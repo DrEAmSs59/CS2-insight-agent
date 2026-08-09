@@ -103,12 +103,12 @@ export default function PlayerGameConfigPage() {
             </div>
           </section>
         ) : (
-          <section className="rounded-xl border border-emerald-500/35 bg-emerald-500/10 px-4 py-4">
+          <section className="rounded-xl border border-emerald-500/35 bg-cs2-emerald-surface px-4 py-4">
             <div className="flex flex-wrap items-start gap-3">
-              <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-emerald-400" aria-hidden />
+              <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-cs2-emerald-on-surface" aria-hidden />
               <div className="min-w-0 flex-1 space-y-2">
                 <p className="text-sm font-bold text-cs2-emerald-on-surface">{t("playercfg.okTitle")}</p>
-                <p className="text-[12px] leading-relaxed text-cs2-emerald-on-surface/80">
+                <p className="text-[12px] leading-relaxed text-cs2-emerald-on-surface">
                   {t("playercfg.okDesc")}
                 </p>
                 {st?.backup_dir ? (

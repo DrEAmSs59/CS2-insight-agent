@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  Archive,
   ArrowDown,
   ArrowUp,
   ChevronDown,
@@ -52,25 +53,25 @@ function montageAiExplainText(clip, t) {
 }
 
 const VARIANT_BAR = {
-  ace: "bg-cs2-rose-on-surface",
-  multikill: "bg-cs2-amber-on-surface",
-  pov: "bg-cs2-cyan-on-surface",
+  ace: "bg-cs2-fail",
+  multikill: "bg-cs2-compilation",
+  pov: "bg-cs2-info",
   fail: "bg-cs2-fail",
-  compilation: "bg-cs2-amber-on-surface",
+  compilation: "bg-cs2-compilation",
   highlight: "bg-cs2-highlight",
-  timeline: "bg-cs2-cyan-on-surface",
-  neutral: "bg-cs2-text-muted",
+  timeline: "bg-cs2-info",
+  neutral: "bg-cs2-neutral-tone",
 };
 
 const VARIANT_RING = {
-  ace: "border-cs2-rose-surface bg-gradient-to-br from-cs2-rose-surface to-cs2-bg-card text-cs2-rose-on-surface",
-  multikill: "border-cs2-amber-surface bg-gradient-to-br from-cs2-amber-surface to-cs2-bg-card text-cs2-amber-on-surface",
-  pov: "border-cs2-cyan-surface bg-gradient-to-br from-cs2-cyan-surface to-cs2-bg-card text-cs2-cyan-on-surface",
-  fail: "border-cs2-red-surface bg-gradient-to-br from-cs2-red-surface to-cs2-bg-card text-cs2-red-on-surface",
-  compilation: "border-cs2-amber-surface bg-gradient-to-br from-cs2-amber-surface to-cs2-bg-card text-cs2-amber-on-surface",
-  highlight: "border-cs2-emerald-surface bg-gradient-to-br from-cs2-emerald-surface to-cs2-bg-card text-cs2-emerald-on-surface",
-  timeline: "border-cs2-cyan-surface bg-gradient-to-br from-cs2-cyan-surface to-cs2-bg-card text-cs2-cyan-on-surface",
-  neutral: "border-cs2-border bg-cs2-bg-elevated text-cs2-text-primary",
+  ace: "bg-cs2-fail text-white",
+  multikill: "bg-cs2-compilation text-[#3b2e00]",
+  pov: "bg-cs2-info text-white",
+  fail: "bg-cs2-fail text-white",
+  compilation: "bg-cs2-compilation text-[#3b2e00]",
+  highlight: "bg-cs2-highlight text-white",
+  timeline: "bg-cs2-info text-white",
+  neutral: "bg-cs2-neutral-tone text-white",
 };
 
 export function CollapsibleSection({ title, hint, defaultOpen = false, children }) {
@@ -119,9 +120,9 @@ function SortDropdown({ onAutoSort, onTimelineSort, onRhythmSort, onRandomSort, 
   return (
     <div className="relative" ref={ref}>
       <ToolbarMiniButton onClick={() => setOpen((v) => !v)} title={t("montage.sortDropdownTitle")}>
-        <ArrowUpDown className="h-3.5 w-3.5" />
+        <ArrowUpDown data-toolbar-action-icon className="h-4 w-4 shrink-0 text-cs2-accent" strokeWidth={2.25} />
         {t("montage.toolbarSortBtn")}
-        <ChevronDown className={`h-3 w-3 transition-transform ${open ? "rotate-180" : ""}`} />
+        <ChevronDown className={`h-3.5 w-3.5 shrink-0 text-cs2-text-muted transition-transform ${open ? "rotate-180" : ""}`} />
       </ToolbarMiniButton>
       {open && (
         <div className="absolute right-0 top-full z-50 mt-1.5 min-w-[180px] rounded-xl border border-cs2-border bg-cs2-bg-card p-1.5 shadow-xl">
@@ -145,11 +146,106 @@ function SortDropdown({ onAutoSort, onTimelineSort, onRhythmSort, onRandomSort, 
   );
 }
 
+function SaveDraftPopover({ fallbackName, onSaveDraft, savingDraft }) {
+  const t = useT();
+  const [open, setOpen] = useState(false);
+  const [nameDraft, setNameDraft] = useState("");
+  const ref = useRef(null);
+
+  useEffect(() => {
+    if (!open) return undefined;
+    const handlePointerDown = (event) => {
+      if (ref.current && !ref.current.contains(event.target)) setOpen(false);
+    };
+    const handleKeyDown = (event) => {
+      if (event.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("mousedown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [open]);
+
+  const submit = useCallback(async () => {
+    const saved = await onSaveDraft?.(nameDraft);
+    if (saved !== false) {
+      setOpen(false);
+      setNameDraft("");
+    }
+  }, [nameDraft, onSaveDraft]);
+
+  return (
+    <div className="relative" ref={ref}>
+      <ToolbarMiniButton
+        onClick={() => {
+          setNameDraft("");
+          setOpen((value) => !value);
+        }}
+        disabled={savingDraft}
+        title={t("montage.toolbarSaveDraftTitle")}
+        aria-expanded={open}
+        aria-haspopup="dialog"
+      >
+        {savingDraft
+          ? <Loader2 data-toolbar-action-icon className="h-4 w-4 shrink-0 animate-spin text-cs2-accent" strokeWidth={2.25} />
+          : <Save data-toolbar-action-icon className="h-4 w-4 shrink-0 text-cs2-accent" strokeWidth={2.25} />}
+        {t("montage.toolbarSaveDraftBtn")}
+      </ToolbarMiniButton>
+
+      {open ? (
+        <div
+          role="dialog"
+          aria-labelledby="montage-save-draft-title"
+          className="absolute right-0 top-full z-[80] mt-2 w-[360px] max-w-[calc(100vw-2rem)] rounded-xl border border-cs2-border-focus/60 bg-cs2-bg-elevated p-4 shadow-2xl"
+        >
+          <div className="flex items-center gap-2">
+            <Save className="h-4 w-4 text-cs2-accent" aria-hidden />
+            <h3 id="montage-save-draft-title" className="text-sm font-bold text-cs2-text-primary">
+              {t("montage.toolbarSaveDraftDialogTitle")}
+            </h3>
+          </div>
+          <p className="mt-2 text-xs font-medium leading-relaxed text-cs2-text-secondary">
+            {t("montage.toolbarSaveDraftDialogHint", { name: fallbackName })}
+          </p>
+          <div className="mt-3 flex gap-2">
+            <input
+              autoFocus
+              value={nameDraft}
+              onChange={(event) => setNameDraft(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  void submit();
+                }
+              }}
+              aria-label={t("montage.toolbarSaveDraftNameLabel")}
+              placeholder={fallbackName || t("montage.toolbarSaveDraftNamePlaceholder")}
+              className="min-w-0 flex-1 rounded-lg border border-cs2-border-focus/70 bg-cs2-bg-card px-3 py-2 text-xs font-medium text-cs2-text-primary outline-none transition-all placeholder:text-cs2-text-primary placeholder:opacity-100 focus:border-cs2-accent focus:ring-1 focus:ring-cs2-accent/40"
+            />
+            <button
+              type="button"
+              disabled={savingDraft}
+              onClick={() => void submit()}
+              className="inline-flex shrink-0 items-center justify-center rounded-lg bg-cs2-accent px-3.5 text-xs font-bold text-cs2-text-on-accent transition-all hover:opacity-95 disabled:cursor-not-allowed disabled:opacity-45"
+            >
+              {savingDraft ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : t("montage.toolbarSaveDraftConfirmBtn")}
+            </button>
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 export function MontageWorkbenchToolbar({
   isPage,
   montageTitle,
   subtitle,
   autosaveLabel,
+  poolSelectedCount = 0,
+  poolStats,
   onClose,
   onAutoSort,
   onTimelineSort,
@@ -158,52 +254,89 @@ export function MontageWorkbenchToolbar({
   onReverseOrder,
   onSaveDraft,
   savingDraft,
+  saveDraftNameFallback,
   onHistory,
+  onDrafts,
 }) {
   const t = useT();
   return (
-    <header className={`montage-workbench-toolbar flex min-h-14 shrink-0 items-center gap-3 border-b px-4 ${isPage ? "border-cs2-border rounded-t-lg" : "border-cs2-border bg-cs2-surface-1"}`}>
-      <div className="montage-workbench-toolbar__title flex min-w-0 flex-1 items-center gap-2.5">
-        <Clapperboard className="h-4 w-4 shrink-0 text-cs2-accent" aria-hidden />
-        <div className="min-w-0">
-          <h2 id="montage-title" className="truncate text-sm font-bold text-cs2-text-primary">
-            {montageTitle}
-          </h2>
-          <p className="truncate text-xs text-cs2-text-muted mt-0.5">
+    <header
+      data-testid="montage-workbench-toolbar-card"
+      className={`montage-workbench-toolbar flex min-h-14 shrink-0 flex-col items-stretch gap-1.5 px-4 py-2.5 ${isPage ? "rounded-lg border border-cs2-border bg-cs2-bg-card" : "border-b border-cs2-border bg-cs2-surface-1"}`}
+    >
+      <div className="flex min-w-0 items-center gap-3">
+        <div className="montage-workbench-toolbar__title flex min-w-0 flex-1 items-center gap-2.5">
+          <Clapperboard className="h-4 w-4 shrink-0 text-cs2-accent" aria-hidden />
+          <p className="min-w-0 truncate text-xs text-cs2-text-muted">
             <span className="text-cs2-text-secondary">{subtitle}</span>
+            <span className="mx-1.5 text-cs2-text-muted">·</span>
+            <span className="font-semibold text-cs2-text-secondary">{t("montage.projectNameLabel")}</span>{" "}
+            <span id="montage-title" className="font-mono font-semibold text-cs2-text-primary">{montageTitle}</span>
             <span className="mx-1.5 text-cs2-text-muted">·</span>
             <span>{autosaveLabel}</span>
           </p>
         </div>
+
+        <div className="montage-workbench-toolbar__actions flex min-w-0 shrink-0 flex-wrap items-center justify-end gap-1.5">
+          <SortDropdown
+            onAutoSort={onAutoSort}
+            onTimelineSort={onTimelineSort}
+            onRhythmSort={onRhythmSort}
+            onRandomSort={onRandomSort}
+            onReverseOrder={onReverseOrder}
+          />
+          <ToolbarMiniButton onClick={onHistory} title={t("montage.toolbarHistoryTitle")}>
+            <History data-toolbar-action-icon className="h-4 w-4 shrink-0 text-cs2-accent" strokeWidth={2.25} />
+            {t("montage.toolbarHistoryBtn")}
+          </ToolbarMiniButton>
+          <ToolbarMiniButton onClick={onDrafts} title={t("montage.toolbarDraftsTitle")}>
+            <Archive data-toolbar-action-icon className="h-4 w-4 shrink-0 text-cs2-accent" strokeWidth={2.25} />
+            {t("montage.toolbarDraftsBtn")}
+          </ToolbarMiniButton>
+          <SaveDraftPopover
+            fallbackName={saveDraftNameFallback || montageTitle}
+            onSaveDraft={onSaveDraft}
+            savingDraft={savingDraft}
+          />
+          {!isPage ? (
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-lg p-2 text-cs2-text-muted hover:bg-cs2-surface-2 hover:text-cs2-text-secondary transition-colors"
+              aria-label={t("montage.toolbarCloseAriaLabel")}
+            >
+              <X className="h-4 w-4" />
+            </button>
+          ) : null}
+        </div>
       </div>
 
-      <div className="montage-workbench-toolbar__actions flex min-w-0 shrink-0 flex-wrap items-center justify-end gap-1.5">
-        <SortDropdown
-          onAutoSort={onAutoSort}
-          onTimelineSort={onTimelineSort}
-          onRhythmSort={onRhythmSort}
-          onRandomSort={onRandomSort}
-          onReverseOrder={onReverseOrder}
-        />
-        <ToolbarMiniButton onClick={onHistory} title={t("montage.toolbarHistoryTitle")}>
-          <History className="h-3.5 w-3.5" />
-          {t("montage.toolbarHistoryBtn")}
-        </ToolbarMiniButton>
-        <ToolbarMiniButton onClick={onSaveDraft} disabled={savingDraft} title={t("montage.toolbarSaveDraftTitle")}>
-          {savingDraft ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
-          {t("montage.toolbarSaveDraftBtn")}
-        </ToolbarMiniButton>
-        {!isPage ? (
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-lg p-2 text-cs2-text-muted hover:bg-cs2-surface-2 hover:text-cs2-text-secondary transition-colors"
-            aria-label={t("montage.toolbarCloseAriaLabel")}
-          >
-            <X className="h-4 w-4" />
-          </button>
-        ) : null}
-      </div>
+      {poolStats ? (
+        <div
+          data-testid="montage-toolbar-pool-summary"
+          className="flex min-w-0 flex-wrap items-center gap-x-2.5 gap-y-1 pl-[26px] text-xs leading-5 text-cs2-text-muted"
+        >
+          <span className="font-bold uppercase tracking-wide text-cs2-text-secondary">{t("montage.poolTitle")}</span>
+          <span className={poolSelectedCount > 0 ? "font-semibold text-cs2-accent" : "font-medium text-cs2-text-muted"}>
+            {poolSelectedCount > 0
+              ? t("montage.poolSelectedCount", { n: poolSelectedCount })
+              : t("montage.poolMultiSelectReady")}
+          </span>
+          <span className="min-w-0 text-cs2-text-secondary">
+            <span className="font-bold text-cs2-text-primary">{t("montage.poolBatchHintTitle")}</span>{" "}
+            <kbd className="rounded border border-cs2-border bg-cs2-bg-input px-1.5 py-0.5 font-mono text-[11px]">Ctrl</kbd>{" / "}
+            <kbd className="rounded border border-cs2-border bg-cs2-bg-input px-1.5 py-0.5 font-mono text-[11px]">{"\u2318"}</kbd>{" "}
+            {t("montage.poolBatchHintBody")}
+          </span>
+          <span className="font-mono text-cs2-text-muted">
+            {t("montage.poolStats", {
+              count: poolStats.count,
+              total: poolStats.totalLabel,
+              avg: poolStats.avgLabel,
+            })}
+          </span>
+        </div>
+      ) : null}
     </header>
   );
 }
@@ -407,7 +540,7 @@ export function MontageOrchestrationTimeline({
   }, [clips, transitionByClipId, formatTransitionLine, locale, t]);
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-cs2-border bg-cs2-surface-1 shadow-lg">
+    <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-transparent">
       <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-cs2-border-subtle p-4">
         <div>
           <p className="text-sm font-bold tracking-wide text-cs2-text-primary">{t("montage.orchTitle")}</p>

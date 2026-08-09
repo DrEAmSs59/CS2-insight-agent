@@ -38,15 +38,26 @@ test("renders candidate search under title, fills grid, defaults replacement wea
   expect(sized.length).toBeGreaterThan(2);
   for (const el of sized) {
     expect(el.className).toMatch(/h-\[128px\]/);
+    expect(el.className).toContain("rounded-[10px]");
+    const caption = el.querySelector("[data-skin-caption]");
+    expect(caption?.className).toContain("bg-cs2-bg-card");
+    expect(caption?.className).toContain("border-cs2-border");
+    expect(caption?.className).not.toContain("bg-black");
   }
 
   const currentSkin = screen.getByTestId("skin-picker-current");
+  expect(currentSkin.querySelector("[data-skin-tile]")?.className).toContain("rounded-[10px]");
+  expect(search.className).toContain("rounded-[10px]");
   expect(within(currentSkin).getByText("0.250000")).toBeTruthy();
   expect(within(currentSkin).getByText("412")).toBeTruthy();
   expect(within(currentSkin).queryByRole("slider")).toBeNull();
   expect(within(currentSkin).queryByRole("textbox")).toBeNull();
   expect(screen.getAllByDisplayValue("0.000000").length).toBeGreaterThanOrEqual(1);
   expect(screen.getAllByDisplayValue("0").some((input) => !input.readOnly && !input.disabled)).toBe(true);
+  for (const slider of screen.getAllByRole("slider")) {
+    expect(slider.className).toContain("cs2-data-slider");
+    expect(slider.style.getPropertyValue("--cs2-range-progress")).toBe("0%");
+  }
 
   const first = within(candidates).getAllByRole("button")[0];
   fireEvent.click(first);

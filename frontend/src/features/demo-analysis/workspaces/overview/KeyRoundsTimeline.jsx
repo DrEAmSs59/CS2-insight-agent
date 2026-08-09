@@ -2,19 +2,19 @@ import { Play } from "lucide-react";
 
 const TONE_STYLES = {
   accent: {
-    badge: "border-cs2-accent/35 bg-cs2-accent-soft text-cs2-accent",
+    badge: "bg-cs2-accent-soft text-cs2-accent",
     dot: "bg-cs2-accent",
   },
   amber: {
-    badge: "border-amber-500/30 bg-amber-500/10 text-amber-300",
+    badge: "bg-cs2-amber-surface text-cs2-amber-on-surface",
     dot: "bg-amber-400",
   },
   violet: {
-    badge: "border-violet-500/30 bg-violet-500/10 text-violet-300",
+    badge: "bg-cs2-violet-surface text-cs2-violet-on-surface",
     dot: "bg-violet-400",
   },
   blue: {
-    badge: "border-sky-500/30 bg-sky-500/10 text-sky-300",
+    badge: "bg-cs2-cyan-surface text-cs2-cyan-on-surface",
     dot: "bg-sky-400",
   },
 };
@@ -68,7 +68,7 @@ export default function KeyRoundsTimeline({ rounds, onOpenRound, onOpenReplayRou
   if (list.length === 0) return null;
 
   return (
-    <section className="rounded-[10px] border border-cs2-border bg-cs2-bg-card p-3 shadow-sm">
+    <section className="rounded-[10px] border border-cs2-border bg-cs2-bg-card p-3">
       <div className="mb-2 flex items-center gap-2">
         <span className="h-3.5 w-1 rounded-full bg-cs2-accent" />
         <h2 className="text-[12px] font-bold text-cs2-text-primary">关键回合</h2>
@@ -107,7 +107,8 @@ export default function KeyRoundsTimeline({ rounds, onOpenRound, onOpenReplayRou
                       {roundHeading(round)}
                     </span>
                     <span
-                      className={`inline-flex rounded border px-1.5 py-0.5 text-[9px] font-semibold ${styles.badge}`}
+                      data-overview-tone-tag
+                      className={`inline-flex rounded px-1.5 py-0.5 text-[9px] font-semibold ${styles.badge}`}
                     >
                       {typeBadgeLabel(round.types)}
                     </span>

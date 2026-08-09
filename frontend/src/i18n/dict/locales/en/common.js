@@ -41,6 +41,7 @@ export default {
   "actionbar.deselect": "Deselect",
   "actionbar.currentPlayerScope": "Current: {player}",
   "actionbar.addCurrentPlayerHighlights": "Queue all highlights from {player}",
+  "actionbar.addCurrentPlayerFails": "Queue all fails from {player}",
   "actionbar.addSelected": "Add selected to queue",
   "actionbar.queueCount": "{n} in queue — click \"Recording Queue\" on the right to batch export",
   "upload.dragDropMsg": "Drag one or more .dem files here",

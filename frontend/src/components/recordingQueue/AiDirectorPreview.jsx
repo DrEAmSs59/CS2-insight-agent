@@ -51,7 +51,7 @@ export default function AiDirectorPreview({ item, globalPacing }) {
   const { status, data, error } = state;
 
   return (
-    <div className="rounded border border-violet-500/25 bg-violet-500/5 p-2">
+    <div className="rounded-lg border border-violet-500/25 bg-violet-500/5 p-2">
       <div className="mb-1 flex items-center justify-between gap-2">
         <div className="flex items-center gap-1.5 text-[10px] font-semibold text-cs2-text-primary">
           <Sparkles className="h-3 w-3 shrink-0 text-violet-400" />
@@ -105,7 +105,7 @@ export default function AiDirectorPreview({ item, globalPacing }) {
             <p className="mt-1 text-[9px] text-amber-400/90">{t("queue.aiDirectorHeuristicWarn")}</p>
           ) : null}
           {Array.isArray(data.victim_pov_omitted) && data.victim_pov_omitted.length > 0 ? (
-            <div className="mt-2 rounded border border-amber-500/20 bg-amber-500/5 p-1.5">
+            <div className="mt-2 rounded-lg border border-amber-500/20 bg-amber-500/5 p-1.5">
               <p className="text-[9px] font-semibold text-amber-300/90">
                 {t("queue.aiDirectorOmittedTitle")}
               </p>

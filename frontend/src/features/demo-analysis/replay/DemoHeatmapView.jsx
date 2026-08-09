@@ -405,7 +405,7 @@ export default function DemoHeatmapView({
   };
 
   return (
-    <section className="overflow-hidden rounded-xl border border-cs2-border bg-cs2-bg-card shadow-sm">
+    <section className="overflow-hidden rounded-xl border border-cs2-border bg-cs2-bg-card">
       <header className="flex flex-wrap items-center justify-between gap-3 border-b border-cs2-border px-4 py-3">
         <div>
           <h2 className="mt-0.5 text-[14px] font-black text-cs2-text-primary">{t("analysis.heatmap.title")}</h2>

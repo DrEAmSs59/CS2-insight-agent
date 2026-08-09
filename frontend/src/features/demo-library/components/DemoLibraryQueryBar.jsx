@@ -37,7 +37,7 @@ export default function DemoLibraryQueryBar({
   };
 
   return (
-    <div className="demo-library-querybar flex shrink-0 flex-col gap-2 border-b border-cs2-border pb-2">
+    <div className="demo-library-querybar flex shrink-0 flex-col gap-2">
       <div className="demo-library-querybar__controls flex min-w-0 flex-wrap items-center gap-2">
         <div className="demo-library-querybar__search relative min-w-0 flex-[1_1_14rem]">
           <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-cs2-text-muted" />

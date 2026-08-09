@@ -28,7 +28,7 @@ export default function DemoLibraryToolbar({
     </button>
   );
   return (
-    <div className="demo-library-toolbar flex shrink-0 flex-col gap-3 border-b border-cs2-border pb-3">
+    <div className="demo-library-toolbar flex shrink-0 flex-col gap-3">
       <div className="min-w-0">
         <h1 className="text-lg font-bold text-cs2-text-primary">{t("library.pageTitle")}</h1>
         <p className="mt-0.5 text-[12px] leading-relaxed text-cs2-text-muted">

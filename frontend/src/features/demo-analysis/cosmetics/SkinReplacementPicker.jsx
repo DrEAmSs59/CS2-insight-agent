@@ -152,6 +152,9 @@ function ParamRow({
   const sliderValue = Number.isFinite(numeric)
     ? Math.min(max, Math.max(min, numeric))
     : min;
+  const sliderProgress = max > min
+    ? Math.max(0, Math.min(100, ((sliderValue - min) / (max - min)) * 100))
+    : 0;
 
   return (
     <label className="flex w-full min-w-0 shrink-0 flex-col gap-0.5 text-[11px]">
@@ -170,7 +173,7 @@ function ParamRow({
           value={value}
           onChange={(event) => onChange?.(event.target.value)}
           aria-invalid={Boolean(invalidText)}
-          className="w-[84px] shrink-0 rounded border border-cs2-border bg-cs2-bg-input px-2 py-1 font-mono text-[11px] text-cs2-text-primary outline-none focus:border-cs2-accent"
+          className="w-[84px] shrink-0 rounded-[8px] border border-cs2-border bg-cs2-bg-input px-2 py-1 font-mono text-[11px] text-cs2-text-primary outline-none focus:border-cs2-accent"
         />
         <input
           type="range"
@@ -182,14 +185,15 @@ function ParamRow({
             const next = Number(event.target.value);
             onChange?.(isWear ? formatWear(next) : String(Math.round(next)));
           }}
-          className="h-1.5 min-w-0 flex-1 cursor-pointer accent-cs2-accent"
+          className="cs2-data-slider min-w-0 flex-1"
+          style={{ "--cs2-range-progress": `${sliderProgress}%` }}
         />
         <button
           type="button"
           onClick={onRandom}
           title={t("analysis.cosmetics.picker.random")}
           aria-label={t("analysis.cosmetics.picker.random")}
-          className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded border border-cs2-border bg-cs2-bg-input text-cs2-text-secondary transition-colors hover:bg-cs2-bg-hover hover:text-cs2-text-primary"
+          className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-[8px] border border-cs2-border bg-cs2-bg-input text-cs2-text-secondary transition-colors hover:bg-cs2-bg-hover hover:text-cs2-text-primary"
         >
           <Shuffle className="h-3.5 w-3.5" />
         </button>
@@ -233,7 +237,7 @@ function SkinColumn({
       <span className="shrink-0 text-xs font-medium text-cs2-text-muted">{label}</span>
       <div
         data-skin-tile
-        className="cosmetic-preview-surface flex h-[192px] w-full shrink-0 items-center justify-center overflow-hidden rounded border border-cs2-border"
+        className="cosmetic-preview-surface flex h-[192px] w-full shrink-0 items-center justify-center overflow-hidden rounded-[10px] border border-cs2-border"
       >
         <TileImage
           item={item}
@@ -380,7 +384,7 @@ export default function SkinReplacementPicker({
           <button
             type="button"
             onClick={onClose}
-            className="rounded border border-cs2-border px-4 py-2 text-sm text-cs2-text-secondary transition-colors hover:bg-cs2-bg-hover"
+            className="rounded-[10px] border border-cs2-border bg-cs2-bg-input px-4 py-2 text-sm text-cs2-text-secondary transition-colors hover:bg-cs2-bg-hover"
           >
             {t("analysis.cosmetics.picker.cancel")}
           </button>
@@ -388,7 +392,7 @@ export default function SkinReplacementPicker({
             type="button"
             onClick={handleConfirm}
             disabled={!canConfirm}
-            className="rounded bg-cs2-accent px-4 py-2 text-sm font-medium text-white transition-opacity disabled:cursor-not-allowed disabled:opacity-40"
+            className="rounded-[10px] bg-cs2-accent px-4 py-2 text-sm font-medium text-white transition-opacity disabled:cursor-not-allowed disabled:opacity-40"
           >
             {t("analysis.cosmetics.picker.confirm")}
           </button>
@@ -442,7 +446,7 @@ export default function SkinReplacementPicker({
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             placeholder={t("analysis.cosmetics.picker.search")}
-            className="w-full shrink-0 rounded border border-cs2-border bg-cs2-bg-input px-3 py-2 text-sm text-cs2-text-primary outline-none focus:border-cs2-accent"
+            className="w-full shrink-0 rounded-[10px] border border-cs2-border bg-cs2-bg-input px-3 py-2 text-sm text-cs2-text-primary outline-none focus:border-cs2-accent"
           />
           {typeGroups.length > 1 ? (
             <div data-testid="skin-type-filters" className="shrink-0">
@@ -497,7 +501,7 @@ export default function SkinReplacementPicker({
                   aria-pressed={active}
                   aria-label={formatCraftPipeName(candidate, locale) || displayName(candidate, locale)}
                   data-skin-tile
-                  className={`cosmetic-preview-surface relative box-border flex h-[128px] w-full min-w-0 shrink-0 flex-col overflow-hidden rounded border text-left transition-colors ${
+                  className={`cosmetic-preview-surface relative box-border flex h-[128px] w-full min-w-0 shrink-0 flex-col overflow-hidden rounded-[10px] border text-left transition-colors ${
                     active
                       ? "border-cs2-accent ring-1 ring-cs2-accent/40"
                       : "border-cs2-border hover:border-cs2-text-muted"
@@ -506,7 +510,7 @@ export default function SkinReplacementPicker({
                   <div className="min-h-0 flex-1">
                     <TileImage item={candidate} locale={locale} onlineAssetsEnabled={onlineAssetsEnabled} />
                   </div>
-                  <span className="absolute inset-x-0 bottom-0 bg-black/65 px-2 py-1">
+                  <span data-skin-caption className="absolute inset-x-0 bottom-0 border-t border-cs2-border bg-cs2-bg-card px-2 py-1">
                     <ItemCaption item={candidate} locale={locale} compact />
                   </span>
                 </button>

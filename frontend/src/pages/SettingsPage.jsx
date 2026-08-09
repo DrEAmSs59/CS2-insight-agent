@@ -9,6 +9,7 @@ import { desktopBridge } from "../desktop/desktopBridge.js";
 import RecordingParamsPage from "./RecordingParamsPage";
 import SponsorModal from "../components/SponsorModal";
 import ObsAiSettingsPanel from "../components/ObsAiSettingsPanel";
+import ObsHostField from "../components/settings/ObsHostField.jsx";
 import { formatFileSize } from "../utils/demoLibraryDisplay.js";
 import {
   Settings as SettingsIcon,
@@ -72,7 +73,7 @@ function openIssueTemplate(type) {
  * Reusable field-row primitives
  * ------------------------------------------------------------------------ */
 
-function SectionCard({ title, hint, children, search, className }) {
+function SectionCard({ title, hint, children, search, className, contentClassName }) {
   if (search) return null;
   return (
     <div className={`rounded-xl border border-cs2-border/70 bg-cs2-bg-card px-4 py-3.5 ${className ?? ""}`}>
@@ -80,7 +81,7 @@ function SectionCard({ title, hint, children, search, className }) {
         <h2 className="text-sm font-bold uppercase tracking-wide text-cs2-text-secondary">{title}</h2>
         {hint && <span className="text-xs text-cs2-text-muted">{hint}</span>}
       </div>
-      <div className="divide-y divide-cs2-border/40">
+      <div className={contentClassName ?? "divide-y divide-cs2-border/40"}>
         {children}
       </div>
     </div>
@@ -1367,12 +1368,12 @@ export default function SettingsPage() {
                     </div>
                   </div>
                 ) : (
-                  <div className="rounded-lg border border-emerald-500/35 bg-emerald-500/10 px-3 py-2.5">
+                  <div className="rounded-lg border border-emerald-500/35 bg-cs2-emerald-surface px-3 py-2.5">
                     <div className="flex items-start gap-2">
-                      <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-400" aria-hidden />
+                      <CheckCircle2 className="h-4 w-4 shrink-0 text-cs2-emerald-on-surface" aria-hidden />
                       <div className="min-w-0 flex-1">
-                        <p className="font-semibold text-emerald-200">{t("playercfg.okTitle")}</p>
-                        <p className="mt-1 text-xs leading-relaxed text-emerald-100/80">{t("playercfg.okDesc")}</p>
+                        <p className="font-semibold text-cs2-emerald-on-surface">{t("playercfg.okTitle")}</p>
+                        <p className="mt-1 text-xs leading-relaxed text-cs2-emerald-on-surface">{t("playercfg.okDesc")}</p>
                         {playerConfigStatus?.backup_dir && (
                           <p className="mt-1 break-all font-mono text-xs text-cs2-text-muted">
                             {t("playercfg.backupDir")}<span className="text-cs2-text-secondary">{playerConfigStatus.backup_dir}</span>
@@ -1438,7 +1439,12 @@ export default function SettingsPage() {
               {/* OBS: manual controls or AI workspace */}
               {!aiObsRecommendationEnabled ? (
                 <>
-              <SectionCard title={t("settings.sectionObs")} hint={t("settings.sectionObsHint")} search={search && !matches(t("settings.sectionObs") + " " + t("settings.labelObsHost") + " " + t("settings.labelObsPort") + " " + t("settings.labelObsPassword") + " " + t("settings.labelObsVerified"))}>
+              <SectionCard
+                title={t("settings.sectionObs")}
+                hint={t("settings.sectionObsHint")}
+                search={search && !matches(t("settings.sectionObs") + " " + t("settings.labelObsHost") + " " + t("settings.labelObsPort") + " " + t("settings.labelObsPassword") + " " + t("settings.labelObsVerified"))}
+                contentClassName=""
+              >
                 <div className="mb-2 flex items-center justify-between">
                   <span className="text-[11px] font-semibold text-cs2-text-secondary">{t("settings.labelObsVerified")}</span>
                   <button
@@ -1456,8 +1462,8 @@ export default function SettingsPage() {
                   <div className="mb-2 flex items-center gap-2 text-[11px]">
                     {!checkResult.error && checkResult.path_ok && checkResult.connected ? (
                       <>
-                        <CheckCircle2 className="h-3.5 w-3.5 text-green-400 shrink-0" />
-                        <span className="text-green-400">{t("obscfg.connOk")}</span>
+                        <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-cs2-emerald-on-surface" />
+                        <span className="text-cs2-emerald-on-surface">{t("obscfg.connOk")}</span>
                       </>
                     ) : checkResult.error ? (
                       <>
@@ -1472,21 +1478,31 @@ export default function SettingsPage() {
                     )}
                   </div>
                 )}
-                <FieldRow label={t("settings.labelObsHost")} search={search && !matches(t("settings.labelObsHost") + " " + (obs.host ?? ""))}>
-                  <TextInput value={obs.host ?? "localhost"} onChange={(v) => set("obs.host", v)} />
-                </FieldRow>
-                <FieldRow label={t("settings.labelObsPort")} search={search && !matches(t("settings.labelObsPort") + " " + (obs.port ?? ""))}>
-                  <NumberInput value={obs.port ?? 4455} onChange={(v) => set("obs.port", v)} min={1} max={65535} />
-                </FieldRow>
-                <FieldRow label={t("settings.labelObsPassword")} search={search && !matches(t("settings.labelObsPassword"))}>
-                  <TextInput type="password" value={obs.password ?? ""} onChange={(v) => set("obs.password", v)} placeholder="OBS WebSocket password" />
-                </FieldRow>
+                <div className="divide-y divide-cs2-border/40">
+                  <FieldRow label={t("settings.labelObsHost")} search={search && !matches(t("settings.labelObsHost") + " " + (obs.host ?? ""))}>
+                    <ObsHostField value={obs.host ?? "localhost"} onChange={(v) => set("obs.host", v)} />
+                  </FieldRow>
+                  <FieldRow label={t("settings.labelObsPort")} search={search && !matches(t("settings.labelObsPort") + " " + (obs.port ?? ""))}>
+                    <NumberInput value={obs.port ?? 4455} onChange={(v) => set("obs.port", v)} min={1} max={65535} />
+                  </FieldRow>
+                  <FieldRow label={t("settings.labelObsPassword")} search={search && !matches(t("settings.labelObsPassword"))}>
+                    <TextInput type="password" value={obs.password ?? ""} onChange={(v) => set("obs.password", v)} placeholder="OBS WebSocket password" />
+                  </FieldRow>
+                </div>
               </SectionCard>
 
               {/* OBS 校准 */}
-              <SectionCard title={t("obscfg.sectionCalibrate")} hint={t("obscfg.calibrateDesc")} search={search && !matches(t("obscfg.sectionCalibrate") + " " + t("obscfg.rowCanvas") + " " + t("obscfg.rowOutput") + " " + t("obscfg.rowScene"))}>
+              <SectionCard
+                title={t("obscfg.sectionCalibrate")}
+                hint={t("obscfg.calibrateDesc")}
+                search={search && !matches(t("obscfg.sectionCalibrate") + " " + t("obscfg.rowCanvas") + " " + t("obscfg.rowOutput") + " " + t("obscfg.rowScene"))}
+                contentClassName=""
+              >
                 <div className="mb-2 flex items-center justify-between">
-                  <span className="text-[11px] text-cs2-text-muted">{status?.obs_connected ? t("obscfg.connOk") : t("obscfg.connFail")}</span>
+                  <span className={`inline-flex items-center gap-2 text-[11px] font-semibold ${status?.obs_connected ? "text-cs2-emerald-on-surface" : "text-cs2-rose-on-surface"}`}>
+                    {status?.obs_connected ? <CheckCircle2 className="h-3.5 w-3.5 shrink-0" /> : <XCircle className="h-3.5 w-3.5 shrink-0" />}
+                    {status?.obs_connected ? t("obscfg.connOk") : t("obscfg.connFail")}
+                  </span>
                   <button
                     type="button"
                     onClick={() => void handleRefreshStatus()}
@@ -1521,7 +1537,7 @@ export default function SettingsPage() {
                             <span className="text-cs2-text-muted">—</span>
                           )
                         ) : item.ok ? (
-                          <span className="flex items-center gap-1 text-green-400">
+                          <span className="flex items-center gap-1 text-cs2-emerald-on-surface">
                             <CheckCircle2 className="h-3 w-3 shrink-0" />{t("obscfg.statusOk")}
                           </span>
                         ) : (
@@ -1560,7 +1576,7 @@ export default function SettingsPage() {
                 {calibrateResult?.changed?.length > 0 && (
                   <div className="mt-2 space-y-1">
                     {calibrateResult.changed.map((msg, i) => (
-                      <div key={i} className="flex items-start gap-1.5 text-[11px] text-green-400">
+                      <div key={i} className="flex items-start gap-1.5 text-[11px] text-cs2-emerald-on-surface">
                         <CheckCircle2 className="mt-0.5 h-3 w-3 shrink-0" />{msg}
                       </div>
                     ))}
@@ -1686,36 +1702,39 @@ export default function SettingsPage() {
         </div>
       </div>
 
-      {/* Footer save bar */}
-      {
-        <div className="shrink-0 border-t border-cs2-border/60 bg-cs2-bg/90 px-4 py-3 backdrop-blur">
-          <div className={`flex items-center justify-between gap-4 ${activeTab === "video" && aiObsRecommendationEnabled ? "w-full xl:px-2 2xl:px-4" : "mx-auto max-w-4xl"}`}>
-            <div className="min-w-0 flex-1">
-              {activeTab !== "recording" && saveMsg && (
-                <p className={`truncate text-[11px] ${saveMsg.tone === "ok" ? "text-green-400" : "text-red-400"}`}>
-                  {saveMsg.text}
-                </p>
-              )}
+{/* Footer save bar */}
+{
+  <div className="shrink-0 px-4 pb-3 pt-2">
+    <div
+      data-testid="settings-save-footer-card"
+      className={`flex items-center justify-between gap-4 rounded-[10px] border border-cs2-border bg-cs2-bg-card px-4 py-2.5 ${activeTab === "video" && aiObsRecommendationEnabled ? "w-full" : "mx-auto w-full max-w-6xl"}`}
+    >
+      <div className="min-w-0 flex-1">
+        {activeTab !== "recording" && saveMsg && (
+          <p className={`truncate text-[11px] ${saveMsg.tone === "ok" ? "text-cs2-emerald-on-surface" : "text-cs2-rose-on-surface"}`}>
+            {saveMsg.text}
+          </p>
+        )}
               {activeTab !== "recording" && !saveMsg && <p className="text-xs text-cs2-text-muted">{t("settings.saveFooterDesc")}</p>}
               {activeTab === "recording" && <p className="text-xs text-cs2-text-muted">{t("record.commonSaveFooterDesc")}</p>}
             </div>
             {activeTab === "recording" ? (
               <button
-                type="button"
-                onClick={handleRecordingSave}
-                disabled={recordingSaveUi.disabled}
-                className="shrink-0 inline-flex items-center gap-2 rounded-lg bg-cs2-accent px-4 py-2 text-xs font-semibold text-cs2-bg-dark transition-colors hover:bg-cs2-accent/80 disabled:opacity-50"
-              >
+          type="button"
+          onClick={handleRecordingSave}
+          disabled={recordingSaveUi.disabled}
+          className="inline-flex h-9 shrink-0 items-center gap-2 rounded-[10px] bg-cs2-accent px-4 text-xs font-semibold text-cs2-text-on-accent transition-opacity hover:opacity-90 disabled:opacity-50"
+        >
                 {recordingSaveUi.state === "saving" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
                 {recordingSaveUi.state === "saving" ? t("record.commonSaving") : recordingSaveUi.state === "saved" ? t("record.commonSaved") : t("record.commonSaveBtn")}
               </button>
             ) : (
               <button
-                type="button"
-                onClick={handleSave}
-                disabled={saving}
-                className="shrink-0 inline-flex items-center gap-2 rounded-lg bg-cs2-accent px-4 py-2 text-xs font-semibold text-cs2-bg-dark transition-colors hover:bg-cs2-accent/80 disabled:opacity-50"
-              >
+          type="button"
+          onClick={handleSave}
+          disabled={saving}
+          className="inline-flex h-9 shrink-0 items-center gap-2 rounded-[10px] bg-cs2-accent px-4 text-xs font-semibold text-cs2-text-on-accent transition-opacity hover:opacity-90 disabled:opacity-50"
+        >
                 {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
                 {t("settings.saveAllBtn")}
               </button>

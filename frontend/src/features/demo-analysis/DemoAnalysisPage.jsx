@@ -184,12 +184,12 @@ function PlayerPicker({ teams, teamAName, teamBName, activePlayer, playerStats, 
   const renderTeam = (players, teamName, tone) => {
     const isBlue = tone === "blue";
     return (
-      <div className="border-b border-cs2-border-subtle last:border-b-0">
-        <div className="flex items-center gap-2 px-3 pb-1.5 pt-2.5 text-[9px] font-bold uppercase tracking-[0.14em] text-cs2-text-muted">
+      <div className="analysis-player-team-card flex h-full min-h-0 flex-col overflow-hidden" data-testid={`analysis-player-team-${tone}`}>
+        <div className="flex shrink-0 items-center gap-2 px-3 pb-1.5 pt-2.5 text-[9px] font-bold uppercase tracking-[0.14em] text-cs2-text-muted">
           <span className="h-2 w-2 rounded-full" style={{ background: isBlue ? "var(--cs2-team-blue)" : "var(--cs2-team-amber)" }} />
           <span className="truncate">{teamName}</span>
         </div>
-        <div className="pb-1">
+        <div className="custom-scrollbar min-h-0 flex-1 overflow-x-hidden overflow-y-auto pb-1">
           {players.map((player) => {
             const name = playerName(player);
             const playerKey = playerIdentityKey(player);
@@ -235,8 +235,8 @@ function PlayerPicker({ teams, teamAName, teamBName, activePlayer, playerStats, 
   };
 
   return (
-    <section className="analysis-side-section flex min-h-0 flex-1 flex-col overflow-hidden">
-      <header className="flex min-h-10 items-center justify-between gap-2 border-b border-cs2-border-subtle px-3">
+    <section className="flex min-h-0 flex-1 flex-col gap-2 overflow-hidden">
+      <header className="flex min-h-8 shrink-0 items-center justify-between gap-2 px-1">
         <h2 className="text-[11px] font-black uppercase tracking-[0.12em] text-cs2-text-primary">{t("analysis.workspace.selectPlayer")}</h2>
         <span className="inline-flex items-center gap-1.5 font-mono text-[10px] text-cs2-text-muted">
           {parsing ? <Loader2 className="h-3 w-3 animate-spin text-cs2-accent" /> : <Check className="h-3 w-3 text-emerald-400" />}
@@ -245,7 +245,7 @@ function PlayerPicker({ teams, teamAName, teamBName, activePlayer, playerStats, 
             : t("analysis.workspace.parsedPlayers", { parsed: Object.keys(parsedPlayers || {}).length, total: totalPlayers })}
         </span>
       </header>
-      <div className="custom-scrollbar min-h-0 flex-1 overflow-x-hidden overflow-y-auto">
+      <div className="grid min-h-0 flex-1 grid-rows-2 gap-3 overflow-hidden" data-testid="analysis-player-team-list">
         {renderTeam(teams.a, teamAName, "blue")}
         {renderTeam(teams.b, teamBName, "amber")}
       </div>
@@ -256,7 +256,7 @@ function PlayerPicker({ teams, teamAName, teamBName, activePlayer, playerStats, 
 function MatchRailSummary({ teamAName, teamBName, teamAScore, teamBScore, mapName, totalRounds, durationMins }) {
   const t = useT();
   return (
-    <section className="analysis-side-section shrink-0 overflow-hidden">
+    <section className="analysis-rail-card shrink-0 overflow-hidden" data-testid="analysis-match-summary-card">
       <div className="h-0.5 bg-gradient-to-r from-sky-500 via-cs2-accent to-amber-500" />
       <div className="px-3 py-2.5">
         <div className="flex items-center justify-between gap-2">
@@ -291,7 +291,7 @@ function MatchRailSummary({ teamAName, teamBName, teamAScore, teamBScore, mapNam
 function AnalysisViewNavigation({ activeTab, onSelectTab }) {
   const t = useT();
   return (
-    <section className="analysis-view-switcher shrink-0">
+    <section className="analysis-view-switcher shrink-0" data-testid="analysis-view-navigation-card">
       <nav className="analysis-view-nav" aria-label={t("analysis.workspace.demoViews")}>
         {TABS.map(({ key, labelKey, icon: Icon }) => (
           <button key={key} type="button" data-active={activeTab === key ? "true" : "false"} aria-current={activeTab === key ? "page" : undefined} onClick={() => onSelectTab(key)}>
@@ -592,7 +592,7 @@ export default function DemoAnalysisPage() {
 
       <main className={`${PAGE_CONTAINER_CLASS} min-h-0 flex-1 py-3`} data-testid="demo-analysis-content-container">
         <div className="analysis-workspace-grid h-full" data-testid="analysis-fixed-workspace">
-          <aside className="analysis-side-rail flex h-full min-h-0 flex-col overflow-hidden" data-testid="analysis-scoreboard-panel">
+          <aside className="flex h-full min-h-0 flex-col gap-2 overflow-hidden" data-testid="analysis-scoreboard-panel">
             <MatchRailSummary
               teamAName={teamAName}
               teamBName={teamBName}
@@ -605,9 +605,10 @@ export default function DemoAnalysisPage() {
             <PlayerPicker teams={teams} teamAName={teamAName} teamBName={teamBName} activePlayer={activePlayer} playerStats={workspace.players} parsedPlayers={parsedPlayers} totalPlayers={s.players.length} parsing={parsingCurrent} avatars={steamAvatars} onSelect={selectPlayer} />
           </aside>
 
-          <section className="analysis-center-surface flex h-full min-h-0 min-w-0 flex-col overflow-hidden" data-testid="analysis-main-panel">
+          <section className="flex h-full min-h-0 min-w-0 flex-col gap-2" data-testid="analysis-main-panel">
             <AnalysisViewNavigation activeTab={activeTab} onSelectTab={selectAnalysisTab} />
-            <div className="custom-scrollbar min-h-0 flex-1 overflow-y-auto p-3">
+            <div className="analysis-center-surface flex min-h-0 flex-1 flex-col overflow-hidden" data-testid="analysis-view-content-card">
+              <div className="custom-scrollbar min-h-0 flex-1 overflow-y-auto p-3">
               {activeTab === "highlights" && (
                 <div className="space-y-3">
                   {!s.currentParsed ? <EmptyResult parsing={parsingCurrent} onAnalyze={() => void s.handleParse()} disabled={!canAnalyze} /> : !selectedPlayer ? (
@@ -700,22 +701,25 @@ export default function DemoAnalysisPage() {
               )}
 
               {activeTab === "economy" && <EconomyView data={workspace} onOpenRound={openRound} />}
+              </div>
+              {showDockedActionBar ? (
+                <ActionBar
+                  selectedCount={s.selectedRegularCount}
+                  totalCount={s.regularSelectableTotal}
+                  hasSelection={s.selectedClientClipUids.size > 0}
+                  onSelectAll={s.handleSelectAll}
+                  onDeselectAll={s.handleDeselectAll}
+                  onAddSelectedToQueue={s.handleAddSelectedToQueue}
+                  onAddCurrentPlayerHighlights={s.handleAddCurrentPlayerHighlights}
+                  onAddCurrentPlayerFails={s.handleAddCurrentPlayerFails}
+                  currentPlayer={activePlayerLabel}
+                  queueLength={s.queue.length}
+                  batchRecording={s.batchRecording}
+                  canAddCurrentPlayerHighlights={s.canAddCurrentPlayerHighlights}
+                  canAddCurrentPlayerFails={s.canAddCurrentPlayerFails}
+                />
+              ) : null}
             </div>
-            {showDockedActionBar ? (
-              <ActionBar
-                selectedCount={s.selectedRegularCount}
-                totalCount={s.regularSelectableTotal}
-                hasSelection={s.selectedClientClipUids.size > 0}
-                onSelectAll={s.handleSelectAll}
-                onDeselectAll={s.handleDeselectAll}
-                onAddSelectedToQueue={s.handleAddSelectedToQueue}
-                onAddCurrentPlayerHighlights={s.handleAddCurrentPlayerHighlights}
-                currentPlayer={activePlayerLabel}
-                queueLength={s.queue.length}
-                batchRecording={s.batchRecording}
-                canAddCurrentPlayerHighlights={s.canAddCurrentPlayerHighlights}
-              />
-            ) : null}
           </section>
         </div>
       </main>

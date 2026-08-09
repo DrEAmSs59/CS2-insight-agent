@@ -97,6 +97,7 @@ export function useClipQueueActions({
     [currentActivePlayer, currentParsed, queuedClientClipUidsForCurrentDemo],
   );
   const canAddCurrentPlayerHighlights = currentPlayerClipScope.queueableHighlights.length > 0;
+  const canAddCurrentPlayerFails = currentPlayerClipScope.queueableFails.length > 0;
 
   const queueItemMetaForPlayer = useCallback((index, playerName) => {
     const upload = uploadedDemos?.[index];
@@ -236,6 +237,39 @@ export function useClipQueueActions({
     }
     addToQueue(queueItems);
     setProgressText(t("app.enqueuePlayerHighlightsDone", {
+      player: currentActivePlayer,
+      n: queueItems.length,
+    }), { autoDismissMs: 2000, queueLink: true });
+  }, [
+    addToQueue,
+    currentActivePlayer,
+    currentMatchIndex,
+    currentParsed,
+    currentPlayerClipScope,
+    queueItemMetaForPlayer,
+    setProgressText,
+    t,
+  ]);
+
+  const handleAddCurrentPlayerFails = useCallback(() => {
+    if (!currentParsed || !currentActivePlayer) return;
+    const meta = queueItemMetaForPlayer(currentMatchIndex, currentActivePlayer);
+    const queueItems = currentPlayerClipScope.queueableFails.map((clip) => ({
+      demoPath: meta.demoPath,
+      demoFilename: meta.demoFilename,
+      targetPlayer: meta.targetPlayer,
+      targetPlayerUserId: meta.targetPlayerUserId,
+      targetSteamId: meta.targetSteamId,
+      clipId: clip.clip_id,
+      clientClipUid: clip.client_clip_uid,
+      clipData: clip,
+    }));
+    if (!queueItems.length) {
+      setProgressText(t("app.enqueuePlayerFailsEmpty", { player: currentActivePlayer }));
+      return;
+    }
+    addToQueue(queueItems);
+    setProgressText(t("app.enqueuePlayerFailsDone", {
       player: currentActivePlayer,
       n: queueItems.length,
     }), { autoDismissMs: 2000, queueLink: true });
@@ -440,11 +474,13 @@ export function useClipQueueActions({
     regularSelectableTotal,
     selectedRegularCount,
     canAddCurrentPlayerHighlights,
+    canAddCurrentPlayerFails,
     handleToggleClip,
     handleSelectAll,
     handleDeselectAll,
     handleAddSelectedToQueue,
     handleAddCurrentPlayerHighlights,
+    handleAddCurrentPlayerFails,
     handleAddTimelineEventToQueue,
     handleAddTimelineRoundToQueue,
     handleAddTimelineEventsBatchToQueue,

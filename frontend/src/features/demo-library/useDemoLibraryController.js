@@ -400,11 +400,17 @@ export function useDemoLibraryController({
     ],
   );
 
-  const handleLoadSelectedLibraryDemos = useCallback(async () => {
-    const ids = Array.from(selectedLibraryDemoIds);
+  const handleLoadSelectedLibraryDemos = useCallback(async (requestedIds = null, opts = {}) => {
+    const { showLoadingOverlay = true } = opts;
+    const sourceIds = Array.isArray(requestedIds)
+      ? requestedIds
+      : Array.from(selectedLibraryDemoIds);
+    const ids = [...new Set(sourceIds.filter((id) => id != null))];
     if (!ids.length) return;
-    setLibraryLoadingOverlay(true);
-    setLibraryLoadingText(t("app.libraryLoadingDemo"));
+    if (showLoadingOverlay) {
+      setLibraryLoadingOverlay(true);
+      setLibraryLoadingText(t("app.libraryLoadingDemo"));
+    }
     try {
       ids.sort((a, b) => Number(a) - Number(b));
       const { data } = await API.post("/demos/batch-summary", { ids });
@@ -424,7 +430,7 @@ export function useDemoLibraryController({
         const idMap = Object.fromEntries(
           loaded.map((demo, index) => [index, demo.id]),
         );
-        setLibraryLoadingOverlay(false);
+        if (showLoadingOverlay) setLibraryLoadingOverlay(false);
         await autoParseLoadedDemosRef.current?.(loaded, idMap, failedItems);
       }
     } catch (error) {
@@ -444,7 +450,7 @@ export function useDemoLibraryController({
         );
       }
     } finally {
-      setLibraryLoadingOverlay(false);
+      if (showLoadingOverlay) setLibraryLoadingOverlay(false);
     }
   }, [
     autoParseLoadedDemosRef,

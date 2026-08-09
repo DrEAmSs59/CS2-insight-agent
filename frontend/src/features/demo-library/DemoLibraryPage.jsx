@@ -1,9 +1,8 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import API from "../../api/api";
 import { LayoutGrid, List } from "lucide-react";
 import PageContainer from "../../components/PageContainer";
 import { useAppShell } from "../../context/AppShellContext";
-import { useRecordingQueue } from "../../stores/recordingQueueStore";
 import DemoAdvancedFilters from "./components/DemoAdvancedFilters";
 import DemoBatchActionBar from "./components/DemoBatchActionBar";
 import DemoLibraryQueryBar from "./components/DemoLibraryQueryBar";
@@ -11,7 +10,6 @@ import DemoLibraryToolbar from "./components/DemoLibraryToolbar";
 import DemoWatchPathsModal from "./components/DemoWatchPathsModal";
 import DemoPagination from "./components/DemoPagination";
 import MatchCard, { MatchListRow } from "./components/MatchCard";
-import DemoInfoModal from "./components/DemoInfoModal";
 import IngestModal from "./components/IngestModal";
 import Modal from "../../components/ui/Modal";
 import Button from "../../components/ui/Button";
@@ -44,34 +42,22 @@ const INITIAL_ADV_FILTERS = {
 export default function DemoLibraryPage() {
   const t = useT();
   const s = useAppShell();
-  const addToQueue = useRecordingQueue((st) => st.addToQueue);
-  const removeByClientClipUid = useRecordingQueue((st) => st.removeByClientClipUid);
-  const queue = useRecordingQueue((st) => st.queue);
 
   const [viewMode, setViewMode] = useState("grid"); // "grid" | "list"
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [sortKey, setSortKey] = useState("library");
   const [sortDir, setSortDir] = useState("desc");
   const [watchPathsModalOpen, setWatchPathsModalOpen] = useState(false);
-  const [demoInfoModalId, setDemoInfoModalId] = useState(null);
   const [ingestModalOpen, setIngestModalOpen] = useState(false);
   const [batchDeleteCount, setBatchDeleteCount] = useState(0);
+  const [openingDemoId, setOpeningDemoId] = useState(null);
+  const openingDemoIdRef = useRef(null);
   const { requestPlayDemo, DemoPlaybackUi } = useDemoPlaybackDialog();
-
-  const queuedClientClipUids = useMemo(
-    () => new Set(queue.map((q) => q.clientClipUid).filter(Boolean)),
-    [queue]
-  );
 
   const expectedPlayers = useMemo(() => {
     const raw = s.expectedParsePlayersText || "";
     return raw.split(/[\n,]+/).map((p) => p.trim()).filter(Boolean);
   }, [s.expectedParsePlayersText]);
-
-  const handleAddToQueue = useCallback((clips) => {
-    if (!clips?.length) return;
-    addToQueue(clips);
-  }, [addToQueue]);
 
   const handleBatchIngest = useCallback(async (ids) => {
     const { data } = await API.post("/demos/batch-ingest", { demo_ids: ids });
@@ -96,6 +82,20 @@ export default function DemoLibraryPage() {
     const label = (item?.display_name && String(item.display_name).trim()) || item?.filename || `#${demoId}`;
     void requestPlayDemo({ id: demoId, label });
   }, [requestPlayDemo, s.demoLibraryItems]);
+
+  const handleOpenAnalysis = useCallback(async (demoId) => {
+    if (openingDemoIdRef.current !== null) return;
+    openingDemoIdRef.current = demoId;
+    setOpeningDemoId(demoId);
+    try {
+      await s.handleLoadSelectedLibraryDemos([demoId], {
+        showLoadingOverlay: false,
+      });
+    } finally {
+      openingDemoIdRef.current = null;
+      setOpeningDemoId(null);
+    }
+  }, [s.handleLoadSelectedLibraryDemos]);
 
   const handleOpenFile = useCallback(
     async (demoId) => {
@@ -290,7 +290,7 @@ export default function DemoLibraryPage() {
         <DemoAdvancedFilters libraryAdvFilters={s.libraryAdvFilters} setLibraryAdvFilters={s.setLibraryAdvFilters} />
       ) : null}
 
-      <section className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border border-cs2-border bg-cs2-bg-card">
+      <section className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border-x border-t border-cs2-border bg-cs2-bg-card">
         <div className="demo-library-results min-h-0 flex-1 overflow-x-hidden overflow-y-auto p-4 custom-scrollbar">
           {s.libraryLoading ? (
             <div className="flex h-32 items-center justify-center text-cs2-text-muted text-sm">{t("library.loading")}</div>
@@ -314,7 +314,9 @@ export default function DemoLibraryPage() {
                   onOpenFile={handleOpenFile}
                   onDelete={(id, filename) => s.setLibraryDeletePrompt({ id, label: filename || `#${id}` })}
                   onUpdateRemark={handleUpdateRemark}
-                  onOpenInfo={(id) => setDemoInfoModalId(id)}
+                  onLoad={(id) => void handleOpenAnalysis(id)}
+                  isLoading={openingDemoId === it.id}
+                  loadDisabled={openingDemoId !== null}
                   expectedPlayers={expectedPlayers}
                 />
               ))}
@@ -337,7 +339,9 @@ export default function DemoLibraryPage() {
                   onOpenFile={handleOpenFile}
                   onDelete={(id, filename) => s.setLibraryDeletePrompt({ id, label: filename || `#${id}` })}
                   onUpdateRemark={handleUpdateRemark}
-                  onOpenInfo={(id) => setDemoInfoModalId(id)}
+                  onLoad={(id) => void handleOpenAnalysis(id)}
+                  isLoading={openingDemoId === it.id}
+                  loadDisabled={openingDemoId !== null}
                   expectedPlayers={expectedPlayers}
                 />
               ))}
@@ -345,20 +349,21 @@ export default function DemoLibraryPage() {
           )}
         </div>
 
-        <div className="flex shrink-0 justify-end border-t border-cs2-border px-2 py-1.5">
-          <DemoPagination
-            libraryPage={s.libraryPage}
-            libraryTotalPages={s.libraryTotalPages}
-            libraryHasNextPage={s.libraryHasNextPage}
-            libraryPageSize={s.libraryPageSize}
-            onPageSizeChange={s.setLibraryPageSize}
-            libraryJumpDraft={s.libraryJumpDraft}
-            onPageChange={onPageChange}
-            onJumpDraftChange={s.setLibraryJumpDraft}
-            onJumpSubmit={s.handleLibraryPageJump}
-          />
-        </div>
       </section>
+
+      <div className="flex shrink-0 justify-end">
+        <DemoPagination
+          libraryPage={s.libraryPage}
+          libraryTotalPages={s.libraryTotalPages}
+          libraryHasNextPage={s.libraryHasNextPage}
+          libraryPageSize={s.libraryPageSize}
+          onPageSizeChange={s.setLibraryPageSize}
+          libraryJumpDraft={s.libraryJumpDraft}
+          onPageChange={onPageChange}
+          onJumpDraftChange={s.setLibraryJumpDraft}
+          onJumpSubmit={s.handleLibraryPageJump}
+        />
+      </div>
 
       <DemoBatchActionBar
         count={s.selectedLibraryDemoIds.size}
@@ -489,19 +494,6 @@ export default function DemoLibraryPage() {
           </div>
         </div>
       ) : null}
-
-      <DemoInfoModal
-        open={demoInfoModalId !== null}
-        onClose={() => setDemoInfoModalId(null)}
-        demoId={demoInfoModalId}
-        onAddToQueue={handleAddToQueue}
-        onEnqueueNotice={(msg, meta) => s.setProgressText(msg, meta)}
-        expectedPlayers={expectedPlayers}
-        aiMode={s.aiMode}
-        queuedClientClipUids={queuedClientClipUids}
-        queueLength={queue.length}
-        onDequeue={removeByClientClipUid}
-      />
 
       <IngestModal
         isOpen={ingestModalOpen}

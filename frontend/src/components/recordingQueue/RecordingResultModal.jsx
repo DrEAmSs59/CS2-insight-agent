@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import {
+  AlertTriangle,
   Ban,
   Check,
   CheckCircle2,
@@ -31,15 +32,15 @@ const TYPE_ACCENT_CLASSES = {
   "高光": "bg-cs2-highlight",
   "击杀": "bg-cs2-highlight",
   "下饭": "bg-cs2-fail",
-  "梗死亡": "bg-fuchsia-400",
+  "梗死亡": "bg-cs2-fuchsia-on-surface",
   "合集": "bg-cs2-compilation",
   "击杀合集": "bg-cs2-compilation",
   "死亡合集": "bg-cs2-compilation",
   "回合合集": "bg-cs2-compilation",
-  "时间线": "bg-cyan-400",
-  "时间线击杀": "bg-emerald-400",
-  "时间线死亡": "bg-rose-400",
-  "时间线整回合": "bg-cyan-400",
+  "时间线": "bg-cs2-info",
+  "时间线击杀": "bg-cs2-highlight",
+  "时间线死亡": "bg-cs2-fail",
+  "时间线整回合": "bg-cs2-info",
 };
 
 function isAborted(result) {
@@ -122,7 +123,7 @@ function ResultPreview({ result, clip, duration, t, onDurationDetected }) {
     : null;
 
   return (
-    <div className="relative aspect-video w-full overflow-hidden rounded-lg border border-cs2-border-subtle bg-black shadow-inner">
+    <div className="relative aspect-video w-full overflow-hidden rounded-lg border border-cs2-border bg-cs2-bg-elevated">
       {streamUrl && !previewFailed ? (
         <video
           src={streamUrl}
@@ -141,7 +142,7 @@ function ResultPreview({ result, clip, duration, t, onDurationDetected }) {
           onError={() => setPreviewFailed(true)}
         />
       ) : (
-        <div className="flex h-full w-full flex-col items-center justify-center gap-1.5 bg-gradient-to-br from-cs2-bg-elevated via-cs2-bg-card to-black text-cs2-text-muted">
+        <div className="flex h-full w-full flex-col items-center justify-center gap-1.5 bg-cs2-bg-elevated text-cs2-text-muted">
           <FileVideo2 className="h-7 w-7" />
           <span className="text-[10px]">{t("queue.modalPreviewUnavailable")}</span>
         </div>
@@ -211,7 +212,7 @@ function RecordingResultCard({ result, copiedIdx, onCopy, onReveal, onDurationDe
   );
 
   return (
-    <li className="relative overflow-hidden rounded-xl border border-cs2-border bg-cs2-bg-input/55 shadow-inner">
+    <li className="relative overflow-hidden rounded-xl border border-cs2-border bg-cs2-bg-card">
       <span className={`absolute inset-y-0 left-0 w-1 ${result.success ? accent : "bg-cs2-fail"}`} />
       <div className="flex flex-col gap-3 p-3 pl-4 sm:flex-row sm:items-stretch">
         <div className="w-full shrink-0 sm:w-[248px] lg:w-[290px]">
@@ -264,13 +265,13 @@ function RecordingResultCard({ result, copiedIdx, onCopy, onReveal, onDurationDe
                 label={t("queue.modalRecordingSettings")}
                 icon={MonitorPlay}
                 chips={settingChips}
-                className="border-cyan-400/25 bg-cyan-400/10 text-cyan-200"
+                className="border-cs2-border bg-cs2-cyan-surface text-cs2-cyan-on-surface"
               />
               <ChipGroup
                 label={t("queue.modalHighlightTags")}
                 icon={Tags}
                 chips={tags}
-                className="border-amber-400/30 bg-amber-400/10 text-amber-200"
+                className="border-cs2-border bg-cs2-amber-surface text-cs2-amber-on-surface"
               />
             </div>
           ) : null}
@@ -333,6 +334,15 @@ export default function RecordingResultModal({
     : results.reduce((sum, result, index) => (
       sum + (Number(mediaDurations[resultKey(result, index)]) || getClipDurationSeconds(resultClip(result)) || 0)
     ), 0);
+  const headerIcon = failCount > 0 && successCount === 0 ? (
+    <XCircle className="h-7 w-7 text-cs2-rose-on-surface" />
+  ) : failCount > 0 || abortedCount > 0 ? (
+    <AlertTriangle className="h-7 w-7 text-cs2-amber-on-surface" />
+  ) : results.length > 0 ? (
+    <CheckCircle2 className="h-7 w-7 text-cs2-emerald-on-surface" />
+  ) : (
+    <FileVideo2 className="h-7 w-7 text-cs2-text-muted" />
+  );
 
   useEffect(() => {
     setMediaDurations({});
@@ -394,31 +404,35 @@ export default function RecordingResultModal({
     <Modal
       open={open}
       onClose={onClose}
-      icon={<CheckCircle2 className="h-7 w-7 text-cs2-text-success" />}
+      icon={headerIcon}
       title={`${t("queue.modalTitle")} · ${t("queue.modalHeaderSaved", { n: successCount })}`}
       subtitle={`${t("queue.modalDurationTotal", { duration: formatDuration(totalDuration) })} · ${t("queue.modalSuccess", { n: successCount, total: results.length })}`}
       maxWidth="max-w-6xl"
       maxHeight="max-h-[90vh]"
+      fillHeight={false}
+      contentClassName="min-h-0 overflow-y-auto bg-cs2-bg-page"
       footer={footer}
     >
       <div
         className={`mx-4 mt-4 flex items-start gap-2.5 rounded-lg border px-3 py-2.5 text-[11px] sm:mx-5 ${
           recovery.state === "restored"
-            ? "border-emerald-400/30 bg-emerald-400/10 text-emerald-100"
+            ? "border-cs2-border bg-cs2-emerald-surface text-cs2-emerald-on-surface"
             : recovery.state === "failed"
-              ? "border-rose-400/35 bg-rose-400/10 text-cs2-rose-on-surface"
+              ? "border-cs2-border bg-cs2-rose-surface text-cs2-rose-on-surface"
               : recovery.state === "not_needed"
-                ? "border-cs2-border bg-cs2-bg-input/60 text-cs2-text-secondary"
-                : "border-amber-400/35 bg-amber-400/10 text-amber-100"
+                ? "border-cs2-border bg-cs2-bg-elevated text-cs2-text-secondary"
+                : "border-cs2-border bg-cs2-amber-surface text-cs2-amber-on-surface"
         }`}
         role="status"
       >
         {recovery.state === "restored" ? (
-          <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-400" />
+          <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-cs2-emerald-on-surface" />
         ) : recovery.state === "failed" ? (
           <XCircle className="mt-0.5 h-4 w-4 shrink-0 text-cs2-rose-on-surface" />
+        ) : recovery.state === "not_needed" ? (
+          <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-cs2-text-secondary" />
         ) : (
-          <Ban className="mt-0.5 h-4 w-4 shrink-0 text-amber-300" />
+          <Ban className="mt-0.5 h-4 w-4 shrink-0 text-cs2-amber-on-surface" />
         )}
         <div>
           <p className="font-semibold">

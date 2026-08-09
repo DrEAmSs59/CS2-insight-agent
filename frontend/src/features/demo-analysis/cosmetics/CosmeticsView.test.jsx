@@ -72,10 +72,32 @@ describe("CosmeticsView", () => {
     expect(screen.queryByText("“不属于 JW”")).toBeNull();
     expect(screen.getByTestId("cosmetics-row-ct")).toBeTruthy();
     expect(screen.getByTestId("cosmetics-row-t")).toBeTruthy();
+    expect(screen.getByTestId("cosmetics-row-heading-ct").className).toContain("w-36");
+    expect(screen.getByTestId("cosmetics-row-heading-ct").className).toContain("bg-cs2-cyan-surface");
+    expect(screen.getByTestId("cosmetics-row-heading-t").className).toContain("bg-cs2-amber-surface");
+    expect(screen.getByTestId("cosmetics-row-heading-ct").className).not.toContain("border-l-2");
+    expect(screen.getByTestId("cosmetics-row-heading-t").className).not.toContain("border-l-2");
+    expect(screen.getByTestId("cosmetics-row-heading-ct").className).not.toContain("bg-sky-500/10");
+    expect(screen.getByTestId("cosmetics-row-heading-t").className).not.toContain("bg-amber-500/10");
     expect(screen.queryByTestId("cosmetics-team-tab-ct")).toBeNull();
     expect(screen.queryByTestId("cosmetics-team-tab-t")).toBeNull();
     // Both team sections show the evidence knife + AWP + natural glove placeholder.
     expect(container.querySelectorAll("[data-cosmetic-card]").length).toBe(6);
+    for (const preview of container.querySelectorAll("[data-cosmetic-card] .cosmetic-preview-surface")) {
+      expect(preview.className).toContain("rounded-[10px]");
+    }
+    expect(container.querySelectorAll("[data-cosmetic-card] [data-cosmetic-rarity-rail]")).toHaveLength(6);
+    expect(container.querySelectorAll("[data-cosmetic-card] [data-cosmetic-rarity-label]")).toHaveLength(0);
+    for (const rail of container.querySelectorAll("[data-cosmetic-card] [data-cosmetic-rarity-rail]")) {
+      expect(rail.className).toContain("left-0");
+      expect(rail.className).not.toContain("right-0");
+      expect(rail.className).toContain("top-1/2");
+      expect(rail.className).toContain("h-[60%]");
+      expect(rail.className).toContain("w-[3px]");
+      expect(rail.className).toContain("-translate-y-1/2");
+      expect(rail.className).not.toContain("ring-white");
+      expect(rail.className).not.toContain("border-white");
+    }
   });
 
   test("renders CT then T rows from observed_teams and dual-team items appear in both", () => {
@@ -153,15 +175,24 @@ describe("CosmeticsView", () => {
       />,
     );
 
-    expect(screen.getByRole("button", { name: /自定义饰品|Customize skins/i })).toBeTruthy();
+    const customizeButton = screen.getByRole("button", { name: /自定义饰品|Customize skins/i });
+    expect(customizeButton.className).toContain("rounded-[10px]");
+    expect(customizeButton.className).toContain("bg-cs2-accent-soft");
+    expect(screen.getByTestId("cosmetics-customize-icon").className.baseVal).toContain("text-cs2-accent");
     expect(screen.queryByText(/2 items|2 件饰品/)).toBeNull();
     for (const card of container.querySelectorAll("[data-cosmetic-card]")) {
       expect(within(card).queryByLabelText(/Equipped-team|装备阵营/)).toBeNull();
     }
 
     fireEvent.click(screen.getByRole("button", { name: /自定义饰品|Customize skins/i }));
-    expect(screen.getByRole("button", { name: /保存自定义皮肤方案|Save custom skin plan/i })).toBeTruthy();
-    expect(screen.getByRole("button", { name: /^取消$|^Cancel$/ })).toBeTruthy();
+    const saveButton = screen.getByRole("button", { name: /保存自定义皮肤方案|Save custom skin plan/i });
+    expect(saveButton.className).toContain("rounded-[10px]");
+    expect(saveButton.className).toContain("bg-cs2-accent-soft");
+    expect(screen.getByTestId("cosmetics-save-plan-icon")).toBeTruthy();
+    const cancelButton = screen.getByRole("button", { name: /^取消$|^Cancel$/ });
+    expect(cancelButton.className).toContain("rounded-[10px]");
+    expect(cancelButton.className).toContain("bg-cs2-bg-input");
+    expect(screen.getByTestId("cosmetics-cancel-icon")).toBeTruthy();
   });
 
   test("opens item details on click", () => {
@@ -183,6 +214,10 @@ describe("CosmeticsView", () => {
     expect(dialog.className).not.toContain("fixed");
     expect(within(dialog).getAllByText("Lᵒᵛᵉᵧₒᵤ 玫瑰の吻").length).toBeGreaterThan(0);
     expect(within(dialog).getByText("53009600926")).toBeTruthy();
+    const detailRarity = dialog.querySelector("[data-cosmetic-detail-rarity-label]");
+    expect(detailRarity?.textContent).toBeTruthy();
+    expect(detailRarity?.style.color).not.toBe("");
+    expect(dialog.querySelector("[data-cosmetic-rarity-rail]")).toBeNull();
     expect(within(dialog).queryByText(/Demo 没有提供可归属的贴纸数据|no attributable sticker data/i)).toBeNull();
     expect(dialog.textContent).not.toContain("OriginalOwner");
   });

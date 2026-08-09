@@ -75,14 +75,16 @@ def run_process_capture(
     *,
     timeout: float,
     stall_timeout: float | None = None,
+    cancel_event: Any | None = None,
     **kwargs: Any,
 ) -> subprocess.CompletedProcess[str]:
     """Run a process with byte pipes and return safely decoded text output."""
-    if stall_timeout is not None:
+    if stall_timeout is not None or cancel_event is not None:
         return _run_process_capture_with_stall_detection(
             command,
             timeout=timeout,
             stall_timeout=stall_timeout,
+            cancel_event=cancel_event,
             **kwargs,
         )
     raw = subprocess.run(
@@ -100,10 +102,14 @@ def _run_process_capture_with_stall_detection(
     command: Sequence[str],
     *,
     timeout: float,
-    stall_timeout: float,
+    stall_timeout: float | None,
+    cancel_event: Any | None = None,
     **kwargs: Any,
 ) -> subprocess.CompletedProcess[str]:
-    """Capture a long FrameMeld job while distinguishing progress from a stall."""
+    """Capture a long process while supporting cancellation and stall detection."""
+
+    if cancel_event is not None and getattr(cancel_event, "is_set", lambda: False)():
+        raise InterruptedError("process cancelled")
 
     started = time.monotonic()
     process = subprocess.Popen(
@@ -187,14 +193,26 @@ def _run_process_capture_with_stall_detection(
         )
 
     hard_timeout = max(1.0, float(timeout))
-    no_progress_timeout = max(1.0, float(stall_timeout))
+    no_progress_timeout = (
+        max(1.0, float(stall_timeout))
+        if stall_timeout is not None
+        else None
+    )
     while True:
+        if cancel_event is not None and getattr(cancel_event, "is_set", lambda: False)():
+            process.kill()
+            process.wait(timeout=10)
+            finish(int(process.returncode or -9))
+            raise InterruptedError("process cancelled")
         returncode = process.poll()
         if returncode is not None:
             return finish(int(returncode))
         now = time.monotonic()
         hard_expired = now - started > hard_timeout
-        stalled = now - float(progress["last_at"]) > no_progress_timeout
+        stalled = (
+            no_progress_timeout is not None
+            and now - float(progress["last_at"]) > no_progress_timeout
+        )
         if hard_expired or stalled:
             process.kill()
             process.wait(timeout=10)
@@ -202,7 +220,7 @@ def _run_process_capture_with_stall_detection(
                 f"Process exceeded hard timeout of {hard_timeout:g} seconds"
                 if hard_expired
                 else (
-                    f"Process made no frame progress for {no_progress_timeout:g} seconds "
+                    f"Process made no frame progress for {float(no_progress_timeout or 0):g} seconds "
                     f"after frame {int(progress['last_frame'])}"
                 )
             )
@@ -210,7 +228,7 @@ def _run_process_capture_with_stall_detection(
             completed = finish(124)
             raise subprocess.TimeoutExpired(
                 list(command),
-                hard_timeout if hard_expired else no_progress_timeout,
+                hard_timeout if hard_expired else float(no_progress_timeout or 0),
                 output=completed.stdout,
                 stderr=completed.stderr,
             )

@@ -17,6 +17,7 @@ import { X } from "lucide-react";
  *   contentClassName?: string;
  *   zIndex?: number;
  *   contained?: boolean;
+ *   fillHeight?: boolean;
  * }} props
  */
 export default function Modal({
@@ -34,6 +35,7 @@ export default function Modal({
   contentClassName = "flex-1 overflow-y-auto",
   zIndex = 90,
   contained = false,
+  fillHeight = true,
 }) {
   if (!open) return null;
 
@@ -48,7 +50,7 @@ export default function Modal({
       }}
     >
       <div
-        className={`flex h-full ${maxHeight} w-full ${maxWidth} flex-col overflow-hidden rounded-xl border border-cs2-border bg-cs2-bg-card shadow-lg ${className}`}
+        className={`flex ${fillHeight ? "h-full" : ""} ${maxHeight} w-full ${maxWidth} flex-col overflow-hidden rounded-xl border border-cs2-border bg-cs2-bg-card shadow-lg ${className}`}
       >
         {/* Header */}
         {(title || icon || subtitle) && (

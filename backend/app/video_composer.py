@@ -10,8 +10,9 @@ import shutil
 import subprocess
 import tempfile
 import time
+from contextvars import ContextVar
 from pathlib import Path
-from typing import Any, Optional, Sequence
+from typing import Any, Callable, Optional, Sequence
 
 from .ffmpeg_process import (
     command_for_log,
@@ -48,6 +49,17 @@ from .env_utils import (
 )
 
 logger = logging.getLogger(__name__)
+
+_MONTAGE_CANCEL_EVENT: ContextVar[Any | None] = ContextVar(
+    "montage_cancel_event",
+    default=None,
+)
+
+
+def _raise_if_montage_cancelled() -> None:
+    cancel_event = _MONTAGE_CANCEL_EVENT.get()
+    if cancel_event is not None and getattr(cancel_event, "is_set", lambda: False)():
+        raise MontageComposerError("MONTAGE_EXPORT_CANCELLED")
 
 
 def resolve_ffmpeg_binary(ffmpeg_path: str | None) -> Path:
@@ -101,6 +113,8 @@ def _run_ffmpeg_capture(
     output_path: Path | None = None,
 ) -> subprocess.CompletedProcess[str]:
     """Run FFmpeg with actionable logs and isolated precise GPU policies."""
+    _raise_if_montage_cancelled()
+    cancel_event = _MONTAGE_CANCEL_EVENT.get()
     is_amf = "h264_amf" in cmd
     precise_policy = framemeld_execution_policy(cmd)
     precise_framemeld = precise_policy is not None
@@ -133,9 +147,24 @@ def _run_ffmpeg_capture(
                     cmd,
                     timeout=precise_policy.hard_timeout_seconds,
                     stall_timeout=precise_policy.stall_timeout_seconds,
+                    cancel_event=cancel_event,
                 )
             else:
-                result = run_process_capture(cmd, timeout=timeout)
+                result = run_process_capture(
+                    cmd,
+                    timeout=timeout,
+                    cancel_event=cancel_event,
+                )
+        except InterruptedError as exc:
+            remove_partial_file(output_path)
+            export_event(
+                "stage_cancelled",
+                level=logging.WARNING,
+                stage=stage,
+                attempt=attempt,
+                elapsed_ms=round((time.monotonic() - attempt_started) * 1000),
+            )
+            raise MontageComposerError("MONTAGE_EXPORT_CANCELLED") from exc
         except subprocess.TimeoutExpired as exc:
             remove_partial_file(output_path)
             timeout_result = subprocess.CompletedProcess(
@@ -227,7 +256,10 @@ def _run_ffmpeg_capture(
             # Some Windows AMF drivers release the previous encoder context
             # shortly after the FFmpeg process exits.  A bounded delay avoids
             # immediately racing the next encoder initialization.
-            time.sleep(1.0)
+            if cancel_event is not None and getattr(cancel_event, "wait", lambda _timeout: False)(1.0):
+                raise MontageComposerError("MONTAGE_EXPORT_CANCELLED")
+            if cancel_event is None:
+                time.sleep(1.0)
     return result
 
 
@@ -238,8 +270,15 @@ def _run_json(
     file_role: str = "unknown",
     media_path: Path | None = None,
 ) -> dict[str, Any]:
+    _raise_if_montage_cancelled()
     try:
-        proc = run_process_capture(cmd, timeout=120)
+        proc = run_process_capture(
+            cmd,
+            timeout=120,
+            cancel_event=_MONTAGE_CANCEL_EVENT.get(),
+        )
+    except InterruptedError as exc:
+        raise MontageComposerError("MONTAGE_EXPORT_CANCELLED") from exc
     except (OSError, subprocess.SubprocessError) as exc:
         logger.error(
             "ffprobe could not complete command=%s error=%s",
@@ -1527,7 +1566,13 @@ def _compose_montage_once(
     framemeld_enabled: bool = False,
     encoder_device_args: Sequence[str] | None = None,
     encoder_adapter: object | None = None,
+    progress_callback: Optional[Callable[[float, str, Optional[dict[str, Any]]], None]] = None,
+    progress_stage_prefix: str = "",
 ) -> None:
+    def _progress(progress: float, stage: str, detail: Optional[dict[str, Any]] = None) -> None:
+        if progress_callback is not None:
+            progress_callback(progress, f"{progress_stage_prefix}{stage}", detail)
+
     if not clip_paths:
         raise MontageComposerError("MONTAGE_CLIPS_EMPTY")
     for c in clip_paths:
@@ -1611,6 +1656,8 @@ def _compose_montage_once(
         _outro_idx = len(segments) - 1 if outro_path is not None else -1
 
         normed: list[Path] = []
+        segment_count = max(1, len(segments))
+        _progress(0.16, "normalizing", {"stage_progress": 0.0})
         for i, seg in enumerate(segments):
             out_ts = Path(tmpdir) / f"norm_{i:03d}.ts"
             if _is_image_path(seg):
@@ -1626,6 +1673,8 @@ def _compose_montage_once(
                     duration=img_dur,
                 )
                 normed.append(out_ts)
+                stage_progress = (i + 1) / segment_count
+                _progress(0.16 + 0.48 * stage_progress, "normalizing", {"stage_progress": stage_progress})
                 continue
             info = probed_segment_info.get(seg.resolve()) or probe_video_audio_summary(seg, ffprobe)
             dur = info.get("duration")
@@ -1782,6 +1831,8 @@ def _compose_montage_once(
                 )
                 raise MontageComposerError("MONTAGE_CLIP_NORMALIZE_FAILED", name=seg.name)
             normed.append(out_ts)
+            stage_progress = (i + 1) / segment_count
+            _progress(0.16 + 0.48 * stage_progress, "normalizing", {"stage_progress": stage_progress})
 
         has_transitions = bool(
             transitions is not None
@@ -1792,6 +1843,7 @@ def _compose_montage_once(
         )
 
         if has_transitions:
+            _progress(0.65, "transitions", {"stage_progress": 0.0})
             # 按硬切边界（duration=0 或 type=none）拆成若干组；
             # 组内片段用 xfade 连接，组间直接 concat——这样 0s 转场就是真正的硬切。
             clip_norm = normed[intro_n : intro_n + n_clips]
@@ -1829,6 +1881,11 @@ def _compose_montage_once(
                         video_encode_quality=video_encode_quality,
                     )
                     processed.append(grp_ts)
+                _progress(
+                    0.65 + 0.09 * ((gi + 1) / max(1, len(groups))),
+                    "transitions",
+                    {"stage_progress": (gi + 1) / max(1, len(groups))},
+                )
 
             concat_paths: list[Path] = []
             if intro_path is not None:
@@ -1839,6 +1896,7 @@ def _compose_montage_once(
         else:
             concat_paths = normed
 
+        _progress(0.76, "concat", {"stage_progress": 0.0})
         concat_list = Path(tmpdir) / "concat.txt"
         lines = [_concat_file_line(p) for p in concat_paths]
         concat_list.write_text("\n".join(lines) + "\n", encoding="utf-8")
@@ -1875,8 +1933,10 @@ def _compose_montage_once(
             )
             raise MontageComposerError("MONTAGE_CONCAT_FAILED")
 
+        _progress(0.80, "finalizing", {"stage_progress": 0.0})
         mid_playable = Path(tmpdir) / "mid_playable.mp4"
         _finalize_mp4_for_common_players(ffmpeg_bin, mid_mp4, mid_playable, video_encode_fast)
+        _progress(0.87, "finalizing", {"stage_progress": 1.0})
 
         mid_info = ffprobe_streams(
             mid_playable,
@@ -1894,6 +1954,7 @@ def _compose_montage_once(
         if bgm_path is None:
             shutil.move(str(mid_playable), str(output_path))
         else:
+            _progress(0.89, "audio", {"stage_progress": 0.0})
             bgm_vol = 1.0 if bgm_volume is None else max(0.0, min(2.0, float(bgm_volume)))
             bgm_start = 0.0 if bgm_start_sec is None else max(0.0, float(bgm_start_sec))
 
@@ -1942,8 +2003,10 @@ def _compose_montage_once(
                     process_error_tail(r3),
                 )
                 raise MontageComposerError("MONTAGE_BGM_MIX_FAILED")
+            _progress(0.93, "audio", {"stage_progress": 1.0})
 
         if framemeld_enabled:
+            _progress(0.94, "framemeld", {"stage_progress": 0.0})
             capability = probe_framemeld(ffmpeg_bin)
             if capability is None:
                 raise MontageComposerError("MONTAGE_FRAMEMELD_REQUIRED")
@@ -2038,6 +2101,7 @@ def _compose_montage_once(
                     public_code="MONTAGE_EXPORT_FAILED",
                 )
                 raise MontageComposerError("MONTAGE_EXPORT_FAILED")
+            _progress(0.97, "framemeld", {"stage_progress": 1.0})
     finally:
         try:
             shutil.rmtree(tmpdir, ignore_errors=True)
@@ -2045,7 +2109,7 @@ def _compose_montage_once(
             logger.debug("montage temp cleanup failed", exc_info=True)
 
 
-def compose_montage(
+def _compose_montage_impl(
     *,
     ffmpeg_bin: Path,
     clip_paths: list[Path],
@@ -2062,6 +2126,7 @@ def compose_montage(
     montage_encoder: str = "auto",
     name_cards: Optional[list[dict | None]] = None,
     framemeld_enabled: bool = False,
+    progress_callback: Optional[Callable[[float, str, Optional[dict[str, Any]]], None]] = None,
 ) -> Any:
     """Export with GPU-aware target probing and an x264 safety fallback."""
 
@@ -2087,6 +2152,11 @@ def compose_montage(
     if bgm_path is not None and not bgm_path.is_file():
         raise MontageComposerError("MONTAGE_BGM_MISSING")
 
+    def _progress(progress: float, stage: str, detail: Optional[dict[str, Any]] = None) -> None:
+        if progress_callback is not None:
+            progress_callback(progress, stage, detail)
+
+    _progress(0.02, "checking", {"stage_progress": 0.0})
     ffprobe = resolve_ffprobe_binary(ffmpeg_bin)
     # Probe every original video before selecting an encoder.  Any failure here
     # is a source problem and must not trigger a hardware fallback.
@@ -2104,7 +2174,7 @@ def compose_montage(
         ),
     ]
     source_info: dict[Path, dict[str, Any]] = {}
-    for source in source_videos:
+    for source_index, source in enumerate(source_videos):
         try:
             source_info[source] = probe_video_audio_summary(
                 source,
@@ -2117,6 +2187,8 @@ def compose_montage(
             if hinted is exc:
                 raise
             raise hinted from exc
+        source_progress = (source_index + 1) / max(1, len(source_videos))
+        _progress(0.02 + 0.08 * source_progress, "checking", {"stage_progress": source_progress})
     ref = source_info[clip_paths[0]]
     width = int(ref.get("width") or 0)
     height = int(ref.get("height") or 0)
@@ -2136,6 +2208,7 @@ def compose_montage(
     )
     if not candidates:
         raise MontageComposerError("MONTAGE_ENCODER_ALL_FAILED", last_encoder="none")
+    _progress(0.12, "starting", {"stage_progress": 1.0})
     ffmpeg_identity = ffmpeg_encoder_identity(ffmpeg_bin)
     export_event(
         "encoder_plan",
@@ -2203,8 +2276,13 @@ def compose_montage(
             name=str(exc.params.get("name") or attempt_output.name),
         ) from exc
 
+    attempt_index = 0
+
     def _run_candidate(candidate: EncoderCandidate) -> None:
+        nonlocal attempt_index
+        attempt_index += 1
         _cleanup_attempt()
+        stage_prefix = "fallback_" if attempt_index > 1 else ""
         try:
             _compose_montage_once(
                 ffmpeg_bin=ffmpeg_bin,
@@ -2224,7 +2302,10 @@ def compose_montage(
                 framemeld_enabled=framemeld_enabled,
                 encoder_device_args=candidate.ffmpeg_device_args,
                 encoder_adapter=candidate.adapter,
+                progress_callback=progress_callback,
+                progress_stage_prefix=stage_prefix,
             )
+            _progress(0.975, f"{stage_prefix}validating", {"stage_progress": 0.25})
             final_info = ffprobe_streams(
                 attempt_output,
                 ffprobe,
@@ -2279,7 +2360,13 @@ def compose_montage(
             "-",
         ]
         try:
-            decoded = run_process_capture(decode_command, timeout=3600)
+            decoded = run_process_capture(
+                decode_command,
+                timeout=3600,
+                cancel_event=_MONTAGE_CANCEL_EVENT.get(),
+            )
+        except InterruptedError as exc:
+            raise MontageComposerError("MONTAGE_EXPORT_CANCELLED") from exc
         except (OSError, subprocess.SubprocessError) as exc:
             if not candidate.is_software:
                 raise HardwareEncoderFailure(
@@ -2303,6 +2390,7 @@ def compose_montage(
                     command=decode_command,
                 )
             raise MontageComposerError("MONTAGE_OUTPUT_NOT_PLAYABLE")
+        _progress(0.99, f"{stage_prefix}validating", {"stage_progress": 1.0})
         try:
             os.replace(attempt_output, output_path)
         except OSError as exc:
@@ -2338,6 +2426,7 @@ def compose_montage(
             _run_candidate,
             ffmpeg_identity=ffmpeg_identity,
             cleanup=_cleanup_attempt,
+            cancellation_check=_raise_if_montage_cancelled,
             on_attempt=_on_attempt,
         )
     except MontageComposerError as exc:
@@ -2347,3 +2436,52 @@ def compose_montage(
         raise hinted from exc
     finally:
         _cleanup_attempt()
+
+
+def compose_montage(
+    *,
+    ffmpeg_bin: Path,
+    clip_paths: list[Path],
+    intro_path: Optional[Path],
+    outro_path: Optional[Path],
+    bgm_path: Optional[Path],
+    output_path: Path,
+    transitions: Optional[dict[str, Any]] = None,
+    clip_row_ids: Optional[list[int]] = None,
+    bgm_volume: Optional[float] = None,
+    bgm_start_sec: Optional[float] = None,
+    intro_image_duration: Optional[float] = None,
+    outro_image_duration: Optional[float] = None,
+    montage_encoder: str = "auto",
+    name_cards: Optional[list[dict | None]] = None,
+    framemeld_enabled: bool = False,
+    progress_callback: Optional[Callable[[float, str, Optional[dict[str, Any]]], None]] = None,
+    cancel_event: Any | None = None,
+) -> Any:
+    """Export a Montage while making every child process cooperatively cancellable."""
+
+    token = _MONTAGE_CANCEL_EVENT.set(cancel_event)
+    try:
+        _raise_if_montage_cancelled()
+        result = _compose_montage_impl(
+            ffmpeg_bin=ffmpeg_bin,
+            clip_paths=clip_paths,
+            intro_path=intro_path,
+            outro_path=outro_path,
+            bgm_path=bgm_path,
+            output_path=output_path,
+            transitions=transitions,
+            clip_row_ids=clip_row_ids,
+            bgm_volume=bgm_volume,
+            bgm_start_sec=bgm_start_sec,
+            intro_image_duration=intro_image_duration,
+            outro_image_duration=outro_image_duration,
+            montage_encoder=montage_encoder,
+            name_cards=name_cards,
+            framemeld_enabled=framemeld_enabled,
+            progress_callback=progress_callback,
+        )
+        _raise_if_montage_cancelled()
+        return result
+    finally:
+        _MONTAGE_CANCEL_EVENT.reset(token)

@@ -42,6 +42,7 @@ class ConfigPayload(BaseModel):
     llm: Optional[LLMConfig] = None
     ffmpeg_path: Optional[str] = None
     montage_encoder: Optional[str] = None
+    montage_export_dir: Optional[str] = None
     cs2_path: Optional[str] = None
     demo_directory: Optional[str] = None
     demo_cache_directory: Optional[str] = None
@@ -233,9 +234,12 @@ def detect_obs_path_save():
             "未找到 OBS（obs64.exe）。请确认已安装 OBS，或在 OBS 配置中心手动填写完整路径。",
         )
     cfg = load_config()
-    cfg.obs.obs_path = path
+    next_path = str(path).strip()
+    if next_path != str(cfg.obs.obs_path or "").strip():
+        cfg.obs.obs_config_verified = False
+    cfg.obs.obs_path = next_path
     save_config(cfg)
-    return {"obs_path": path}
+    return {"obs_path": next_path}
 
 
 @router.post("/api/config/test-llm")
@@ -310,6 +314,12 @@ async def test_llm_connection():
 async def update_config(payload: ConfigPayload):
     cfg = load_config()
     if payload.obs:
+        verified_connection_before = (
+            cfg.obs.host,
+            cfg.obs.port,
+            cfg.obs.password,
+            cfg.obs.obs_path,
+        )
         obs = payload.obs
         obs_fields = getattr(obs, "model_fields_set", set()) or set()
         cfg.obs.host = obs.host
@@ -325,6 +335,14 @@ async def update_config(payload: ConfigPayload):
         # 设置页已下线该开关；未显式传入时保留配置文件/API 调试值。
         if "browser_begin_frame_scheduling" in obs_fields:
             cfg.obs.browser_begin_frame_scheduling = bool(obs.browser_begin_frame_scheduling)
+        verified_connection_after = (
+            cfg.obs.host,
+            cfg.obs.port,
+            cfg.obs.password,
+            cfg.obs.obs_path,
+        )
+        if verified_connection_after != verified_connection_before:
+            cfg.obs.obs_config_verified = False
     if payload.llm:
         if payload.llm.api_key and not payload.llm.api_key.startswith("****"):
             cfg.llm = payload.llm
@@ -372,6 +390,8 @@ async def update_config(payload: ConfigPayload):
         cfg.ffmpeg_path = str(payload.ffmpeg_path).strip()
     if payload.montage_encoder is not None:
         cfg.montage_encoder = str(payload.montage_encoder).strip().lower() or "auto"
+    if payload.montage_export_dir is not None:
+        cfg.montage_export_dir = str(payload.montage_export_dir).strip()
     if payload.recording_global_pacing is not None:
         cfg.recording_global_pacing = (
             dict(payload.recording_global_pacing)

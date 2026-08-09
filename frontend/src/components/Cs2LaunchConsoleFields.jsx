@@ -145,12 +145,12 @@ export default function Cs2LaunchConsoleFields({
         <label className="block text-[10px] font-semibold uppercase tracking-wider text-cs2-text-secondary">
           {t("record.launchSectionLabel")}
         </label>
-        <div className="flex min-h-[3rem] flex-wrap content-start gap-2 overflow-y-auto rounded-lg border border-cs2-border bg-cs2-bg-input/40 p-2">
+        <div className="flex min-h-[3rem] flex-wrap content-start gap-2 overflow-y-auto rounded-lg border border-cs2-border bg-cs2-bg-input p-2">
           {FIXED_LAUNCH_ARGS.map((line) => (
             <span
               key={`fixed-${line}`}
               title={t("record.launchFixedArgTitle")}
-              className="inline-flex max-w-full items-center gap-1 rounded-md border border-cs2-border bg-cs2-bg-input/60 px-2 py-1 text-[11px] font-semibold text-cs2-text-muted"
+              className="inline-flex max-w-full items-center gap-1 rounded-md border border-cs2-border bg-cs2-bg-elevated px-2 py-1 text-[11px] font-semibold text-cs2-text-muted"
             >
               <span aria-hidden className="shrink-0">🔒</span>
               <span className="min-w-0 max-w-[min(100%,18rem)] truncate font-mono" title={line}>
@@ -163,7 +163,7 @@ export default function Cs2LaunchConsoleFields({
             return (
               <span
                 key={`lc-${idx}`}
-                className="group inline-flex max-w-full items-center gap-1 rounded-md border border-cs2-accent/30 bg-cs2-accent/10 pl-2 pr-1 py-1 text-[11px] font-semibold text-cs2-accent"
+                className="group inline-flex max-w-full items-center gap-1 rounded-md border border-cs2-accent bg-cs2-accent-soft pl-2 pr-1 py-1 text-[11px] font-semibold text-cs2-accent"
               >
                 <span className="min-w-0 max-w-[min(100%,18rem)] truncate font-mono" title={line}>
                   {line}
@@ -197,14 +197,14 @@ export default function Cs2LaunchConsoleFields({
         <label className="block text-[10px] font-semibold uppercase tracking-wider text-cs2-text-secondary">
           {t("record.consoleSectionLabel")}
         </label>
-        <div className="flex min-h-[3rem] flex-wrap content-start gap-2 overflow-y-auto rounded-lg border border-cs2-border bg-cs2-bg-input/40 p-2">
+        <div className="flex min-h-[3rem] flex-wrap content-start gap-2 overflow-y-auto rounded-lg border border-cs2-border bg-cs2-bg-input p-2">
           {consoleChips.length === 0 ? (
             <span className="py-1 text-[12px] text-cs2-text-muted">{t("record.consoleEmpty")}</span>
           ) : (
             consoleChips.map((line, idx) => (
               <span
                 key={`cc-${idx}`}
-                className="group inline-flex max-w-full items-center gap-1 rounded-md border border-cyan-500/35 bg-cs2-cyan-surface pl-2 pr-1 py-1 text-[11px] font-semibold text-cyan-100/95"
+                className="group inline-flex max-w-full items-center gap-1 rounded-md border border-cs2-border bg-cs2-cyan-surface pl-2 pr-1 py-1 text-[11px] font-semibold text-cs2-cyan-on-surface"
               >
                 <span className="min-w-0 max-w-[min(100%,20rem)] truncate font-mono" title={line}>
                   {line}

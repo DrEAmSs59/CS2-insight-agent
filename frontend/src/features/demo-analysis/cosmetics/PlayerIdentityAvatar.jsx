@@ -15,7 +15,7 @@ export default function PlayerIdentityAvatar({ player, avatarUrl, fallbackTone =
 
   return (
     <span
-      className={`relative flex shrink-0 items-center justify-center overflow-hidden rounded-lg border-2 font-black shadow-sm ${className}`}
+      className={`relative flex shrink-0 items-center justify-center overflow-hidden rounded-lg border-2 font-black ${className}`}
       style={{ color: tone.color, background: tone.background, borderColor: tone.color }}
       data-player-color-source={tone.source}
     >

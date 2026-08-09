@@ -39,4 +39,21 @@ describe("LiteCutExportProgressDialog", () => {
     expect(screen.getByText("导出完成")).toBeTruthy();
     expect(screen.getByText("clip.mp4")).toBeTruthy();
   });
+
+  it("reuses the progress UI and cancellation action for Montage", () => {
+    const onCancel = vi.fn();
+    render(<LiteCutExportProgressDialog
+      variant="montage"
+      phase="running"
+      result={{ export_id: 18, stage: "finalizing", progress: 0.8 }}
+      onClose={vi.fn()}
+      onCancel={onCancel}
+    />);
+
+    expect(screen.getByText("正在导出合辑…")).toBeTruthy();
+    expect(screen.getByText(/封装成片/)).toBeTruthy();
+    expect(screen.getByText("80%")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "取消导出" }));
+    expect(onCancel).toHaveBeenCalledTimes(1);
+  });
 });

@@ -1,23 +1,19 @@
 import React, { useState } from "react";
 import { classifyDemoStatus } from "../../../utils/demoLibraryDisplay";
 import {
-  Play,
-  FolderSearch,
+  CirclePlay,
+  FolderOpen,
   Clock,
-  Map as MapIcon,
   Trophy,
-  User,
-  Users,
   Tag,
   MessageSquare,
   CheckCircle2,
   ExternalLink,
   Pencil,
   Save,
-  X,
-  Trash2,
-  Info,
+  Trash,
   Sparkles,
+  Loader2,
 } from "lucide-react";
 import { useT } from "../../../i18n/useT.js";
 
@@ -51,7 +47,9 @@ export function MatchListRow({
   onOpenFile,
   onDelete,
   onUpdateRemark,
-  onOpenInfo,
+  onLoad,
+  isLoading = false,
+  loadDisabled = false,
   expectedPlayers = [],
 }) {
   const t = useT();
@@ -127,9 +125,16 @@ export function MatchListRow({
 
   return (
     <div
-      className={`match-list-row group relative flex min-w-0 items-center gap-4 rounded-lg border px-4 py-2 transition-all cursor-pointer ${isSelected ? 'border-cs2-accent bg-cs2-accent/5 shadow-md shadow-cs2-accent/5' : 'border-cs2-border bg-cs2-bg-card/40 hover:border-cs2-border'}`}
-      onClick={() => onOpenInfo?.(demo.id)}
+      className={`match-list-row group relative flex min-w-0 items-center gap-4 rounded-lg border px-4 py-2 transition-all ${loadDisabled ? 'cursor-wait' : 'cursor-pointer'} ${isSelected ? 'border-cs2-accent bg-cs2-accent/5 shadow-md shadow-cs2-accent/5' : 'border-cs2-border bg-cs2-bg-card/40 hover:border-cs2-border'}`}
+      onClick={() => !loadDisabled && onLoad?.(demo.id)}
+      aria-busy={isLoading}
     >
+      {isLoading ? (
+        <div className="absolute inset-0 z-20 flex items-center justify-center gap-2 rounded-lg bg-cs2-bg-card/90 text-[11px] font-bold text-cs2-accent backdrop-blur-[1px]" onClick={(event) => event.stopPropagation()}>
+          <Loader2 className="h-4 w-4 animate-spin" />
+          {t("app.libraryLoadingDemo")}
+        </div>
+      ) : null}
       {/* 1. 勾选 */}
       <div onClick={e => e.stopPropagation()} className="shrink-0">
         <input
@@ -171,10 +176,10 @@ export function MatchListRow({
           <span className="text-xs font-black text-cs2-text-secondary truncate w-full text-right mb-0.5">
             {matchMeta.team_a_name || t("match.teamA")}
           </span>
-          <div className="flex flex-wrap justify-end gap-x-1.5 gap-y-0 text-[11px] text-cs2-text-muted overflow-hidden h-[16px]">
+          <div className="flex flex-wrap justify-end gap-x-1.5 gap-y-0.5 text-[11px] leading-4 text-cs2-text-muted">
             {teamA.slice(0, 5).map((p, i) => (
-              <span key={i} className={`truncate flex items-center gap-0.5 ${isHighlighted(p.name) ? "text-cs2-accent font-bold" : ""}`}>
-                {p.name?.slice(0, 8)}{isAnalyzedPlayer(p.name) && <Sparkles className="h-2 w-2 text-cs2-accent animate-pulse" />}
+              <span key={i} className={`flex max-w-full min-w-0 items-center gap-0.5 [overflow-wrap:anywhere] ${isHighlighted(p.name) ? "text-cs2-accent font-bold" : ""}`} title={p.name}>
+                {p.name}{isAnalyzedPlayer(p.name) && <Sparkles className="h-2 w-2 shrink-0 text-cs2-accent animate-pulse" />}
               </span>
             ))}
           </div>
@@ -192,10 +197,10 @@ export function MatchListRow({
           <span className="text-xs font-black text-cs2-text-secondary truncate w-full mb-0.5">
             {matchMeta.team_b_name || t("match.teamB")}
           </span>
-          <div className="flex flex-wrap justify-start gap-x-1.5 gap-y-0 text-[11px] text-cs2-text-muted overflow-hidden h-[16px]">
+          <div className="flex flex-wrap justify-start gap-x-1.5 gap-y-0.5 text-[11px] leading-4 text-cs2-text-muted">
             {teamB.slice(0, 5).map((p, i) => (
-              <span key={i} className={`truncate flex items-center gap-0.5 ${isHighlighted(p.name) ? "text-cs2-accent font-bold" : ""}`}>
-                {p.name?.slice(0, 8)}{isAnalyzedPlayer(p.name) && <Sparkles className="h-2 w-2 text-cs2-accent animate-pulse" />}
+              <span key={i} className={`flex max-w-full min-w-0 items-center gap-0.5 [overflow-wrap:anywhere] ${isHighlighted(p.name) ? "text-cs2-accent font-bold" : ""}`} title={p.name}>
+                {p.name}{isAnalyzedPlayer(p.name) && <Sparkles className="h-2 w-2 shrink-0 text-cs2-accent animate-pulse" />}
               </span>
             ))}
           </div>
@@ -232,6 +237,16 @@ export function MatchListRow({
         {/* 悬停显示：操作按钮 */}
         <div className="match-list-row__details-actions hidden items-center gap-1 group-hover:flex animate-in fade-in duration-200" onClick={e => e.stopPropagation()}>
           <button
+            type="button"
+            onClick={() => !loadDisabled && onLoad?.(demo.id)}
+            disabled={loadDisabled}
+            className="p-2 text-cs2-accent hover:bg-cs2-accent/10 rounded-md transition-colors"
+            title={t("library.batchLoad")}
+            aria-label={t("library.batchLoad")}
+          >
+            <ExternalLink className="h-4 w-4" />
+          </button>
+          <button
             onClick={() => setIsEditingRemark(!isEditingRemark)}
             className={`p-2 rounded-md transition-colors ${demo.remark ? 'text-cs2-accent' : 'text-cs2-text-muted'} hover:bg-cs2-bg-input/50`}
             title={t("match.btnRemark")}
@@ -239,13 +254,13 @@ export function MatchListRow({
             <MessageSquare className="h-4 w-4" />
           </button>
           <button onClick={() => onPlay(demo.id)} className="p-2 text-cs2-emerald-on-surface hover:bg-cs2-emerald-surface rounded-md transition-colors" title={t("match.btnPlayCs2")}>
-            <Play className="h-4 w-4 fill-current" />
+            <CirclePlay className="h-4 w-4" strokeWidth={1.8} />
           </button>
-          <button onClick={() => onOpenFile(demo.id)} className="p-2 text-cs2-text-secondary hover:bg-cs2-bg-input/50 rounded-md transition-colors" title={t("match.btnLocate")}>
-            <FolderSearch className="h-4 w-4" />
+          <button onClick={() => onOpenFile(demo.id)} className="p-2 text-cs2-cyan-on-surface hover:bg-cs2-cyan-surface rounded-md transition-colors" title={t("match.btnLocate")}>
+            <FolderOpen className="h-4 w-4" strokeWidth={1.8} />
           </button>
           <button onClick={() => onDelete(demo.id, demo.filename)} className="p-2 text-cs2-red-on-surface hover:bg-cs2-red-surface rounded-md transition-colors" title={t("match.btnDelete")}>
-            <Trash2 className="h-4 w-4" />
+            <Trash className="h-4 w-4" strokeWidth={1.8} />
           </button>
         </div>
       </div>
@@ -289,7 +304,9 @@ export default function MatchCard({
   onOpenFile,
   onDelete,
   onUpdateRemark,
-  onOpenInfo,
+  onLoad,
+  isLoading = false,
+  loadDisabled = false,
   expectedPlayers = [],
 }) {
   const t = useT();
@@ -374,9 +391,16 @@ export default function MatchCard({
 
   return (
     <div
-      className={`match-card group relative flex min-w-0 flex-col overflow-hidden rounded-lg border transition-all cursor-pointer ${isSelected ? 'border-cs2-accent bg-cs2-accent/5 shadow-lg shadow-cs2-accent/5' : 'border-cs2-border bg-cs2-bg-card hover:border-cs2-border'}`}
-      onClick={() => onOpenInfo?.(demo.id)}
+      className={`match-card group relative flex min-w-0 flex-col overflow-hidden rounded-lg border transition-all ${loadDisabled ? 'cursor-wait' : 'cursor-pointer'} ${isSelected ? 'border-cs2-accent bg-cs2-accent/5 shadow-lg shadow-cs2-accent/5' : 'border-cs2-border bg-cs2-bg-card hover:border-cs2-border'}`}
+      onClick={() => !loadDisabled && onLoad?.(demo.id)}
+      aria-busy={isLoading}
     >
+      {isLoading ? (
+        <div className="absolute inset-0 z-20 flex items-center justify-center gap-2 bg-cs2-bg-card/90 text-[11px] font-bold text-cs2-accent backdrop-blur-[1px]" onClick={(event) => event.stopPropagation()}>
+          <Loader2 className="h-4 w-4 animate-spin" />
+          {t("app.libraryLoadingDemo")}
+        </div>
+      ) : null}
       {/* 顶部：地图缩略图背景（图绝对定位，文案叠在上层；比分绝对居中） */}
       <div className="match-card__hero relative h-[70px] w-full overflow-hidden">
         <img
@@ -413,11 +437,6 @@ export default function MatchCard({
               </span>
             </div>
 
-            <div className="match-card__actions absolute right-0 top-1/2 z-[2] flex -translate-y-1/2 gap-1.5 opacity-0 transition-opacity group-hover:opacity-100" onClick={e => e.stopPropagation()}>
-              <button onClick={() => onPlay(demo.id)} className="flex h-8 w-8 items-center justify-center rounded-md border border-cs2-emerald-surface bg-cs2-bg-overlay text-cs2-emerald-on-surface hover:bg-cs2-emerald-surface hover:text-cs2-text-primary transition-all" title={t("match.btnPlayCs2")}><Play className="h-4 w-4 fill-current" /></button>
-              <button onClick={() => onOpenFile(demo.id)} className="flex h-8 w-8 items-center justify-center rounded-md border border-cs2-border bg-cs2-bg-overlay text-cs2-text-primary hover:bg-cs2-bg-hover hover:text-cs2-text-on-accent transition-all" title={t("match.btnLocate")}><FolderSearch className="h-4 w-4" /></button>
-              <button onClick={() => onDelete(demo.id, demo.filename)} className="flex h-8 w-8 items-center justify-center rounded-md border border-cs2-red-surface bg-cs2-bg-overlay text-cs2-red-on-surface hover:bg-cs2-red-surface hover:text-cs2-text-primary transition-all" title={t("match.btnDelete")}><Trash2 className="h-4 w-4" /></button>
-            </div>
           </div>
 
           {/* 底部行：来源 / 时长 / 日期 */}
@@ -434,31 +453,35 @@ export default function MatchCard({
               {demo.added_at ? new Date(demo.added_at).toLocaleDateString('zh-CN', { year: '2-digit', month: '2-digit', day: '2-digit' }) : ""}
             </div>
           </div>
+
+          <div className="match-card__actions absolute bottom-2.5 right-2 top-2.5 z-[2] flex items-center gap-1 rounded-lg border border-cs2-border bg-cs2-bg-elevated p-2 opacity-0 shadow-sm transition-opacity group-hover:opacity-100" onClick={e => e.stopPropagation()}>
+            <button aria-label={t("match.btnPlayCs2")} onClick={() => onPlay(demo.id)} className="grid h-8 w-8 shrink-0 place-items-center rounded-md text-cs2-emerald-on-surface transition-colors hover:bg-cs2-emerald-surface" title={t("match.btnPlayCs2")}><CirclePlay className="h-[18px] w-[18px]" strokeWidth={1.8} /></button>
+            <button aria-label={t("match.btnLocate")} onClick={() => onOpenFile(demo.id)} className="grid h-8 w-8 shrink-0 place-items-center rounded-md text-cs2-cyan-on-surface transition-colors hover:bg-cs2-cyan-surface" title={t("match.btnLocate")}><FolderOpen className="h-[18px] w-[18px]" strokeWidth={1.8} /></button>
+            <button aria-label={t("match.btnDelete")} onClick={() => onDelete(demo.id, demo.filename)} className="grid h-8 w-8 shrink-0 place-items-center rounded-md text-cs2-red-on-surface transition-colors hover:bg-cs2-red-surface" title={t("match.btnDelete")}><Trash className="h-[18px] w-[18px]" strokeWidth={1.8} /></button>
+          </div>
         </div>
       </div>
 
       {/* 中部：队伍与成员 */}
       <div className="grid grid-cols-2 border-y border-cs2-border bg-cs2-bg-input/30 group/roster w-full transition-colors hover:bg-cs2-bg-hover">
         <div className="relative border-r border-cs2-border px-3 py-1">
-          <div className="text-[10px] font-bold uppercase tracking-wider text-cs2-text-muted">{matchMeta.team_a_name || t("match.teamA")}</div>
-          <div className="h-[50px] overflow-y-auto flex flex-wrap gap-1 scrollbar-hover">
+          <div className="mb-1 text-[10px] font-bold uppercase tracking-wider text-cs2-text-muted">{matchMeta.team_a_name || t("match.teamA")}</div>
+          <div className="flex min-h-[70px] flex-col gap-0.5">
             {teamA.length > 0 ? teamA.slice(0, 5).map((p, i) => (
-              <span key={i} className={`relative flex items-center gap-0.5 text-[10px] ${isHighlighted(p.name) ? 'font-bold text-cs2-accent underline underline-offset-2' : 'text-cs2-text-secondary'}`} title={p.name}>
-                {p.name?.slice(0, 8)}{p.name?.length > 8 ? '..' : ''}
-                {isAnalyzedPlayer(p.name) && <Sparkles className="h-2 w-2 text-cs2-accent animate-pulse" />}
-                {i < 4 && i < teamA.length - 1 ? ',' : ''}
+              <span key={i} className={`relative flex min-w-0 items-start gap-0.5 text-[10px] leading-[13px] ${isHighlighted(p.name) ? 'font-bold text-cs2-accent underline underline-offset-2' : 'text-cs2-text-secondary'}`} title={p.name}>
+                <span className="min-w-0 [overflow-wrap:anywhere]">{p.name}</span>
+                {isAnalyzedPlayer(p.name) && <Sparkles className="mt-0.5 h-2 w-2 shrink-0 text-cs2-accent animate-pulse" />}
               </span>
             )) : <span className="text-[10px] text-cs2-text-muted italic">No roster</span>}
           </div>
         </div>
         <div className="px-3 py-1">
           <div className="mb-1 text-[10px] font-bold uppercase tracking-wider text-cs2-text-muted">{matchMeta.team_b_name || t("match.teamB")}</div>
-          <div className="h-[50px] overflow-y-auto flex flex-wrap gap-1 scrollbar-hover">
+          <div className="flex min-h-[70px] flex-col gap-0.5">
             {teamB.length > 0 ? teamB.slice(0, 5).map((p, i) => (
-              <span key={i} className={`relative flex items-center gap-0.5 text-[10px] ${isHighlighted(p.name) ? 'font-bold text-cs2-accent underline underline-offset-2' : 'text-cs2-text-secondary'}`} title={p.name}>
-                {p.name?.slice(0, 8)}{p.name?.length > 8 ? '..' : ''}
-                {isAnalyzedPlayer(p.name) && <Sparkles className="h-2 w-2 text-cs2-accent animate-pulse" />}
-                {i < 4 && i < teamB.length - 1 ? ',' : ''}
+              <span key={i} className={`relative flex min-w-0 items-start gap-0.5 text-[10px] leading-[13px] ${isHighlighted(p.name) ? 'font-bold text-cs2-accent underline underline-offset-2' : 'text-cs2-text-secondary'}`} title={p.name}>
+                <span className="min-w-0 [overflow-wrap:anywhere]">{p.name}</span>
+                {isAnalyzedPlayer(p.name) && <Sparkles className="mt-0.5 h-2 w-2 shrink-0 text-cs2-accent animate-pulse" />}
               </span>
             )) : <span className="text-[10px] text-cs2-text-muted italic">No roster</span>}
           </div>
@@ -483,22 +506,34 @@ export default function MatchCard({
             ))}
           </div>
         </div>
-        <div className="mt-2 flex items-start gap-2 rounded bg-cs2-bg-input/70 p-1.5 border border-cs2-border">
-          <MessageSquare className="mt-0.5 h-3 w-3 shrink-0 text-cs2-text-muted" />
-          {isEditingRemark ? (
-            <div className="flex flex-1 flex-col gap-1.5">
-              <textarea autoFocus value={remarkDraft} onChange={(e) => setRemarkDraft(e.target.value)} className="w-full bg-transparent p-0 text-[12px] text-cs2-text-primary outline-none placeholder:text-cs2-text-muted resize-none" placeholder={t("match.remarkPlaceholder")} rows={2} />
-              <div className="flex justify-end gap-2">
-                <button onClick={() => setIsEditingRemark(false)} className="text-[10px] text-cs2-text-muted hover:text-cs2-text-primary">{t("match.remarkCancel")}</button>
-                <button onClick={handleSaveRemark} className="flex items-center gap-1 rounded bg-cs2-accent px-2 py-0.5 text-[10px] font-bold text-cs2-text-on-accent"><Save className="h-2.5 w-2.5" /> {t("match.remarkSave")}</button>
+        <div className="mt-2 flex items-stretch gap-2">
+          <div className="flex min-w-0 flex-1 items-start gap-2 rounded-md border border-cs2-border bg-cs2-bg-input/70 p-1.5">
+            <MessageSquare className="mt-0.5 h-3 w-3 shrink-0 text-cs2-text-muted" />
+            {isEditingRemark ? (
+              <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+                <textarea autoFocus value={remarkDraft} onChange={(e) => setRemarkDraft(e.target.value)} className="w-full bg-transparent p-0 text-[12px] text-cs2-text-primary outline-none placeholder:text-cs2-text-muted resize-none" placeholder={t("match.remarkPlaceholder")} rows={2} />
+                <div className="flex justify-end gap-2">
+                  <button onClick={() => setIsEditingRemark(false)} className="text-[10px] text-cs2-text-muted hover:text-cs2-text-primary">{t("match.remarkCancel")}</button>
+                  <button onClick={handleSaveRemark} className="flex items-center gap-1 rounded bg-cs2-accent px-2 py-0.5 text-[10px] font-bold text-cs2-text-on-accent"><Save className="h-2.5 w-2.5" /> {t("match.remarkSave")}</button>
+                </div>
               </div>
-            </div>
-          ) : (
-            <div className="group/remark flex flex-1 cursor-pointer items-start justify-between gap-2" onClick={() => setIsEditingRemark(true)}>
-              <p className={`text-[12px] leading-relaxed ${demo.remark ? 'text-cs2-text-secondary' : 'text-cs2-text-muted italic'}`}>{demo.remark || t("match.remarkClickAdd")}</p>
-              <Pencil className="h-2.5 w-2.5 text-cs2-text-muted opacity-0 group-hover/remark:opacity-100" />
-            </div>
-          )}
+            ) : (
+              <div className="group/remark flex min-w-0 flex-1 cursor-pointer items-start justify-between gap-2" onClick={() => setIsEditingRemark(true)}>
+                <p className={`truncate text-[12px] leading-relaxed ${demo.remark ? 'text-cs2-text-secondary' : 'text-cs2-text-muted italic'}`}>{demo.remark || t("match.remarkClickAdd")}</p>
+                <Pencil className="h-2.5 w-2.5 shrink-0 text-cs2-text-muted opacity-0 group-hover/remark:opacity-100" />
+              </div>
+            )}
+          </div>
+          <button
+            type="button"
+            onClick={() => !loadDisabled && onLoad?.(demo.id)}
+            disabled={loadDisabled}
+            className="inline-flex shrink-0 items-center justify-center gap-1.5 rounded-md border border-cs2-accent/35 bg-cs2-accent/10 px-2.5 text-[11px] font-bold text-cs2-accent transition-colors hover:border-cs2-accent/60 hover:bg-cs2-accent/15"
+            title={t("library.batchLoad")}
+          >
+            <ExternalLink className="h-3 w-3" />
+            {t("library.batchLoad")}
+          </button>
         </div>
       </div>
     </div>

@@ -28,15 +28,17 @@ import {
 
 function StatusDot({ ok, loading }) {
   if (loading) return <Loader2 className="h-4 w-4 animate-spin text-zinc-500" />;
-  if (ok) return <CheckCircle2 className="h-4 w-4 text-emerald-400" />;
-  return <XCircle className="h-4 w-4 text-red-400" />;
+  if (ok) return <CheckCircle2 className="h-4 w-4 text-cs2-emerald-on-surface" />;
+  return <XCircle className="h-4 w-4 text-cs2-red-on-surface" />;
 }
 
 function SetupChecklist() {
   const t = useT();
   const { initialQuickCheckStatus } = useAppShell();
   const [status, setStatus] = useState(() => initialQuickCheckStatus ?? null);
-  const [loading, setLoading] = useState(() => initialQuickCheckStatus == null);
+  // 启动时的 quick-check 仅作为占位缓存；每次进入页面都重新核查，
+  // 避免设置页保存后先展示旧的红/绿状态，直到下一轮轮询才纠正。
+  const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [obsConfigHasIssuesState, setObsConfigHasIssues] = useState(/** @type {boolean | null} */ (null));
   const timerRef = useRef(null);
@@ -81,8 +83,10 @@ function SetupChecklist() {
     try {
       const { data } = await API.get("/config/quick-check");
       setStatus(data);
+      return data;
     } catch {
       setStatus(null);
+      return null;
     } finally {
       if (!isBackground) setLoading(false);
     }
@@ -100,32 +104,33 @@ function SetupChecklist() {
   };
 
   useEffect(() => {
-    if (initialQuickCheckStatus != null) {
-      setStatus(initialQuickCheckStatus);
-      setLoading(false);
-    } else {
-      void fetchStatus(false);
-    }
+    void fetchStatus(false);
     // quick-check 不连 OBS 很快，保留轮询以反映配置变化
     timerRef.current = setInterval(() => fetchStatus(true), 15000);
     return () => clearInterval(timerRef.current);
-  }, [initialQuickCheckStatus]);
+  // 进入上手指南时执行一次；后续由 15 秒轮询和手动刷新负责同步。
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // OBS 配置状态变化时同步拉配置健康
   useEffect(() => {
-    if (status?.obs_configured) {
+    if (!loading && status?.obs_configured) {
       void fetchObsConfigHealth();
     } else {
       setObsConfigHasIssues(null);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [status?.obs_configured]);
+  }, [loading, status?.obs_configured]);
 
   const handleRefresh = async () => {
     setRefreshing(true);
     try {
-      await fetchStatus(true);
-      if (status?.obs_configured) await fetchObsConfigHealth();
+      const nextStatus = await fetchStatus(true);
+      if (nextStatus?.obs_configured) {
+        await fetchObsConfigHealth();
+      } else {
+        setObsConfigHasIssues(null);
+      }
     } finally {
       setRefreshing(false);
     }
@@ -151,7 +156,7 @@ function SetupChecklist() {
       </div>
 
       {allRequired && !loading && (
-        <div className="mb-3 flex items-center gap-2 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-[12px] text-emerald-300">
+        <div className="mb-3 flex items-center gap-2 rounded-lg border border-cs2-emerald-surface bg-cs2-emerald-surface px-3 py-2 text-[12px] text-cs2-emerald-on-surface">
           <CheckCircle2 className="h-4 w-4 shrink-0" />
           {t("guide.checklistAllReady")}
         </div>
@@ -167,12 +172,12 @@ function SetupChecklist() {
               key={key}
               className={`rounded-xl border px-4 py-3 transition-colors ${
                 pending
-                  ? "border-white/8 bg-cs2-bg-card/70"
+                  ? "border-white/8 bg-cs2-bg-card"
                   : ok
-                  ? "border-emerald-500/20 bg-emerald-500/5"
+                  ? "border-cs2-emerald-surface bg-cs2-emerald-surface"
                   : required
-                  ? "border-red-500/20 bg-red-500/5"
-                  : "border-white/8 bg-cs2-bg-card/70"
+                  ? "border-cs2-red-surface bg-cs2-red-surface"
+                  : "border-white/8 bg-cs2-bg-card"
               }`}
             >
               <div className="flex items-start gap-3">
@@ -185,8 +190,8 @@ function SetupChecklist() {
                     <span
                       className={`rounded px-1.5 py-0.5 font-mono text-[10px] ${
                         required
-                          ? "bg-cs2-orange/20 text-cs2-orange"
-                          : "bg-zinc-700/60 text-dynamic-zinc-400"
+                          ? "bg-cs2-accent text-white"
+                          : "bg-cs2-neutral-tone text-white"
                       }`}
                     >
                       {required ? t("guide.tagRequired") : t("guide.tagOptional")}
@@ -207,7 +212,7 @@ function SetupChecklist() {
                     <div className={`mt-2 flex items-start gap-2 rounded-lg border px-2.5 py-2 text-[11px] ${
                       obsConfigHasIssuesState
                         ? "border-amber-500/25 bg-amber-500/8 text-amber-300"
-                        : "border-emerald-500/20 bg-emerald-500/8 text-emerald-300"
+                        : "border-emerald-500/20 bg-emerald-500/5 text-cs2-emerald-on-surface"
                     }`}>
                       {obsConfigHasIssuesState
                         ? <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
@@ -264,7 +269,7 @@ function QuickStart() {
       <div className="flex flex-wrap gap-2">
         {STEPS.map(({ step, text }, i) => (
           <div key={step} className="flex items-center gap-2">
-            <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-cs2-orange/20 font-mono text-[11px] font-bold text-cs2-orange">
+            <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-cs2-accent font-mono text-[11px] font-bold text-white">
               {step}
             </div>
             <span className="text-[12px] text-dynamic-zinc-300">{text}</span>
@@ -303,9 +308,9 @@ function FeatureCards() {
           <Link
             key={to}
             to={to}
-            className="group flex items-center gap-3 rounded-xl border border-white/8 bg-cs2-bg-card/80 px-3 py-3 transition-colors hover:border-cs2-orange/30 hover:bg-cs2-bg-card"
+            className="group flex items-center gap-3 rounded-xl border border-white/8 bg-cs2-bg-card px-3 py-3 transition-colors hover:border-cs2-orange/30"
           >
-            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-cs2-orange/12 text-cs2-orange transition-colors group-hover:bg-cs2-orange/22">
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-cs2-accent text-white">
               <Icon className="h-4 w-4" />
             </div>
             <div className="min-w-0">
@@ -354,7 +359,7 @@ function FaqAccordion() {
       <h2 className="mb-3 text-[13px] font-bold uppercase tracking-widest text-zinc-500">
         {t("guide.faqTitle")}
       </h2>
-      <div className="divide-y divide-white/8 rounded-xl border border-white/8 bg-cs2-bg-card/60">
+      <div className="divide-y divide-white/8 rounded-xl border border-white/8 bg-cs2-bg-card">
         {FAQ_ITEMS.map(({ q, a }, i) => {
           const open = openIdx === i;
           return (

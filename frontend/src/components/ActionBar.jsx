@@ -1,4 +1,4 @@
-import { CheckSquare, XSquare, Loader2, ListPlus, Sparkles } from "lucide-react";
+import { CheckSquare, XSquare, Loader2, ListPlus, Sparkles, Skull } from "lucide-react";
 import { useT } from "../i18n/useT.js";
 
 export default function ActionBar({
@@ -9,10 +9,12 @@ export default function ActionBar({
   onDeselectAll,
   onAddSelectedToQueue,
   onAddCurrentPlayerHighlights,
+  onAddCurrentPlayerFails,
   currentPlayer,
   queueLength,
   batchRecording,
   canAddCurrentPlayerHighlights,
+  canAddCurrentPlayerFails,
   sticky = false,
   compact = false,
 }) {
@@ -68,6 +70,17 @@ export default function ActionBar({
             >
               <Sparkles className="h-3.5 w-3.5" />
               {t("actionbar.addCurrentPlayerHighlights", { player: currentPlayer })}
+            </button>
+          )}
+          {!compact && canAddCurrentPlayerFails && (
+            <button
+              type="button"
+              disabled={batchRecording}
+              onClick={onAddCurrentPlayerFails}
+              className="flex items-center gap-2 rounded-lg border border-rose-500/35 bg-rose-500/10 px-4 py-2.5 text-xs font-bold text-rose-400 transition-colors hover:border-rose-500/60 hover:bg-rose-500/15 disabled:opacity-30"
+            >
+              <Skull className="h-3.5 w-3.5" />
+              {t("actionbar.addCurrentPlayerFails", { player: currentPlayer })}
             </button>
           )}
           <button

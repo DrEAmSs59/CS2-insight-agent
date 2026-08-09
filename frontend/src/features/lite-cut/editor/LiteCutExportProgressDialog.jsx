@@ -19,13 +19,18 @@ function formatDuration(seconds) {
 }
 
 function exportStageLabel(result) {
-  return {
+  const rawStage = String(result?.stage || result?.status || "");
+  const fallback = rawStage.startsWith("fallback_");
+  const stage = fallback ? rawStage.slice("fallback_".length) : rawStage;
+  const label = {
     queued: "排队中",
     starting: "准备导出",
     checking: "检查素材",
     normalizing: "规范化片段",
     transitions: "合成转场",
     concat: "拼接主轨",
+    finalizing: "封装成片",
+    validating: "校验成片",
     overlays: "合成叠加层",
     audio: "混音",
     range: "裁剪输出范围",
@@ -34,10 +39,18 @@ function exportStageLabel(result) {
     cancelling: "正在取消",
     cancelled: "已取消",
     error: "失败",
-  }[result?.stage || result?.status] || result?.stage || result?.status || "导出中";
+  }[stage] || stage || "导出中";
+  return fallback ? `切换兼容编码 · ${label}` : label;
 }
 
-export default function LiteCutExportProgressDialog({ phase = "idle", result = null, error = "", onClose, onCancel }) {
+export default function LiteCutExportProgressDialog({
+  phase = "idle",
+  result = null,
+  error = "",
+  onClose,
+  onCancel,
+  variant = "liteCut",
+}) {
   if (phase === "idle") return null;
   const outputPath = result?.output_path || "";
   const fileName = basenameFromPath(outputPath);
@@ -49,6 +62,12 @@ export default function LiteCutExportProgressDialog({ phase = "idle", result = n
   const processedFrames = Number(result?.processed_frames);
   const totalFrames = Number(result?.total_frames);
   const hasFrameProgress = Number.isFinite(processedFrames) && Number.isFinite(totalFrames) && totalFrames > 0;
+  const montage = variant === "montage";
+  const runningTitle = montage ? "正在导出合辑…" : "正在导出成片…";
+  const runningSubtitle = montage ? "FFmpeg 真实合成 · 请保持程序运行" : "FFmpeg 真实合成 · 预览不参与导出";
+  const dialogSubtitle = !running && montage ? "合辑已保存到指定目录" : runningSubtitle;
+  const pipelineLabel = montage ? "片段 · 转场 · 片头片尾 · 音频 · 成片校验" : "视频 · 转场 · 叠加层 · 音频 · 调色";
+  const doneButtonLabel = montage ? "返回合辑工作台" : "返回 LiteCut 首页";
 
   const copyPath = async () => {
     if (!outputPath) return;
@@ -74,14 +93,14 @@ export default function LiteCutExportProgressDialog({ phase = "idle", result = n
       <div className="w-full max-w-md rounded-2xl border border-cs2-border bg-cs2-bg-card p-6 shadow-2xl">
         <div className="flex items-start justify-between gap-3">
           <div>
-            <p className="text-sm font-bold text-cs2-text-primary">{running ? "正在导出成片…" : phase === "done" ? "导出完成" : phase === "cancelled" ? "导出已取消" : "导出失败"}</p>
-            <p className="mt-1 text-xs text-cs2-text-muted">FFmpeg 真实合成 · 预览不参与导出</p>
+            <p className="text-sm font-bold text-cs2-text-primary">{running ? runningTitle : phase === "done" ? "导出完成" : phase === "cancelled" ? "导出已取消" : "导出失败"}</p>
+            <p className="mt-1 text-xs text-cs2-text-muted">{dialogSubtitle}</p>
           </div>
           {!running ? <button type="button" aria-label="关闭导出窗口" onClick={onClose} className="rounded-lg p-1 text-cs2-text-muted hover:bg-cs2-surface-2"><X className="h-4 w-4" /></button> : null}
         </div>
 
         {running ? <div className="mt-5 space-y-3">
-          <div className="flex items-center gap-2 text-xs text-cs2-text-secondary"><Loader2 className="h-4 w-4 animate-spin text-cs2-accent" />视频 · 转场 · 叠加层 · 音频 · 调色</div>
+          <div className="flex items-center gap-2 text-xs text-cs2-text-secondary"><Loader2 className="h-4 w-4 animate-spin text-cs2-accent" />{pipelineLabel}</div>
           <div className="flex items-center justify-between text-[11px] font-semibold text-cs2-text-secondary"><span>{exportStageLabel(result)} · 任务 #{result?.export_id || "-"}</span><span className="font-mono text-cs2-text-primary">{progressPct}%</span></div>
           <div className="h-2 overflow-hidden rounded-full bg-cs2-bg-input"><div className="h-full rounded-full bg-cs2-accent transition-[width]" style={{ width: `${Math.max(4, progressPct)}%` }} /></div>
           <div className="flex items-center justify-between gap-3 font-mono text-[11px] text-cs2-text-muted">
@@ -93,7 +112,7 @@ export default function LiteCutExportProgressDialog({ phase = "idle", result = n
           ) : (
             <p className="font-mono text-[11px] text-cs2-text-muted">请稍候，导出正在后台执行…</p>
           )}
-          <button type="button" onClick={onCancel} className="w-full rounded-lg border border-cs2-border py-2 text-xs font-semibold text-cs2-text-secondary hover:border-rose-400/60 hover:text-rose-300">取消导出</button>
+          {onCancel ? <button type="button" onClick={onCancel} className="w-full rounded-lg border border-cs2-border py-2 text-xs font-semibold text-cs2-text-secondary hover:border-rose-400/60 hover:text-rose-300">取消导出</button> : null}
         </div> : null}
 
         {phase === "done" ? <div className="mt-5 space-y-4">
@@ -102,7 +121,7 @@ export default function LiteCutExportProgressDialog({ phase = "idle", result = n
             <button type="button" disabled={!outputPath} onClick={() => void revealOutput()} className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-cs2-border py-2 text-xs font-semibold text-cs2-text-secondary disabled:opacity-40"><FolderOpen className="h-3.5 w-3.5" />打开文件夹</button>
             <button type="button" disabled={!outputPath} onClick={() => void copyPath()} className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-cs2-border py-2 text-xs font-semibold text-cs2-text-secondary disabled:opacity-40"><Copy className="h-3.5 w-3.5" />复制路径</button>
           </div>
-          <button type="button" onClick={onClose} className="w-full rounded-lg bg-cs2-accent py-2.5 text-center text-xs font-bold text-dynamic-white">返回 LiteCut 首页</button>
+          <button type="button" onClick={onClose} className="w-full rounded-lg bg-cs2-accent py-2.5 text-center text-xs font-bold text-dynamic-white">{doneButtonLabel}</button>
         </div> : null}
 
         {phase === "cancelled" || phase === "error" ? <div className="mt-5 space-y-3">

@@ -72,6 +72,12 @@ function PacingSliderRow({
   onChange,
 }) {
   const clamp = (n) => Math.min(max, Math.max(min, n));
+  const progress = max > min ? ((clamp(Number(value)) - min) / (max - min)) * 100 : 0;
+  const rangeAccent = accent.includes("cyan")
+    ? "var(--cyan-9)"
+    : accent.includes("amber")
+      ? "var(--amber-9)"
+      : "var(--cs2-accent)";
   return (
     <div className="flex flex-col gap-1">
       <span className="text-[11px] text-cs2-text-secondary">{label}</span>
@@ -83,7 +89,11 @@ function PacingSliderRow({
           step={step}
           value={value}
           onChange={(e) => onChange(clamp(parseFloat(e.target.value)))}
-          className={`min-w-0 flex-1 ${accent}`}
+          className={`cs2-data-slider min-w-0 flex-1 ${accent}`}
+          style={{
+            "--cs2-range-progress": `${progress}%`,
+            "--cs2-range-accent": rangeAccent,
+          }}
         />
         <input
           type="number"
@@ -105,7 +115,7 @@ function PacingSliderRow({
   );
 }
 
-export function PacingMicroPanel({ item, updateItemPacing }) {
+export function PacingMicroPanel({ item, updateItemPacing, embedded = false }) {
   const t = useT();
   const globalPacing = useRecordingQueue((s) => s.globalPacing);
   const gp = globalPacing || {};
@@ -128,8 +138,8 @@ export function PacingMicroPanel({ item, updateItemPacing }) {
   };
 
   return (
-    <div className="space-y-3 rounded border border-cs2-border bg-cs2-bg-input/50 p-2">
-      <div className="border-b border-cs2-border pb-2">
+    <div className={embedded ? "" : "space-y-3 rounded-lg border border-cs2-border bg-cs2-bg-input/50 p-2"}>
+      <div className={embedded ? "" : "border-b border-cs2-border pb-2"}>
         <p className="mb-2 flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider text-cs2-text-muted">
           <Settings className="h-3 w-3" /> {t("queue.pacingBasicParams")}
         </p>
@@ -176,7 +186,7 @@ export function PovSection({ item, updateItemPacing }) {
   if (isClipPacingAndPovLocked(item.clipData)) {
     const wholeRound = isRoundTimelineRoundClip(item.clipData);
     return (
-      <p className="rounded border border-cs2-amber-surface bg-cs2-amber-surface px-2 py-1.5 text-[10px] leading-relaxed text-cs2-text-muted">
+      <p className="rounded-lg border border-cs2-amber-surface bg-cs2-amber-surface px-2 py-1.5 text-[10px] leading-relaxed text-cs2-text-muted">
         {wholeRound ? (
           <>
             {t("queue.povLockedPrefix")}<strong className="font-semibold text-cs2-text-secondary">{t("queue.povLockedTimelineStrong")}</strong>
@@ -244,7 +254,7 @@ export function PovSection({ item, updateItemPacing }) {
             type="button"
             title={t("queue.victimPovHint")}
             onClick={() => commit({ victim_pov: !povEnabled, ai_director: povEnabled ? false : po.ai_director })}
-            className={`flex w-full items-center gap-1.5 rounded border px-2 py-1.5 text-[10px] font-semibold transition-colors ${
+            className={`flex w-full items-center gap-1.5 rounded-lg border px-2 py-1.5 text-[10px] font-semibold transition-colors ${
               povEnabled
                 ? "border-cyan-500/40 bg-cs2-cyan-surface text-cyan-300 hover:bg-cs2-cyan-surface"
                 : "border-cs2-border bg-cs2-bg-hover text-cs2-text-secondary hover:border-cyan-500/30 hover:text-cyan-400"
@@ -270,7 +280,7 @@ export function PovSection({ item, updateItemPacing }) {
           </button>
         )}
         {noKillerPovReason && (
-          <div className="flex w-full items-center gap-1.5 rounded border border-cs2-border bg-cs2-bg-hover px-2 py-1.5 text-[10px] text-cs2-text-muted cursor-not-allowed select-none">
+          <div className="flex w-full items-center gap-1.5 rounded-lg border border-cs2-border bg-cs2-bg-hover px-2 py-1.5 text-[10px] text-cs2-text-muted cursor-not-allowed select-none">
             <EyeOff className="h-3 w-3 shrink-0 opacity-40" />
             <span className="opacity-60">{t("queue.killerPovUnavailable")}</span>
             <span className="ml-1 opacity-40">· {noKillerPovReason}</span>
@@ -280,7 +290,7 @@ export function PovSection({ item, updateItemPacing }) {
           <button
             type="button"
             onClick={() => commit({ killer_pov: !killerPovEnabled })}
-            className={`flex w-full items-center gap-1.5 rounded border px-2 py-1.5 text-[10px] font-semibold transition-colors ${
+            className={`flex w-full items-center gap-1.5 rounded-lg border px-2 py-1.5 text-[10px] font-semibold transition-colors ${
               killerPovEnabled
                 ? "border-cs2-amber-surface bg-cs2-amber-surface text-cs2-amber-on-surface hover:bg-cs2-amber-surface"
                 : "border-cs2-border bg-cs2-bg-hover text-cs2-text-secondary hover:border-cs2-amber-surface hover:text-cs2-amber-on-surface"
@@ -308,7 +318,7 @@ export function PovSection({ item, updateItemPacing }) {
       </div>
 
       {((povEnabled && canVictimPov) || (killerPovEnabled && isDeathCompilation)) && !aiDirectorEnabled && (
-        <label className="flex cursor-pointer items-start gap-2 rounded border border-cs2-border-subtle bg-cs2-bg-input px-2 py-1.5 text-[10px] text-cs2-text-secondary">
+        <label className="flex cursor-pointer items-start gap-2 rounded-lg border border-cs2-border-subtle bg-cs2-bg-input px-2 py-1.5 text-[10px] text-cs2-text-secondary">
           <input
             type="checkbox"
             checked={povInterleaved}
@@ -327,7 +337,7 @@ export function PovSection({ item, updateItemPacing }) {
       )}
 
       {canAiDirector && (
-        <label className="flex cursor-pointer items-start gap-2 rounded border border-violet-500/20 bg-violet-500/5 px-2 py-1.5 text-[10px] text-cs2-text-secondary">
+        <label className="flex cursor-pointer items-start gap-2 rounded-lg border border-violet-500/20 bg-violet-500/5 px-2 py-1.5 text-[10px] text-cs2-text-secondary">
           <input
             type="checkbox"
             checked={aiDirectorEnabled}
@@ -353,7 +363,7 @@ export function PovSection({ item, updateItemPacing }) {
       )}
 
       {povEnabled && canVictimPov && (
-        <div className="space-y-2 rounded border border-cyan-500/10 bg-cs2-cyan-surface p-2">
+        <div className="space-y-2 rounded-lg border border-cyan-500/10 bg-cs2-cyan-surface p-2">
           <PacingSliderRow
             label={t("queue.victimPovPreLabel")}
             value={vicPre}
@@ -361,7 +371,7 @@ export function PovSection({ item, updateItemPacing }) {
             max={5}
             step={0.1}
             accent="accent-cyan-500"
-            valueTextClass="text-cyan-300"
+            valueTextClass="text-cs2-cyan-on-surface"
             onChange={(n) => commit({ victim_pov_pre_sec: n })}
           />
           <PacingSliderRow
@@ -371,14 +381,14 @@ export function PovSection({ item, updateItemPacing }) {
             max={5}
             step={0.1}
             accent="accent-cyan-500"
-            valueTextClass="text-cyan-300"
+            valueTextClass="text-cs2-cyan-on-surface"
             onChange={(n) => commit({ victim_pov_post_sec: n })}
           />
         </div>
       )}
 
       {killerPovEnabled && canKillerPov && (
-        <div className="space-y-2 rounded border border-cs2-amber-surface bg-cs2-amber-surface p-2">
+        <div className="space-y-2 rounded-lg border border-cs2-amber-surface bg-cs2-amber-surface p-2">
           <PacingSliderRow
             label={t("queue.killerPovPreLabel")}
             value={killPre}
@@ -442,6 +452,7 @@ export function GlobalPacingPanel({
   queue,
   onToggleAllVictimPov,
   onToggleAllKillerPov,
+  standalone = false,
 }) {
   const t = useT();
   const post = globalPacing.post_last_sec ?? DEFAULT_PACING.post_last_sec;
@@ -458,18 +469,18 @@ export function GlobalPacingPanel({
   };
 
   return (
-    <div className="border-b border-cs2-border bg-cs2-bg-input/30 px-3 py-2">
-      <div className="mb-2 flex min-w-0 flex-nowrap items-baseline gap-x-2 overflow-x-auto">
-        <span className="flex shrink-0 items-center gap-1.5 text-[11px] font-semibold text-cs2-text-primary">
+    <div className={`${standalone ? "" : "border-b border-cs2-border"} bg-cs2-bg-input/30 px-3 py-2`}>
+      <div className="mb-2 flex min-w-0 flex-nowrap items-center gap-x-2 overflow-x-auto">
+        <span className="flex shrink-0 items-center gap-1.5 text-[11px] font-semibold leading-4 text-cs2-text-primary">
           <Settings className="h-3.5 w-3.5 text-cs2-text-muted" />
           {t("queue.globalPacingTitle")}
         </span>
-        <span className="min-w-0 whitespace-nowrap text-[11px] text-cs2-text-muted">
+        <span className="min-w-0 whitespace-nowrap text-[11px] leading-4 text-cs2-text-muted">
           {t("queue.globalPacingSubtitle")}
         </span>
       </div>
 
-      <div className="space-y-3 rounded border border-cs2-border bg-cs2-bg-input/50 p-2">
+      <div className="space-y-3 rounded-lg border border-cs2-border bg-cs2-bg-input/50 p-2">
         <PacingSliderRow
           label={t("record.commonPacingPreSlider")}
           value={pre}
@@ -496,7 +507,7 @@ export function GlobalPacingPanel({
         />
       </div>
 
-      <div className="mt-2 rounded border border-cs2-border bg-cs2-bg-input/30 p-2">
+      <div className="mt-2 rounded-lg border border-cs2-border bg-cs2-bg-input/30 p-2">
         <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-cs2-text-muted">
           {t("queue.batchPovTitle")}
         </p>
@@ -504,16 +515,28 @@ export function GlobalPacingPanel({
           {[
             { key: "victim", label: t("queue.victimPovLabel"), status: victimStatus, onToggle: onToggleAllVictimPov, accent: "cyan" },
             { key: "killer", label: t("queue.killerPovLabel"), status: killerStatus, onToggle: onToggleAllKillerPov, accent: "amber" },
-          ].map(({ key, label, status, onToggle, accent }) => {
+          ].map(({ key, label, status, onToggle, accent }, index) => {
             const fullyOn = status.state === "on";
             const stateLabel = t(`queue.povState${status.state[0].toUpperCase()}${status.state.slice(1)}`);
+            const countLines = t("queue.povEnabledCount", {
+              enabled: status.enabled,
+              total: status.eligible,
+            }).split(" / ");
             return (
-              <div key={key} className="rounded-md border border-cs2-border bg-cs2-bg-input/55 p-2">
-                <div className="flex items-center gap-2">
+              <div
+                key={key}
+                className={[
+                  "relative px-1 py-2",
+                  index > 0
+                    ? "before:absolute before:-left-1 before:top-[10%] before:hidden before:h-[80%] before:w-px before:bg-cs2-border sm:before:block"
+                    : "",
+                ].join(" ")}
+              >
+                <div className="flex h-6 items-center gap-1.5">
                   {fullyOn ? <Eye className={`h-3.5 w-3.5 ${accent === "cyan" ? "text-cs2-cyan-on-surface" : "text-cs2-amber-on-surface"}`} /> : <EyeOff className="h-3.5 w-3.5 text-cs2-text-muted" />}
-                  <span className="min-w-0 flex-1 truncate text-[11px] font-semibold text-cs2-text-primary">{label}</span>
+                  <span className="min-w-0 flex-1 truncate text-[11px] font-semibold leading-5 text-cs2-text-primary">{label}</span>
                   <span className={[
-                    "rounded border px-1.5 py-0.5 text-[9px] font-bold",
+                    "inline-flex h-6 w-[50px] shrink-0 items-center justify-center whitespace-nowrap rounded border px-1 text-[10px] font-semibold leading-none",
                     status.state === "on"
                       ? "border-cs2-emerald-surface bg-cs2-emerald-surface text-cs2-emerald-on-surface"
                       : status.state === "partial"
@@ -521,15 +544,17 @@ export function GlobalPacingPanel({
                         : "border-cs2-border bg-cs2-bg-hover text-cs2-text-muted",
                   ].join(" ")}>{stateLabel}</span>
                 </div>
-                <div className="mt-2 flex items-center justify-between gap-2">
-                  <span className="font-mono text-[9px] tabular-nums text-cs2-text-muted">
-                    {t("queue.povEnabledCount", { enabled: status.enabled, total: status.eligible })}
+                <div className="mt-2 flex min-h-8 items-center gap-1.5">
+                  <span className="min-w-0 flex-1 whitespace-nowrap text-[10px] font-medium leading-[14px] tabular-nums text-cs2-text-muted">
+                    {countLines.map((line) => (
+                      <span key={line} className="block">{line}</span>
+                    ))}
                   </span>
                   <button
                     type="button"
                     disabled={status.eligible === 0}
                     onClick={onToggle}
-                    className="rounded border border-cs2-border bg-cs2-bg-hover px-2 py-1 text-[9px] font-semibold text-cs2-text-secondary hover:border-cs2-accent/40 hover:text-cs2-text-primary disabled:cursor-not-allowed disabled:opacity-40"
+                    className="inline-flex h-8 w-[54px] shrink-0 items-center justify-center whitespace-nowrap rounded border border-cs2-border bg-cs2-bg-hover px-0 text-[10px] font-semibold leading-none text-cs2-text-secondary hover:border-cs2-accent/40 hover:text-cs2-text-primary disabled:cursor-not-allowed disabled:opacity-40"
                   >
                     {fullyOn ? t("queue.povDisableAll") : t("queue.povEnableAll")}
                   </button>

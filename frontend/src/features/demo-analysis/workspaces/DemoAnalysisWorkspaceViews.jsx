@@ -44,13 +44,16 @@ export function Panel({ title, eyebrow, action, children, className = "" }) {
 
 export function MetricCard({ icon: Icon, label, value, detail, tone = "accent" }) {
   const tones = {
-    accent: "border-cs2-accent/60 bg-cs2-accent-soft/45 text-cs2-accent",
-    blue: "border-sky-500/60 bg-sky-500/8 text-sky-400",
-    green: "border-emerald-500/60 bg-emerald-500/8 text-emerald-400",
-    violet: "border-violet-500/60 bg-violet-500/8 text-violet-400",
+    accent: "bg-cs2-accent-soft/45 text-cs2-accent",
+    blue: "bg-sky-500/8 text-sky-400",
+    green: "bg-emerald-500/8 text-emerald-400",
+    violet: "bg-violet-500/8 text-violet-400",
   };
   return (
-    <div className={`flex min-w-0 items-center gap-3 border-l-2 px-3.5 py-2.5 ${tones[tone] || tones.accent}`}>
+    <div
+      data-testid="analysis-metric-card"
+      className={`flex min-w-0 items-center gap-3 rounded-[10px] px-3.5 py-2.5 ${tones[tone] || tones.accent}`}
+    >
       <div className="flex h-8 w-8 shrink-0 items-center justify-center"><Icon className="h-4 w-4" /></div>
       <div className="min-w-0"><p className="text-[9px] font-semibold uppercase tracking-wider text-cs2-text-muted">{label}</p><p className="mt-0.5 truncate text-lg font-black tabular-nums text-cs2-text-primary">{value}</p><p className="truncate text-[9px] text-cs2-text-muted">{detail}</p></div>
     </div>
@@ -168,13 +171,25 @@ export function useWorkspaceData(workspace, fallback) {
 function TeamScoreboard({ teamKey, name, score, players, onSelectPlayer, winner = false }) {
   const isBlue = teamKey === "a";
   return (
-    <section className={`min-w-0 overflow-hidden rounded-lg border bg-cs2-bg-input/20 ${winner ? (isBlue ? "border-sky-500/40" : "border-amber-500/40") : "border-cs2-border"}`}>
-      <header className={`flex items-center justify-between border-b px-3 py-2 ${isBlue ? "border-sky-500/20 bg-sky-500/5" : "border-amber-500/20 bg-amber-500/5"}`}>
+    <section
+      data-testid={`overview-team-scoreboard-${teamKey}`}
+      data-winner={winner ? "true" : "false"}
+      className={`min-w-0 overflow-hidden rounded-lg border bg-cs2-bg-card ${isBlue ? "border-cyan-500/45" : "border-amber-500/45"}`}
+    >
+      <header
+        data-testid={`overview-team-scoreboard-header-${teamKey}`}
+        className={`flex items-center justify-between border-b border-cs2-border px-3 py-2 ${isBlue ? "bg-cs2-cyan-surface text-cs2-cyan-on-surface" : "bg-cs2-amber-surface text-cs2-amber-on-surface"}`}
+      >
         <div className="flex min-w-0 items-center gap-2">
-          <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-sm font-black ${isBlue ? "bg-sky-500/15 text-sky-300" : "bg-amber-500/15 text-amber-300"}`}>{name.slice(0, 1).toUpperCase()}</span>
-          <h3 className={`truncate text-[11px] font-black tracking-wider ${isBlue ? "text-sky-300" : "text-amber-300"}`}>{name}</h3>
+          <span
+            data-testid={`overview-team-scoreboard-mark-${teamKey}`}
+            className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-sm font-black ${isBlue ? "bg-cs2-cyan-on-surface text-cs2-cyan-surface" : "bg-cs2-amber-on-surface text-cs2-amber-surface"}`}
+          >
+            {name.slice(0, 1).toUpperCase()}
+          </span>
+          <h3 className="truncate text-[11px] font-black tracking-wider">{name}</h3>
         </div>
-        <span className={`font-mono text-xl font-black ${isBlue ? "text-sky-200" : "text-amber-200"}`}>{score}</span>
+        <span className="font-mono text-xl font-black">{score}</span>
       </header>
       <div className="overflow-hidden">
         <table className="w-full table-fixed border-collapse text-left">
@@ -182,7 +197,7 @@ function TeamScoreboard({ teamKey, name, score, players, onSelectPlayer, winner 
             <col className="w-[28%]" />
             {Array.from({ length: 9 }).map((_, index) => <col key={index} className="w-[8%]" />)}
           </colgroup>
-          <thead className="border-b border-cs2-border bg-cs2-bg-input/55 text-[7px] uppercase tracking-wide text-cs2-text-muted">
+          <thead className="border-b border-cs2-border bg-cs2-bg-input text-[7px] uppercase tracking-wide text-cs2-text-muted">
             <tr>
               <th className="px-2 py-1.5">玩家</th>
               <th className="px-1 text-right">K</th>
@@ -304,7 +319,7 @@ export function OverviewView({ data, onSelectPlayer, onOpenRound, onOpenReplayRo
         onOpenReplayRound={onOpenReplayRound}
       />
 
-      <section data-testid="overview-full-scoreboard" className="rounded-[10px] border border-cs2-border bg-cs2-bg-card shadow-sm">
+      <section data-testid="overview-full-scoreboard" className="rounded-[10px] border border-cs2-border bg-cs2-bg-card">
         <header className="flex items-center justify-between gap-3 border-b border-cs2-border px-3.5 py-2.5">
           <h2 className="text-[12px] font-bold text-cs2-text-primary">全场数据</h2>
         </header>
@@ -529,7 +544,7 @@ export function RoundsView({ data, selectedRound, onSelectRound, onOpenReplayRou
 
 function StatBar({ label, value, display, max = 100 }) {
   const width = Math.max(0, Math.min(100, Number(value || 0) / Math.max(1, max) * 100));
-  return <div className="grid grid-cols-[104px_minmax(100px,1fr)_52px] items-center gap-2"><span className="text-[10px] text-cs2-text-secondary">{label}</span><div className="h-1.5 overflow-hidden rounded-full bg-cs2-bg-input"><div className="h-full rounded-full bg-gradient-to-r from-emerald-400 to-sky-400" style={{ width: `${width}%` }} /></div><span className="text-right font-mono text-[10px] font-bold text-cs2-text-primary">{display ?? value}</span></div>;
+  return <div className="grid grid-cols-[104px_minmax(100px,1fr)_52px] items-center gap-2"><span className="text-[10px] text-cs2-text-secondary">{label}</span><div data-testid="analysis-stat-track" className="h-1.5 overflow-hidden rounded-full bg-cs2-border-subtle"><div className="h-full rounded-full bg-gradient-to-r from-emerald-400 to-sky-400" style={{ width: `${width}%` }} /></div><span className="text-right font-mono text-[10px] font-bold text-cs2-text-primary">{display ?? value}</span></div>;
 }
 
 function StatGroup({ title, rows }) {

@@ -184,7 +184,9 @@ function buildShell(overrides = {}) {
     handleDeselectAll: vi.fn(),
     handleAddSelectedToQueue: vi.fn(),
     handleAddCurrentPlayerHighlights: vi.fn(),
+    handleAddCurrentPlayerFails: vi.fn(),
     canAddCurrentPlayerHighlights: false,
+    canAddCurrentPlayerFails: false,
     queue: [],
     handleUpload: vi.fn(),
     handleResetDemo: vi.fn(),
@@ -233,7 +235,14 @@ describe("DemoAnalysisPage Insight Agent flow", () => {
     const workspace = screen.getByTestId("analysis-fixed-workspace");
     expect(within(workspace).getByTestId("analysis-scoreboard-panel")).toBeTruthy();
     expect(within(workspace).getByTestId("analysis-main-panel")).toBeTruthy();
-    expect(within(workspace).getByTestId("analysis-scoreboard-panel").className).toContain("analysis-side-rail");
+    expect(within(workspace).getByTestId("analysis-match-summary-card").className).toContain("analysis-rail-card");
+    expect(within(workspace).getByTestId("analysis-player-team-blue").className).toContain("analysis-player-team-card");
+    expect(within(workspace).getByTestId("analysis-player-team-amber").className).toContain("analysis-player-team-card");
+    expect(within(workspace).getByTestId("analysis-player-team-blue").className).toContain("h-full");
+    expect(within(workspace).getByTestId("analysis-player-team-amber").className).toContain("h-full");
+    expect(within(workspace).getByTestId("analysis-player-team-list").className).toContain("grid-rows-2");
+    expect(within(workspace).getByTestId("analysis-player-team-list").className).toContain("gap-3");
+    expect(within(workspace).getByText("选择玩家").closest("header")?.className).not.toContain("border");
     expect(view.container.querySelector('[data-testid="dock-row-analysis-workspace"]')).toBeNull();
     expect(screen.getByTestId("scoreboard-adr-ZywOo").textContent).toBe("ADR96");
     expect(screen.queryByRole("button", { name: "编辑布局" })).toBeNull();
@@ -336,7 +345,24 @@ describe("DemoAnalysisPage Insight Agent flow", () => {
     expect(screen.getByRole("heading", { name: "比赛主线" })).toBeTruthy();
     expect(screen.queryByRole("heading", { name: "本局洞察" })).toBeNull();
     expect(screen.getByRole("heading", { name: "关键回合" })).toBeTruthy();
+    const overviewToneTags = document.querySelectorAll("[data-overview-tone-tag]");
+    expect(overviewToneTags.length).toBeGreaterThan(0);
+    overviewToneTags.forEach((tag) => expect(tag.className).not.toMatch(/bg-(amber|sky|violet)-500\/10/));
+    document.querySelectorAll("[data-overview-neutral-tag]").forEach((tag) => {
+      expect(tag.className).toContain("bg-cs2-bg-input");
+      expect(tag.className).not.toContain("/40");
+    });
     expect(screen.getByRole("heading", { name: "全场数据" })).toBeTruthy();
+    expect(screen.getByTestId("overview-team-scoreboard-a").className).toContain("bg-cs2-bg-card");
+    expect(screen.getByTestId("overview-team-scoreboard-b").className).toContain("bg-cs2-bg-card");
+    expect(screen.getByTestId("overview-team-scoreboard-header-a").className).toContain("bg-cs2-cyan-surface");
+    expect(screen.getByTestId("overview-team-scoreboard-header-a").className).toContain("text-cs2-cyan-on-surface");
+    expect(screen.getByTestId("overview-team-scoreboard-header-b").className).toContain("bg-cs2-amber-surface");
+    expect(screen.getByTestId("overview-team-scoreboard-header-b").className).toContain("text-cs2-amber-on-surface");
+    expect(screen.getByTestId("overview-team-scoreboard-mark-a").className).toContain("bg-cs2-cyan-on-surface");
+    expect(screen.getByTestId("overview-team-scoreboard-mark-b").className).toContain("bg-cs2-amber-on-surface");
+    expect(screen.getByTestId("overview-team-scoreboard-header-a").className).not.toMatch(/\/\d+/);
+    expect(screen.getByTestId("overview-team-scoreboard-header-b").className).not.toMatch(/\/\d+/);
     expect(screen.queryByRole("heading", { name: "全场计分板" })).toBeNull();
     expect(screen.queryByText("详细战报")).toBeNull();
     expect(screen.queryByText("最佳")).toBeNull();
@@ -352,7 +378,9 @@ describe("DemoAnalysisPage Insight Agent flow", () => {
     expect(within(analysisNavigation).getAllByRole("button").map((button) => button.textContent)).toEqual([
       "高光与录制", "概览", "2D 回放", "热力图", "回合", "经济", "玩家", "饰品",
     ]);
-    expect(analysisNavigation.closest(".analysis-center-surface")).toBeTruthy();
+    expect(analysisNavigation.closest('[data-testid="analysis-view-navigation-card"]')).toBeTruthy();
+    expect(analysisNavigation.closest(".analysis-center-surface")).toBeNull();
+    expect(screen.getByTestId("analysis-view-content-card").className).toContain("analysis-center-surface");
     expect(analysisNavigation.closest('[data-dock-panel="right-rail"]')).toBeNull();
 
     fireEvent.click(screen.getByRole("button", { name: "2D 回放" }));
@@ -498,6 +526,15 @@ describe("DemoAnalysisPage Insight Agent flow", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "玩家" }));
     expect(screen.getByText("详细数据")).toBeTruthy();
+    expect(screen.getAllByTestId("analysis-metric-card")).toHaveLength(4);
+    screen.getAllByTestId("analysis-metric-card").forEach((card) => {
+      expect(card.className).toContain("rounded-[10px]");
+      expect(card.className).not.toContain("border-l-2");
+    });
+    screen.getAllByTestId("analysis-stat-track").forEach((track) => {
+      expect(track.className).toContain("bg-cs2-border-subtle");
+      expect(track.className).not.toContain("bg-cs2-bg-input");
+    });
     expect(screen.queryByRole("button", { name: /生成 AI 点评/ })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "返回概览" }));
     expect(screen.getByRole("heading", { name: "比赛主线" })).toBeTruthy();
@@ -994,6 +1031,7 @@ describe("DemoAnalysisPage Insight Agent flow", () => {
       }],
       regularSelectableTotal: 1,
       canAddCurrentPlayerHighlights: true,
+      canAddCurrentPlayerFails: true,
     }));
 
     const dockedActionBar = screen.getByTestId("clip-selection-action-bar");
@@ -1003,10 +1041,13 @@ describe("DemoAnalysisPage Insight Agent flow", () => {
     const selectAll = screen.getByRole("button", { name: "全选" });
     const deselectAll = screen.getByRole("button", { name: "取消" });
     const addPlayerHighlights = screen.getByRole("button", { name: "ZywOo 的全部高光入队" });
+    const addPlayerFails = screen.getByRole("button", { name: "ZywOo 的全部下饭入队" });
     expect(selectAll.closest('[data-testid="analysis-main-panel"]')).toBeTruthy();
     expect(deselectAll.closest('[data-testid="analysis-main-panel"]')).toBeTruthy();
     expect(screen.queryByTestId("analysis-right-panel")).toBeNull();
     expect(addPlayerHighlights.className).toContain("bg-cs2-accent");
+    expect(addPlayerFails.className).toContain("bg-rose-500/10");
+    expect(addPlayerHighlights.compareDocumentPosition(addPlayerFails) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   test("uses the roster nickname in the action bar for SteamID-backed player keys", async () => {

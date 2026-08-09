@@ -41,6 +41,8 @@ export default {
   "app.enqueueSkippedHint": " (skipped {n} {n, plural, one=clip, other=clips} that didn't meet criteria)",
   "app.enqueuePlayerHighlightsEmpty": "No highlights from {player} can be added (they may already be queued).",
   "app.enqueuePlayerHighlightsDone": "Added {n} {n, plural, one=highlight clip, other=highlight clips} from {player} to the queue.",
+  "app.enqueuePlayerFailsEmpty": "No fail clips from {player} can be added (they may already be queued).",
+  "app.enqueuePlayerFailsDone": "Added {n} {n, plural, one=fail clip, other=fail clips} from {player} to the queue.",
   "app.enqueueTimelineAlreadyIn": "This item is already in the recording queue.",
   "app.enqueueTimelineDone": "Added to recording queue (timeline)",
   "app.enqueueWeaponKillsDone": "Added all kills with this weapon to the recording queue",

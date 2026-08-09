@@ -137,7 +137,7 @@ export default function WeaponKillsView({
               return (
                 <article
                   key={group.weaponKey}
-                  className="overflow-hidden rounded-xl border border-cs2-border bg-cs2-bg-card shadow-sm"
+                  className="overflow-hidden rounded-xl border border-cs2-border bg-cs2-bg-card"
                 >
                   <div className="flex items-start gap-3.5 border-b border-cs2-border px-5 py-4">
                     <div className="mt-0.5 rounded-lg border border-cs2-accent/30 bg-cs2-accent/10 p-2 text-cs2-accent">

@@ -8,7 +8,7 @@ function FactRow({ label, value, successText, failureText, unknownText }) {
   const Icon = !known ? AlertTriangle : value ? CheckCircle2 : XCircle;
   const tone = !known ? "text-cs2-amber-on-surface" : value ? "text-emerald-400" : "text-rose-400";
   return (
-    <div className="flex items-start gap-2 rounded-lg border border-cs2-border bg-cs2-bg-input/40 px-3 py-2.5">
+    <div className="flex items-start gap-2 rounded-lg border border-cs2-border bg-cs2-bg-input/40 px-3 py-2">
       <Icon className={`mt-0.5 h-4 w-4 shrink-0 ${tone}`} />
       <div className="min-w-0">
         <p className="text-xs font-bold text-cs2-text-primary">{label}</p>
@@ -79,11 +79,13 @@ export default function DemoPlaybackRestoreModal({
           : <Loader2 className="h-4 w-4 animate-spin text-cs2-accent" />}
       maxWidth="max-w-lg"
       maxHeight="max-h-[82vh]"
+      className="!h-auto"
+      contentClassName="overflow-y-auto"
       zIndex={155}
     >
-      <div className="space-y-4 px-5 py-5">
+      <div className="space-y-3 px-5 py-4" data-testid="demo-playback-restore-content">
         {!final ? (
-          <div className="flex items-start gap-3 rounded-lg border border-cs2-border bg-cs2-bg-input/35 px-4 py-3">
+          <div className="flex items-start gap-3 rounded-lg border border-cs2-border bg-cs2-bg-input/35 px-3.5 py-2.5">
             <Loader2 className="mt-0.5 h-5 w-5 shrink-0 animate-spin text-cs2-accent" />
             <div>
               <p className="text-sm font-bold text-cs2-text-primary">
@@ -93,7 +95,7 @@ export default function DemoPlaybackRestoreModal({
             </div>
           </div>
         ) : (
-          <div className={`rounded-lg border px-4 py-3 ${verified ? "border-emerald-500/35 bg-emerald-500/10" : "border-rose-500/35 bg-cs2-rose-surface"}`}>
+          <div className={`rounded-lg border px-3 py-2.5 ${verified ? "border-emerald-500/35 bg-emerald-500/10" : "border-rose-500/35 bg-cs2-rose-surface"}`}>
             <p className={`text-sm font-bold ${verified ? "text-emerald-400" : "text-cs2-rose-on-surface"}`}>
               {verified ? t(successTitleKey) : t("playDemo.restoreFailedTitle")}
             </p>

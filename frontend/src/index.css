@@ -79,6 +79,8 @@
   --cs2-highlight: var(--green-9);
   --cs2-fail: var(--red-9);
   --cs2-compilation: var(--amber-9);
+  --cs2-info: var(--cyan-9);
+  --cs2-neutral-tone: #8d8d86;
 
   /* 表面层次 */
   --cs2-surface-0: var(--cs2-bg-page);
@@ -206,6 +208,60 @@
 
 .litecut-property-slider:focus-visible::-webkit-slider-thumb {
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--cs2-accent) 28%, transparent);
+}
+
+/* 录制队列节奏滑块：进度使用业务强调色，未填充轨道跟随亮/暗主题边框灰。 */
+.cs2-data-slider {
+  --cs2-range-progress: 0%;
+  --cs2-range-accent: var(--cs2-accent);
+  width: 100%;
+  height: 6px;
+  margin: 0;
+  border-radius: 999px;
+  outline: none;
+  appearance: none;
+  cursor: pointer;
+  background: linear-gradient(
+    to right,
+    var(--cs2-range-accent) 0 var(--cs2-range-progress),
+    var(--cs2-border) var(--cs2-range-progress) 100%
+  );
+}
+
+.cs2-data-slider::-webkit-slider-thumb {
+  width: 14px;
+  height: 14px;
+  border: 0;
+  border-radius: 50%;
+  appearance: none;
+  background: var(--cs2-range-accent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--cs2-range-accent) 28%, transparent);
+}
+
+.cs2-data-slider:focus-visible::-webkit-slider-thumb {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--cs2-range-accent) 28%, transparent);
+}
+
+.cs2-data-slider::-moz-range-track {
+  height: 6px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--cs2-border);
+}
+
+.cs2-data-slider::-moz-range-progress {
+  height: 6px;
+  border-radius: 999px;
+  background: var(--cs2-range-accent);
+}
+
+.cs2-data-slider::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--cs2-range-accent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--cs2-range-accent) 28%, transparent);
 }
 
 .litecut-inspector-header {
@@ -380,9 +436,9 @@
 /* 浅色主题使用柔和灰色画布，白色只留给需要抬升的内容表面。 */
 .light {
   color-scheme: light;
-  --cs2-bg-page: color-mix(in srgb, var(--sand-3) 55%, var(--sand-4));
-  --cs2-bg-card: var(--sand-2);
-  --cs2-bg-sidebar: color-mix(in srgb, var(--sand-2) 40%, var(--sand-3));
+  --cs2-bg-page: #ebebeb;
+  --cs2-bg-card: #f5f5f5;
+  --cs2-bg-sidebar: #f5f5f5;
   --cs2-bg-input: var(--sand-3);
   --cs2-bg-elevated: var(--sand-1);
   --cs2-bg-hover: var(--sand-4);
@@ -407,26 +463,14 @@
   transition: none;
 }
 
-/* CS2 inventory-style neutral studio backdrop. The layered gradients keep
- * transparent weapon art readable without falling back to a flat black tile. */
+/* 饰品预览使用明确的主题实体底，避免渐变和透明叠色在亮暗模式下产生色偏。 */
 .cosmetic-preview-surface {
-  background:
-    radial-gradient(ellipse at 48% 24%, rgba(255, 255, 255, 0.24) 0%, rgba(255, 255, 255, 0.08) 32%, transparent 62%),
-    linear-gradient(
-      145deg,
-      color-mix(in srgb, var(--cs2-bg-input) 48%, #777d82) 0%,
-      color-mix(in srgb, var(--cs2-bg-input) 30%, #b7b9ba) 52%,
-      color-mix(in srgb, var(--cs2-bg-input) 58%, #656b70) 100%
-    );
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.16),
-    inset 0 -28px 48px rgba(0, 0, 0, 0.14);
+  background: #2b2b2b;
+  box-shadow: none;
 }
 
 .light .cosmetic-preview-surface {
-  background:
-    radial-gradient(ellipse at 48% 24%, rgba(255, 255, 255, 0.52) 0%, rgba(255, 255, 255, 0.12) 36%, transparent 64%),
-    linear-gradient(145deg, #b9bdc0 0%, #dedfdf 52%, #a8adb0 100%);
+  background: #77797a;
 }
 
 /* ===== 页面级容器适配 =====
@@ -706,7 +750,6 @@
   border: 1px solid var(--cs2-border-subtle);
   border-radius: var(--cs2-radius-panel);
   background: var(--cs2-bg-card);
-  box-shadow: var(--cs2-shadow-sm);
 }
 
 .analysis-side-section + .analysis-side-section {
@@ -717,7 +760,6 @@
   border: 1px solid var(--cs2-border-subtle);
   border-radius: var(--cs2-radius-panel);
   background: var(--cs2-bg-card);
-  box-shadow: var(--cs2-shadow-sm);
 }
 
 .analysis-center-surface,
@@ -725,7 +767,6 @@
   border: 1px solid var(--cs2-border-subtle);
   border-radius: var(--cs2-radius-panel);
   background: var(--cs2-bg-card);
-  box-shadow: var(--cs2-shadow-sm);
 }
 
 .analysis-view-switcher {
@@ -733,7 +774,9 @@
   min-width: 0;
   min-height: 40px;
   align-items: stretch;
-  border-bottom: 1px solid var(--cs2-border-subtle);
+  overflow: hidden;
+  border: 1px solid var(--cs2-border-subtle);
+  border-radius: var(--cs2-radius-panel);
   background: color-mix(in srgb, var(--cs2-bg-card) 92%, var(--cs2-bg-page));
 }
 
@@ -741,8 +784,10 @@
   display: flex;
   min-width: 0;
   flex: 1;
+  gap: 2px;
   overflow-x: auto;
   overflow-y: hidden;
+  padding: 4px;
   scrollbar-width: none;
   -ms-overflow-style: none;
 }
@@ -762,10 +807,17 @@
   justify-content: center;
   gap: 6px;
   padding: 0 10px;
+  border-radius: calc(var(--cs2-radius-panel) - 3px);
   color: var(--cs2-text-muted);
   font-size: 10px;
   font-weight: 700;
+  isolation: isolate;
   transition: color 140ms ease, background-color 140ms ease, box-shadow 140ms ease;
+}
+
+.analysis-view-nav > button > * {
+  position: relative;
+  z-index: 1;
 }
 
 .analysis-view-nav > button:hover {
@@ -775,15 +827,25 @@
 
 .analysis-view-nav > button[data-active="true"] {
   color: var(--cs2-accent);
-  background: linear-gradient(to bottom, transparent 15%, var(--cs2-accent-soft));
+  background: transparent;
+}
+
+.analysis-view-nav > button[data-active="true"]::before {
+  position: absolute;
+  inset: 0 7px;
+  z-index: 0;
+  border-radius: calc(var(--cs2-radius-panel) - 3px);
+  background: linear-gradient(to bottom, transparent 5%, var(--cs2-accent-soft));
+  content: "";
 }
 
 .analysis-view-nav > button[data-active="true"]::after {
   position: absolute;
-  right: 10px;
-  bottom: -1px;
-  left: 10px;
+  right: 7px;
+  bottom: 0;
+  left: 7px;
   height: 2px;
+  border-radius: 999px;
   background: var(--cs2-accent);
   content: "";
 }
@@ -834,6 +896,12 @@
 
 .analysis-player-row[data-active="true"] {
   border-left-color: var(--analysis-player-accent, var(--cs2-accent));
+}
+
+.analysis-player-team-card {
+  border: 1px solid var(--cs2-border-subtle);
+  border-radius: var(--cs2-radius-panel);
+  background: var(--cs2-bg-card);
 }
 
 .analysis-subnav {
@@ -1184,6 +1252,8 @@
   --color-cs2-highlight: var(--cs2-highlight);
   --color-cs2-fail: var(--cs2-fail);
   --color-cs2-compilation: var(--cs2-compilation);
+  --color-cs2-info: var(--cs2-info);
+  --color-cs2-neutral-tone: var(--cs2-neutral-tone);
 
   /* 表面层次 */
   --color-cs2-surface-0: var(--cs2-surface-0);

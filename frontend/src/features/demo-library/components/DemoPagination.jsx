@@ -18,7 +18,10 @@ export default function DemoPagination({
   const t = useT();
 
   return (
-    <div className="flex flex-wrap items-center justify-end gap-2 text-[11px] text-cs2-text-muted">
+    <div
+      data-testid="demo-library-pagination-tray"
+      className="flex max-w-full flex-wrap items-center justify-end gap-2 rounded-lg border border-cs2-border bg-cs2-bg-card px-3 py-2 text-[11px] text-cs2-text-muted"
+    >
       <IconButton
         label={t("library.paginationPrevious")}
         size="sm"

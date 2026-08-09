@@ -288,6 +288,49 @@ class MontageDB:
         d["body"] = json.loads(str(d.pop("body_json")))
         return d
 
+    async def list_projects(self, *, limit: int = 50, offset: int = 0) -> tuple[list[dict[str, Any]], int]:
+        async with aiosqlite.connect(self.db_path) as conn:
+            conn.row_factory = aiosqlite.Row
+            cur = await conn.execute(
+                """
+                SELECT id, name, body_json, updated_at, created_at
+                FROM montage_projects
+                ORDER BY updated_at DESC, id DESC
+                LIMIT ? OFFSET ?
+                """,
+                (int(limit), int(offset)),
+            )
+            rows = await cur.fetchall()
+            count_cur = await conn.execute("SELECT COUNT(*) FROM montage_projects")
+            count_row = await count_cur.fetchone()
+
+        items: list[dict[str, Any]] = []
+        for row in rows:
+            item = dict(row)
+            try:
+                body = json.loads(str(item.pop("body_json")))
+            except (TypeError, ValueError, json.JSONDecodeError):
+                body = {}
+            clip_ids = body.get("recorded_clip_ids") if isinstance(body, dict) else []
+            items.append(
+                {
+                    **item,
+                    "clip_count": len(clip_ids) if isinstance(clip_ids, list) else 0,
+                    "output_filename": str(body.get("output_filename") or "") if isinstance(body, dict) else "",
+                    "has_bgm": bool(body.get("bgm_path")) if isinstance(body, dict) else False,
+                },
+            )
+        return items, int(count_row[0] if count_row else 0)
+
+    async def delete_project(self, project_id: int) -> bool:
+        async with aiosqlite.connect(self.db_path) as conn:
+            cur = await conn.execute(
+                "DELETE FROM montage_projects WHERE id = ?",
+                (int(project_id),),
+            )
+            await conn.commit()
+            return cur.rowcount > 0
+
     async def create_export(
         self,
         *,

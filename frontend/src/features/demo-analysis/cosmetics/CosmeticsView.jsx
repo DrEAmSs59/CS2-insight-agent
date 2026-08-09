@@ -471,6 +471,8 @@ function CosmeticCard({
   const disabled = customMode && !customizable;
   const stickers = Array.isArray(item?.stickers) ? item.stickers : [];
   const showClear = Boolean(customMode && replacement && !replacement.restore && onClearReplacement);
+  const rarityColor = String(item?.rarity || "").trim() || "#ded6cc";
+  const rarityKey = RARITY_NAMES[rarityColor.toLowerCase()] || "unknown";
   return (
     <button
       type="button"
@@ -480,12 +482,12 @@ function CosmeticCard({
       onFocus={(event) => onHoverStart?.(event, item)}
       onBlur={onHoverEnd}
       data-cosmetic-card
-      className={`group grid w-full min-w-0 self-start grid-rows-[auto_auto] text-left outline-none${
+      className={`group grid w-full min-w-0 self-start grid-rows-[auto_auto] rounded-[10px] text-left outline-none${
         disabled ? " cursor-not-allowed opacity-50 grayscale" : ""
       }`}
       aria-label={accessibleName}
     >
-      <span className="cosmetic-preview-surface relative block aspect-[4/3] overflow-hidden rounded-[3px] border border-cs2-border transition-colors group-hover:border-cs2-text-muted group-focus-visible:border-cs2-accent">
+      <span className="cosmetic-preview-surface relative block aspect-[4/3] overflow-hidden rounded-[10px] border border-cs2-border transition-colors group-hover:border-cs2-text-muted group-focus-visible:border-cs2-accent">
         {showClear ? (
           <span
             role="button"
@@ -510,6 +512,13 @@ function CosmeticCard({
             <X className="h-3.5 w-3.5" />
           </span>
         ) : null}
+        <span
+          data-cosmetic-rarity-rail
+          aria-label={`${t("analysis.cosmetics.rarity")} ${t(`analysis.cosmetics.rarity.${rarityKey}`)}`}
+          title={t(`analysis.cosmetics.rarity.${rarityKey}`)}
+          className="absolute left-0 top-1/2 z-[1] h-[60%] w-[3px] -translate-y-1/2 rounded-full"
+          style={{ backgroundColor: rarityColor }}
+        />
         <CosmeticImage item={item} onlineAssetsEnabled={onlineAssetsEnabled} className="h-full w-full p-2" />
         {onlineAssetsEnabled && stickers.length ? (
           <span className="absolute bottom-1 left-1 z-[1] flex max-w-[85%] items-end gap-1">
@@ -518,7 +527,6 @@ function CosmeticCard({
             ))}
           </span>
         ) : null}
-        <span className="absolute inset-x-0 bottom-0 h-1" style={{ backgroundColor: item?.rarity || "#ded6cc" }} />
       </span>
       <span data-cosmetic-card-label className="mt-1.5 block min-h-8 min-w-0 overflow-hidden leading-tight">
         <CraftNameLines item={labelSource} locale={locale} rename={rename} compact />
@@ -547,11 +555,14 @@ function CosmeticsTeamRow({
   return (
     <section data-testid={`cosmetics-row-${teamKey}`} className="space-y-2">
       {showHeading ? (
-        <div className={`flex items-center justify-between border-l-2 px-3 py-2 ${
+        <div
+          data-testid={`cosmetics-row-heading-${teamKey}`}
+          className={`flex w-36 items-center justify-between rounded-[10px] px-3 py-2 ${
           teamKey === "ct"
-            ? "border-sky-400 bg-sky-500/10 text-sky-200"
-            : "border-amber-400 bg-amber-500/10 text-amber-200"
-        }`}>
+            ? "bg-cs2-cyan-surface text-cs2-cyan-on-surface"
+            : "bg-cs2-amber-surface text-cs2-amber-on-surface"
+        }`}
+        >
           <h3 className="text-[11px] font-black uppercase tracking-wide">{t(`analysis.cosmetics.team.${teamKey}`)}</h3>
           <span className="font-mono text-[10px] font-semibold opacity-75">{items.length}</span>
         </div>
@@ -728,9 +739,17 @@ function ItemDetail({ item, locale, onlineAssetsEnabled, onOpen3d, onCopyInspect
                 <CraftNameLines item={item} locale={locale} />
               </div>
             </div>
-            <TeamIndicators item={item} />
+            <div className="flex shrink-0 items-center gap-2">
+              <span
+                data-cosmetic-detail-rarity-label
+                className="text-[10px] font-semibold leading-5"
+                style={{ color: item?.rarity || "#ded6cc" }}
+              >
+                {t(`analysis.cosmetics.rarity.${rarityKey}`)}
+              </span>
+              <TeamIndicators item={item} />
+            </div>
           </div>
-          <div className="mt-3 h-1" style={{ backgroundColor: item?.rarity || "#ded6cc" }} />
         </div>
         <dl>
           <DetailRow label={t("analysis.cosmetics.type")}>{t(`analysis.cosmetics.type.${item?.type || "unknown"}`)}</DetailRow>
@@ -1127,8 +1146,9 @@ export default function CosmeticsView({ workspace, selectedPlayer, locale = "zh"
                 clearOverlays();
                 setViewMode("custom");
               }}
-              className="inline-flex h-8 items-center gap-1.5 border border-cs2-border bg-cs2-bg-input px-3 text-[10px] font-bold text-cs2-text-secondary hover:border-cs2-text-muted hover:text-cs2-text-primary"
+              className="group inline-flex h-8 items-center gap-1.5 rounded-[10px] border border-cs2-accent/45 bg-cs2-accent-soft px-3 text-[10px] font-bold text-cs2-accent transition-colors hover:border-cs2-accent hover:bg-cs2-accent hover:text-white"
             >
+              <Gem data-testid="cosmetics-customize-icon" className="h-3.5 w-3.5 text-cs2-accent transition-colors group-hover:text-white" />
               {t("analysis.cosmetics.customize")}
             </button>
           ) : (
@@ -1144,8 +1164,9 @@ export default function CosmeticsView({ workspace, selectedPlayer, locale = "zh"
                 type="button"
                 disabled={saving}
                 onClick={cancelCustomize}
-                className="inline-flex h-8 items-center border border-cs2-border px-3 text-[10px] font-bold text-cs2-text-secondary hover:bg-cs2-bg-hover hover:text-cs2-text-primary disabled:cursor-not-allowed disabled:opacity-50"
+                className="inline-flex h-8 items-center gap-1.5 rounded-[10px] border border-cs2-border bg-cs2-bg-input px-3 text-[10px] font-bold text-cs2-text-secondary transition-colors hover:border-cs2-text-muted hover:bg-cs2-bg-hover hover:text-cs2-text-primary disabled:cursor-not-allowed disabled:opacity-50"
               >
+                <X data-testid="cosmetics-cancel-icon" className="h-3.5 w-3.5 text-cs2-text-muted" />
                 {t("analysis.cosmetics.cancelCustomize")}
               </button>
               <button
@@ -1154,9 +1175,11 @@ export default function CosmeticsView({ workspace, selectedPlayer, locale = "zh"
                 disabled={!canSavePlan}
                 aria-busy={saving}
                 onClick={() => void savePlan()}
-                className="inline-flex h-8 items-center gap-1.5 border border-cs2-accent/40 bg-cs2-accent/10 px-3 text-[10px] font-bold text-cs2-accent disabled:cursor-not-allowed disabled:opacity-50"
+                className="group inline-flex h-8 items-center gap-1.5 rounded-[10px] border border-cs2-accent/45 bg-cs2-accent-soft px-3 text-[10px] font-bold text-cs2-accent transition-colors hover:border-cs2-accent hover:bg-cs2-accent hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
               >
-                {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden /> : null}
+                {saving
+                  ? <Loader2 data-testid="cosmetics-save-plan-icon" className="h-3.5 w-3.5 animate-spin" aria-hidden />
+                  : <Check data-testid="cosmetics-save-plan-icon" className="h-3.5 w-3.5 text-cs2-accent transition-colors group-hover:text-white" aria-hidden />}
                 {saving ? t("analysis.cosmetics.savingPlan") : t("analysis.cosmetics.savePlan")}
               </button>
             </>

@@ -19,7 +19,7 @@ export function RecordingHudCard({
   return (
     <div
       title={disabled ? disabledMsg : undefined}
-      className={`flex flex-col rounded-lg border border-cs2-border bg-cs2-bg-input/50 p-4 ${
+      className={`flex flex-col rounded-lg border border-cs2-border bg-cs2-bg-input p-4 ${
         disabled ? "opacity-45" : ""
       }`}
     >
@@ -41,7 +41,7 @@ export function RecordingHudCard({
         />
       </div>
       {checked && !disabled && outcomeOn ? (
-        <p className="mt-3 border-t border-cs2-border pt-2.5 text-[11px] leading-relaxed text-emerald-400/95">
+        <p className="mt-3 border-t border-cs2-border pt-2.5 text-[11px] leading-relaxed text-cs2-emerald-on-surface">
           {t("record.outcomePrefix")}{outcomeOn}
         </p>
       ) : null}
