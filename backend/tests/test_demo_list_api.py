@@ -8,6 +8,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app import main
+from app.features.match_history import api as match_history_api
 
 
 def _run(coro):
@@ -186,7 +187,7 @@ def test_match_history_batches_library_lookup(monkeypatch):
         raise AssertionError("match history must not issue per-row filename queries")
 
     monkeypatch.setattr(
-        main,
+        match_history_api,
         "load_config",
         lambda: SimpleNamespace(
             steam_api_key="key",
@@ -195,12 +196,12 @@ def test_match_history_batches_library_lookup(monkeypatch):
             match_mode="premier",
         ),
     )
-    monkeypatch.setattr(main, "fetch_match_history", fake_matches)
-    monkeypatch.setattr(main, "fetch_player_summary", fake_player)
-    monkeypatch.setattr(main.demo_db, "find_existing_filenames", fake_existing)
-    monkeypatch.setattr(main.demo_db, "find_by_filename", forbidden_single_lookup)
+    monkeypatch.setattr(match_history_api, "fetch_match_history", fake_matches)
+    monkeypatch.setattr(match_history_api, "fetch_player_summary", fake_player)
+    monkeypatch.setattr(match_history_api.demo_db, "find_existing_filenames", fake_existing)
+    monkeypatch.setattr(match_history_api.demo_db, "find_by_filename", forbidden_single_lookup)
 
-    response = _run(main.get_match_history())
+    response = _run(match_history_api.get_match_history())
 
     assert batch_calls == [["match730_1.dem", "match730_2.dem"]]
     assert [row["demo_in_library"] for row in response["matches"]] == [False, True]

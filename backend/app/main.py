@@ -7,7 +7,6 @@ import hashlib
 import json
 import logging
 import os
-import re
 import sys
 import uuid
 import weakref
@@ -19,7 +18,7 @@ from typing import Annotated, Any, Literal, Optional
 
 import faulthandler
 
-from fastapi import Body, Depends, FastAPI, File, Form, HTTPException, Query, Request, UploadFile
+from fastapi import Body, FastAPI, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -39,20 +38,14 @@ from .databases import demo_db, lite_cut_db, montage_db
 from .demo_library_hub import demo_library_hub
 from .demo_paths import UPLOAD_DIR, resolve_demo_path, resolve_working_demo_path
 from .demo_compat_service import ensure_demo_compatible
-from .demo_playback_service import (
-    DemoPlaybackBusyError,
-    DemoPlaybackCs2RunningError,
-    DemoPlaybackPovOptions,
-    demo_playback_service,
-)
-from .demo_watcher import DemoWatcher, _demo_ingest_md5_enabled
+from .demo_watcher import DemoWatcher
 from .file_hash import file_md5_hex
 from .gsi_ready import (
     cleanup_stale_gsi_configs,
     install_gsi_access_log_filter,
 )
 from .update_info import resolve_local_version_info
-from .runtime_session import runtime_session_dependency, runtime_session_state
+from .runtime_session import runtime_session_state
 from .app_state import application_state
 from .api.config import (
     build_data_dir_info,
@@ -76,20 +69,10 @@ from .api.config_backup import router as config_backup_router
 from .api.gsi import router as gsi_router
 from .recording.api import router as recording_router
 from .features.lite_cut.api import router as lite_cut_router
+from .features.demo_playback.api import router as demo_playback_router
+from .features.demo_library.ingestion import enqueue_demo_path, infer_demo_source
+from .features.match_history.api import router as match_history_router
 from .api_errors import error_detail
-from .pov_hud_manager import PovHudError
-import httpx
-
-from .steam_match_history import (
-    _official_steam_avatar_url,
-    fetch_match_history,
-    fetch_player_summaries,
-    fetch_public_player_summaries,
-    fetch_player_summary,
-    parse_match_row,
-    download_demo,
-    game_type_to_mode,
-)
 
 
 # Compatibility exports for tests and older integrations that call helpers from
@@ -140,123 +123,13 @@ _demo_roster_locks: weakref.WeakValueDictionary[int, asyncio.Lock] = (
 )
 _DEMO_ROSTER_CACHE_VERSION = 3
 
-# 同一路径并发入库（扫描 + watchdog 双触发等）时，避免重复写库 / 双开自动解析任务
-_enqueue_striped_locks: list[asyncio.Lock] = []
-_enqueue_striped_init_lock = asyncio.Lock()
-_ENQUEUE_STRIPE_COUNT = 64
-
-def infer_demo_source(filename: str, server_name: str | None = None) -> str:
-    fn = filename.lower()
-    sn = (server_name or "").lower()
-    if "faceit" in sn:
-        return "Faceit"
-    if "5eplay" in sn or "5e" in sn:
-        return "5E"
-    if "完美世界" in sn or "wanmei" in sn:
-        return "Perfect World"
-    if "valve" in sn:
-        return "Matchmaking"
-    if "esl" in sn:
-        return "ESL"
-    if "ESL" in sn:
-        return "ESL"
-    if "esea" in sn:
-        return "ESEA"
-    if "blast" in sn:
-        return "Blast"
-    if "BLAST" in sn:
-        return "Blast"
-    if "pgl" in sn:
-        return "PGL"
-    if "starladder" in sn:
-        return "StarLadder"
-    if "flashpoint" in sn:
-        return "Flashpoint"
-    if "challengermode" in sn:
-        return "Challengermode"
-
-    if re.match(r"^g\d+-", fn):
-        return "5E"
-    if re.match(r"^\d+_team", fn):
-        return "Faceit"
-
-    if "faceit" in fn:
-        return "Faceit"
-    if "5e" in fn:
-        return "5E"
-    if "perfectworld" in fn or "pvp" in fn:
-        return "Perfect World"
-    if "match730" in fn or "matchmaking" in fn:
-        return "Matchmaking"
-    if "esl" in fn:
-        return "ESL"
-    if "esea" in fn:
-        return "ESEA"
-
-    return "Local/Other"
-
-
-async def _enqueue_demo_path(path: Path, origin_zip: str | None = None) -> None:
-    global _enqueue_striped_locks
-    can_store_md5 = demo_db.ingest_md5_supported
-    use_md5 = can_store_md5 and _demo_ingest_md5_enabled()
-    async with _enqueue_striped_init_lock:
-        if not _enqueue_striped_locks:
-            _enqueue_striped_locks = [asyncio.Lock() for _ in range(_ENQUEUE_STRIPE_COUNT)]
-    demo_path = str(path.resolve())
-    stripe = (hash(demo_path) & 0x7FFFFFFF) % _ENQUEUE_STRIPE_COUNT
-    async with _enqueue_striped_locks[stripe]:
-        size: int | None = None
-        mtime_iso: str | None = None
-        try:
-            st = path.stat()
-            size = st.st_size
-            from datetime import timezone
-
-            mtime_iso = datetime.fromtimestamp(st.st_mtime, tz=timezone.utc).isoformat()
-        except OSError:
-            pass
-        source = infer_demo_source(path.name)
-        watcher = application_state.demo_watcher
-        watch_root = watcher.watch_root_for(path) if watcher is not None else None
-
-        md5_hex: str | None = None
-        if use_md5:
-            try:
-                md5_hex = await asyncio.to_thread(file_md5_hex, path)
-            except OSError as e:
-                logger.warning("Demo file md5 failed, continue without md5 dedupe: %s (%s)", demo_path, e)
-            if md5_hex and await demo_db.content_md5_exists(md5_hex):
-                logger.info("Skip enqueue duplicate demo content (md5): %s", demo_path)
-                return
-
-        _, inserted = await demo_db.add_demo(
-            demo_path,
-            file_size=size,
-            source=source,
-            status="pending",
-            added_at=mtime_iso,
-            content_md5=md5_hex if use_md5 else None,
-            origin_zip=origin_zip if use_md5 else None,
-            watch_root=watch_root,
-        )
-        if not inserted:
-            if use_md5 and md5_hex:
-                await demo_db.update_demo_content_md5_if_absent(demo_path, md5_hex, origin_zip)
-            return
-
-        # 发现阶段只做文件登记、去重与基础校验。地图、名单和记分板在用户确认
-        # 入库时一次性提取，避免“扫描目录一次 + 入库一次”的重复 parser 读盘。
-    await demo_library_hub.notify("enqueue")
-
-
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     """
     仅初始化 DB 与 DemoWatcher 实例（不启动 watchdog Observer，也不做启动时扫描）。
 
     **为什么不再自动扫描**：watchdog Observer 会在目录出现新 .dem 时立刻触发
-    ``_enqueue_demo_path``。录制期我们会
+    ``enqueue_demo_path``。录制期我们会
     准备一个兼容性复验后的 ``_insight_<uuid>.dem`` 到 CS2 的 ``csgo/``；若用户的监听目录与
     ``csgo/`` 有重叠（常见：就是把 CS2 的 replay 目录作为监听目录），**每次录制都会在后台触发
     登记新文件并做内容去重，仍可能与录制争用磁盘；历史上还曾叠加解析工作
@@ -286,7 +159,7 @@ async def lifespan(_: FastAPI):
         logger.info("Removed %d stale CS2 Insight GSI config(s)", len(removed_gsi_configs))
     application_state.demo_watcher = DemoWatcher(
         cfg.demo_watch_paths or [],
-        _enqueue_demo_path,
+        enqueue_demo_path,
         demo_db,
         max_depth=cfg.demo_watch_scan_depth,
     )
@@ -320,6 +193,8 @@ app = FastAPI(title="CS2 Insight Agent", version=APP_VERSION, lifespan=lifespan)
 
 app.include_router(recording_router)
 app.include_router(lite_cut_router)
+app.include_router(demo_playback_router)
+app.include_router(match_history_router)
 app.include_router(config_router)
 app.include_router(obs_router)
 app.include_router(montage_router)
@@ -896,12 +771,6 @@ async def _run_library_demo_analyze(
         "demo_path": library_path,
     }
 
-
-
-class MatchHistoryDownloadBody(BaseModel):
-    demo_url: str
-    match_id: str
-    filename: str  # e.g. "match730_3733386468353335412.dem"
 
 
 # ─── Demo parsing endpoints ───────────────────────────────────
@@ -1751,173 +1620,6 @@ async def demo_library_event_stream():
     )
 
 
-@app.get("/api/match-history/matches")
-async def get_match_history():
-    cfg = load_config()
-    if not cfg.steam_api_key or not cfg.steam_id64:
-        raise HTTPException(400, "Steam API Key 和 SteamID64 未配置，请先保存凭据")
-
-    try:
-        raw_matches, player = await asyncio.gather(
-            fetch_match_history(cfg.steam_api_key, cfg.steam_id64, cfg.match_count),
-            fetch_player_summary(cfg.steam_api_key, cfg.steam_id64),
-        )
-    except httpx.HTTPStatusError as e:
-        status = e.response.status_code
-        if status == 403:
-            raise HTTPException(403, "Steam API Key 无效，请检查凭据")
-        if status == 429:
-            raise HTTPException(429, "Steam API 请求频率超限，请稍后再试")
-        raise HTTPException(502, f"Steam API 返回 {status}")
-    except httpx.RequestError as e:
-        raise HTTPException(502, f"无法连接 Steam API: {e}")
-    except ValueError as e:
-        raise HTTPException(502, str(e))
-
-    mode_filter = cfg.match_mode
-    parsed_rows: list[tuple[dict, str]] = []
-    for i, m in enumerate(raw_matches):
-        wmi = m.get("watchablematchinfo") or {}
-        mode = game_type_to_mode(int(wmi.get("game_type", 0)))
-        if mode != mode_filter:
-            continue
-        try:
-            row = parse_match_row(m, player_index=0)
-        except Exception:
-            logger.exception("Failed to parse match %s", m.get("matchid"))
-            continue
-        dem_name = f"match730_{row['match_id']}.dem"
-        parsed_rows.append((row, dem_name))
-    existing_filenames = await demo_db.find_existing_filenames(
-        dem_name for _, dem_name in parsed_rows
-    )
-    rows = []
-    for row, dem_name in parsed_rows:
-        row["demo_in_library"] = dem_name in existing_filenames
-        rows.append(row)
-
-    wins = sum(1 for r in rows if r["result"] == "win")
-    losses = sum(1 for r in rows if r["result"] == "loss")
-    total_kills = sum(r["kills"] for r in rows)
-    total_deaths = sum(r["deaths"] for r in rows)
-    total_hs = sum(r["headshot_kills"] for r in rows)
-    total_dmg = sum(r["damage"] for r in rows)
-    total_rounds = sum(r["score_own"] + r["score_opp"] for r in rows)
-    avg_kd = round(total_kills / total_deaths, 2) if total_deaths else 0.0
-    hs_pct = round(total_hs / total_kills * 100) if total_kills else 0
-    avg_adr = round(total_dmg / total_rounds, 1) if total_rounds else 0.0
-    avg_rating = round(sum(r["rating"] for r in rows) / len(rows), 2) if rows else 0.0
-
-    return {
-        "player": {
-            "name": player.get("personaname", ""),
-            "avatar": player.get("avatarfull", ""),
-            "steam_id64": cfg.steam_id64,
-        },
-        "stats_summary": {
-            "wins": wins,
-            "losses": losses,
-            "avg_kd": avg_kd,
-            "headshot_pct": hs_pct,
-            "avg_adr": avg_adr,
-            "rating": avg_rating,
-        },
-        "matches": rows,
-        "total": len(rows),
-    }
-
-
-@app.post("/api/match-history/test-connection")
-async def test_steam_connection(body: dict = Body(...)):
-    api_key = str(body.get("steam_api_key") or "").strip()
-    steam_id64 = str(body.get("steam_id64") or "").strip()
-    if not api_key or not steam_id64:
-        raise HTTPException(400, "steam_api_key 和 steam_id64 不能为空")
-    try:
-        player = await fetch_player_summary(api_key, steam_id64)
-    except httpx.HTTPStatusError as e:
-        raise HTTPException(e.response.status_code, f"Steam API 返回 {e.response.status_code}")
-    except httpx.RequestError as e:
-        raise HTTPException(502, f"无法连接 Steam: {e}")
-    if not player:
-        raise HTTPException(404, "未找到该 SteamID 的玩家信息，请检查 SteamID64")
-    return {"ok": True, "name": player.get("personaname", ""), "avatar": player.get("avatarfull", "")}
-
-
-@app.get("/api/steam/player-avatars")
-async def get_steam_player_avatars(
-    steam_ids: str = Query("", max_length=220),
-):
-    """Resolve optional Steam CDN avatars for one Demo roster."""
-    cfg = load_config()
-    if not cfg.steam_cdn_assets_enabled:
-        return {"enabled": False, "avatars": {}}
-
-    unique_ids: list[str] = []
-    for raw in steam_ids.split(","):
-        value = raw.strip()
-        if not value.isdigit() or not 15 <= len(value) <= 20 or value in unique_ids:
-            continue
-        unique_ids.append(value)
-        if len(unique_ids) >= 10:
-            break
-    if not unique_ids:
-        return {"enabled": True, "avatars": {}}
-
-    players: list[dict] = []
-    try:
-        players = await fetch_public_player_summaries(unique_ids)
-    except httpx.HTTPError as exc:
-        logger.info("Public Steam avatar lookup unavailable: %s", exc)
-
-    resolved_ids = {str(player.get("steamid") or "") for player in players}
-    missing_ids = [steam_id for steam_id in unique_ids if steam_id not in resolved_ids]
-    if missing_ids and cfg.steam_api_key:
-        try:
-            players.extend(await fetch_player_summaries(cfg.steam_api_key, missing_ids))
-        except (httpx.HTTPError, ValueError) as exc:
-            logger.info("Steam Web API avatar lookup unavailable: %s", exc)
-
-    avatars: dict[str, str] = {}
-    for player in players:
-        steam_id = str(player.get("steamid") or "")
-        avatar_url = _official_steam_avatar_url(player.get("avatarfull"))
-        if steam_id in unique_ids and avatar_url:
-            avatars[steam_id] = avatar_url
-    return {"enabled": True, "avatars": avatars}
-
-
-@app.post("/api/match-history/download")
-async def download_match_demo(body: MatchHistoryDownloadBody):
-    cfg = load_config()
-    watch_paths = [p for p in cfg.demo_watch_paths if p.strip()]
-    if not watch_paths:
-        raise HTTPException(400, "未配置 Demo 库监听目录，请先在「Demo 库」设置监听路径")
-
-    dest_dir = Path(watch_paths[0])
-    requested_filename = Path(body.filename).name.strip()
-    if not requested_filename or requested_filename in {".", ".."}:
-        raise HTTPException(400, "Demo 文件名无效")
-    filename = (
-        requested_filename
-        if requested_filename.lower().endswith(".dem")
-        else requested_filename + ".dem"
-    )
-    try:
-        dem_path = await download_demo(body.demo_url, dest_dir, filename)
-    except httpx.HTTPStatusError as e:
-        raise HTTPException(502, f"下载失败，HTTP {e.response.status_code}")
-    except httpx.RequestError as e:
-        raise HTTPException(502, f"下载超时或网络错误: {e}")
-    except OSError as e:
-        raise HTTPException(500, f"文件写入失败: {e}")
-    except Exception as e:
-        raise HTTPException(500, f"解压失败: {e}")
-
-    await _enqueue_demo_path(dem_path)
-    return {"ok": True, "path": str(dem_path), "filename": filename}
-
-
 @app.get("/api/demos/discovered")
 async def list_discovered_demos(
     limit: int = Query(default=200, ge=1, le=1000),
@@ -2320,99 +2022,6 @@ async def delete_demo(demo_id: int):
         raise HTTPException(404, f"Demo not found: {demo_id}")
     await demo_library_hub.notify("deleted")
     return {"status": "deleted", "demo_id": demo_id, "replay_cache": cache_removed}
-
-
-class DemoPlaybackPovBody(BaseModel):
-    enabled: bool = False
-    radar_mode: Literal[-1, 0] = 0
-    teamcounter_numeric: bool = False
-
-
-class DemoPlaybackOptionsBody(BaseModel):
-    pov_hud: DemoPlaybackPovBody = Field(default_factory=DemoPlaybackPovBody)
-
-
-class DemoPlayByPathBody(DemoPlaybackOptionsBody):
-    path: str = Field(..., min_length=1)
-
-
-def _launch_cs2_play_demo(
-    dem_path: Path,
-    options: Optional[DemoPlaybackOptionsBody] = None,
-) -> dict[str, Any]:
-    """Launch managed direct playback; both normal and POV modes require CS2 to be closed."""
-    cfg = ensure_cs2_path(load_config())
-    if not cfg.cs2_path or not Path(cfg.cs2_path).is_file():
-        raise HTTPException(400, error_detail("DEMO_PLAYBACK_CS2_PATH_MISSING"))
-    if not dem_path.is_file():
-        raise HTTPException(422, error_detail("DEMO_PLAYBACK_DEMO_NOT_FOUND", path=str(dem_path)))
-
-    body = options or DemoPlaybackOptionsBody()
-    pov = body.pov_hud
-    try:
-        return demo_playback_service.launch(
-            dem_path,
-            cfg,
-            DemoPlaybackPovOptions(
-                enabled=bool(pov.enabled),
-                radar_mode=int(pov.radar_mode),
-                teamcounter_numeric=bool(pov.teamcounter_numeric),
-            ),
-        )
-    except DemoPlaybackCs2RunningError as exc:
-        raise HTTPException(409, error_detail("DEMO_PLAYBACK_CS2_RUNNING")) from exc
-    except DemoPlaybackBusyError as exc:
-        raise HTTPException(409, error_detail("DEMO_PLAYBACK_BUSY")) from exc
-    except PovHudError as exc:
-        raise HTTPException(400, error_detail("DEMO_PLAYBACK_POV_FAILED", err=str(exc))) from exc
-    except FileNotFoundError as exc:
-        raise HTTPException(400, error_detail("DEMO_PLAYBACK_CS2_PATH_MISSING")) from exc
-    except HTTPException:
-        raise
-    except Exception as exc:
-        logger.exception("Failed to launch CS2 for direct playback")
-        raise HTTPException(500, error_detail("DEMO_PLAYBACK_LAUNCH_FAILED", err=str(exc))) from exc
-
-
-@app.get("/api/demo/playback/preflight")
-async def demo_playback_preflight():
-    """Preflight for the playback dialog; launch performs the authoritative recheck."""
-    cfg = ensure_cs2_path(load_config())
-    return await asyncio.to_thread(demo_playback_service.preflight, cfg)
-
-
-@app.get("/api/demo/playback/status")
-async def demo_playback_status(session_id: str = Query(..., min_length=1, max_length=128)):
-    """Return the measured lifecycle and POV file-restoration result for one playback session."""
-    return await asyncio.to_thread(demo_playback_service.session_status, session_id)
-
-
-@app.post("/api/demo/play")
-async def play_demo_by_path(
-    body: DemoPlayByPathBody,
-    _runtime_session: None = Depends(runtime_session_dependency),
-):
-    """按路径启动 CS2 播放 Demo（本地上传等无库内 id 的场景）。"""
-    dem_path = await resolve_uploaded_demo_path_async(body.path)
-    return await asyncio.to_thread(_launch_cs2_play_demo, dem_path, body)
-
-
-@app.post("/api/demos/{demo_id}/play")
-async def play_demo_in_cs2(
-    demo_id: int,
-    body: Annotated[Optional[DemoPlaybackOptionsBody], Body()] = None,
-    _runtime_session: None = Depends(runtime_session_dependency),
-):
-    """将 Demo 复制到 game/csgo/ 后直接启动 CS2 播放，不涉及 OBS 录制。"""
-    row = await demo_db.get_demo_by_id(demo_id)
-    if not row:
-        raise HTTPException(404, f"Demo not found: {demo_id}")
-
-    dem_path = await _library_working_demo_path(row)
-    if not dem_path.is_file():
-        raise HTTPException(422, "Demo 文件不存在于磁盘，无法播放。")
-
-    return await asyncio.to_thread(_launch_cs2_play_demo, dem_path, body)
 
 
 @app.post("/api/demos/{demo_id}/delete-file")
