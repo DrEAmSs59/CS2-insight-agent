@@ -11,6 +11,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app import main
 from app.demo_playback_compat import PATCH_ID, PATCH_REVISION, PlaybackDemoReport
+from app.features.demo_analysis import uploads
 
 
 def _compat_result(*, cached: bool = False):
@@ -43,9 +44,9 @@ def _stub_analysis_registration(monkeypatch, demo_id: int = 73):
 
 
 def test_decode_upload_source_paths_fails_closed():
-    assert main._decode_upload_source_paths(None, 2) == [None, None]
-    assert main._decode_upload_source_paths("not-json", 1) == [None]
-    assert main._decode_upload_source_paths(json.dumps(["one.dem"]), 2) == [None, None]
+    assert uploads.decode_upload_source_paths(None, 2) == [None, None]
+    assert uploads.decode_upload_source_paths("not-json", 1) == [None]
+    assert uploads.decode_upload_source_paths(json.dumps(["one.dem"]), 2) == [None, None]
 
 
 def test_verified_upload_source_path_requires_identical_content(tmp_path: Path):
@@ -58,8 +59,8 @@ def test_verified_upload_source_path_requires_identical_content(tmp_path: Path):
     mismatch = tmp_path / "mismatch.dem"
     mismatch.write_bytes(b"different-demo")
 
-    assert main._verified_upload_source_path(str(original), uploaded, expected_md5) == original
-    assert main._verified_upload_source_path(str(mismatch), uploaded, expected_md5) == uploaded
+    assert uploads.verified_upload_source_path(str(original), uploaded, expected_md5) == original
+    assert uploads.verified_upload_source_path(str(mismatch), uploaded, expected_md5) == uploaded
 
 
 def test_multiple_upload_returns_verified_original_path(monkeypatch, tmp_path: Path):
@@ -76,7 +77,7 @@ def test_multiple_upload_returns_verified_original_path(monkeypatch, tmp_path: P
         return [{"name": "player"}], {"map_name": "de_mirage"}, None
 
     monkeypatch.setattr(main, "UPLOAD_DIR", upload_dir)
-    monkeypatch.setattr(main, "_safe_upload_demo_meta", fake_meta)
+    monkeypatch.setattr(main, "safe_upload_demo_meta", fake_meta)
     def fake_ensure(_path, *, allow_truncated_packet_tail=False):
         ensure_options.append(allow_truncated_packet_tail)
         return _compat_result()
@@ -103,7 +104,7 @@ def test_multiple_upload_without_electron_path_uses_cache(monkeypatch, tmp_path:
         return [{"name": "player"}], {}, None
 
     monkeypatch.setattr(main, "UPLOAD_DIR", tmp_path)
-    monkeypatch.setattr(main, "_safe_upload_demo_meta", fake_meta)
+    monkeypatch.setattr(main, "safe_upload_demo_meta", fake_meta)
     def fake_ensure(_path, *, allow_truncated_packet_tail=False):
         ensure_options.append(allow_truncated_packet_tail)
         return _compat_result()
@@ -146,7 +147,7 @@ def test_multiple_upload_skips_bad_demo_and_keeps_good_demo(monkeypatch, tmp_pat
 
     monkeypatch.setattr(main, "UPLOAD_DIR", tmp_path)
     monkeypatch.setattr(main, "ensure_demo_compatible", fake_ensure)
-    monkeypatch.setattr(main, "_safe_upload_demo_meta", fake_meta)
+    monkeypatch.setattr(main, "safe_upload_demo_meta", fake_meta)
     _stub_analysis_registration(monkeypatch)
 
     response = asyncio.run(main.upload_demos([bad, good], json.dumps(["", ""])))
@@ -163,7 +164,7 @@ def test_save_uploaded_demo_overwrites_existing_via_partial(tmp_path: Path):
     dest.write_bytes(b"old-content-that-must-be-replaced")
     upload = main.UploadFile(filename="existing.dem", file=io.BytesIO(b"new-demo-bytes"))
 
-    digest = main._save_uploaded_demo(upload, dest)
+    digest = uploads.save_uploaded_demo(upload, dest)
 
     assert dest.read_bytes() == b"new-demo-bytes"
     assert digest == hashlib.md5(b"new-demo-bytes").hexdigest()
@@ -189,8 +190,8 @@ def test_upload_demo_saves_file_off_the_event_loop_thread(monkeypatch, tmp_path:
         return _compat_result()
 
     monkeypatch.setattr(main, "UPLOAD_DIR", tmp_path)
-    monkeypatch.setattr(main, "_save_uploaded_demo", fake_save)
-    monkeypatch.setattr(main, "_safe_upload_demo_meta", fake_meta)
+    monkeypatch.setattr(main, "save_uploaded_demo", fake_save)
+    monkeypatch.setattr(main, "safe_upload_demo_meta", fake_meta)
     monkeypatch.setattr(main, "ensure_demo_compatible", fake_ensure)
     _stub_analysis_registration(monkeypatch)
 
@@ -217,7 +218,7 @@ def test_open_local_repairs_and_returns_the_real_source(monkeypatch, tmp_path: P
         return [{"name": "player"}], {"map_name": "de_nuke"}, None
 
     monkeypatch.setattr(main, "ensure_demo_compatible", fake_ensure)
-    monkeypatch.setattr(main, "_safe_upload_demo_meta", fake_meta)
+    monkeypatch.setattr(main, "safe_upload_demo_meta", fake_meta)
     registered = _stub_analysis_registration(monkeypatch)
 
     response = asyncio.run(main.open_local_demos(main.OpenLocalDemosBody(paths=[str(original)])))

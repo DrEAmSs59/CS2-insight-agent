@@ -3,13 +3,10 @@
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import json
 import logging
 import os
 import sys
-import uuid
-import weakref
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from contextlib import asynccontextmanager
@@ -25,7 +22,6 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from .env_utils import (
-    AppConfig,
     load_config,
     ensure_cs2_path,
     resolve_config_path,
@@ -36,10 +32,9 @@ from .env_utils import (
 from .demo_db import DemoListFilters, utc_now_iso
 from .databases import demo_db, lite_cut_db, montage_db
 from .demo_library_hub import demo_library_hub
-from .demo_paths import UPLOAD_DIR, resolve_demo_path, resolve_working_demo_path
+from .demo_paths import UPLOAD_DIR
 from .demo_compat_service import ensure_demo_compatible
 from .demo_watcher import DemoWatcher
-from .file_hash import file_md5_hex
 from .gsi_ready import (
     cleanup_stale_gsi_configs,
     install_gsi_access_log_filter,
@@ -71,7 +66,35 @@ from .recording.api import router as recording_router
 from .features.lite_cut.api import router as lite_cut_router
 from .features.demo_playback.api import router as demo_playback_router
 from .features.demo_library.ingestion import enqueue_demo_path, infer_demo_source
+from .features.demo_library.roster import (
+    get_or_index_demo_roster,
+    index_demo_player_stats,
+    _roster_rows_for_api,
+)
 from .features.match_history.api import router as match_history_router
+from .features.demo_analysis.inspection import (
+    analyze_demo_sync,
+    demo_failure_code,
+    demo_failure_item,
+    demo_inspect_concurrency,
+    inspect_demo_meta,
+    library_working_demo_path,
+    resolve_spectator_for_demo,
+    resolve_uploaded_demo_path,
+    resolve_uploaded_demo_path_async,
+    safe_upload_demo_meta,
+)
+from .features.demo_analysis.player_matching import (
+    match_expected_players_in_roster,
+    normalized_expected_parse_players,
+)
+from .features.demo_analysis.uploads import (
+    decode_upload_source_paths,
+    save_uploaded_demo,
+    upload_source_scope,
+    verified_upload_source_path,
+)
+from .features.demo_analysis.workflows import run_library_demo_analyze
 from .api_errors import error_detail
 
 
@@ -117,11 +140,6 @@ try:
     logging.getLogger(__name__).info("Backend file logging enabled: %s", _backend_log)
 except Exception:
     logging.getLogger(__name__).exception("Backend file logging setup failed")
-
-_demo_roster_locks: weakref.WeakValueDictionary[int, asyncio.Lock] = (
-    weakref.WeakValueDictionary()
-)
-_DEMO_ROSTER_CACHE_VERSION = 3
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
@@ -353,426 +371,6 @@ async def kb_overlay_ws(ws: WebSocket) -> None:
         await _kb_overlay_bus.unregister(ws)
 
 
-def resolve_spectator_for_demo(dem_path: Path, requested: Optional[str]) -> Optional[str]:
-    """
-    将客户端传来的 target_player 与本场 Demo 的 roster 对齐（大小写/空白），
-    再用于 spec_player。必须先对 roster 匹配：昵称里可能出现 SQLException 等字样，
-    不能当作异常串过滤掉。
-    """
-    from .demo_parse_isolation import get_player_list_isolated
-
-    raw = (requested or "").strip()
-    if not raw:
-        return None
-    low = raw.lower()
-
-    roster = get_player_list_isolated(str(dem_path))
-    names = [str(p["name"]).strip() for p in roster if p.get("name") and str(p["name"]).strip()]
-    if names:
-        if raw in names:
-            return raw
-        for n in names:
-            if n.lower() == low:
-                logger.info("spectator 名称大小写归一: %r -> %r", raw, n)
-                return n
-
-        # 不在名单中时，再拒绝明显占位串（避免把 HTTP/JSON 错误当名字送进游戏）
-        junk = frozenset({"error", "null", "undefined", "nan", "none", "true", "false"})
-        if low in junk or "traceback" in low:
-            logger.warning("忽略无效的 spectator 名称: %r", raw)
-            return None
-        logger.warning(
-            "spectator 不在本 Demo 玩家名单中，将跳过 spec_player: %r（共 %d 名玩家）",
-            raw,
-            len(names),
-        )
-        return None
-
-    # 无名单（解析失败等）：仍信任客户端，避免完全无法切视角
-    logger.warning("本 Demo 未能生成玩家名单，仍使用 spectator: %r", raw)
-    return raw
-
-
-def resolve_uploaded_demo_path(p: str) -> Path:
-    """接受绝对路径或仅文件名（相对 ``UPLOAD_DIR``）。"""
-    return resolve_demo_path(p, upload_dir=UPLOAD_DIR)
-
-
-async def resolve_uploaded_demo_path_async(p: str) -> Path:
-    """Library-aware resolve: use demo cache when the path belongs to demo_files."""
-    return await resolve_working_demo_path(p, demo_db=demo_db, upload_dir=UPLOAD_DIR)
-
-
-async def _library_working_demo_path(row: dict[str, Any]) -> Path:
-    from .demo_cache import ensure_row_cached
-
-    try:
-        return await ensure_row_cached(demo_db, row)
-    except FileNotFoundError as exc:
-        raise HTTPException(404, str(exc)) from exc
-
-
-def _analyze_demo_sync(
-    dem_path: str,
-    target_player: str,
-    freeze_to_death_rounds: Optional[list[int]] = None,
-) -> dict:
-    """Parse in a child process so demoparser native crashes cannot kill FastAPI."""
-    from .demo_parse_isolation import analyze_demo_isolated
-
-    return analyze_demo_isolated(dem_path, target_player, freeze_to_death_rounds)
-
-
-def _demo_inspect_concurrency() -> int:
-    try:
-        configured = int(os.environ.get("CS2_INSIGHT_DEMO_INSPECT_CONCURRENCY", "2"))
-    except ValueError:
-        configured = 2
-    return max(1, min(4, configured))
-
-
-async def _inspect_demo_meta(dem_path: Path) -> tuple[list[dict], dict]:
-    from .demo_parse_isolation import inspect_demo_isolated
-
-    inspection = await asyncio.to_thread(inspect_demo_isolated, str(dem_path))
-    players = inspection.get("players")
-    match_meta = inspection.get("match_meta")
-    if not isinstance(players, list) or not isinstance(match_meta, dict):
-        raise ValueError("Demo inspection returned invalid metadata")
-    return players, match_meta
-
-
-def _demo_failure_code(error: BaseException, phase: str) -> str:
-    if isinstance(error, FileNotFoundError):
-        return "DEMO_FILE_NOT_FOUND"
-    text = str(error).casefold()
-    if "not a .dem file" in text or "only .dem" in text:
-        return "DEMO_INVALID_EXTENSION"
-    if any(marker in text for marker in ("not found", "no such file", "找不到", "不存在")):
-        return "DEMO_FILE_NOT_FOUND"
-    if "timeout" in text or "timed out" in text or "超时" in text:
-        if phase == "inspection":
-            return "DEMO_INSPECTION_TIMEOUT"
-        if phase == "analysis":
-            return "DEMO_ANALYSIS_TIMEOUT"
-        return "DEMO_PREPARE_FAILED"
-    return {
-        "prepare": "DEMO_PREPARE_FAILED",
-        "inspection": "DEMO_INSPECTION_FAILED",
-        "analysis": "DEMO_ANALYSIS_FAILED",
-        "save": "DEMO_ANALYSIS_SAVE_FAILED",
-    }.get(phase, "DEMO_ANALYSIS_FAILED")
-
-
-def _demo_failure_item(
-    filename: str,
-    error: BaseException,
-    phase: str,
-    *,
-    demo_id: Optional[int] = None,
-) -> dict:
-    item = {
-        "filename": str(filename or "Demo"),
-        "code": _demo_failure_code(error, phase),
-    }
-    if demo_id is not None:
-        item["id"] = int(demo_id)
-    return item
-
-
-async def _safe_upload_demo_meta(dem_path: Path) -> tuple[list[dict], dict, Optional[str]]:
-    """Return metadata or a stable public error code while keeping the batch alive."""
-    try:
-        players, match_meta = await _inspect_demo_meta(dem_path)
-        if not players:
-            logger.warning("Demo inspection returned no players for %s", dem_path)
-            return [], match_meta, "DEMO_INSPECTION_FAILED"
-        return players, match_meta, None
-    except Exception as e:  # noqa: BLE001
-        logger.exception("Upload metadata inspection failed for %s: %s", dem_path, e)
-        return [], {}, _demo_failure_code(e, "inspection")
-
-
-def _save_uploaded_demo(file: UploadFile, destination: Path) -> str:
-    """Save one upload and return the MD5 calculated during that same read.
-
-    Writes via a unique ``.partial`` then ``os.replace`` so Windows does not
-    hit ``OSError: [Errno 22] Invalid argument`` when truncating a large
-    existing ``.dem`` that is briefly locked (Defender / prior parse handle).
-    """
-
-    if not destination.name or destination.name in {".", ".."}:
-        raise ValueError(f"invalid upload destination name: {destination!r}")
-
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    digest = hashlib.md5()
-    tmp = destination.with_name(f".{destination.name}.{uuid.uuid4().hex}.partial")
-    try:
-        with tmp.open("wb") as writer:
-            while chunk := file.file.read(1024 * 1024):
-                writer.write(chunk)
-                digest.update(chunk)
-        try:
-            os.replace(tmp, destination)
-        except OSError:
-            # Same-volume replace can still fail if the final name is locked.
-            try:
-                destination.unlink(missing_ok=True)
-            except OSError:
-                logger.warning(
-                    "Could not remove locked upload destination before replace: %s",
-                    destination,
-                )
-            os.replace(tmp, destination)
-    finally:
-        if tmp.exists():
-            try:
-                tmp.unlink()
-            except OSError:
-                pass
-    return digest.hexdigest()
-
-
-def _decode_upload_source_paths(raw: Optional[str], count: int) -> list[Optional[str]]:
-    """Decode Electron source paths; malformed browser input safely means no paths."""
-
-    if not raw:
-        return [None] * count
-    try:
-        decoded = json.loads(raw)
-    except (TypeError, json.JSONDecodeError):
-        logger.warning("Ignoring malformed demo upload source_paths_json")
-        return [None] * count
-    if not isinstance(decoded, list) or len(decoded) != count:
-        logger.warning(
-            "Ignoring demo upload source paths with unexpected count: expected=%d",
-            count,
-        )
-        return [None] * count
-    return [item.strip() if isinstance(item, str) and item.strip() else None for item in decoded]
-
-
-def _verified_upload_source_path(
-    raw_source_path: Optional[str],
-    uploaded_path: Path,
-    uploaded_md5: str,
-) -> Path:
-    """Use an Electron local path only when it is the exact uploaded demo."""
-
-    if not raw_source_path:
-        logger.info(
-            "Browser demo upload has no local source path; using uploaded copy: %s",
-            uploaded_path,
-        )
-        return uploaded_path
-    try:
-        source = Path(raw_source_path).resolve(strict=True)
-        if not source.is_file() or source.suffix.lower() != ".dem":
-            raise ValueError("source is not a .dem file")
-        if source.stat().st_size != uploaded_path.stat().st_size:
-            raise ValueError("source size does not match upload")
-        if file_md5_hex(source) != uploaded_md5:
-            raise ValueError("source content does not match upload")
-    except (OSError, ValueError) as exc:
-        logger.warning(
-            "Demo upload source path was not trusted; using temporary copy: source=%r reason=%s",
-            raw_source_path,
-            exc,
-        )
-        return uploaded_path
-
-    logger.info("Verified original demo path for persistent repair: %s", source)
-    return source
-
-
-def _upload_source_scope(persistent_path: Path, uploaded_path: Path) -> str:
-    try:
-        return "uploaded_copy" if persistent_path.resolve() == uploaded_path.resolve() else "original"
-    except OSError:
-        return "uploaded_copy"
-
-
-def _normalized_expected_parse_players(cfg: AppConfig) -> list[str]:
-    """Normalize the watched-player list used by batch resolve / load-mode parse."""
-    raw = getattr(cfg, "expected_parse_players", None) or []
-    seen: set[str] = set()
-    out: list[str] = []
-    for x in raw:
-        if not isinstance(x, str):
-            continue
-        s = x.strip()
-        if not s or s in seen:
-            continue
-        seen.add(s)
-        out.append(s)
-        if len(out) >= 50:
-            break
-    return out
-
-
-def _norm_player_key(s: str) -> str:
-    from .player_names import normalize_player_key
-
-    return normalize_player_key(s)
-
-
-def _match_expected_to_roster_row(expected: str, roster: list[dict]) -> Optional[dict]:
-    e = (expected or "").strip()
-    if not e:
-        return None
-    en = _norm_player_key(e)
-    el = e.lower()
-    for r in roster:
-        n = (r.get("name") or "").strip()
-        if not n:
-            continue
-        if _norm_player_key(n) == en or n.lower() == el:
-            return r
-    if len(el) >= 3:
-        for r in roster:
-            n = (r.get("name") or "").strip()
-            if not n:
-                continue
-            nl = n.lower()
-            if el in nl or nl in el:
-                return r
-    return None
-
-
-def _match_expected_players_in_roster(expected: list[str], roster: list[dict]) -> list[dict]:
-    """Match configured names against an already loaded roster."""
-
-    if not roster:
-        return []
-    out: list[dict] = []
-    seen_key: set[str] = set()
-    for exp in expected:
-        exp_text = str(exp or "").strip()
-        exact = [
-            row for row in roster
-            if str(row.get("player_key") or "").strip() == exp_text
-            or str(row.get("name") or "").strip().casefold() == exp_text.casefold()
-        ]
-        matches = exact or [row for row in [_match_expected_to_roster_row(exp_text, roster)] if row]
-        for row in matches:
-            key = str(row.get("player_key") or "").strip()
-            if not key:
-                sid = str(row.get("steam_id64") or row.get("steamid64") or "").strip()
-                key = f"steamid:{sid}" if sid else _norm_player_key(str(row.get("name") or ""))
-            if not key or key in seen_key:
-                continue
-            seen_key.add(key)
-            out.append(row)
-    return out
-
-
-
-async def _run_library_demo_analyze(
-    demo_id: int,
-    dem_path: str | Path,
-    target_players: list[str],
-    freeze_to_death_rounds: Optional[list[int]] = None,
-    locale: str = "zh",
-) -> dict:
-    # Working-cache path is for file I/O; demo_files.path remains the DB join key.
-    working_path = os.fspath(dem_path)
-    row = await demo_db.get_demo_by_id(demo_id)
-    library_path = str(row.get("path") or "").strip() if row else ""
-    if not library_path:
-        library_path = working_path
-    target_players = list(
-        dict.fromkeys(
-            str(player).strip()
-            for player in target_players
-            if str(player).strip()
-        )
-    )
-    if not target_players:
-        raise HTTPException(400, "target_players 不能为空")
-    # 列表筛选 / PlayerSelect 依赖 demo_player_stats；缓存命中时不再重复扫描 Demo。
-    idx = await get_or_index_demo_roster(demo_id, library_path)
-    if idx.get("error"):
-        logger.warning(
-            "index_demo_player_stats before library analyze demo_id=%s: %s",
-            demo_id,
-            idx.get("error"),
-        )
-    await demo_db.update_status(library_path, "parsing", error_msg=None, parsed_at=None)
-    players_out: dict = {}
-    analysis_workspace = None
-    try:
-        from .demo_parse_isolation import analyze_multi_isolated
-
-        batch_result = await asyncio.to_thread(
-            analyze_multi_isolated,
-            working_path,
-            target_players,
-            freeze_to_death_rounds,
-        )
-        analysis_workspace = batch_result.pop("__analysis_workspace__", None)
-        players_out = {p: v for p, v in batch_result.items() if isinstance(v, dict)}
-        missing = [p for p in target_players if p not in players_out]
-        if missing:
-            logger.warning(
-                "analyze_multi_isolated missing players demo_id=%s missing=%s",
-                demo_id, missing,
-            )
-    except Exception as e:
-        code = _demo_failure_code(e, "analysis")
-        logger.error("Library demo parse failed demo_id=%s path=%s: %s", demo_id, working_path, e)
-        await demo_db.update_status(library_path, "error", error_msg=code, parsed_at=None)
-        await demo_library_hub.notify("parse_error")
-        raise HTTPException(500, error_detail(code)) from e
-
-    if not players_out:
-        code = "DEMO_ANALYSIS_EMPTY"
-        await demo_db.update_status(library_path, "error", error_msg=code, parsed_at=None)
-        await demo_library_hub.notify("parse_error")
-        raise HTTPException(500, error_detail(code))
-
-    first_player = next(
-        (player for player in target_players if player in players_out),
-        next(iter(players_out)),
-    )
-    first_pdata = players_out[first_player]
-    players_payload = {p: dict(v) for p, v in players_out.items() if isinstance(v, dict)}
-    analyzed_targets = [p for p in target_players if p in players_payload]
-    analyzed_targets.extend(p for p in players_payload if p not in analyzed_targets)
-    composite: dict[str, Any] = {
-        "players": players_payload,
-        "analysis_workspace": analysis_workspace if isinstance(analysis_workspace, dict) else None,
-        "analyzed_target_players": analyzed_targets,
-        "auto_target_player": first_player,
-        # 兼容仍读取「顶层 clips / match_meta」的旧逻辑（列表、SSE、部分 UI）
-        "clips": first_pdata.get("clips") or [],
-        "match_meta": first_pdata.get("match_meta"),
-        "timeline": first_pdata.get("timeline"),
-        "round_timeline": first_pdata.get("round_timeline"),
-    }
-    try:
-        # save_result replaces the previous snapshot transactionally; the old
-        # result remains readable until the new parse is complete.
-        await demo_db.save_result(
-            library_path,
-            composite,
-            timeline_results=players_out,
-        )
-        await demo_db.update_status(library_path, "done", error_msg=None, parsed_at=utc_now_iso())
-    except Exception as e:
-        code = _demo_failure_code(e, "save")
-        logger.exception("Library demo result commit failed demo_id=%s path=%s", demo_id, library_path)
-        await demo_db.update_status(library_path, "error", error_msg=code, parsed_at=None)
-        await demo_library_hub.notify("parse_error")
-        raise HTTPException(500, error_detail(code)) from e
-    await demo_library_hub.notify("analyzed")
-    return {
-        "players": players_out,
-        "analysis_workspace": analysis_workspace if isinstance(analysis_workspace, dict) else None,
-        "demo_path": library_path,
-    }
-
-
-
 # ─── Demo parsing endpoints ───────────────────────────────────
 
 class ParseRequest(BaseModel):
@@ -816,9 +414,9 @@ async def upload_demo(
 
     filename = Path(file.filename).name
     dest = UPLOAD_DIR / filename
-    uploaded_md5 = await asyncio.to_thread(_save_uploaded_demo, file, dest)
+    uploaded_md5 = await asyncio.to_thread(save_uploaded_demo, file, dest)
     persistent_path = await asyncio.to_thread(
-        _verified_upload_source_path,
+        verified_upload_source_path,
         source_path,
         dest,
         uploaded_md5,
@@ -829,14 +427,14 @@ async def upload_demo(
         allow_truncated_packet_tail=True,
     )
 
-    players, match_meta, inspection_error = await _safe_upload_demo_meta(persistent_path)
+    players, match_meta, inspection_error = await safe_upload_demo_meta(persistent_path)
     demo_id = await _ensure_analysis_demo_row(persistent_path)
     return {
         "id": demo_id,
         "filename": filename,
         "path": str(persistent_path),
         "uploaded_path": str(dest),
-        "source_scope": _upload_source_scope(persistent_path, dest),
+        "source_scope": upload_source_scope(persistent_path, dest),
         "compatibility": {**compat.report.to_dict(), "cached": compat.cached},
         "players": players,
         "match_meta": match_meta,
@@ -852,7 +450,7 @@ async def upload_demos(
     """一次上传多个 .dem，返回与单文件 upload 相同结构的数组。"""
     if not files:
         raise HTTPException(400, "请至少选择一个文件")
-    source_paths = _decode_upload_source_paths(source_paths_json, len(files))
+    source_paths = decode_upload_source_paths(source_paths_json, len(files))
     saved: list[tuple[str, Path, Path, Any]] = []
     failed: list[dict] = []
     for file, source_path in zip(files, source_paths):
@@ -861,9 +459,9 @@ async def upload_demos(
             if not file.filename or not str(file.filename).lower().endswith(".dem"):
                 raise ValueError("not a .dem file")
             dest = UPLOAD_DIR / filename
-            uploaded_md5 = await asyncio.to_thread(_save_uploaded_demo, file, dest)
+            uploaded_md5 = await asyncio.to_thread(save_uploaded_demo, file, dest)
             persistent_path = await asyncio.to_thread(
-                _verified_upload_source_path,
+                verified_upload_source_path,
                 source_path,
                 dest,
                 uploaded_md5,
@@ -876,13 +474,13 @@ async def upload_demos(
             saved.append((filename, dest, persistent_path, compat))
         except Exception as exc:  # noqa: BLE001
             logger.exception("Demo preparation failed for %s", filename)
-            failed.append(_demo_failure_item(filename, exc, "prepare"))
+            failed.append(demo_failure_item(filename, exc, "prepare"))
 
-    inspect_sem = asyncio.Semaphore(_demo_inspect_concurrency())
+    inspect_sem = asyncio.Semaphore(demo_inspect_concurrency())
 
     async def _inspect_one(dest: Path) -> tuple[list[dict], dict]:
         async with inspect_sem:
-            return await _safe_upload_demo_meta(dest)
+            return await safe_upload_demo_meta(dest)
 
     inspected = await asyncio.gather(
         *(_inspect_one(persistent_path) for _, _, persistent_path, _ in saved)
@@ -899,7 +497,7 @@ async def upload_demos(
                 "filename": filename,
                 "path": str(persistent_path),
                 "uploaded_path": str(dest),
-                "source_scope": _upload_source_scope(persistent_path, dest),
+                "source_scope": upload_source_scope(persistent_path, dest),
                 "compatibility": {**compat.report.to_dict(), "cached": compat.cached},
                 "players": players,
                 "match_meta": match_meta,
@@ -928,14 +526,14 @@ async def open_local_demos(body: OpenLocalDemosBody):
         except Exception as exc:  # noqa: BLE001
             logger.exception("Could not prepare local Demo: %s", raw_path)
             failed.append(
-                _demo_failure_item(Path(str(raw_path)).name or str(raw_path), exc, "prepare")
+                demo_failure_item(Path(str(raw_path)).name or str(raw_path), exc, "prepare")
             )
 
-    inspect_sem = asyncio.Semaphore(_demo_inspect_concurrency())
+    inspect_sem = asyncio.Semaphore(demo_inspect_concurrency())
 
     async def _inspect_local(path: Path) -> tuple[list[dict], dict]:
         async with inspect_sem:
-            return await _safe_upload_demo_meta(path)
+            return await safe_upload_demo_meta(path)
 
     inspected = await asyncio.gather(*(_inspect_local(path) for path, _ in opened))
     uploads: list[dict] = []
@@ -969,14 +567,14 @@ async def parse_demo(req: ParseRequest, filename: str):
 
     try:
         result = await asyncio.to_thread(
-            _analyze_demo_sync,
+            analyze_demo_sync,
             str(dem_path),
             req.target_player,
             req.freeze_to_death_rounds,
         )
     except IsolatedParseError as e:
         logger.error("Demo parse failed filename=%s: %s", filename, e)
-        raise HTTPException(500, error_detail(_demo_failure_code(e, "analysis"))) from e
+        raise HTTPException(500, error_detail(demo_failure_code(e, "analysis"))) from e
 
     cfg = load_config()
     if cfg.ai_mode and cfg.llm.api_key:
@@ -1025,7 +623,7 @@ async def parse_demo_multi(
         raise HTTPException(e.status_code, error_detail(code)) from e
     except IsolatedParseError as e:
         logger.error("Multi-player Demo parse failed filename=%s path=%s: %s", filename, path, e)
-        raise HTTPException(500, error_detail(_demo_failure_code(e, "analysis"))) from e
+        raise HTTPException(500, error_detail(demo_failure_code(e, "analysis"))) from e
 
     analysis_workspace = results_by_player.pop("__analysis_workspace__", None)
     players_out = {
@@ -1070,7 +668,7 @@ async def parse_demo_batch(req: BatchParseRequest):
     loop = asyncio.get_running_loop()
 
     def run_one(path_str: str) -> dict:
-        return _analyze_demo_sync(path_str, target, req.freeze_to_death_rounds)
+        return analyze_demo_sync(path_str, target, req.freeze_to_death_rounds)
 
     with ThreadPoolExecutor(max_workers=workers) as pool:
         tasks = [loop.run_in_executor(pool, run_one, str(p)) for p in resolved]
@@ -1078,7 +676,7 @@ async def parse_demo_batch(req: BatchParseRequest):
             raw_matches: list[dict] = await asyncio.gather(*tasks)
         except IsolatedParseError as e:
             logger.error("Batch Demo parse failed: %s", e)
-            raise HTTPException(500, error_detail(_demo_failure_code(e, "analysis"))) from e
+            raise HTTPException(500, error_detail(demo_failure_code(e, "analysis"))) from e
 
     cfg = load_config()
     matches_out: list[dict] = []
@@ -1170,264 +768,6 @@ def _demo_library_filters_from_query(
     if date_to and str(date_to).strip():
         f["date_to"] = str(date_to).strip()
     return f
-
-
-def _demo_roster_source_fingerprint(demo_path: str) -> tuple[str, int | None, int | None]:
-    normalized_path = os.path.normcase(os.path.abspath(os.fspath(demo_path)))
-    try:
-        stat = Path(demo_path).stat()
-        return normalized_path, int(stat.st_size), int(stat.st_mtime_ns)
-    except OSError:
-        return normalized_path, None, None
-
-
-async def index_demo_player_stats(
-    demo_id: int,
-    demo_path: str,
-    *,
-    precomputed_players: Optional[list[dict[str, Any]]] = None,
-) -> dict[str, Any]:
-    from .demo_parse_isolation import get_player_list_isolated
-
-    normalized_path, file_size, mtime_ns = _demo_roster_source_fingerprint(demo_path)
-    try:
-        raw: Any = (
-            precomputed_players
-            if precomputed_players is not None
-            else await asyncio.to_thread(get_player_list_isolated, demo_path)
-        )
-        if isinstance(raw, dict):
-            players = raw.get("players") or raw.get("roster") or []
-        elif isinstance(raw, list):
-            players = raw
-        else:
-            players = []
-        if isinstance(players, dict):
-            players = list(players.values())
-        if not isinstance(players, list):
-            players = []
-        await demo_db.replace_demo_player_stats(demo_id, demo_path, players)
-        await demo_db.save_demo_roster_cache(
-            demo_id,
-            normalized_path,
-            cache_version=_DEMO_ROSTER_CACHE_VERSION,
-            source_file_size=file_size,
-            source_mtime_ns=mtime_ns,
-            state="ready" if players else "empty",
-            row_count=len(players),
-        )
-        return {
-            "indexed": True,
-            "player_count": len(players),
-            "players": players,
-            "error": None,
-        }
-    except Exception as exc:
-        logger.warning("Failed to index player stats for demo %s: %s", demo_id, exc)
-        try:
-            await demo_db.replace_demo_player_stats(demo_id, demo_path, [])
-            await demo_db.save_demo_roster_cache(
-                demo_id,
-                normalized_path,
-                cache_version=_DEMO_ROSTER_CACHE_VERSION,
-                source_file_size=file_size,
-                source_mtime_ns=mtime_ns,
-                state="error",
-                row_count=0,
-                error_msg=str(exc),
-            )
-        except Exception:
-            logger.exception("Failed to persist roster error state for demo %s", demo_id)
-        return {
-            "indexed": False,
-            "player_count": 0,
-            "players": [],
-            "error": str(exc),
-        }
-
-
-def _roster_rows_for_api(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Normalize persisted player stats to the roster shape returned by demoparser."""
-
-    out: list[dict[str, Any]] = []
-    for raw in rows:
-        if not isinstance(raw, dict):
-            continue
-        name = str(raw.get("name") or raw.get("player_name") or "").strip()
-        if not name:
-            continue
-        team = raw.get("team")
-        if team is None:
-            team = raw.get("team_number")
-        try:
-            team = int(team) if team is not None else 0
-        except (TypeError, ValueError):
-            team = 0
-        raw_steam_id64 = raw.get("steam_id64") or raw.get("steamid64")
-        raw_steam_id = raw.get("steam_id") or raw.get("steamid")
-        steam_id64 = str(raw_steam_id64).strip() if raw_steam_id64 not in (None, "") else None
-        steam_id = str(raw_steam_id).strip() if raw_steam_id not in (None, "") else None
-        if steam_id64 is None and steam_id and steam_id.isdigit() and len(steam_id) >= 15:
-            steam_id64 = steam_id
-        if steam_id is None:
-            steam_id = steam_id64
-        account_id = raw.get("account_id")
-        if account_id is None and steam_id64:
-            try:
-                derived = int(steam_id64) - 76561197960265728
-                account_id = derived if derived >= 0 else None
-            except (TypeError, ValueError):
-                account_id = None
-        user_id = raw.get("user_id")
-
-        def integer(key: str) -> int:
-            try:
-                return int(raw.get(key) or 0)
-            except (TypeError, ValueError):
-                return 0
-
-        kills = integer("kills")
-        deaths = integer("deaths")
-        assists = integer("assists")
-        try:
-            kd = float(raw.get("kd")) if raw.get("kd") is not None else kills / max(deaths, 1)
-        except (TypeError, ValueError):
-            kd = kills / max(deaths, 1)
-        team_name = raw.get("team_name")
-        out.append(
-            {
-                "name": name,
-                "player_name": name,
-                "player_key": (
-                    f"steamid:{steam_id64}"
-                    if steam_id64
-                    else f"userid:{user_id}"
-                    if user_id not in (None, "")
-                    else f"name:{name.casefold()}"
-                ),
-                "team": team,
-                "team_number": team,
-                "team_name": str(team_name).strip() if team_name not in (None, "") else None,
-                "player_color": str(raw.get("player_color") or "").strip().lower() or None,
-                "steam_id": steam_id,
-                "steam_id64": steam_id64,
-                "steamid64": steam_id64,
-                "account_id": str(account_id) if account_id not in (None, "") else None,
-                "user_id": str(user_id) if user_id not in (None, "") else None,
-                "kills": kills,
-                "deaths": deaths,
-                "assists": assists,
-                "kd": round(kd, 3),
-            }
-        )
-    return out
-
-
-async def _read_valid_demo_roster_cache(
-    demo_id: int,
-    demo_path: str,
-    *,
-    cached_rows: list[dict[str, Any]] | None = None,
-) -> dict[str, Any] | None:
-    metadata = await demo_db.get_demo_roster_cache(demo_id)
-    if not metadata:
-        return None
-    normalized_path, file_size, mtime_ns = _demo_roster_source_fingerprint(demo_path)
-    cached_path = os.path.normcase(os.path.abspath(str(metadata.get("demo_path") or "")))
-    source_md5 = str(metadata.get("source_content_md5") or "").strip().lower()
-    current_md5 = str(metadata.get("current_content_md5") or "").strip().lower()
-    try:
-        cache_version = int(metadata.get("cache_version"))
-        cached_file_size = (
-            int(metadata["source_file_size"])
-            if metadata.get("source_file_size") is not None
-            else None
-        )
-        cached_mtime_ns = (
-            int(metadata["source_mtime_ns"])
-            if metadata.get("source_mtime_ns") is not None
-            else None
-        )
-        row_count = int(metadata.get("row_count") or 0)
-    except (TypeError, ValueError):
-        return None
-    if (
-        cache_version != _DEMO_ROSTER_CACHE_VERSION
-        or cached_path != normalized_path
-        or cached_file_size != file_size
-        or cached_mtime_ns != mtime_ns
-        or source_md5 != current_md5
-    ):
-        return None
-
-    state = str(metadata.get("state") or "")
-    if state == "empty" and row_count == 0:
-        return {
-            "players": [],
-            "cache_hit": True,
-            "indexed": True,
-            "error": None,
-        }
-    if state == "error" and row_count == 0:
-        return {
-            "players": [],
-            "cache_hit": True,
-            "indexed": False,
-            "error": str(metadata.get("error_msg") or "Demo 玩家名单解析失败"),
-        }
-    if state != "ready" or row_count <= 0:
-        return None
-    rows = cached_rows if cached_rows is not None else await demo_db.list_demo_player_stats(demo_id)
-    players = _roster_rows_for_api(rows)
-    if len(players) != row_count:
-        return None
-    return {
-        "players": players,
-        "cache_hit": True,
-        "indexed": True,
-        "error": None,
-    }
-
-
-async def get_or_index_demo_roster(
-    demo_id: int,
-    demo_path: str,
-    *,
-    parse_semaphore: asyncio.Semaphore | None = None,
-    cached_rows: list[dict[str, Any]] | None = None,
-) -> dict[str, Any]:
-    """Return a versioned roster cache, parsing the Demo once on a valid miss."""
-
-    cached = await _read_valid_demo_roster_cache(
-        demo_id,
-        demo_path,
-        cached_rows=cached_rows,
-    )
-    if cached is not None:
-        return cached
-    lock = _demo_roster_locks.get(demo_id)
-    if lock is None:
-        lock = asyncio.Lock()
-        _demo_roster_locks[demo_id] = lock
-    async with lock:
-        # Recheck after acquiring the single-flight lock. Persisted empty and
-        # error states stop concurrent waiters from serially repeating a parse.
-        cached = await _read_valid_demo_roster_cache(demo_id, demo_path)
-        if cached is not None:
-            return cached
-        if parse_semaphore is None:
-            indexed = await index_demo_player_stats(demo_id, demo_path)
-        else:
-            async with parse_semaphore:
-                indexed = await index_demo_player_stats(demo_id, demo_path)
-        if indexed.get("indexed"):
-            await demo_library_hub.notify("player_stats")
-        return {
-            "players": _roster_rows_for_api(indexed.get("players") or []),
-            "cache_hit": False,
-            "indexed": bool(indexed.get("indexed")),
-            "error": indexed.get("error"),
-        }
 
 
 @app.get("/api/demos")
@@ -1700,7 +1040,7 @@ async def batch_resolve_players(body: BatchResolvePlayersBody):
         return {"resolved": {str(i): [] for i in body.demo_ids}, "failed": []}
     if body.mode == "config_expected":
         cfg = load_config()
-        exp = _normalized_expected_parse_players(cfg)
+        exp = normalized_expected_parse_players(cfg)
         if not exp:
             return {"resolved": {str(i): [] for i in body.demo_ids}, "failed": []}
     elif body.mode == "manual":
@@ -1714,7 +1054,7 @@ async def batch_resolve_players(body: BatchResolvePlayersBody):
         if not row:
             resolved[str(did)] = []
             failed.append(
-                _demo_failure_item(str(did), FileNotFoundError(), "inspection", demo_id=int(did))
+                demo_failure_item(str(did), FileNotFoundError(), "inspection", demo_id=int(did))
             )
             continue
         dem_path = str(row["path"])
@@ -1722,12 +1062,12 @@ async def batch_resolve_players(body: BatchResolvePlayersBody):
             roster_lookup = await get_or_index_demo_roster(int(did), dem_path)
             if roster_lookup.get("error"):
                 raise RuntimeError(str(roster_lookup["error"]))
-            matched = _match_expected_players_in_roster(exp, roster_lookup["players"])
+            matched = match_expected_players_in_roster(exp, roster_lookup["players"])
         except Exception as exc:  # noqa: BLE001
             logger.exception("batch_resolve roster match failed demo_id=%s", did)
             resolved[str(did)] = []
             failed.append(
-                _demo_failure_item(
+                demo_failure_item(
                     str(row.get("display_name") or row.get("filename") or did),
                     exc,
                     "inspection",
@@ -1761,7 +1101,7 @@ async def batch_demo_summary(body: BatchSummaryBody):
         if row.get("result_error"):
             raise ValueError(str(row["result_error"]))
         # Materialize working cache for legacy rows (no / stale cached_path).
-        await _library_working_demo_path(row)
+        await library_working_demo_path(row)
         dem_path = str(row.get("path") or "")
         roster_lookup = await get_or_index_demo_roster(
             demo_id,
@@ -1803,7 +1143,7 @@ async def batch_demo_summary(body: BatchSummaryBody):
                 fname = str(did)
             logger.warning("Batch Demo summary skipped id=%s filename=%s: %s", did, fname, res)
             errors.append(
-                _demo_failure_item(
+                demo_failure_item(
                     fname,
                     res,
                     "inspection",
@@ -1971,7 +1311,7 @@ async def get_demo_players(demo_id: int):
     row = await demo_db.get_demo_by_id(demo_id)
     if not row:
         raise HTTPException(404, f"Demo not found: {demo_id}")
-    dem_path = await _library_working_demo_path(row)
+    dem_path = await library_working_demo_path(row)
     await asyncio.to_thread(ensure_demo_compatible, dem_path)
     match_meta = {
         "map_name": row.get("map_name"),
@@ -1995,9 +1335,9 @@ async def analyze_demo_from_library(demo_id: int, req: DemoAnalyzeRequest):
     row = await demo_db.get_demo_by_id(demo_id)
     if not row:
         raise HTTPException(404, f"Demo not found: {demo_id}")
-    dem_path = await _library_working_demo_path(row)
+    dem_path = await library_working_demo_path(row)
     await asyncio.to_thread(ensure_demo_compatible, dem_path)
-    out = await _run_library_demo_analyze(
+    out = await run_library_demo_analyze(
         demo_id,
         dem_path,
         req.target_players,
@@ -2095,14 +1435,14 @@ async def batch_ingest_demos(body: BatchIngestBody):
             continue
         candidates.append((int(demo_id), row, dem_path))
 
-    inspect_sem = asyncio.Semaphore(_demo_inspect_concurrency())
+    inspect_sem = asyncio.Semaphore(demo_inspect_concurrency())
 
     async def _inspect_candidate(
         candidate: tuple[int, dict[str, Any], str],
     ) -> tuple[int, dict[str, Any], str, Optional[list[dict]], Optional[dict], Optional[Exception]]:
         demo_id, row, dem_path = candidate
         try:
-            working = await _library_working_demo_path(row)
+            working = await library_working_demo_path(row)
             async with inspect_sem:
                 # Finalize the narrowly classified unfinalized-demo shape (and
                 # apply 138/win-panel compatibility patches) before any parser
@@ -2112,7 +1452,7 @@ async def batch_ingest_demos(body: BatchIngestBody):
                     working,
                     allow_truncated_packet_tail=True,
                 )
-                players, meta = await _inspect_demo_meta(working)
+                players, meta = await inspect_demo_meta(working)
             return demo_id, row, dem_path, players, meta, None
         except Exception as exc:  # noqa: BLE001 - report one failed demo without cancelling the batch.
             return demo_id, row, dem_path, None, None, exc

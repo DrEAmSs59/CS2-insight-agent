@@ -224,7 +224,7 @@ def test_batch_summary_reports_corrupt_result_as_item_error(monkeypatch):
     )
     monkeypatch.setattr(
         main,
-        "_library_working_demo_path",
+        "library_working_demo_path",
         AsyncMock(return_value=Path("broken.dem")),
     )
 

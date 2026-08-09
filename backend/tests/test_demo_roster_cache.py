@@ -10,6 +10,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from app import demo_parse_isolation, main, parse_worker
 from app.demo_db import DemoDB
 from app.env_utils import AppConfig
+from app.features.demo_analysis import inspection
+from app.features.demo_analysis import workflows
+from app.features.demo_library import roster
 
 
 def _cache_metadata(
@@ -20,11 +23,11 @@ def _cache_metadata(
     error_msg: str | None = None,
     cache_version: int | None = None,
 ):
-    normalized_path, file_size, mtime_ns = main._demo_roster_source_fingerprint(demo_path)
+    normalized_path, file_size, mtime_ns = roster._demo_roster_source_fingerprint(demo_path)
     return {
         "demo_path": normalized_path,
         "cache_version": (
-            main._DEMO_ROSTER_CACHE_VERSION if cache_version is None else cache_version
+            roster._DEMO_ROSTER_CACHE_VERSION if cache_version is None else cache_version
         ),
         "source_content_md5": None,
         "current_content_md5": None,
@@ -56,9 +59,9 @@ def test_get_or_index_demo_roster_reuses_persisted_stats(monkeypatch):
     )
     monkeypatch.setattr(main.demo_db, "list_demo_player_stats", AsyncMock(return_value=cached))
     index_mock = AsyncMock(side_effect=AssertionError("cache hit must not parse the Demo"))
-    monkeypatch.setattr(main, "index_demo_player_stats", index_mock)
+    monkeypatch.setattr(roster, "index_demo_player_stats", index_mock)
 
-    result = asyncio.run(main.get_or_index_demo_roster(12, "match.dem"))
+    result = asyncio.run(roster.get_or_index_demo_roster(12, "match.dem"))
 
     assert result["cache_hit"] is True
     assert result["players"] == [{
@@ -103,9 +106,9 @@ def test_get_or_index_demo_roster_indexes_only_on_cache_miss(monkeypatch):
             "error": None,
         },
     )
-    monkeypatch.setattr(main, "index_demo_player_stats", index_mock)
+    monkeypatch.setattr(roster, "index_demo_player_stats", index_mock)
 
-    result = asyncio.run(main.get_or_index_demo_roster(13, "match.dem"))
+    result = asyncio.run(roster.get_or_index_demo_roster(13, "match.dem"))
 
     assert result["cache_hit"] is False
     assert result["indexed"] is True
@@ -146,7 +149,7 @@ def test_batch_demo_summary_uses_roster_cache(monkeypatch):
     monkeypatch.setattr(main, "get_or_index_demo_roster", lookup_mock)
     monkeypatch.setattr(
         main,
-        "_library_working_demo_path",
+        "library_working_demo_path",
         AsyncMock(return_value=Path("match.dem")),
     )
 
@@ -196,7 +199,7 @@ def test_batch_demo_summary_materializes_working_cache_for_legacy_rows(monkeypat
             "error": None,
         }
 
-    monkeypatch.setattr(main, "_library_working_demo_path", fake_working)
+    monkeypatch.setattr(main, "library_working_demo_path", fake_working)
     monkeypatch.setattr(main, "get_or_index_demo_roster", fake_roster)
 
     response = asyncio.run(main.batch_demo_summary(main.BatchSummaryBody(ids=[99])))
@@ -228,7 +231,7 @@ def test_batch_demo_summary_reports_missing_original_as_item_failure(monkeypatch
     async def fake_working(_row):
         raise FileNotFoundError("Demo original missing: C:/missing/gone.dem")
 
-    monkeypatch.setattr(main, "_library_working_demo_path", fake_working)
+    monkeypatch.setattr(main, "library_working_demo_path", fake_working)
     monkeypatch.setattr(main, "get_or_index_demo_roster", AsyncMock())
 
     response = asyncio.run(main.batch_demo_summary(main.BatchSummaryBody(ids=[44])))
@@ -317,12 +320,12 @@ def test_get_or_index_demo_roster_single_flights_concurrent_misses(monkeypatch):
 
     monkeypatch.setattr(main.demo_db, "get_demo_roster_cache", get_cache)
     monkeypatch.setattr(main.demo_db, "list_demo_player_stats", list_stats)
-    monkeypatch.setattr(main, "index_demo_player_stats", index_once)
+    monkeypatch.setattr(roster, "index_demo_player_stats", index_once)
 
     async def scenario():
         return await asyncio.gather(
-            main.get_or_index_demo_roster(31337, "same.dem"),
-            main.get_or_index_demo_roster(31337, "same.dem"),
+            roster.get_or_index_demo_roster(31337, "same.dem"),
+            roster.get_or_index_demo_roster(31337, "same.dem"),
         )
 
     first, second = asyncio.run(scenario())
@@ -356,9 +359,9 @@ def test_partial_or_stale_roster_cache_is_rebuilt(monkeypatch):
             "error": None,
         }
     )
-    monkeypatch.setattr(main, "index_demo_player_stats", index_mock)
+    monkeypatch.setattr(roster, "index_demo_player_stats", index_mock)
 
-    result = asyncio.run(main.get_or_index_demo_roster(88, "partial.dem"))
+    result = asyncio.run(roster.get_or_index_demo_roster(88, "partial.dem"))
 
     assert result["cache_hit"] is False
     assert [player["name"] for player in result["players"]] == ["alpha", "bravo"]
@@ -369,10 +372,10 @@ def test_empty_and_error_roster_states_are_negative_cached(monkeypatch):
     cache_mock = AsyncMock()
     monkeypatch.setattr(main.demo_db, "get_demo_roster_cache", cache_mock)
     index_mock = AsyncMock(side_effect=AssertionError("negative cache must not parse"))
-    monkeypatch.setattr(main, "index_demo_player_stats", index_mock)
+    monkeypatch.setattr(roster, "index_demo_player_stats", index_mock)
 
     cache_mock.return_value = _cache_metadata("empty.dem", state="empty", row_count=0)
-    empty = asyncio.run(main.get_or_index_demo_roster(89, "empty.dem"))
+    empty = asyncio.run(roster.get_or_index_demo_roster(89, "empty.dem"))
     assert empty == {
         "players": [],
         "cache_hit": True,
@@ -386,7 +389,7 @@ def test_empty_and_error_roster_states_are_negative_cached(monkeypatch):
         row_count=0,
         error_msg="broken demo",
     )
-    error = asyncio.run(main.get_or_index_demo_roster(90, "error.dem"))
+    error = asyncio.run(roster.get_or_index_demo_roster(90, "error.dem"))
     assert error == {
         "players": [],
         "cache_hit": True,
@@ -410,9 +413,9 @@ def test_roster_cache_version_mismatch_forces_rebuild(monkeypatch):
             "error": None,
         }
     )
-    monkeypatch.setattr(main, "index_demo_player_stats", index_mock)
+    monkeypatch.setattr(roster, "index_demo_player_stats", index_mock)
 
-    result = asyncio.run(main.get_or_index_demo_roster(91, "old.dem"))
+    result = asyncio.run(roster.get_or_index_demo_roster(91, "old.dem"))
 
     assert result["cache_hit"] is False
     assert result["players"][0]["name"] == "fresh"
@@ -437,9 +440,9 @@ def test_roster_cache_file_fingerprint_change_forces_rebuild(monkeypatch, tmp_pa
             "error": None,
         }
     )
-    monkeypatch.setattr(main, "index_demo_player_stats", index_mock)
+    monkeypatch.setattr(roster, "index_demo_player_stats", index_mock)
 
-    result = asyncio.run(main.get_or_index_demo_roster(94, str(demo_path)))
+    result = asyncio.run(roster.get_or_index_demo_roster(94, str(demo_path)))
 
     assert result["cache_hit"] is False
     index_mock.assert_awaited_once()
@@ -459,12 +462,12 @@ def test_index_demo_player_stats_persists_ready_metadata(monkeypatch, tmp_path):
     monkeypatch.setattr(main.demo_db, "replace_demo_player_stats", replace_mock)
     monkeypatch.setattr(main.demo_db, "save_demo_roster_cache", save_mock)
 
-    result = asyncio.run(main.index_demo_player_stats(92, str(demo_path)))
+    result = asyncio.run(roster.index_demo_player_stats(92, str(demo_path)))
 
     assert result["indexed"] is True
     replace_mock.assert_awaited_once_with(92, str(demo_path), players)
     kwargs = save_mock.await_args.kwargs
-    assert kwargs["cache_version"] == main._DEMO_ROSTER_CACHE_VERSION
+    assert kwargs["cache_version"] == roster._DEMO_ROSTER_CACHE_VERSION
     assert kwargs["state"] == "ready"
     assert kwargs["row_count"] == 1
     assert kwargs["source_file_size"] == 4
@@ -512,14 +515,14 @@ def test_roster_cache_round_trip_preserves_public_contract(tmp_path):
         await db.save_demo_roster_cache(
             demo_id,
             demo_path,
-            cache_version=main._DEMO_ROSTER_CACHE_VERSION,
+            cache_version=roster._DEMO_ROSTER_CACHE_VERSION,
             source_file_size=None,
             source_mtime_ns=None,
             state="ready",
             row_count=1,
         )
         cached = await db.list_demo_player_stats(demo_id)
-        return main._roster_rows_for_api(cached), await db.get_demo_roster_cache(demo_id)
+        return roster._roster_rows_for_api(cached), await db.get_demo_roster_cache(demo_id)
 
     players, metadata = asyncio.run(scenario())
     assert players == [{
@@ -543,7 +546,7 @@ def test_roster_cache_round_trip_preserves_public_contract(tmp_path):
     assert not ({"id", "demo_id", "demo_path", "normalized_name", "indexed_at"} & players[0].keys())
     assert metadata["state"] == "ready"
     assert metadata["row_count"] == 1
-    assert metadata["cache_version"] == main._DEMO_ROSTER_CACHE_VERSION
+    assert metadata["cache_version"] == roster._DEMO_ROSTER_CACHE_VERSION
 
 
 def test_library_multi_parse_normalizes_targets_and_uses_first_success(monkeypatch):
@@ -562,7 +565,7 @@ def test_library_multi_parse_normalizes_targets_and_uses_first_success(monkeypat
         return parsed
 
     monkeypatch.setattr(demo_parse_isolation, "analyze_multi_isolated", fake_analyze_multi)
-    monkeypatch.setattr(main, "get_or_index_demo_roster", AsyncMock(return_value={"error": None}))
+    monkeypatch.setattr(workflows, "get_or_index_demo_roster", AsyncMock(return_value={"error": None}))
     monkeypatch.setattr(
         main.demo_db,
         "get_demo_by_id",
@@ -577,7 +580,7 @@ def test_library_multi_parse_normalizes_targets_and_uses_first_success(monkeypat
     monkeypatch.setattr(main.demo_db, "replace_timeline_events", AsyncMock())
 
     response = asyncio.run(
-        main._run_library_demo_analyze(
+        workflows.run_library_demo_analyze(
             7,
             "match.dem",
             [" missing ", " alpha ", "alpha"],
@@ -632,16 +635,16 @@ def test_library_analyze_persists_status_on_original_path(monkeypatch, tmp_path)
         "get_demo_by_id",
         AsyncMock(return_value={"id": 11746, "path": str(original), "cached_path": str(working)}),
     )
-    monkeypatch.setattr(main, "get_or_index_demo_roster", fake_roster)
+    monkeypatch.setattr(workflows, "get_or_index_demo_roster", fake_roster)
     monkeypatch.setattr(main.demo_db, "update_status", fake_update_status)
     monkeypatch.setattr(main.demo_db, "save_result", fake_save_result)
     monkeypatch.setattr(main.demo_db, "replace_timeline_events", AsyncMock())
     monkeypatch.setattr(demo_parse_isolation, "analyze_multi_isolated", fake_analyze_multi)
     monkeypatch.setattr(main, "load_config", AppConfig)
-    monkeypatch.setattr(main, "demo_library_hub", SimpleNamespace(notify=AsyncMock()))
+    monkeypatch.setattr(workflows, "demo_library_hub", SimpleNamespace(notify=AsyncMock()))
 
     response = asyncio.run(
-        main._run_library_demo_analyze(11746, Path(working), ["alpha"])
+        workflows.run_library_demo_analyze(11746, Path(working), ["alpha"])
     )
 
     assert roster_paths == [str(original)]
@@ -667,7 +670,7 @@ def test_upload_metadata_uses_one_combined_inspection_worker(monkeypatch):
     monkeypatch.setattr(demo_parse_isolation, "inspect_demo_isolated", fake_inspect)
 
     players, match_meta, error_code = asyncio.run(
-        main._safe_upload_demo_meta(Path("match.dem"))
+        inspection.safe_upload_demo_meta(Path("match.dem"))
     )
 
     assert players == expected["players"]
@@ -683,7 +686,7 @@ def test_upload_metadata_returns_safe_timeout_code(monkeypatch):
     monkeypatch.setattr(demo_parse_isolation, "inspect_demo_isolated", fake_inspect)
 
     players, match_meta, error_code = asyncio.run(
-        main._safe_upload_demo_meta(Path("broken.dem"))
+        inspection.safe_upload_demo_meta(Path("broken.dem"))
     )
 
     assert players == []
@@ -727,7 +730,7 @@ def test_index_demo_player_stats_reuses_precomputed_roster(monkeypatch):
     monkeypatch.setattr(main.demo_db, "save_demo_roster_cache", save_cache)
 
     result = asyncio.run(
-        main.index_demo_player_stats(
+        roster.index_demo_player_stats(
             7,
             "match.dem",
             precomputed_players=players,
@@ -766,13 +769,13 @@ def test_batch_ingest_bounds_inspection_concurrency_and_reuses_rosters(
         active -= 1
         return ([{"name": dem_path.stem}], {"map_name": "de_test"})
 
-    monkeypatch.setattr(main, "_demo_inspect_concurrency", lambda: 2)
-    monkeypatch.setattr(main, "_inspect_demo_meta", fake_inspect)
+    monkeypatch.setattr(main, "demo_inspect_concurrency", lambda: 2)
+    monkeypatch.setattr(main, "inspect_demo_meta", fake_inspect)
 
     async def fake_working(row):
         return Path(str(row["path"]))
 
-    monkeypatch.setattr(main, "_library_working_demo_path", fake_working)
+    monkeypatch.setattr(main, "library_working_demo_path", fake_working)
     compat_calls: list[tuple[str, bool]] = []
 
     def fake_ensure(path, *, allow_truncated_packet_tail=False):

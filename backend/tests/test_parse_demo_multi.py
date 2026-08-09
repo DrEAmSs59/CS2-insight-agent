@@ -8,6 +8,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app import demo_parse_isolation, main
 from app.env_utils import AppConfig, LLMConfig
+from app.features.demo_analysis import inspection
 
 
 @pytest.fixture(autouse=True)
@@ -29,7 +30,7 @@ def _run_parse_multi(*, players: list[str], filename: str = "match.dem", locale:
 def test_parse_demo_multi_uses_one_shared_worker(monkeypatch, tmp_path):
     demo_path = tmp_path / "match.dem"
     demo_path.write_bytes(b"demo")
-    monkeypatch.setattr(main, "UPLOAD_DIR", tmp_path)
+    monkeypatch.setattr(inspection, "UPLOAD_DIR", tmp_path)
     monkeypatch.setattr(main, "load_config", AppConfig)
 
     calls: list[tuple[str, list[str], list[int] | None]] = []
@@ -55,7 +56,7 @@ def test_parse_demo_multi_defers_ai_review_until_player_is_selected(monkeypatch,
 
     demo_path = tmp_path / "match.dem"
     demo_path.write_bytes(b"demo")
-    monkeypatch.setattr(main, "UPLOAD_DIR", tmp_path)
+    monkeypatch.setattr(inspection, "UPLOAD_DIR", tmp_path)
     monkeypatch.setattr(
         main,
         "load_config",
@@ -96,7 +97,7 @@ def test_parse_demo_multi_defers_ai_review_until_player_is_selected(monkeypatch,
 def test_parse_demo_multi_extracts_shared_analysis_workspace(monkeypatch, tmp_path):
     demo_path = tmp_path / "match.dem"
     demo_path.write_bytes(b"demo")
-    monkeypatch.setattr(main, "UPLOAD_DIR", tmp_path)
+    monkeypatch.setattr(inspection, "UPLOAD_DIR", tmp_path)
     monkeypatch.setattr(main, "load_config", AppConfig)
     workspace = {"version": 1, "map_name": "de_mirage", "players": [], "rounds": []}
     parsed = {
@@ -114,7 +115,7 @@ def test_parse_demo_multi_extracts_shared_analysis_workspace(monkeypatch, tmp_pa
 def test_parse_demo_multi_returns_stable_timeout_code(monkeypatch, tmp_path):
     demo_path = tmp_path / "match.dem"
     demo_path.write_bytes(b"demo")
-    monkeypatch.setattr(main, "UPLOAD_DIR", tmp_path)
+    monkeypatch.setattr(inspection, "UPLOAD_DIR", tmp_path)
 
     def fake_analyze_multi(*_args):
         raise demo_parse_isolation.IsolatedParseError(
@@ -131,7 +132,7 @@ def test_parse_demo_multi_returns_stable_timeout_code(monkeypatch, tmp_path):
 
 
 def test_parse_demo_multi_returns_stable_missing_file_code(monkeypatch, tmp_path):
-    monkeypatch.setattr(main, "UPLOAD_DIR", tmp_path)
+    monkeypatch.setattr(inspection, "UPLOAD_DIR", tmp_path)
 
     with pytest.raises(main.HTTPException) as exc_info:
         _run_parse_multi(players=["alpha"], filename="missing.dem")
@@ -143,7 +144,7 @@ def test_parse_demo_multi_returns_stable_missing_file_code(monkeypatch, tmp_path
 def test_parse_demo_multi_rejects_empty_success(monkeypatch, tmp_path):
     demo_path = tmp_path / "match.dem"
     demo_path.write_bytes(b"demo")
-    monkeypatch.setattr(main, "UPLOAD_DIR", tmp_path)
+    monkeypatch.setattr(inspection, "UPLOAD_DIR", tmp_path)
     monkeypatch.setattr(demo_parse_isolation, "analyze_multi_isolated", lambda *_args: {})
 
     with pytest.raises(main.HTTPException) as exc_info:
