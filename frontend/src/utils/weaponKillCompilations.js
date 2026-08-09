@@ -1,5 +1,5 @@
 import { weaponDisplayName } from "../i18n/weaponNames.js";
-import { resolveHudWeaponStem } from "../components/analysis/timeline/killfeed/resolveHudWeaponStem.js";
+import { resolveHudWeaponStem } from "../features/demo-analysis/workspaces/timeline/killfeed/resolveHudWeaponStem.js";
 
 function isKillEvent(event) {
   const type = String(event?.record_type || event?.type || "").trim();

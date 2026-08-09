@@ -30,14 +30,14 @@ import {
 import { messageFromApiCode } from "./utils/apiErrorMessages";
 import { formatRecordingApiError, parseRecordingApiError } from "./utils/formatRecordingApiError";
 import { progressToastShowsBusy } from "./utils/progressToast";
-import { buildPendingDemoAnalysisSpecs, demoAnalysisRoster } from "./utils/demoAnalysisCache";
+import { buildPendingDemoAnalysisSpecs, demoAnalysisRoster } from "./features/demo-analysis/state/analysisCache";
 import { playerIdentityKey } from "./utils/playerIdentity.js";
 import {
   DEMO_ANALYSIS_REQUEST_TIMEOUT_MS,
   demoBatchFailureMessage,
   normalizeDemoBatchFailures,
 } from "./utils/demoBatchFailures";
-import { resetDemoAnalysisDefaultView } from "./utils/demoAnalysisSession";
+import { resetDemoAnalysisDefaultView } from "./features/demo-analysis/state/analysisSession";
 import {
   recordingAbortToastKind,
   recordingQueueHadUnexpectedCs2Exit,
@@ -55,7 +55,7 @@ import SidebarNav from "./components/SidebarNav";
 
 const GuidePage = lazy(() => import("./pages/GuidePage"));
 const DemoLibraryPage = lazy(() => import("./pages/DemoLibraryPage"));
-const DemoAnalysisPreviewPage = lazy(() => import("./pages/DemoAnalysisPreviewPage"));
+const DemoAnalysisPage = lazy(() => import("./features/demo-analysis/DemoAnalysisPage"));
 const RecordingQueuePage = lazy(() => import("./pages/RecordingQueuePage"));
 const MontageWorkbenchPage = lazy(() => import("./pages/MontageWorkbenchPage"));
 const LiteCutEditorPage = lazy(() => import("./features/lite-cut/pages/LiteCutEditorPage"));
@@ -3113,7 +3113,7 @@ export default function App() {
               <Routes>
                 <Route path="/" element={<GuidePage />} />
                 <Route path="/library" element={<DemoLibraryPage />} />
-                <Route path="/analysis" element={<DemoAnalysisPreviewPage />} />
+                <Route path="/analysis" element={<DemoAnalysisPage />} />
                 <Route path="/demo-analysis-preview" element={<Navigate to="/analysis" replace />} />
                 <Route path="/queue" element={<RecordingQueuePage />} />
                 <Route path="/montage" element={<MontageWorkbenchPage />} />
