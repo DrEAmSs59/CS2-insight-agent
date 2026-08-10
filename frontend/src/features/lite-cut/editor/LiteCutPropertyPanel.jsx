@@ -1,10 +1,10 @@
 import {
   Film,
+  Monitor,
   Type,
   SlidersHorizontal,
   Volume2,
   Gauge,
-  Download,
   FolderOpen,
   RotateCcw,
   FlipHorizontal,
@@ -44,12 +44,12 @@ import {
 } from "./editorPresets.js";
 
 const RAIL = [
+  { id: "canvas", labelKey: "liteCut.inspector.canvas", icon: Monitor },
   { id: "clip", labelKey: "liteCut.inspector.clip", icon: Film },
   { id: "text", labelKey: "liteCut.inspector.text", icon: Type },
   { id: "color", labelKey: "liteCut.inspector.color", icon: SlidersHorizontal },
   { id: "audio", labelKey: "liteCut.inspector.audio", icon: Volume2 },
   { id: "speed", labelKey: "liteCut.inspector.speed", icon: Gauge },
-  { id: "export", labelKey: "liteCut.inspector.export", icon: Download },
 ];
 const SOURCE_METADATA_CACHE = new Map();
 
@@ -82,10 +82,10 @@ function KeyframeEditorBar({
   hint,
 }) {
   return (
-    <div className="space-y-1.5 rounded-lg border border-cs2-border/60 bg-cs2-surface-1/55 p-2.5">
+    <div className="litecut-keyframe-editor space-y-1.5 py-1">
       <div className="flex items-center justify-between gap-2">
         <div className="min-w-0">
-          <p className="text-[10px] font-semibold text-cs2-text-primary">{label}</p>
+          <p className="text-[10px] font-semibold text-cs2-text-secondary">{label}</p>
           <p className={`mt-0.5 text-[9px] ${active ? "text-cs2-accent" : "text-cs2-text-muted"}`}>
             {active ? "当前播放头已有关键帧，修改下方参数会更新此关键帧" : "当前播放头没有关键帧，修改下方参数会调整片段基础值"}
           </p>
@@ -292,7 +292,7 @@ export function ClipPane({
 
   return (
     <>
-      <div className="litecut-selected-media flex items-center gap-2 overflow-hidden rounded-lg border border-cs2-border/55 bg-cs2-bg-card p-2 shadow-sm">
+      <div className="litecut-selected-media flex items-center gap-2 overflow-hidden rounded-lg border border-cs2-border bg-cs2-bg-card p-2">
         <div className="relative aspect-video w-[92px] shrink-0 overflow-hidden rounded-md bg-black">
           {thumbUrl ? (
             imagePreview ? (
@@ -947,7 +947,7 @@ export function AudioPane({
 
   const bgmSection = (
     <PaneSection title="工程 BGM（全局）">
-      <div className="rounded-lg border border-cs2-accent/30 bg-cs2-accent-soft px-3 py-2.5">
+      <div className="litecut-property-inline-group px-1 py-1">
         <div className="flex items-center justify-between gap-2">
           <p className="text-[11px] font-bold text-cs2-accent">独立的全局背景音乐</p>
           <span className="shrink-0 rounded-full border border-cs2-accent/40 px-1.5 py-0.5 text-[8px] font-bold text-cs2-accent">不占用音频轨(A轨)</span>
@@ -1012,7 +1012,7 @@ export function AudioPane({
               step={0.1}
             />
           </div>
-          <div className="flex items-center justify-between rounded-lg border border-cs2-border/60 bg-cs2-surface-1/50 px-2.5 py-2">
+          <div className="litecut-property-inline-group flex items-center justify-between px-1 py-1">
             <span className="text-[10px] font-semibold text-cs2-text-secondary">原声时自动压低 BGM</span>
             <Toggle checked={bgmDuckingEnabled} onChange={(checked) => updateBgm({ ducking_enabled: checked })} />
           </div>
@@ -1055,7 +1055,7 @@ export function AudioPane({
         {bgmSection}
         {trackMix}
         <PaneSection title="音频轨(A轨)片段">
-          <div className="flex items-center gap-2 rounded-lg border border-cs2-border/50 bg-cs2-surface-1/60 p-2">
+          <div className="litecut-property-inline-group flex items-center gap-2 px-1 py-1">
             <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-cs2-accent-soft text-cs2-accent">
               <Volume2 className="h-4 w-4" />
             </div>
@@ -1162,7 +1162,184 @@ function exportStatusLabel(status) {
   );
 }
 
-function ExportPane({
+function canvasRatioLabel(width, height) {
+  let w = Math.max(1, Math.round(Number(width) || 1920));
+  let h = Math.max(1, Math.round(Number(height) || 1080));
+  const gcd = (a, b) => (b ? gcd(b, a % b) : a);
+  const divisor = gcd(w, h);
+  w /= divisor;
+  h /= divisor;
+  return `${w}:${h}`;
+}
+
+export function CanvasPane({
+  width = 1920,
+  height = 1080,
+  canvasFit = "contain",
+  backgroundColor = "#000000",
+  blurAmount = 24,
+  onOutputSettingsChange,
+}) {
+  const commitCanvas = (patch) => onOutputSettingsChange?.(patch);
+  const sizePresets = [
+    { id: "16:9", width: 1920, height: 1080 },
+    { id: "9:16", width: 1080, height: 1920 },
+    { id: "1:1", width: 1080, height: 1080 },
+    { id: "4:3", width: 1440, height: 1080 },
+  ];
+  const currentRatio = canvasRatioLabel(width, height);
+  const hasPresetRatio = sizePresets.some((preset) => preset.id === currentRatio);
+  const fitOptions = [
+    { id: "contain", label: "适应", desc: "保留完整画面" },
+    { id: "cover", label: "填满", desc: "裁切画面边缘" },
+    { id: "blur", label: "模糊底", desc: "竖屏与窄屏素材" },
+  ];
+  const normalizedColor = /^#[0-9a-f]{6}$/i.test(backgroundColor) ? backgroundColor : "#000000";
+  const normalizedBlur = Math.max(4, Math.min(80, Number(blurAmount) || 24));
+  const [widthDraft, setWidthDraft] = useState(String(width));
+  const [heightDraft, setHeightDraft] = useState(String(height));
+  useEffect(() => setWidthDraft(String(width)), [width]);
+  useEffect(() => setHeightDraft(String(height)), [height]);
+  const commitWidth = () => {
+    const nextWidth = Math.max(320, Math.min(7680, Number(widthDraft) || Number(width) || 1920));
+    setWidthDraft(String(nextWidth));
+    if (nextWidth !== Number(width)) commitCanvas({ width: nextWidth });
+  };
+  const commitHeight = () => {
+    const nextHeight = Math.max(180, Math.min(4320, Number(heightDraft) || Number(height) || 1080));
+    setHeightDraft(String(nextHeight));
+    if (nextHeight !== Number(height)) commitCanvas({ height: nextHeight });
+  };
+
+  return (
+    <div className="space-y-2">
+      <PaneSection title="画布规格">
+        <div className="litecut-property-inline-group flex items-center justify-between px-1 py-1">
+          <div>
+            <p className="text-[11px] font-bold text-cs2-text-primary">当前工程画布</p>
+            <p className="mt-0.5 text-[9px] text-cs2-text-muted">修改后会立即同步预览，导出沿用当前比例。</p>
+          </div>
+          <div className="shrink-0 text-right">
+            <p className="font-mono text-[12px] font-bold text-cs2-accent">{currentRatio}</p>
+            <p className="font-mono text-[9px] text-cs2-text-muted">{width} × {height}</p>
+          </div>
+        </div>
+        <div className="grid grid-cols-5 gap-1.5">
+          {sizePresets.map((preset) => (
+            <button
+              key={preset.id}
+              type="button"
+              onClick={() => commitCanvas({ width: preset.width, height: preset.height })}
+              className={`rounded-lg border px-1 py-1.5 text-[9px] font-bold transition-colors ${
+                currentRatio === preset.id
+                  ? "border-cs2-accent/70 bg-cs2-accent-soft text-cs2-accent"
+                  : "border-cs2-border/60 bg-cs2-bg-card text-cs2-text-muted hover:border-cs2-border-focus"
+              }`}
+            >
+              {preset.id}
+            </button>
+          ))}
+          <span
+            aria-label="自定义画布比例"
+            className={`cursor-default rounded-lg border px-1 py-1.5 text-center text-[9px] font-bold ${
+              !hasPresetRatio
+                ? "border-cs2-accent/70 bg-cs2-accent-soft text-cs2-accent"
+                : "border-cs2-border/60 bg-cs2-bg-card text-cs2-text-muted"
+            }`}
+          >
+            自定义
+          </span>
+        </div>
+        <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2">
+          <input
+            type="number"
+            aria-label="画布宽度"
+            min={320}
+            max={7680}
+            value={widthDraft}
+            onChange={(event) => setWidthDraft(event.target.value)}
+            onBlur={commitWidth}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") event.currentTarget.blur();
+            }}
+            className="litecut-property-number w-full"
+          />
+          <span className="text-[10px] text-cs2-text-muted">×</span>
+          <input
+            type="number"
+            aria-label="画布高度"
+            min={180}
+            max={4320}
+            value={heightDraft}
+            onChange={(event) => setHeightDraft(event.target.value)}
+            onBlur={commitHeight}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") event.currentTarget.blur();
+            }}
+            className="litecut-property-number w-full"
+          />
+        </div>
+      </PaneSection>
+
+      <PaneSection title="画布适配">
+        <div className="grid grid-cols-3 gap-1.5">
+          {fitOptions.map((option) => (
+            <button
+              key={option.id}
+              type="button"
+              onClick={() => commitCanvas({ canvas_fit: option.id })}
+              className={`rounded-lg border px-2 py-2 text-left transition-colors ${
+                canvasFit === option.id
+                  ? "border-cs2-accent/70 bg-cs2-accent-soft text-cs2-accent"
+                  : "border-cs2-border/60 bg-cs2-bg-card text-cs2-text-muted hover:border-cs2-border-focus"
+              }`}
+            >
+              <span className="block text-[10px] font-bold">{option.label}</span>
+              <span className="mt-0.5 block whitespace-normal text-[9px] leading-snug opacity-75">{option.desc}</span>
+            </button>
+          ))}
+        </div>
+      </PaneSection>
+
+      <PaneSection title="画布背景">
+        <label className="block space-y-1">
+          <span className="text-[10px] font-medium text-cs2-text-muted">底色</span>
+          <div className="flex items-center gap-2 rounded-lg border border-cs2-border bg-cs2-bg-input px-2 py-1.5">
+            <input
+              type="color"
+              aria-label="画布底色"
+              value={normalizedColor}
+              onChange={(event) => commitCanvas({ background_color: event.target.value })}
+              className="h-6 w-8 cursor-pointer border-0 bg-transparent p-0"
+            />
+            <span className="font-mono text-[10px] text-cs2-text-secondary">{normalizedColor}</span>
+          </div>
+        </label>
+        <label className={`block space-y-1 ${canvasFit === "blur" ? "" : "opacity-55"}`}>
+          <span className="flex items-center justify-between text-[10px] font-medium text-cs2-text-muted">
+            <span>模糊强度</span>
+            <span className="font-mono">{normalizedBlur}</span>
+          </span>
+          <input
+            type="range"
+            aria-label="画布模糊强度"
+            min={4}
+            max={80}
+            step={1}
+            value={normalizedBlur}
+            disabled={canvasFit !== "blur"}
+            onChange={(event) => commitCanvas({ blur_amount: Math.max(4, Math.min(80, Number(event.target.value) || 24)) })}
+            style={{ "--cs2-range-progress": `${((normalizedBlur - 4) / 76) * 100}%` }}
+            className="cs2-data-slider w-full disabled:cursor-not-allowed disabled:opacity-40"
+          />
+          {canvasFit !== "blur" ? <p className="text-[9px] text-cs2-text-muted">选择“模糊底”后可调节。</p> : null}
+        </label>
+      </PaneSection>
+    </div>
+  );
+}
+
+export function ExportPane({
   outputDir,
   outputDirHint,
   filename,
@@ -1174,9 +1351,6 @@ function ExportPane({
   framemeldSourceItems = [],
   encoder = "auto",
   encoderTier = "quality",
-  canvasFit = "contain",
-  backgroundColor = "#000000",
-  blurAmount = 24,
   rangeMode = "full",
   rangeStartSec = 0,
   rangeEndSec = 1,
@@ -1276,41 +1450,8 @@ function ExportPane({
       // The text field remains available when the desktop shell cannot open a picker.
     }
   };
-  const fitOptions = [
-    { id: "contain", label: "适应", desc: "保留完整画面" },
-    { id: "cover", label: "填满", desc: "裁切边缘" },
-    { id: "blur", label: "模糊底", desc: "竖屏/窄屏友好" },
-  ];
   return (
     <div className="space-y-2">
-      <div className="rounded-lg border border-cs2-border/70 bg-cs2-bg-card p-3 shadow-sm">
-        <div className="mb-2 flex items-center justify-between">
-          <span className="flex items-center gap-2 text-[12px] font-bold text-cs2-text-primary"><span className="h-1.5 w-1.5 rounded-full bg-cs2-accent" />画布比例</span>
-          <span className="font-mono text-[9px] text-cs2-text-muted">{width} × {height}</span>
-        </div>
-        <div className="grid grid-cols-4 gap-1.5">
-        {[
-          [1920, 1080, "16:9"],
-          [1080, 1920, "9:16"],
-          [1080, 1080, "1:1"],
-          [1080, 1350, "4:5"],
-        ].map(([w, h, label]) => (
-          <button
-            key={label}
-            type="button"
-            title={`设置为 ${label} 画布`}
-            onClick={() => setPresetSize(w, h)}
-            className={`flex min-h-10 flex-col items-center justify-center rounded-md border text-[10px] font-bold transition-colors ${
-              Math.abs(Number(width) / Math.max(1, Number(height)) - w / h) < 0.005
-                ? "border-cs2-accent/70 bg-cs2-accent-soft text-cs2-accent"
-                : "border-cs2-border/60 text-cs2-text-muted hover:border-cs2-border-focus"
-            }`}
-          >
-            {label}
-          </button>
-        ))}
-        </div>
-      </div>
       <PaneSection title="导出规格">
         <div className="grid grid-cols-2 gap-1.5">
           {[
@@ -1342,7 +1483,7 @@ function ExportPane({
               max="7680"
               value={width}
               onChange={(e) => commitSize({ width: Math.max(320, Math.min(7680, Number(e.target.value) || 1920)) })}
-              className="w-full rounded-lg border border-cs2-border bg-cs2-bg-input px-2 py-1.5 font-mono text-[11px] text-cs2-text-primary"
+              className="litecut-property-number w-full"
             />
           </label>
           <label className="block space-y-1">
@@ -1353,7 +1494,7 @@ function ExportPane({
               max="4320"
               value={height}
               onChange={(e) => commitSize({ height: Math.max(180, Math.min(4320, Number(e.target.value) || 1080)) })}
-              className="w-full rounded-lg border border-cs2-border bg-cs2-bg-input px-2 py-1.5 font-mono text-[11px] text-cs2-text-primary"
+              className="litecut-property-number w-full"
             />
           </label>
           <label className="block space-y-1">
@@ -1365,7 +1506,7 @@ function ExportPane({
               step="1"
               value={fps}
               onChange={(e) => commitWorkingFps(e.target.value)}
-              className="w-full rounded-lg border border-cs2-border bg-cs2-bg-input px-2 py-1.5 font-mono text-[11px] text-cs2-text-primary"
+              className="litecut-property-number w-full"
               aria-label="工程帧率"
             />
           </label>
@@ -1480,7 +1621,7 @@ function ExportPane({
                   step={0.1}
                   value={Number(rangeStartSec).toFixed(1)}
                   onChange={(e) => commitRangeStart(e.target.value)}
-                  className="w-full rounded-lg border border-cs2-border bg-cs2-bg-input px-2 py-1.5 font-mono text-[11px] text-cs2-text-primary"
+                  className="litecut-property-number w-full"
                 />
               </label>
               <label className="block space-y-1">
@@ -1492,7 +1633,7 @@ function ExportPane({
                   step={0.1}
                   value={Number(rangeEndSec).toFixed(1)}
                   onChange={(e) => commitRangeEnd(e.target.value)}
-                  className="w-full rounded-lg border border-cs2-border bg-cs2-bg-input px-2 py-1.5 font-mono text-[11px] text-cs2-text-primary"
+                  className="litecut-property-number w-full"
                 />
               </label>
             </div>
@@ -1522,51 +1663,6 @@ function ExportPane({
             </button>
           </div>
         ) : null}
-      </PaneSection>
-      <PaneSection title="画布适配" defaultOpen={false}>
-        <div className="grid grid-cols-3 gap-1.5">
-          {fitOptions.map((opt) => (
-            <button
-              key={opt.id}
-              type="button"
-              onClick={() => commitSize({ canvas_fit: opt.id })}
-              className={`rounded-lg border px-2 py-1.5 text-left transition-colors ${
-                canvasFit === opt.id
-                  ? "border-cs2-accent/70 bg-cs2-accent-soft text-cs2-accent"
-                  : "border-cs2-border/60 text-cs2-text-muted hover:border-cs2-border-focus"
-              }`}
-            >
-              <span className="block text-[10px] font-bold">{opt.label}</span>
-              <span className="block whitespace-normal text-[9px] leading-snug opacity-75">{opt.desc}</span>
-            </button>
-          ))}
-        </div>
-        <div className="grid grid-cols-2 gap-2">
-          <label className="block space-y-1">
-            <span className="text-[10px] font-medium text-cs2-text-muted">底色</span>
-            <div className="flex items-center gap-2 rounded-lg border border-cs2-border bg-cs2-bg-input px-2 py-1.5">
-              <input
-                type="color"
-                value={/^#[0-9a-f]{6}$/i.test(backgroundColor) ? backgroundColor : "#000000"}
-                onChange={(e) => commitSize({ background_color: e.target.value })}
-                className="h-6 w-8 cursor-pointer border-0 bg-transparent p-0"
-              />
-              <span className="font-mono text-[10px] text-cs2-text-secondary">{backgroundColor || "#000000"}</span>
-            </div>
-          </label>
-          <label className="block space-y-1">
-            <span className="text-[10px] font-medium text-cs2-text-muted">模糊强度</span>
-            <input
-              type="range"
-              min={4}
-              max={80}
-              step={1}
-              value={Math.max(4, Math.min(80, Number(blurAmount) || 24))}
-              onChange={(e) => commitSize({ blur_amount: Math.max(4, Math.min(80, Number(e.target.value) || 24)) })}
-              className="mt-3 h-1 w-full accent-cs2-accent"
-            />
-          </label>
-        </div>
       </PaneSection>
       <PaneSection title="输出路径">
         <label className="block space-y-1">
@@ -1847,15 +1943,8 @@ export default function LiteCutPropertyPanel({
     setTab(id);
     onTabChange?.(id);
   };
-  const paneTitle = {
-    clip: t("liteCut.inspector.clip"),
-    text: t("liteCut.inspector.text"),
-    color: t("liteCut.inspector.color"),
-    audio: t("liteCut.inspector.audio"),
-    speed: t("liteCut.inspector.speed"),
-    export: t("liteCut.inspector.export"),
-  }[tab];
   const paneDescription = {
+    canvas: t("liteCut.inspector.canvasDescription"),
     clip: t("liteCut.inspector.clipDescription"),
     text: t("liteCut.inspector.textDescription"),
     color: t("liteCut.inspector.colorDescription"),
@@ -1865,13 +1954,41 @@ export default function LiteCutPropertyPanel({
   }[tab];
   return (
     <aside data-litecut-property-panel className="litecut-property-panel flex h-full min-h-0 w-full flex-col overflow-hidden bg-cs2-bg-sidebar">
+      <nav
+        data-litecut-inspector-tabs
+        className="litecut-inspector-tabs grid h-[58px] shrink-0 grid-cols-6 border-b border-cs2-border bg-cs2-bg-card px-1.5 py-1.5"
+      >
+        {RAIL.map((item) => (
+          <button
+            key={item.id}
+            type="button"
+            title={t(item.labelKey)}
+            onClick={() => setTabBoth(item.id)}
+            className={`relative flex min-w-0 flex-col items-center justify-center gap-1 rounded-md border text-[8px] font-medium transition-colors ${
+              tab === item.id
+                ? "border-cs2-accent/25 bg-cs2-accent-soft text-cs2-accent"
+                : "border-transparent text-cs2-text-secondary hover:border-cs2-border hover:bg-cs2-bg-hover hover:text-cs2-text-primary"
+            }`}
+          >
+            <item.icon className="h-4 w-4 shrink-0" />
+            <span className="truncate">{t(item.labelKey)}</span>
+          </button>
+        ))}
+      </nav>
       <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden">
-        <div className="flex min-h-0 min-w-0 flex-1 flex-col border-l border-cs2-border/80">
-        <header className="litecut-inspector-header flex h-11 shrink-0 items-center border-b border-cs2-border px-3.5">
-          <p className="text-[12px] font-bold text-cs2-accent">{paneTitle}</p>
-          <span className="sr-only">{paneDescription}</span>
-        </header>
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         <div className="litecut-inspector-scroll min-h-0 flex-1 space-y-2 overflow-y-auto p-2">
+          <span className="sr-only">{paneDescription}</span>
+          {tab === "canvas" ? (
+            <CanvasPane
+              width={outputWidth}
+              height={outputHeight}
+              canvasFit={outputCanvasFit}
+              backgroundColor={outputBackgroundColor}
+              blurAmount={outputBlurAmount}
+              onOutputSettingsChange={onOutputSettingsChange}
+            />
+          ) : null}
           {tab === "clip" ? (
             <ClipPane
               media={media}
@@ -2029,9 +2146,6 @@ export default function LiteCutPropertyPanel({
               framemeldSourceItems={framemeldSourceItems}
               encoder={outputEncoder}
               encoderTier={outputEncoderTier}
-              canvasFit={outputCanvasFit}
-              backgroundColor={outputBackgroundColor}
-              blurAmount={outputBlurAmount}
               rangeMode={outputRangeMode}
               rangeStartSec={outputRangeStartSec}
               rangeEndSec={outputRangeEndSec}
@@ -2056,23 +2170,6 @@ export default function LiteCutPropertyPanel({
           ) : null}
         </div>
       </div>
-      <nav className="litecut-inspector-rail flex w-[58px] shrink-0 flex-col items-center gap-1 border-l border-cs2-border bg-cs2-bg-card px-1.5 py-2">
-        {RAIL.map((item) => (
-          <button
-            key={item.id}
-            type="button"
-            title={t(item.labelKey)}
-            onClick={() => setTabBoth(item.id)}
-            className={`relative flex w-11 flex-col items-center gap-1.5 rounded-md border py-2.5 text-[9px] font-medium transition-all ${
-              tab === item.id ? "border-cs2-accent/25 bg-cs2-accent-soft text-cs2-accent shadow-sm" : "border-transparent text-cs2-text-secondary hover:border-cs2-border hover:bg-cs2-bg-hover hover:text-cs2-text-primary"
-            }`}
-          >
-            {tab === item.id ? <span className="absolute -left-2 top-0 bottom-0 w-0.5 rounded-full bg-cs2-accent" /> : null}
-            <item.icon className="h-[18px] w-[18px]" />
-            <span>{t(item.labelKey)}</span>
-          </button>
-        ))}
-      </nav>
       </div>
     </aside>
   );

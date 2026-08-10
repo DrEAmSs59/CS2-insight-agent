@@ -11,6 +11,7 @@ import { ChevronDown, Loader2, SlidersHorizontal } from "lucide-react";
 import { useT } from "../i18n/useT.js";
 import { formatMontageApiError, humanizeMontageError } from "../utils/formatMontageApiError.js";
 import { ffmpegGateSubtitle } from "../utils/ffmpegGateMessages.js";
+import { isFrameMeldImagePath, summarizeFrameMeldSources } from "../utils/framemeld.js";
 import {
   MontageWorkbenchToolbar,
   MontageOrchestrationTimeline,
@@ -276,9 +277,6 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
   const [outroPath, setOutroPath] = useState("");
   const [outroDuration, setOutroDuration] = useState(3);
   const [framemeldEnabled, setFrameMeldEnabled] = useState(false);
-  const handleFrameMeldEnabledChange = useCallback((enabled) => {
-    setFrameMeldEnabled(Boolean(enabled));
-  }, []);
   const [outputFilename, setOutputFilename] = useState(() => buildTimestampMontageFilename());
   const [outputDir, setOutputDir] = useState("");
   const outputDirTouchedRef = useRef(false);
@@ -355,12 +353,6 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
   useEffect(() => {
     void checkFfmpegGate();
   }, [checkFfmpegGate, location.pathname]);
-
-  useEffect(() => {
-    if (!ffmpegGate.loading && !ffmpegGate.framemeldAvailable && framemeldEnabled) {
-      setFrameMeldEnabled(false);
-    }
-  }, [ffmpegGate.framemeldAvailable, ffmpegGate.loading, framemeldEnabled]);
 
   useEffect(() => {
     if (!open && !isPage) return;
@@ -559,6 +551,81 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
   const orderedIdSet = useMemo(() => new Set(orderedIds), [orderedIds]);
 
   const orderedClips = useMemo(() => orderedIds.map((id) => byId.get(id)).filter(Boolean), [orderedIds, byId]);
+
+  const supplementalFrameMeldPaths = useMemo(
+    () => [introPath, outroPath]
+      .map((value) => String(value || "").trim())
+      .filter((value) => value && !isFrameMeldImagePath(value)),
+    [introPath, outroPath],
+  );
+  const supplementalFrameMeldKey = useMemo(
+    () => JSON.stringify(supplementalFrameMeldPaths),
+    [supplementalFrameMeldPaths],
+  );
+  const [supplementalFrameMeldProbe, setSupplementalFrameMeldProbe] = useState({ key: "[]", items: [] });
+
+  useEffect(() => {
+    let cancelled = false;
+    if (supplementalFrameMeldPaths.length === 0) {
+      setSupplementalFrameMeldProbe({ key: supplementalFrameMeldKey, items: [] });
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    const pendingItems = supplementalFrameMeldPaths.map((path) => ({ path, fps: null }));
+    setSupplementalFrameMeldProbe({ key: supplementalFrameMeldKey, items: pendingItems });
+    const timerId = window.setTimeout(() => {
+      void API.post("/montage/media-fps", { paths: supplementalFrameMeldPaths })
+        .then(({ data }) => {
+          if (cancelled) return;
+          const probedByPath = new Map(
+            (Array.isArray(data?.items) ? data.items : []).map((item) => [String(item?.path || ""), item]),
+          );
+          setSupplementalFrameMeldProbe({
+            key: supplementalFrameMeldKey,
+            items: supplementalFrameMeldPaths.map((path) => ({
+              path,
+              fps: probedByPath.get(path)?.fps ?? null,
+            })),
+          });
+        })
+        .catch(() => {
+          if (!cancelled) {
+            setSupplementalFrameMeldProbe({ key: supplementalFrameMeldKey, items: pendingItems });
+          }
+        });
+    }, 150);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timerId);
+    };
+  }, [supplementalFrameMeldKey, supplementalFrameMeldPaths]);
+
+  const supplementalFrameMeldItems = useMemo(
+    () => supplementalFrameMeldProbe.key === supplementalFrameMeldKey
+      ? supplementalFrameMeldProbe.items
+      : supplementalFrameMeldPaths.map((path) => ({ path, fps: null })),
+    [supplementalFrameMeldKey, supplementalFrameMeldPaths, supplementalFrameMeldProbe],
+  );
+  const framemeldSourceSummary = useMemo(
+    () => summarizeFrameMeldSources([...orderedClips, ...supplementalFrameMeldItems]),
+    [orderedClips, supplementalFrameMeldItems],
+  );
+  const framemeldCanEnable = !ffmpegGate.loading
+    && ffmpegGate.framemeldAvailable
+    && framemeldSourceSummary.compatible;
+  const effectiveFrameMeldEnabled = framemeldCanEnable && framemeldEnabled;
+
+  useEffect(() => {
+    if (framemeldEnabled && !framemeldCanEnable) {
+      setFrameMeldEnabled(false);
+    }
+  }, [framemeldCanEnable, framemeldEnabled]);
+
+  const handleFrameMeldEnabledChange = useCallback((enabled) => {
+    setFrameMeldEnabled(Boolean(enabled) && framemeldCanEnable);
+  }, [framemeldCanEnable]);
 
   const unknownDurationHint = useMemo(() => {
     if (orderedClips.length === 0) return null;
@@ -891,7 +958,7 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
         bgm_volume: bgmVolume / 100,
         player_avatars: playerAvatarsPayload,
         name_cards_enabled: nameCardsEnabled,
-        framemeld_enabled: framemeldEnabled,
+        framemeld_enabled: effectiveFrameMeldEnabled,
       });
       setProjectId(data.id);
       if (data?.body?.transitions && typeof data.body.transitions === "object") {
@@ -926,7 +993,7 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
         setNameCardsEnabled(data.body.name_cards_enabled);
       }
       if (typeof data?.body?.framemeld_enabled === "boolean") {
-        setFrameMeldEnabled(data.body.framemeld_enabled);
+        setFrameMeldEnabled(Boolean(data.body.framemeld_enabled) && framemeldCanEnable);
       }
       if (requestedName) setDraftName(requestedName);
       setDraftDirty(false);
@@ -957,7 +1024,8 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
     bgmVolume,
     playerAvatars,
     nameCardsEnabled,
-    framemeldEnabled,
+    effectiveFrameMeldEnabled,
+    framemeldCanEnable,
     t,
   ]);
 
@@ -1075,7 +1143,7 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
         theme_id: selectedThemeId,
         player_avatars: playerAvatarsPayload,
         name_cards_enabled: nameCardsEnabled,
-        framemeld_enabled: framemeldEnabled,
+        framemeld_enabled: effectiveFrameMeldEnabled,
       });
       const next = { ...data, output_path: data?.output_path || outPath };
       setExportJob(next);
@@ -1108,7 +1176,7 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
     bgmVolume,
     playerAvatars,
     nameCardsEnabled,
-    framemeldEnabled,
+    effectiveFrameMeldEnabled,
     showToast,
     t,
   ]);
@@ -1690,8 +1758,9 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
                 nameCardsEnabled={nameCardsEnabled}
                 onPlayerAvatarChange={handlePlayerAvatarChange}
                 onNameCardsEnabledChange={setNameCardsEnabled}
-                framemeldEnabled={framemeldEnabled}
+                framemeldEnabled={effectiveFrameMeldEnabled}
                 framemeldRuntimeAvailable={ffmpegGate.framemeldAvailable}
+                framemeldSourceSummary={framemeldSourceSummary}
                 onFrameMeldEnabledChange={handleFrameMeldEnabledChange}
               />
             </div>

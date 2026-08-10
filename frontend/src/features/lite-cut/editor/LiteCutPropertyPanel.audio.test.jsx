@@ -76,7 +76,7 @@ describe("LiteCut audio inspector", () => {
   });
 
   it("renders the resolved A-track target while the selected timeline clip is video", () => {
-    render(
+    const { container } = render(
       <LiteCutPropertyPanel
         defaultTab="audio"
         selectedMedia={{ id: "video", kind: "video", title: "video.mp4" }}
@@ -88,5 +88,8 @@ describe("LiteCut audio inspector", () => {
 
     expect(screen.getByText("音频轨(A轨)片段")).toBeTruthy();
     expect(screen.getByText("detached-audio.wav")).toBeTruthy();
+    const tabs = container.querySelector("[data-litecut-inspector-tabs]");
+    expect(tabs.className).toContain("grid-cols-6");
+    expect(tabs.querySelectorAll("button")).toHaveLength(6);
   });
 });

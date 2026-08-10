@@ -56,7 +56,7 @@ export function useTransformControls(transform, onChange, defaultSize = 1) {
 export function PaneSection({ title, defaultOpen = true, children }) {
   const [open, setOpen] = useState(defaultOpen);
   return (
-    <section className="litecut-property-collapse overflow-hidden rounded-lg border border-cs2-border/55 bg-cs2-bg-card shadow-sm">
+    <section className="litecut-property-collapse overflow-hidden rounded-lg border border-cs2-border bg-cs2-bg-card">
       <button
         type="button"
         aria-expanded={open}
@@ -66,7 +66,7 @@ export function PaneSection({ title, defaultOpen = true, children }) {
         <span className="flex min-w-0 items-center whitespace-normal break-words text-[11px] font-semibold leading-snug text-cs2-text-secondary">{title}</span>
         <ChevronDown className={`h-3.5 w-3.5 shrink-0 text-cs2-text-muted transition-transform ${open ? "rotate-180" : ""}`} />
       </button>
-      <div hidden={!open} className="litecut-property-collapse-content space-y-1">{children}</div>
+      <div hidden={!open} className="litecut-property-collapse-content space-y-2">{children}</div>
     </section>
   );
 }
@@ -86,7 +86,7 @@ export function ProSlider({ label, value, onChange, min = -100, max = 100, reset
         step={step}
         value={numericValue}
         aria-label={label}
-        style={{ "--litecut-range-progress": `${progress}%` }}
+        style={{ "--cs2-range-progress": `${progress}%` }}
         onBlur={endPropertyEdit}
         onKeyDown={beginPropertyEdit}
         onKeyUp={endPropertyEdit}
@@ -94,7 +94,7 @@ export function ProSlider({ label, value, onChange, min = -100, max = 100, reset
         onPointerUp={endPropertyEdit}
         onPointerCancel={endPropertyEdit}
         onChange={(event) => onChange(Number(event.target.value))}
-        className="litecut-property-slider min-w-0 flex-1"
+        className="cs2-data-slider min-w-0 flex-1"
       />
       <NumberInput value={numericValue} min={min} max={max} step={step} onFocus={beginPropertyEdit} onBlur={endPropertyEdit} onChange={onChange} className="w-full min-w-0" />
       <button type="button" disabled={numericValue === resetValue} onClick={() => { beginPropertyEdit(); onChange(resetValue); endPropertyEdit(); }} className="inline-flex h-7 w-6 items-center justify-center rounded-md text-cs2-text-muted transition-colors hover:bg-cs2-accent-soft hover:text-cs2-accent disabled:opacity-45 disabled:hover:bg-transparent disabled:hover:text-cs2-text-muted" title="重置" aria-label={`${label}重置`}>

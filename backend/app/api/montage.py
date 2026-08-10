@@ -66,6 +66,50 @@ class MontageProjectBody(BaseModel):
     framemeld_enabled: bool = False
 
 
+class MontageMediaFpsProbeBody(BaseModel):
+    paths: list[str] = Field(default_factory=list, max_length=2)
+
+
+@router.post("/api/montage/media-fps")
+async def probe_montage_media_fps(body: MontageMediaFpsProbeBody):
+    """Probe optional intro/outro videos for the project-level FrameMeld gate."""
+    from ..video_composer import (
+        _is_image_path,
+        probe_video_audio_summary,
+        resolve_ffmpeg_binary,
+        resolve_ffprobe_binary,
+    )
+
+    cfg = load_config()
+    ffmpeg_bin = resolve_ffmpeg_binary(getattr(cfg, "ffmpeg_path", None))
+    ffprobe_bin = resolve_ffprobe_binary(ffmpeg_bin)
+    items: list[dict[str, Any]] = []
+    for raw_path in body.paths:
+        normalized = str(raw_path or "").strip()
+        if not normalized:
+            continue
+        media_path = Path(normalized).expanduser()
+        if _is_image_path(media_path):
+            items.append({"path": normalized, "kind": "image", "fps": None, "status": "ok"})
+            continue
+        if not media_path.is_file():
+            items.append({"path": normalized, "kind": "video", "fps": None, "status": "missing"})
+            continue
+        try:
+            summary = await asyncio.to_thread(probe_video_audio_summary, media_path, ffprobe_bin)
+            fps = float(summary.get("fps") or 0.0)
+            items.append({
+                "path": normalized,
+                "kind": "video",
+                "fps": fps if fps >= 1.0 else None,
+                "status": "ok" if fps >= 1.0 else "unknown",
+            })
+        except Exception:
+            logger.warning("failed to probe montage media fps path=%s", media_path, exc_info=True)
+            items.append({"path": normalized, "kind": "video", "fps": None, "status": "error"})
+    return {"items": items}
+
+
 
 
 @router.post("/api/montage/projects")

@@ -172,12 +172,17 @@ describe("OpenCutTrackTimeline", () => {
     expect(screen.getByText("删右侧")).toBeTruthy();
     expect(document.querySelector("[data-oc-ruler]")).toBeTruthy();
     expect(document.querySelector("[data-oc-lane][data-oc-track-id='v1']")).toBeTruthy();
+    expect(document.querySelector("[data-auto-overlay-track-drop]")?.className).toContain("litecut-timeline-auto-lane");
+    expect(document.querySelector("[data-auto-video-track-drop]")?.className).toContain("litecut-timeline-auto-lane");
+    expect(document.querySelector("[data-timeline-track-header]")?.className).toContain("litecut-timeline-track-header");
   });
 
   it("supports continuous zoom down to 8 percent", () => {
     render(<OpenCutTrackTimeline body={useLiteCutEditorStore.getState().body} />);
 
     const slider = screen.getByRole("slider", { name: "时间轴无级缩放" });
+    expect(slider.className).toContain("cs2-data-slider");
+    expect(slider.style.getPropertyValue("--cs2-range-progress")).not.toBe("");
     fireEvent.change(slider, { target: { value: "0" } });
 
     expect(useLiteCutTimelineStore.getState().timelineZoom).toBeCloseTo(0.08);

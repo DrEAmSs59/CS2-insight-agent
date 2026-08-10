@@ -32,6 +32,7 @@ from .montage_encoder import (
 from .montage_exceptions import HardwareEncoderFailure, MontageComposerError
 from .ffmpeg_compatibility import add_ffmpeg_compatibility_hint, ffmpeg_tool_version_identity
 from .framemeld import (
+    FrameMeldRifeDevicePlan,
     build_framemeld_command,
     framemeld_execution_policy,
     framemeld_failure_from_result,
@@ -39,7 +40,9 @@ from .framemeld import (
     framemeld_sources_are_compatible,
     framemeld_working_fps,
     parse_framemeld_status_events,
+    plan_framemeld_rife_device,
     probe_framemeld,
+    record_framemeld_rife_result,
 )
 from .video_export_log import export_event, export_gpu_inventory
 from .env_utils import (
@@ -1566,6 +1569,7 @@ def _compose_montage_once(
     framemeld_enabled: bool = False,
     encoder_device_args: Sequence[str] | None = None,
     encoder_adapter: object | None = None,
+    rife_device_plan: FrameMeldRifeDevicePlan | None = None,
     progress_callback: Optional[Callable[[float, str, Optional[dict[str, Any]]], None]] = None,
     progress_stage_prefix: str = "",
 ) -> None:
@@ -2018,6 +2022,7 @@ def _compose_montage_once(
                 output_path=output_path,
                 video_encode_args=video_encode_quality,
                 encoder_adapter=encoder_adapter,
+                rife_device_plan=rife_device_plan,
                 capability=capability,
             )
             framemeld_policy = framemeld_execution_policy(cmd_framemeld)
@@ -2028,6 +2033,11 @@ def _compose_montage_once(
                 output_path=output_path,
             )
             precise_events = parse_framemeld_status_events(r4.stdout, r4.stderr)
+            record_framemeld_rife_result(
+                rife_device_plan,
+                precise_events,
+                succeeded=r4.returncode == 0,
+            )
             if precise_events:
                 log_framemeld_diagnostic_events(
                     precise_events,
@@ -2201,6 +2211,13 @@ def _compose_montage_impl(
     if "h264_nvenc" in available:
         adapters = map_nvenc_device_indices(ffmpeg_bin, adapters)
     export_gpu_inventory(adapters)
+    rife_device_plan = (
+        plan_framemeld_rife_device(ffmpeg_bin, adapters)
+        if framemeld_enabled
+        else None
+    )
+    if rife_device_plan is not None:
+        export_event("rife_device_plan", **rife_device_plan.log_fields())
     candidates = build_encoder_candidates(
         montage_encoder,
         adapters,
@@ -2302,6 +2319,7 @@ def _compose_montage_impl(
                 framemeld_enabled=framemeld_enabled,
                 encoder_device_args=candidate.ffmpeg_device_args,
                 encoder_adapter=candidate.adapter,
+                rife_device_plan=rife_device_plan,
                 progress_callback=progress_callback,
                 progress_stage_prefix=stage_prefix,
             )

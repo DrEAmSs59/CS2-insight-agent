@@ -140,7 +140,7 @@
   min-height: 38px;
   padding: 8px 11px;
   border: 0;
-  background: linear-gradient(180deg, color-mix(in srgb, var(--cs2-bg-elevated) 45%, var(--cs2-bg-card)), var(--cs2-bg-card));
+  background: var(--cs2-bg-card);
   color: inherit;
   cursor: pointer;
   transition: background-color 160ms ease;
@@ -151,63 +151,52 @@
 }
 
 .litecut-property-collapse-header[aria-expanded="true"] {
-  background: linear-gradient(180deg, color-mix(in srgb, var(--cs2-bg-elevated) 60%, var(--cs2-bg-card)), var(--cs2-bg-card));
-  border-bottom: 1px solid color-mix(in srgb, var(--cs2-border) 75%, transparent);
+  background: var(--cs2-bg-card);
 }
 
 .litecut-property-collapse-content {
-  padding: 10px 9px 11px;
-  background: linear-gradient(135deg, color-mix(in srgb, var(--cs2-bg-card) 88%, var(--cs2-bg-elevated)), var(--cs2-bg-sidebar));
+  padding: 2px 10px 12px;
+  background: var(--cs2-bg-card);
+}
+
+.litecut-keyframe-editor {
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.litecut-property-inline-group {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
 }
 
 .litecut-property-number {
   height: 26px;
   padding: 0 6px;
-  border: 1px solid color-mix(in srgb, var(--cs2-border) 78%, transparent);
-  border-radius: var(--cs2-radius-control);
+  border: 1px solid var(--cs2-border-subtle);
+  border-radius: 8px;
   outline: none;
   text-align: right;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 11px;
+  font-weight: 600;
   color: var(--cs2-text-primary);
-  background: color-mix(in srgb, var(--cs2-bg-page) 70%, var(--cs2-bg-input));
-  box-shadow: inset 0 1px 1px rgba(0, 0, 0, 0.16);
+  background: var(--cs2-bg-input);
+  box-shadow: none;
+  appearance: textfield;
 }
 
 .litecut-property-number:hover,
 .litecut-property-number:focus {
-  border-color: color-mix(in srgb, var(--cs2-accent) 55%, var(--cs2-border));
+  border-color: var(--cs2-accent);
 }
 
 .litecut-property-number::-webkit-inner-spin-button,
 .litecut-property-number::-webkit-outer-spin-button {
   margin: 0;
   appearance: none;
-}
-
-.litecut-property-slider {
-  width: 100%;
-  height: 3px;
-  margin: 0;
-  border-radius: 999px;
-  outline: none;
-  appearance: none;
-  cursor: pointer;
-  background: linear-gradient(to right, var(--cs2-accent) 0 var(--litecut-range-progress), var(--cs2-bg-elevated) var(--litecut-range-progress) 100%);
-}
-
-.litecut-property-slider::-webkit-slider-thumb {
-  width: 10px;
-  height: 10px;
-  border: 2px solid var(--cs2-accent);
-  border-radius: 50%;
-  appearance: none;
-  background: var(--cs2-bg-card);
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--cs2-accent) 30%, transparent);
-}
-
-.litecut-property-slider:focus-visible::-webkit-slider-thumb {
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--cs2-accent) 28%, transparent);
 }
 
 /* 录制队列节奏滑块：进度使用业务强调色，未填充轨道跟随亮/暗主题边框灰。 */
@@ -264,17 +253,8 @@
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--cs2-range-accent) 28%, transparent);
 }
 
-.litecut-inspector-header {
-  background: linear-gradient(180deg, color-mix(in srgb, var(--cs2-bg-card) 90%, var(--cs2-bg-elevated)), var(--cs2-bg-card));
-}
-
-.litecut-inspector-rail {
-  background: linear-gradient(90deg, var(--cs2-bg-card), color-mix(in srgb, var(--cs2-bg-card) 82%, var(--cs2-bg-elevated)));
-  box-shadow: -5px 0 18px rgba(0, 0, 0, 0.12);
-}
-
 .litecut-selected-media {
-  background: linear-gradient(145deg, color-mix(in srgb, var(--cs2-bg-elevated) 35%, var(--cs2-bg-card)), var(--cs2-bg-card));
+  background: var(--cs2-bg-card);
 }
 
 .litecut-property-control-row + .litecut-property-control-row {
@@ -312,38 +292,56 @@
     width: 20px;
   }
 
-  .litecut-inspector-rail {
-    width: 50px;
-    padding-inline: 3px;
-  }
-
-  .litecut-inspector-rail > button {
-    width: 40px;
-  }
 }
 
 /* LiteCut 时间轴采用同一组低饱和冷色，避免素材与状态标记互相抢色。 */
 .litecut-timeline-clip {
   --litecut-clip-rgb: 55, 91, 126;
-  border-color: rgba(var(--litecut-clip-rgb), 0.62);
-  background:
-    linear-gradient(135deg, rgba(var(--litecut-clip-rgb), 0.3), rgba(var(--litecut-clip-rgb), 0.14)),
-    var(--cs2-bg-card);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.045), 0 1px 2px rgba(0, 0, 0, 0.2);
+  --litecut-clip-fill: #1f2d38;
+  --litecut-clip-border: #466b87;
+  --litecut-clip-text: #eaf2f7;
+  border-color: var(--litecut-clip-border);
+  background: var(--litecut-clip-fill);
+  color: var(--litecut-clip-text);
+  box-shadow: none;
 }
 
-.litecut-timeline-clip--video { --litecut-clip-rgb: 55, 91, 126; }
-.litecut-timeline-clip--audio { --litecut-clip-rgb: 54, 112, 75; }
-.litecut-timeline-clip--text  { --litecut-clip-rgb: 156, 116, 45; }
-.litecut-timeline-clip--image { --litecut-clip-rgb: 112, 76, 126; }
+.litecut-timeline-clip--video {
+  --litecut-clip-rgb: 55, 91, 126;
+  --litecut-clip-fill: #1f2d38;
+  --litecut-clip-border: #466b87;
+  --litecut-clip-text: #eaf2f7;
+}
+
+.litecut-timeline-clip--audio {
+  --litecut-clip-rgb: 54, 112, 75;
+  --litecut-clip-fill: #1c3428;
+  --litecut-clip-border: #3b7955;
+  --litecut-clip-text: #dff4e7;
+}
+
+.litecut-timeline-clip--text {
+  --litecut-clip-rgb: 156, 116, 45;
+  --litecut-clip-fill: #3b3020;
+  --litecut-clip-border: #8b6e36;
+  --litecut-clip-text: #f5ead2;
+}
+
+.litecut-timeline-clip--image {
+  --litecut-clip-rgb: 112, 76, 126;
+  --litecut-clip-fill: #31273c;
+  --litecut-clip-border: #72588b;
+  --litecut-clip-text: #eee4f5;
+}
 
 .litecut-timeline-clip--selected {
   border-color: var(--cs2-accent) !important;
 }
 
 .litecut-timeline-clip--invalid {
-  border-color: rgba(244, 114, 182, 0.8) !important;
-  background: rgba(190, 24, 93, 0.26) !important;
+  border-color: #d85b76 !important;
+  background: #3f2028 !important;
+  color: #ffdce4;
 }
 
 .litecut-speed-ramp {
@@ -359,12 +357,164 @@
 .litecut-speed-ramp-segment--odd  { background: rgba(var(--litecut-clip-rgb), 0.52); }
 
 .litecut-timeline-track-header {
-  background: var(--cs2-bg-card);
+  background: #181919;
+  color: #e5e5e2;
 }
 
+.litecut-timeline-lane {
+  background: #151718;
+}
+
+.litecut-timeline-lane--selected,
 .litecut-timeline-track-header--selected {
   /* The sticky header must stay opaque while clips scroll underneath it. */
-  background: color-mix(in srgb, var(--cs2-bg-card) 90%, var(--cs2-accent));
+  background: #211d18;
+}
+
+.litecut-timeline-root {
+  background: #151718;
+}
+
+.litecut-timeline-toolbar,
+.litecut-timeline-ruler {
+  background: #181919;
+}
+
+.litecut-timeline-ruler {
+  color: #d7d7d2;
+  box-shadow: none;
+}
+
+.litecut-timeline-tick {
+  border-color: #5a4633;
+}
+
+.litecut-timeline-track-icon {
+  border-color: #474744;
+  background: #242424;
+  color: #b8b8b3;
+}
+
+.litecut-timeline-track-icon--selected {
+  border-color: #96500f;
+  background: #4a2a0d;
+  color: #ff941f;
+}
+
+.litecut-timeline-auto-row {
+  --litecut-auto-fill: #1c191e;
+  --litecut-auto-border: #554758;
+  --litecut-auto-text: #cdbbd2;
+  border-color: var(--litecut-auto-border);
+  background: var(--litecut-auto-fill);
+}
+
+.litecut-timeline-auto-row--video {
+  --litecut-auto-fill: #1c1b17;
+  --litecut-auto-border: #5e5234;
+  --litecut-auto-text: #d2bf83;
+}
+
+.litecut-timeline-auto-label,
+.litecut-timeline-auto-lane {
+  border-color: var(--litecut-auto-border);
+  background: var(--litecut-auto-fill);
+  color: var(--litecut-auto-text);
+}
+
+.litecut-timeline-auto-lane--active {
+  border-color: #b96516;
+  background: #3a260f;
+  color: #ffa044;
+}
+
+.light .litecut-timeline-clip--video {
+  --litecut-clip-fill: #c6d6e2;
+  --litecut-clip-border: #6689a3;
+  --litecut-clip-text: #17364d;
+}
+
+.light .litecut-timeline-clip--audio {
+  --litecut-clip-fill: #d2e5d8;
+  --litecut-clip-border: #6e9b7d;
+  --litecut-clip-text: #214b31;
+}
+
+.light .litecut-timeline-clip--text {
+  --litecut-clip-fill: #eadfca;
+  --litecut-clip-border: #a58448;
+  --litecut-clip-text: #594117;
+}
+
+.light .litecut-timeline-clip--image {
+  --litecut-clip-fill: #ded3e6;
+  --litecut-clip-border: #8e72a4;
+  --litecut-clip-text: #4b365b;
+}
+
+.light .litecut-timeline-clip--invalid {
+  border-color: #c7546d !important;
+  background: #f0cfd6 !important;
+  color: #652236;
+}
+
+.light .litecut-timeline-lane--selected,
+.light .litecut-timeline-track-header--selected {
+  background: #f1ebe5;
+}
+
+.light .litecut-timeline-track-header,
+.light .litecut-timeline-toolbar,
+.light .litecut-timeline-ruler {
+  background: #f5f5f5;
+  color: #292825;
+}
+
+.light .litecut-timeline-root {
+  background: #ebebeb;
+}
+
+.light .litecut-timeline-lane {
+  background: #f0f0ef;
+}
+
+.light .litecut-timeline-lane--selected,
+.light .litecut-timeline-track-header--selected {
+  background: #f1e8df;
+}
+
+.light .litecut-timeline-tick {
+  border-color: #c8a789;
+}
+
+.light .litecut-timeline-track-icon {
+  border-color: #c8c7c4;
+  background: #ebebea;
+  color: #66645f;
+}
+
+.light .litecut-timeline-track-icon--selected {
+  border-color: #d58b48;
+  background: #f4dbc3;
+  color: #bd5500;
+}
+
+.light .litecut-timeline-auto-row {
+  --litecut-auto-fill: #f2edf2;
+  --litecut-auto-border: #bea9c2;
+  --litecut-auto-text: #68466d;
+}
+
+.light .litecut-timeline-auto-row--video {
+  --litecut-auto-fill: #f2efe6;
+  --litecut-auto-border: #c7b47b;
+  --litecut-auto-text: #70591b;
+}
+
+.light .litecut-timeline-auto-lane--active {
+  border-color: #d46a12;
+  background: #f6ddc5;
+  color: #a84400;
 }
 
 .litecut-transition-marker {
@@ -538,6 +688,63 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   padding-right: 0.28em;
+}
+
+/* Demo cards use theme-specific source marks. White publisher logos disappear
+   against the light canvas, while black assets lose contrast in dark mode. */
+.match-source-logo--light {
+  display: block;
+}
+
+.match-source-logo--dark {
+  display: none;
+}
+
+.dark .match-source-logo--light {
+  display: none;
+}
+
+.dark .match-source-logo--dark {
+  display: block;
+}
+
+/* Keep the map art present in light mode without sacrificing the semantic text
+   colors. The former 40% image plus opaque card gradient washed out the whole
+   hero, including publisher marks and the match date. */
+.match-card__hero-image {
+  opacity: 0.42;
+  filter: saturate(0.9) contrast(1.03);
+}
+
+.match-card__hero-shade {
+  background: linear-gradient(
+    to top,
+    var(--cs2-bg-card) 0%,
+    color-mix(in srgb, var(--cs2-bg-card) 54%, transparent) 48%,
+    color-mix(in srgb, var(--cs2-bg-card) 18%, transparent) 100%
+  );
+}
+
+.light .match-card__hero-image {
+  opacity: 0.62;
+  filter: saturate(0.86) contrast(1.08);
+}
+
+.light .match-card__hero-shade {
+  background: linear-gradient(
+    to top,
+    color-mix(in srgb, var(--cs2-bg-card) 88%, transparent) 0%,
+    color-mix(in srgb, var(--cs2-bg-card) 38%, transparent) 48%,
+    color-mix(in srgb, var(--cs2-bg-card) 16%, transparent) 100%
+  );
+}
+
+.match-card__source-logo {
+  opacity: 0.9;
+}
+
+.light .match-card__source-logo {
+  opacity: 0.82;
 }
 
 @container page (min-width: 920px) {

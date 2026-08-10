@@ -55,6 +55,15 @@ export default function LiteCutProjectDrawer({
     if (open) onRefresh?.();
   }, [open, onRefresh]);
 
+  useEffect(() => {
+    if (!open) return undefined;
+    const handleKeyDown = (event) => {
+      if (event.key === "Escape") onClose?.();
+    };
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [open, onClose]);
+
   const matchingProjects = useMemo(() => {
     const keyword = query.trim().toLocaleLowerCase();
     return [...projects]
@@ -127,19 +136,29 @@ export default function LiteCutProjectDrawer({
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-[70] flex justify-end bg-black/45" role="dialog" aria-modal="true" aria-label={t("liteCut.project.drawerTitle")}>
-      <section className="flex h-full w-full max-w-md flex-col border-l border-cs2-border bg-cs2-bg-card shadow-2xl">
-        <header className="flex items-center justify-between border-b border-cs2-border px-4 py-3">
-          <div>
-            <p className="text-sm font-bold text-cs2-text-primary">{t("liteCut.project.drawerTitle")}</p>
+    <>
+      <div className="fixed inset-0 z-[100] bg-black/60 backdrop-blur-sm" aria-hidden />
+      <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 sm:p-6" onClick={onClose}>
+      <section
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="litecut-project-manager-title"
+        className="flex max-h-[88vh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl border border-cs2-border bg-cs2-bg-card shadow-2xl"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <header className="flex shrink-0 items-center gap-3 border-b border-cs2-border px-5 py-4">
+          <FolderOpen className="h-5 w-5 shrink-0 text-cs2-accent" aria-hidden />
+          <div className="min-w-0 flex-1">
+            <h2 id="litecut-project-manager-title" className="text-[15px] font-bold text-cs2-text-primary">{t("liteCut.project.drawerTitle")}</h2>
             <p className="mt-0.5 text-[10px] text-cs2-text-muted">{t("liteCut.project.drawerSubtitle")}</p>
           </div>
-          <button type="button" title={t("common.close")} onClick={onClose} className="inline-flex h-8 w-8 items-center justify-center rounded-md text-cs2-text-muted hover:bg-white/5 hover:text-cs2-text-primary">
+          <button type="button" title={t("common.close")} aria-label={t("common.close")} onClick={onClose} className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-cs2-text-muted transition-colors hover:bg-cs2-surface-2 hover:text-cs2-text-primary">
             <X className="h-4 w-4" />
           </button>
         </header>
 
-        <div className="min-h-0 flex-1 overflow-y-auto p-4">
+        <div className="min-h-0 flex-1 overflow-y-auto p-4 sm:p-5">
+          <div className="mx-auto w-full max-w-4xl">
           <section className="rounded-xl border border-cs2-accent/25 bg-cs2-accent-soft/30 p-3">
             <p className="text-[10px] font-semibold uppercase tracking-wide text-cs2-accent">{t("liteCut.project.current")}</p>
             <div className="mt-1 flex items-center justify-between gap-3">
@@ -241,8 +260,10 @@ export default function LiteCutProjectDrawer({
               })}
             </div>
           </section>
+          </div>
         </div>
       </section>
-    </div>
+      </div>
+    </>
   );
 }

@@ -26,15 +26,28 @@ function formatDuration(mins) {
 }
 
 const SOURCE_LOGOS = {
-  "Faceit": "/images/sources/faceit-white.png",
-  "5E": "/images/sources/5eplay.png",
-  "Perfect World": "/images/sources/perfectworld-white.png",
-  "Matchmaking": "/images/sources/valve-white.png",
-  "ESL": "/images/sources/esl-white.png",
-  "ESEA": "/images/sources/esea-white.png",
-  "Blast": "/images/sources/matchzy.png",
-  "Local/Other": "/images/sources/unknown.png",
+  "Faceit": { light: "/images/sources/faceit-black.png", dark: "/images/sources/faceit-white.png" },
+  "5E": { light: "/images/sources/5eplay.png", dark: "/images/sources/5eplay.png" },
+  "Perfect World": { light: "/images/sources/perfectworld-black.png", dark: "/images/sources/perfectworld-white.png" },
+  "Matchmaking": { light: "/images/sources/valve-black.png", dark: "/images/sources/valve-white.png" },
+  "ESL": { light: "/images/sources/esl-black.png", dark: "/images/sources/esl-white.png" },
+  "ESEA": { light: "/images/sources/esea-black.png", dark: "/images/sources/esea-white.png" },
+  "Blast": { light: "/images/sources/matchzy.png", dark: "/images/sources/matchzy.png" },
+  "Local/Other": { light: "/images/sources/unknown.png", dark: "/images/sources/unknown.png" },
 };
+
+function SourceLogo({ source, className = "" }) {
+  const logos = SOURCE_LOGOS[source] || SOURCE_LOGOS["Local/Other"];
+  if (logos.light === logos.dark) {
+    return <img src={logos.light} alt="" aria-hidden="true" className={className} />;
+  }
+  return (
+    <>
+      <img src={logos.light} alt="" aria-hidden="true" className={`${className} match-source-logo--light`} />
+      <img src={logos.dark} alt="" aria-hidden="true" className={`${className} match-source-logo--dark`} />
+    </>
+  );
+}
 
 /**
  * 列表模式下的行展示
@@ -78,7 +91,6 @@ export function MatchListRow({
   };
 
   const mapName = matchMeta.map_name || "unknown";
-  const sourceLogo = SOURCE_LOGOS[demo.source] || SOURCE_LOGOS["Local/Other"];
   const players = demo.players || [];
   const teamA = players.filter(p => p.team_number === 2 || p.team === 2 || p.team === "TERRORIST");
   const teamB = players.filter(p => p.team_number === 3 || p.team === 3 || p.team === "CT");
@@ -163,7 +175,7 @@ export function MatchListRow({
             {mapName.replace('de_', '').replace('cs_', '')}
           </span>
           <div className="flex items-center gap-1 opacity-60">
-            <img src={sourceLogo} alt={demo.source} className="h-2.5 object-contain" />
+            <SourceLogo source={demo.source} className="h-2.5 object-contain" />
             <span className="text-[9px] font-bold uppercase truncate">{demo.source || "Local"}</span>
           </div>
         </div>
@@ -331,8 +343,6 @@ export default function MatchCard({
 
   const mapName = matchMeta.map_name || "unknown";
   const mapThumbnail = `/images/maps/${mapName}.webp`;
-  const sourceLogo = SOURCE_LOGOS[demo.source] || SOURCE_LOGOS["Local/Other"];
-
   const players = demo.players || [];
   const teamA = players.filter(p => p.team_number === 2 || p.team === 2 || p.team === "TERRORIST");
   const teamB = players.filter(p => p.team_number === 3 || p.team === 3 || p.team === "CT");
@@ -406,10 +416,10 @@ export default function MatchCard({
         <img
           src={mapThumbnail}
           alt={mapName}
-          className="absolute inset-0 h-full w-full object-cover opacity-40 transition-transform duration-500 group-hover:scale-110"
+          className="match-card__hero-image absolute inset-0 h-full w-full object-cover transition-transform duration-500 group-hover:scale-110"
           onError={(e) => { e.target.src = "/images/maps/thumbnail_unknown.webp"; }}
         />
-        <div className="absolute inset-0 bg-gradient-to-t from-cs2-bg-card to-transparent" />
+        <div className="match-card__hero-shade absolute inset-0" />
 
         {/* 顶部悬浮信息 */}
         <div className="match-card__hero-content absolute inset-0 z-[1] flex min-w-0 flex-col justify-center px-2 py-0.5">
@@ -440,9 +450,9 @@ export default function MatchCard({
           </div>
 
           {/* 底部行：来源 / 时长 / 日期 */}
-          <div className="match-card__source-row relative flex min-w-0 items-center justify-between text-[10px] font-bold text-cs2-text-primary/70 drop-shadow-md">
+          <div className="match-card__source-row relative flex min-w-0 items-center justify-between text-[10px] font-bold text-cs2-text-primary/80 drop-shadow-md">
             <div className="flex items-center gap-1.5">
-              <img src={sourceLogo} alt={demo.source} className="h-3 object-contain opacity-80" />
+              <SourceLogo source={demo.source} className="match-card__source-logo h-3 object-contain" />
               <span className="uppercase">{demo.source || "Local"}</span>
             </div>
             <div className="match-card__clock absolute left-1/2 flex items-center gap-1 -translate-x-1/2">

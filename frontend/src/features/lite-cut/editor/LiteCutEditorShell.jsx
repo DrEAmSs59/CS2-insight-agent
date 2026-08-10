@@ -4,9 +4,10 @@ import { Loader2 } from "lucide-react";
 import LiteCutToolbar from "./LiteCutToolbar.jsx";
 import LiteCutMediaBin from "./LiteCutMediaBin.jsx";
 import LiteCutPreviewPanel from "./LiteCutPreviewPanel.jsx";
-import LiteCutPropertyPanel from "./LiteCutPropertyPanel.jsx";
+import LiteCutPropertyPanel, { ExportPane } from "./LiteCutPropertyPanel.jsx";
 import LiteCutTimelinePanel from "./LiteCutTimelinePanel.jsx";
 import LiteCutResizableLayout from "./LiteCutResizableLayout.jsx";
+import LiteCutExportSettingsDialog from "./LiteCutExportSettingsDialog.jsx";
 import LiteCutPresetsDrawer from "./LiteCutPresetsDrawer.jsx";
 import LiteCutProjectStartPage from "./LiteCutProjectStartPage.jsx";
 import LiteCutExportProgressDialog from "./LiteCutExportProgressDialog.jsx";
@@ -160,6 +161,7 @@ function clipToMedia(clip, mediaCache) {
 export default function LiteCutEditorShell({
   projectName: projectNameProp,
   defaultInspectorTab = "clip",
+  defaultExportOpen = false,
   onExportPhaseChange,
 }) {
   const t = useT();
@@ -274,7 +276,7 @@ export default function LiteCutEditorShell({
   const replaceSelectedClipSource = useLiteCutTimelineStore((s) => s.replaceSelectedClipSource);
   const backfillClipSourceDuration = useLiteCutTimelineStore((s) => s.backfillClipSourceDuration);
 
-  const [inspectorTab, setInspectorTab] = useState(defaultInspectorTab);
+  const [inspectorTab, setInspectorTab] = useState(defaultInspectorTab === "export" ? "clip" : defaultInspectorTab);
   const [textStyleId, setTextStyleId] = useState("clutch");
   const [overlayText, setOverlayText] = useState("CLUTCH");
   const [textDefaults, setTextDefaults] = useState({ font_family: "微软雅黑", font_file: null, font_size: 64, align: "center" });
@@ -301,6 +303,7 @@ export default function LiteCutEditorShell({
     }
   }, [isPlaying, playheadSec]);
   const [exportHistory, setExportHistory] = useState([]);
+  const [exportSettingsOpen, setExportSettingsOpen] = useState(defaultExportOpen || defaultInspectorTab === "export");
   const [presetsOpen, setPresetsOpen] = useState(false);
   const selectionInspectorTab = useMemo(
     () => inspectorTabForTimelineSelection(body, selectedClipId, selectedTrackId),
@@ -1776,7 +1779,7 @@ export default function LiteCutEditorShell({
 
   return (
     <div
-      className="litecut-editor-interactive relative flex h-full min-h-0 flex-col overflow-hidden bg-cs2-bg-page"
+      className="litecut-editor-interactive relative flex h-full min-h-0 flex-col gap-2 overflow-hidden bg-cs2-bg-page p-2"
       onDragStartCapture={(event) => {
         const target = event.target instanceof Element ? event.target : null;
         if (target?.closest('[draggable="true"]')) return;
@@ -1824,7 +1827,7 @@ export default function LiteCutEditorShell({
         onExportProject={handleExportProject}
         onImportProject={handleImportProject}
         onProjectSettingsChange={patchOutput}
-        onOpenExport={() => setInspectorTab("export")}
+        onOpenExport={() => setExportSettingsOpen(true)}
         onRestoreSnapshot={handleRestoreSnapshot}
         onImportPortable={handleImportPortable}
         onStartPortableExport={handleStartPortableExport}
@@ -2114,6 +2117,40 @@ export default function LiteCutEditorShell({
         }
         timeline={<LiteCutTimelinePanel body={body} onDropMedia={handleDropMedia} />}
       />
+      <LiteCutExportSettingsDialog open={exportSettingsOpen} onClose={() => setExportSettingsOpen(false)}>
+        <ExportPane
+          outputDir={outputDir}
+          outputDirHint={outputDirHint}
+          filename={outputFilename}
+          width={outputWidth}
+          height={outputHeight}
+          fps={outputFps}
+          framemeldEnabled={outputFrameMeldEnabled}
+          framemeldRuntimeAvailable={ffmpegGate.framemeldAvailable}
+          framemeldSourceItems={framemeldSourceItems}
+          encoder={outputEncoder}
+          encoderTier={outputEncoderTier}
+          rangeMode={outputRange.rangeMode}
+          rangeStartSec={outputRange.rangeStartSec}
+          rangeEndSec={outputRange.rangeEndSec}
+          rangeValid={outputRange.rangeValid}
+          selectedExportRange={selectedExportRange}
+          timelineTotalSec={totalSec}
+          currentPlayheadSec={playheadSec}
+          onOutputDirChange={(dir) => patchOutput({ dir })}
+          onFilenameChange={(name) => patchOutput({ filename: name })}
+          onOutputSettingsChange={(patch) => patchOutput(patch)}
+          onExport={() => {
+            setExportSettingsOpen(false);
+            void handleExport();
+          }}
+          exporting={exporting}
+          exportError={exportError}
+          exportHistory={exportHistory}
+          onRefreshExportHistory={loadExportHistory}
+          clipCount={exportableClipCount}
+        />
+      </LiteCutExportSettingsDialog>
       <LiteCutExportProgressDialog
         phase={exportDialog.phase}
         result={exportDialog.result}

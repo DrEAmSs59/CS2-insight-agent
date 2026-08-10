@@ -25,13 +25,13 @@ function ResizeHandle({ orientation, onPointerDrag }) {
       }}
       className={`group z-30 shrink-0 touch-none ${
         orientation === "v"
-          ? "w-1.5 cursor-col-resize hover:bg-cs2-accent/20"
-          : "h-1.5 cursor-row-resize hover:bg-cs2-accent/20"
+          ? "w-2 cursor-col-resize"
+          : "h-2 cursor-row-resize"
       }`}
     >
       <div
-        className={`mx-auto rounded-full bg-cs2-border group-hover:bg-cs2-accent/60 ${
-          orientation === "v" ? "my-3 h-10 w-0.5" : "mx-3 h-0.5 w-10"
+        className={`mx-auto rounded-full bg-cs2-border-subtle opacity-45 transition-colors group-hover:bg-cs2-accent/70 group-hover:opacity-100 ${
+          orientation === "v" ? "my-3 h-8 w-0.5" : "mx-3 h-0.5 w-8"
         }`}
       />
     </div>
@@ -84,23 +84,41 @@ export default function LiteCutResizableLayout({ mediaBin, preview, properties, 
     <div ref={rootRef} className="flex min-h-0 flex-1 flex-col overflow-hidden bg-cs2-bg-page">
       <div
         ref={topRef}
-        className="flex min-h-0 min-w-0 shrink-0 overflow-hidden"
+        className="flex min-h-0 min-w-0 shrink-0"
         style={{ height: `${panels.mainContent}%` }}
       >
-        <div className="flex h-full min-h-0 min-w-0 overflow-hidden" style={{ width: `${panels.tools}%` }}>
+        <div
+          data-litecut-region="media-bin"
+          className="flex h-full min-h-0 min-w-0 overflow-hidden rounded-lg border border-cs2-border bg-cs2-bg-card"
+          style={{ width: `${panels.tools}%` }}
+        >
           {mediaBin}
         </div>
         <ResizeHandle orientation="v" onPointerDrag={(x) => onToolsDrag(x)} />
-        <div className="flex h-full min-h-0 min-w-0 flex-1 overflow-hidden">
-          <div className="flex h-full min-h-0 min-w-0 overflow-hidden" style={{ width: `${previewOfRest}%` }}>
+        <div className="flex h-full min-h-0 min-w-0 flex-1">
+          <div
+            data-litecut-region="preview"
+            className="flex h-full min-h-0 min-w-0 overflow-hidden rounded-lg border border-cs2-border bg-cs2-bg-card"
+            style={{ width: `${previewOfRest}%` }}
+          >
             {preview}
           </div>
           <ResizeHandle orientation="v" onPointerDrag={(x) => onPreviewPropsDrag(x)} />
-          <div className="flex h-full min-h-0 min-w-0 flex-1 overflow-hidden">{properties}</div>
+          <div
+            data-litecut-region="properties"
+            className="flex h-full min-h-0 min-w-0 flex-1 overflow-hidden rounded-lg border border-cs2-border bg-cs2-bg-card"
+          >
+            {properties}
+          </div>
         </div>
       </div>
       <ResizeHandle orientation="h" onPointerDrag={(_, y) => onTimelineDrag(_, y)} />
-      <div className="min-h-0 flex-1 overflow-hidden">{timeline}</div>
+      <div
+        data-litecut-region="timeline"
+        className="min-h-0 flex-1 overflow-hidden rounded-lg border border-cs2-border bg-cs2-bg-card"
+      >
+        {timeline}
+      </div>
     </div>
   );
 }

@@ -81,6 +81,7 @@ from ...montage_exceptions import HardwareEncoderFailure
 from ...ffmpeg_compatibility import add_ffmpeg_compatibility_hint
 from ...video_export_log import export_event, export_gpu_inventory
 from ...framemeld import (
+    FrameMeldRifeDevicePlan,
     build_framemeld_command,
     framemeld_execution_policy,
     framemeld_failure_from_result,
@@ -88,7 +89,9 @@ from ...framemeld import (
     framemeld_sources_are_compatible,
     framemeld_working_fps,
     parse_framemeld_status_events,
+    plan_framemeld_rife_device,
     probe_framemeld,
+    record_framemeld_rife_result,
 )
 
 logger = logging.getLogger(__name__)
@@ -860,6 +863,7 @@ def _compose_lite_cut_montage_once(
     cancel_event: Any | None = None,
     encoder_device_args: Sequence[str] | None = None,
     encoder_adapter: object | None = None,
+    rife_device_plan: FrameMeldRifeDevicePlan | None = None,
 ) -> None:
     """Export LiteCut schema v2 body — V1 main track with trim, eq, and transitions."""
     output_settings = project_body.get("output") if isinstance(project_body.get("output"), dict) else {}
@@ -1149,6 +1153,7 @@ def _compose_lite_cut_montage_once(
                 output_path=output_path,
                 video_encode_args=video_encode_quality,
                 encoder_adapter=encoder_adapter,
+                rife_device_plan=rife_device_plan,
                 capability=capability,
             )
             precise_policy = framemeld_execution_policy(cmd_framemeld)
@@ -1171,6 +1176,11 @@ def _compose_lite_cut_montage_once(
             precise_events = parse_framemeld_status_events(
                 framemeld_result.stdout,
                 framemeld_result.stderr,
+            )
+            record_framemeld_rife_result(
+                rife_device_plan,
+                precise_events,
+                succeeded=framemeld_result.returncode == 0,
             )
             if precise_events:
                 log_framemeld_diagnostic_events(
@@ -1333,6 +1343,19 @@ def compose_lite_cut_montage(
     if "h264_nvenc" in available:
         adapters = map_nvenc_device_indices(ffmpeg_bin, adapters)
     export_gpu_inventory(adapters)
+    output_settings = (
+        project_body.get("output")
+        if isinstance(project_body.get("output"), dict)
+        else {}
+    )
+    framemeld_enabled = bool(output_settings.get("framemeld_enabled"))
+    rife_device_plan = (
+        plan_framemeld_rife_device(ffmpeg_bin, adapters)
+        if framemeld_enabled
+        else None
+    )
+    if rife_device_plan is not None:
+        export_event("rife_device_plan", **rife_device_plan.log_fields())
     candidates = build_encoder_candidates(
         montage_encoder,
         adapters,
@@ -1348,13 +1371,7 @@ def compose_lite_cut_montage(
         width=width,
         height=height,
         fps=fps,
-        framemeld_enabled=bool(
-            (
-                project_body.get("output")
-                if isinstance(project_body.get("output"), dict)
-                else {}
-            ).get("framemeld_enabled")
-        ),
+        framemeld_enabled=framemeld_enabled,
         candidates=[
             {
                 "codec": candidate.codec,
@@ -1433,6 +1450,7 @@ def compose_lite_cut_montage(
                 cancel_event=cancel_event,
                 encoder_device_args=candidate.ffmpeg_device_args,
                 encoder_adapter=candidate.adapter,
+                rife_device_plan=rife_device_plan,
             )
             validate_export_output(ffmpeg_bin, attempt_output)
         except MontageComposerError as exc:

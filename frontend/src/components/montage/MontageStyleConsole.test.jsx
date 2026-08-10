@@ -109,4 +109,17 @@ describe("MontageStyleConsole export layout", () => {
     expect(screen.getByTitle("I:\\exports\\montage\\montage.mp4")).toBeTruthy();
     expect(screen.getByRole("button", { name: "montage.consoleExportStartBtn" }).disabled).toBe(false);
   });
+
+  it("greys out FrameMeld and explains when project frame rates cross the boundary", () => {
+    renderConsole({
+      clips: [{ id: 1, fps: 60 }, { id: 2, fps: 120 }],
+      framemeldEnabled: true,
+      framemeldRuntimeAvailable: true,
+    });
+
+    const frameMeldButton = screen.getByRole("button", { name: "montage.consoleFrameMeldTitle" });
+    expect(frameMeldButton.disabled).toBe(true);
+    expect(frameMeldButton.getAttribute("aria-pressed")).toBe("false");
+    expect(screen.getByText("montage.consoleFrameMeldBlockedMixedFps")).toBeTruthy();
+  });
 });

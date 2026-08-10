@@ -275,6 +275,113 @@ describe("MontageWorkbenchDrawer", () => {
     expect(screen.getByText("montage.draftsLoadedWithMissing")).toBeTruthy();
   });
 
+  it("clears a stale FrameMeld draft setting and never exports mixed frame rates as enabled", async () => {
+    mocks.get.mockImplementation((url) => {
+      if (url === "config/ffmpeg-check") {
+        return Promise.resolve({ data: { ok: true, framemeld_available: true } });
+      }
+      if (url === "/config") return Promise.resolve({ data: { montage_export_dir: "D:\\Exports" } });
+      if (url === "/recorded-clips") {
+        return Promise.resolve({
+          data: {
+            items: [
+              { id: 5, output_path: "D:\\clips\\60fps.mp4", duration_sec: 4, fps: 60 },
+              { id: 9, output_path: "D:\\clips\\120fps.mp4", duration_sec: 6, fps: 120 },
+            ],
+          },
+        });
+      }
+      return Promise.resolve({ data: {} });
+    });
+    mocks.post.mockImplementation((url) => {
+      if (url === "/montage/export") return Promise.resolve({ data: {} });
+      return Promise.resolve({ data: {} });
+    });
+
+    render(
+      <MemoryRouter initialEntries={["/montage"]}>
+        <MontageWorkbenchDrawer open layout="page" onClose={() => {}} />
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => expect(mocks.draftPanelProps).toBeTruthy());
+    await waitFor(() => expect(mocks.materialProps?.clip?.id).toBe(9));
+    await act(async () => {
+      await mocks.draftPanelProps.onOpenDraft({
+        id: 21,
+        name: "Mixed FPS",
+        body: {
+          recorded_clip_ids: [5, 9],
+          output_filename: "mixed.mp4",
+          framemeld_enabled: true,
+        },
+      });
+    });
+
+    await waitFor(() => {
+      expect(mocks.consoleProps.framemeldSourceSummary.hasMixedFrameRates).toBe(true);
+      expect(mocks.consoleProps.framemeldEnabled).toBe(false);
+    });
+    await act(async () => {
+      await mocks.consoleProps.onExport();
+    });
+
+    const exportCall = mocks.post.mock.calls.find(([url]) => url === "/montage/export");
+    expect(exportCall).toBeTruthy();
+    expect(exportCall[1].framemeld_enabled).toBe(false);
+  });
+
+  it("includes an intro video in the project FrameMeld boundary", async () => {
+    const introPath = "D:\\clips\\intro-60fps.mp4";
+    mocks.get.mockImplementation((url) => {
+      if (url === "config/ffmpeg-check") {
+        return Promise.resolve({ data: { ok: true, framemeld_available: true } });
+      }
+      if (url === "/config") return Promise.resolve({ data: { montage_export_dir: "D:\\Exports" } });
+      if (url === "/recorded-clips") {
+        return Promise.resolve({
+          data: { items: [{ id: 5, output_path: "D:\\clips\\120fps.mp4", duration_sec: 4, fps: 120 }] },
+        });
+      }
+      return Promise.resolve({ data: {} });
+    });
+    mocks.post.mockImplementation((url, body) => {
+      if (url === "/montage/media-fps") {
+        return Promise.resolve({
+          data: { items: [{ path: body.paths[0], kind: "video", fps: 60, status: "ok" }] },
+        });
+      }
+      return Promise.resolve({ data: {} });
+    });
+
+    render(
+      <MemoryRouter initialEntries={["/montage"]}>
+        <MontageWorkbenchDrawer open layout="page" onClose={() => {}} />
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => expect(mocks.draftPanelProps).toBeTruthy());
+    await waitFor(() => expect(mocks.materialProps?.clip?.id).toBe(5));
+    await act(async () => {
+      await mocks.draftPanelProps.onOpenDraft({
+        id: 22,
+        name: "Intro mismatch",
+        body: {
+          recorded_clip_ids: [5],
+          intro_path: introPath,
+          output_filename: "intro-mismatch.mp4",
+          framemeld_enabled: true,
+        },
+      });
+    });
+
+    await waitFor(() => {
+      expect(mocks.post).toHaveBeenCalledWith("/montage/media-fps", { paths: [introPath] });
+      expect(mocks.consoleProps.framemeldSourceSummary.hasMixedFrameRates).toBe(true);
+      expect(mocks.consoleProps.framemeldEnabled).toBe(false);
+    });
+  });
+
   it("requires a second confirmation before batch deleting selected materials", async () => {
     mocks.get.mockImplementation((url) => {
       if (url === "config/ffmpeg-check") return Promise.resolve({ data: { ok: true } });

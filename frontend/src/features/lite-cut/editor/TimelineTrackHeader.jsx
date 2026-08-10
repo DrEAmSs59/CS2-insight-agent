@@ -10,15 +10,15 @@ export default function TimelineTrackHeader({ row, width = 128, selected, onSele
     {selected ? <span className="absolute inset-y-2 left-0 w-0.5 rounded-r bg-cs2-accent" /> : null}
     <div className="min-w-0 flex-1">
       <div className="flex min-w-0 items-center gap-1.5">
-        <span className={`flex h-5 w-5 shrink-0 items-center justify-center rounded border ${selected ? "border-cs2-accent/35 bg-cs2-accent-soft text-cs2-accent" : "border-cs2-border bg-cs2-bg-input text-cs2-text-muted"}`}><RowIcon className="h-3 w-3" /></span>
-        <button type="button" onClick={onSelect} className="block min-w-0 flex-1 truncate text-left text-[10px] font-bold text-cs2-text-secondary hover:text-white">{row.label}</button>
+        <span className={`litecut-timeline-track-icon flex h-5 w-5 shrink-0 items-center justify-center rounded border ${selected ? "litecut-timeline-track-icon--selected" : ""}`}><RowIcon className="h-3 w-3" /></span>
+        <button type="button" onClick={onSelect} className="block min-w-0 flex-1 truncate text-left text-[10px] font-bold text-cs2-text-primary hover:text-cs2-accent">{row.label}</button>
       </div>
-      {editable ? <div className="mt-1 flex items-center gap-0.5 pl-6 text-cs2-text-muted">
-        <button type="button" title={t("liteCut.track.moveUp")} onPointerDown={(event) => event.stopPropagation()} onClick={onMoveUp} className="rounded p-0.5 hover:bg-white/10 hover:text-white"><ArrowUp className="h-3 w-3" /></button>
-        <button type="button" title={t("liteCut.track.moveDown")} onPointerDown={(event) => event.stopPropagation()} onClick={onMoveDown} className="rounded p-0.5 hover:bg-white/10 hover:text-white"><ArrowDown className="h-3 w-3" /></button>
-        <button type="button" title={t(row.hidden ? "liteCut.track.show" : "liteCut.track.hide")} onPointerDown={(event) => event.stopPropagation()} onClick={onToggleHidden} className="rounded p-0.5 hover:bg-white/10 hover:text-white">{row.hidden ? <EyeOff className="h-3 w-3" /> : <Eye className="h-3 w-3" />}</button>
-        <button type="button" title={t(row.locked ? "liteCut.track.unlock" : "liteCut.track.lock")} onPointerDown={(event) => event.stopPropagation()} onClick={onToggleLocked} className="rounded p-0.5 hover:bg-white/10 hover:text-white">{row.locked ? <Lock className="h-3 w-3" /> : <Unlock className="h-3 w-3" />}</button>
-        {row.type !== "overlay" ? <button type="button" title={t(row.muted ? "liteCut.track.unmute" : "liteCut.track.mute")} onPointerDown={(event) => event.stopPropagation()} onClick={onToggleMuted} className="rounded p-0.5 hover:bg-white/10 hover:text-white">{row.muted ? <VolumeX className="h-3 w-3" /> : <Volume2 className="h-3 w-3" />}</button> : null}
+      {editable ? <div className="mt-1 flex items-center gap-0.5 pl-6 text-cs2-text-secondary">
+        <button type="button" title={t("liteCut.track.moveUp")} onPointerDown={(event) => event.stopPropagation()} onClick={onMoveUp} className="rounded p-0.5 hover:bg-cs2-bg-hover hover:text-cs2-text-primary"><ArrowUp className="h-3 w-3" /></button>
+        <button type="button" title={t("liteCut.track.moveDown")} onPointerDown={(event) => event.stopPropagation()} onClick={onMoveDown} className="rounded p-0.5 hover:bg-cs2-bg-hover hover:text-cs2-text-primary"><ArrowDown className="h-3 w-3" /></button>
+        <button type="button" title={t(row.hidden ? "liteCut.track.show" : "liteCut.track.hide")} onPointerDown={(event) => event.stopPropagation()} onClick={onToggleHidden} className="rounded p-0.5 hover:bg-cs2-bg-hover hover:text-cs2-text-primary">{row.hidden ? <EyeOff className="h-3 w-3" /> : <Eye className="h-3 w-3" />}</button>
+        <button type="button" title={t(row.locked ? "liteCut.track.unlock" : "liteCut.track.lock")} onPointerDown={(event) => event.stopPropagation()} onClick={onToggleLocked} className="rounded p-0.5 hover:bg-cs2-bg-hover hover:text-cs2-text-primary">{row.locked ? <Lock className="h-3 w-3" /> : <Unlock className="h-3 w-3" />}</button>
+        {row.type !== "overlay" ? <button type="button" title={t(row.muted ? "liteCut.track.unmute" : "liteCut.track.mute")} onPointerDown={(event) => event.stopPropagation()} onClick={onToggleMuted} className="rounded p-0.5 hover:bg-cs2-bg-hover hover:text-cs2-text-primary">{row.muted ? <VolumeX className="h-3 w-3" /> : <Volume2 className="h-3 w-3" />}</button> : null}
         {row.removable ? <button type="button" title={t("liteCut.track.delete")} aria-label={t("liteCut.track.deleteNamed", { label: row.label })} onPointerDown={(event) => event.stopPropagation()} onClick={onRemove} className="rounded p-0.5 hover:bg-rose-500/15 hover:text-rose-300"><Trash2 className="h-3 w-3" /></button> : null}
       </div> : null}
     </div>

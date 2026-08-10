@@ -54,7 +54,7 @@ export default function SpeedPropertyPane({
           {[50, 75, 100, 125, 150, 200].map((pct) => <button key={pct} type="button" onClick={() => applyDiscreteSpeedEdit(() => setSpeedPct(pct))} className={`rounded-lg border px-2.5 py-1 text-[10px] font-bold transition-colors ${speedPct === pct ? "border-cs2-accent/60 bg-cs2-accent-soft text-cs2-accent" : "border-cs2-border/50 text-cs2-text-muted hover:border-cs2-border-focus"}`}>{pct}%</button>)}
         </div>
         <ProSlider label="整段速度 (%)" value={speedPct} onChange={setSpeedPct} min={25} max={400} resetValue={100} />
-      </> : <div className="flex items-center justify-between gap-3 rounded-lg border border-cs2-accent/30 bg-cs2-accent-soft px-3 py-2">
+      </> : <div className="litecut-property-inline-group flex items-center justify-between gap-3 px-1 py-1">
         <div><p className="text-[11px] font-semibold text-cs2-accent">当前使用分段变速</p><p className="mt-0.5 text-[9px] text-cs2-text-muted">固定速度控件已隐藏，避免误操作清除分段。</p></div>
         <button type="button" onClick={() => applyDiscreteSpeedEdit(() => onSpeedKeyframesChange?.([]))} className="shrink-0 rounded-md border border-cs2-accent/40 px-2 py-1 text-[10px] font-semibold text-cs2-accent hover:bg-cs2-accent/10">切换为固定速度</button>
       </div>}

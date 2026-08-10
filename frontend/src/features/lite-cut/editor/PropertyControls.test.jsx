@@ -35,6 +35,9 @@ describe("PropertyControls", () => {
     render(<ProSlider label="Opacity" value={25} min={0} max={100} onChange={onChange} />);
 
     const slider = screen.getByRole("slider", { name: "Opacity" });
+    expect(slider.className).toContain("cs2-data-slider");
+    expect(slider.style.getPropertyValue("--cs2-range-progress")).toBe("25%");
+    expect(screen.getByRole("spinbutton").className).toContain("litecut-property-number");
     fireEvent.pointerDown(slider);
     fireEvent.change(slider, { target: { value: "40" } });
     fireEvent.pointerUp(slider);

@@ -31,8 +31,12 @@ describe("LiteCutProjectDrawer", () => {
   it("renders the project workspace and current project summary in Chinese", () => {
     renderDrawer();
 
+    expect(screen.getByRole("dialog").className).toContain("max-w-5xl");
     expect(screen.getByText("工程管理")).toBeTruthy();
     expect(screen.getByText("当前工程")).toBeTruthy();
+    expect(screen.getByText("新建空白工程")).toBeTruthy();
+    expect(screen.getByText("导入工程JSON")).toBeTruthy();
+    expect(screen.getByText("导出工程JSON")).toBeTruthy();
     expect(screen.getByText("工程 #24 · 2 条轨道 · 1 个片段")).toBeTruthy();
     expect(screen.getByDisplayValue("Mirage highlights")).toBeTruthy();
     expect(screen.getByLabelText("视频帧率").value).toBe("60");
@@ -45,6 +49,23 @@ describe("LiteCutProjectDrawer", () => {
     expect(screen.getByText("Project manager")).toBeTruthy();
     expect(screen.getByText("Current project")).toBeTruthy();
     expect(screen.getByPlaceholderText("Search project names")).toBeTruthy();
+  });
+
+  it("closes the foreground project page with Escape", () => {
+    const onClose = vi.fn();
+    render(
+      <LiteCutProjectDrawer
+        open
+        projectId={24}
+        projectName={project.name}
+        body={{ tracks: [] }}
+        projects={[project]}
+        onClose={onClose}
+      />,
+    );
+
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(onClose).toHaveBeenCalledTimes(1);
   });
 
   it("selects multiple projects and deletes them in one batch", async () => {

@@ -201,10 +201,11 @@ export function MontageStyleConsole({
   onNameCardsEnabledChange,
   framemeldEnabled,
   framemeldRuntimeAvailable = false,
+  framemeldSourceSummary: providedFrameMeldSourceSummary,
   onFrameMeldEnabledChange,
 }) {
   const t = useT();
-  const framemeldSourceSummary = summarizeFrameMeldSources(clips || []);
+  const framemeldSourceSummary = providedFrameMeldSourceSummary || summarizeFrameMeldSources(clips || []);
   const framemeldAvailable = framemeldRuntimeAvailable && framemeldSourceSummary.compatible;
   const framemeldActive = framemeldAvailable && Boolean(framemeldEnabled);
   const framemeldBlockedReason = !framemeldRuntimeAvailable

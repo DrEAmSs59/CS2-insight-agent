@@ -537,6 +537,7 @@ export default function LiteCutPreviewPanel({
     underlayMediaRegistryRef.current = createMediaElementRefRegistry(underlayVideoRefs.current);
   }
   const canvasRef = useRef(null);
+  const previewViewportRef = useRef(null);
   const [videoDuration, setVideoDuration] = useState(null);
   const [playError, setPlayError] = useState(null);
   const [heldSwitchFrame, setHeldSwitchFrame] = useState(null);
@@ -544,6 +545,7 @@ export default function LiteCutPreviewPanel({
   const [mainLayerDragging, setMainLayerDragging] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [previewZoom, setPreviewZoom] = useState(100);
+  const [previewFitWidth, setPreviewFitWidth] = useState(920);
   const [timeDraft, setTimeDraft] = useState(formatTime(timelinePlayhead ?? playheadSec));
   const [editingTime, setEditingTime] = useState(false);
   const [alignmentGuides, setAlignmentGuides] = useState({ x: null, y: null });
@@ -1264,6 +1266,28 @@ export default function LiteCutPreviewPanel({
     setPreviewZoom(values[Math.max(0, Math.min(values.length - 1, index + direction))]);
   };
 
+  useLayoutEffect(() => {
+    const viewport = previewViewportRef.current;
+    if (!viewport) return undefined;
+
+    const updatePreviewFit = () => {
+      const aspect = Math.max(1, Number(canvasWidth) || 1920) / Math.max(1, Number(canvasHeight) || 1080);
+      const availableWidth = Math.max(1, viewport.clientWidth - 40);
+      const availableHeight = Math.max(1, viewport.clientHeight - 40);
+      const nextWidth = Math.max(1, Math.min(920, availableWidth, availableHeight * aspect));
+      setPreviewFitWidth((current) => (Math.abs(current - nextWidth) < 0.5 ? current : nextWidth));
+    };
+
+    updatePreviewFit();
+    const observer = typeof ResizeObserver !== "undefined" ? new ResizeObserver(updatePreviewFit) : null;
+    observer?.observe(viewport);
+    window.addEventListener("resize", updatePreviewFit);
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener("resize", updatePreviewFit);
+    };
+  }, [canvasHeight, canvasWidth]);
+
   const handleCanvasPointerDown = (e) => {
     if (e.target.closest("[data-preview-overlay]") || e.target.closest("[data-preview-video-layer]")) return;
     onOverlayDeselect?.();
@@ -1312,7 +1336,7 @@ export default function LiteCutPreviewPanel({
   };
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col bg-cs2-bg-page">
+    <div className="flex min-h-0 flex-1 flex-col bg-cs2-bg-sidebar">
       {preloadStreamUrl ? (
         <video
           ref={preloadVideoRef}
@@ -1327,6 +1351,7 @@ export default function LiteCutPreviewPanel({
         />
       ) : null}
       <div
+        ref={previewViewportRef}
         className="relative min-h-0 flex-1 overflow-auto"
         onWheel={(event) => {
           if (!event.ctrlKey) return;
@@ -1335,7 +1360,7 @@ export default function LiteCutPreviewPanel({
         }}
       >
         <div className="flex min-h-full min-w-full items-center justify-center p-3 sm:p-5">
-        <div className="relative shrink-0" style={{ width: `${previewZoom}%`, maxWidth: previewZoom <= 100 ? 920 : "none" }}>
+        <div className="relative shrink-0" style={{ width: `${previewFitWidth * (previewZoom / 100)}px` }}>
           <div
             ref={canvasRef}
             data-preview-canvas
@@ -1591,7 +1616,7 @@ export default function LiteCutPreviewPanel({
             </button>
           </div>
 
-          <span className="flex items-center font-mono text-xs tabular-nums text-cs2-text-secondary">
+          <span className="inline-flex shrink-0 items-center gap-1.5 font-mono text-[11px] tabular-nums">
             <input
               value={timeDraft}
               onFocus={() => setEditingTime(true)}
@@ -1601,10 +1626,12 @@ export default function LiteCutPreviewPanel({
                 if (event.key === "Enter") event.currentTarget.blur();
                 if (event.key === "Escape") { setTimeDraft(formatTime(rulerPlayhead)); event.currentTarget.blur(); }
               }}
-              className="w-[68px] rounded border border-transparent bg-transparent px-1 py-0.5 text-white outline-none hover:border-white/15 focus:border-cs2-accent focus:bg-black/30"
+              className="h-6 w-[66px] cursor-text rounded-md border border-cs2-border-subtle bg-cs2-bg-input px-1.5 text-center font-mono text-[11px] font-medium text-cs2-text-primary outline-none transition-colors hover:border-cs2-border-focus focus:border-cs2-accent"
               aria-label="当前时间"
+              title="输入时间并按回车跳转"
             />
-            <span className="text-cs2-text-muted"> / {formatTime(rulerTotal)}</span>
+            <span className="select-none text-cs2-text-muted">/</span>
+            <span className="min-w-[52px] text-cs2-text-secondary">{formatTime(rulerTotal)}</span>
           </span>
 
           <input
@@ -1630,7 +1657,8 @@ export default function LiteCutPreviewPanel({
               }
             }}
             disabled={!hasStream && !sequenceMode}
-            className="h-1 min-w-[100px] flex-1 cursor-pointer accent-white disabled:opacity-40"
+            style={{ "--cs2-range-progress": `${rulerTotal > 0 ? Math.max(0, Math.min(100, (rulerPlayhead / rulerTotal) * 100)) : 0}%` }}
+            className="cs2-data-slider min-w-[100px] flex-1 disabled:opacity-40"
           />
 
           <div className="ml-auto flex items-center gap-2">
@@ -1640,7 +1668,14 @@ export default function LiteCutPreviewPanel({
             </select>
             <button type="button" title="放大预览" onClick={() => changePreviewZoom(1)} className="rounded p-1 text-cs2-text-muted hover:bg-white/5 hover:text-white"><ZoomIn className="h-4 w-4" /></button>
             <Volume2 className="h-4 w-4 text-cs2-text-muted" />
-            <input type="range" defaultValue={85} className="h-1 w-20 accent-white" disabled={!hasStream} />
+            <input
+              type="range"
+              defaultValue={85}
+              style={{ "--cs2-range-progress": "85%" }}
+              onInput={(event) => event.currentTarget.style.setProperty("--cs2-range-progress", `${event.currentTarget.value}%`)}
+              className="cs2-data-slider w-20 disabled:opacity-40"
+              disabled={!hasStream}
+            />
           </div>
         </div>
         <p className="mx-auto mt-1.5 max-w-[920px] text-center text-[10px] text-cs2-text-muted">

@@ -24,7 +24,7 @@ export function timelineClipTone(type, source) {
 }
 
 export function timelineClipClass(tone, selected, dragging, invalid) {
-  return `litecut-timeline-clip litecut-timeline-clip--${tone} absolute inset-y-1 overflow-hidden rounded-md border shadow-sm ${selected ? "litecut-timeline-clip--selected ring-1 ring-cs2-accent/80 shadow-[0_0_0_2px_rgba(255,140,0,.12)]" : ""} ${dragging ? "opacity-35" : ""} ${invalid ? "litecut-timeline-clip--invalid" : ""}`;
+  return `litecut-timeline-clip litecut-timeline-clip--${tone} absolute inset-y-1 overflow-hidden rounded-md border ${selected ? "litecut-timeline-clip--selected ring-1 ring-cs2-accent/80" : ""} ${dragging ? "opacity-35" : ""} ${invalid ? "litecut-timeline-clip--invalid" : ""}`;
 }
 
 export function waveformBarsForClipWidth(pixelWidth) {
@@ -161,7 +161,6 @@ function TimelineClip({
       className={`${timelineClipClass(tone, selected, dragSource && !dragTarget, dragTarget && !dragValid)} cursor-grab active:cursor-grabbing`}
       style={{ left: start * pixelsPerSecond, width: renderedClipWidth }}
     >
-      <div className={`absolute inset-0 opacity-70 ${rowType === "video" ? "bg-[repeating-linear-gradient(90deg,rgba(255,255,255,.13)_0,rgba(255,255,255,.13)_1px,transparent_1px,transparent_36px)]" : ""}`} />
       {waveformUrl ? (
         <AudioWaveformBars
           sourceUrl={waveformUrl}
@@ -225,7 +224,7 @@ function TimelineClip({
         <span data-transition-compact-label="in" title={transitionInLabel} className="min-w-0 truncate px-1 text-left">{t("liteCut.clip.transitionInShort", { duration: markerInDuration.toFixed(2) })}</span>
         <span data-transition-compact-label="out" title={transitionOutLabel} className="min-w-0 truncate px-1 text-right">{t("liteCut.clip.transitionOutShort", { duration: markerOutDuration.toFixed(2) })}</span>
       </div> : null}
-      <span className="pointer-events-none relative z-10 block truncate px-1.5 pt-1 text-[9px] font-semibold text-white drop-shadow">{clip.label || source.meta?.name || t("liteCut.clip.untitled")}</span>
+      <span className="pointer-events-none relative z-10 block truncate px-1.5 pt-1 text-[9px] font-semibold text-current">{clip.label || source.meta?.name || t("liteCut.clip.untitled")}</span>
     </div>
   );
 }

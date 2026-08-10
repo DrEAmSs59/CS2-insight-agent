@@ -561,8 +561,8 @@ export default function LiteCutMediaBin({
     (selectedTrackType === "audio" && asset?.kind === "audio") || (selectedTrackType === "video" && asset?.kind === "video");
 
   return (
-    <aside className="flex h-full min-h-0 w-full flex-col overflow-hidden border-r border-cs2-border bg-cs2-bg-sidebar">
-      <div className="shrink-0 border-b border-cs2-border bg-cs2-bg-card p-3 shadow-sm">
+    <aside className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-cs2-bg-sidebar">
+      <div className="shrink-0 border-b border-cs2-border bg-cs2-bg-card p-3">
         <div className="mb-2.5 flex items-center justify-between">
           <div>
             <p className="text-[13px] font-bold text-cs2-text-primary">素材库</p>
