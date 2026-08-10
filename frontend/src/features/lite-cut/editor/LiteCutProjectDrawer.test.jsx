@@ -51,6 +51,23 @@ describe("LiteCutProjectDrawer", () => {
     expect(screen.getByPlaceholderText("Search project names")).toBeTruthy();
   });
 
+  it("uses theme-aware solid surfaces for light and dark mode", () => {
+    renderDrawer();
+
+    const dialog = screen.getByRole("dialog");
+    const currentProject = screen.getByText("当前工程").closest("section");
+    const savedState = screen.getByText("已保存");
+    const template = screen.getByText("Shorts").closest("button");
+
+    expect(dialog.className).toContain("bg-cs2-bg-card");
+    expect(currentProject.className).toContain("bg-cs2-bg-input");
+    expect(currentProject.className).not.toContain("bg-cs2-accent-soft/30");
+    expect(savedState.className).toContain("text-cs2-emerald-on-surface");
+    expect(template.className).toContain("bg-cs2-bg-input");
+    expect(dialog.innerHTML).not.toContain("text-emerald-300");
+    expect(dialog.innerHTML).not.toContain("hover:text-white");
+  });
+
   it("closes the foreground project page with Escape", () => {
     const onClose = vi.fn();
     render(

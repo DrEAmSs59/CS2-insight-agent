@@ -1,0 +1,679 @@
+
+/* ===== 合集工作台适配 ===== */
+.montage-workbench-page {
+  min-width: 0;
+  container: montage-page / inline-size;
+}
+
+.montage-workbench-shell,
+.montage-workbench-grid,
+.montage-workbench-panel {
+  min-width: 0;
+}
+
+.montage-workbench-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-content: start;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+.montage-workbench-panel {
+  min-height: 30rem;
+}
+
+@container montage-page (min-width: 1180px) {
+  .montage-workbench-grid {
+    grid-template-columns: minmax(280px, 22rem) minmax(360px, 1fr) minmax(300px, 26rem);
+    align-content: stretch;
+    overflow: hidden;
+  }
+
+  .montage-workbench-panel {
+    min-height: 0;
+  }
+}
+
+@container montage-page (min-width: 860px) and (max-width: 1179px) {
+  .montage-workbench-grid {
+    grid-template-columns: minmax(240px, 0.85fr) minmax(0, 1.45fr);
+    grid-template-rows: auto auto;
+  }
+
+  .montage-workbench-pool {
+    grid-column: 1;
+    grid-row: 1;
+  }
+
+  .montage-workbench-orchestration {
+    grid-column: 2;
+    grid-row: 1;
+  }
+
+  .montage-workbench-console {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+}
+
+@container montage-page (max-width: 859px) {
+  .montage-workbench-toolbar {
+    flex-wrap: wrap;
+    align-items: flex-start;
+    gap: 0.5rem;
+    padding: 0.75rem;
+  }
+
+  .montage-workbench-toolbar__title,
+  .montage-workbench-toolbar__actions {
+    width: 100%;
+    flex-basis: 100%;
+  }
+
+  .montage-workbench-toolbar__actions {
+    justify-content: flex-start;
+  }
+}
+
+@container montage-page (max-width: 600px) {
+  .montage-workbench-toolbar__actions > * {
+    min-width: 0;
+    flex: 1 1 auto;
+  }
+
+  .montage-workbench-grid {
+    grid-auto-rows: minmax(28rem, auto);
+  }
+
+  .montage-workbench-panel {
+    min-height: 28rem;
+  }
+}
+
+.app-sidebar__nav-item--active {
+  box-shadow: inset 3px 0 0 var(--cs2-accent);
+}
+
+.app-sidebar__resize-handle::after {
+  position: absolute;
+  top: 8px;
+  bottom: 8px;
+  left: 50%;
+  width: 2px;
+  border-radius: 999px;
+  background: var(--cs2-border-subtle);
+  content: "";
+  opacity: 0;
+  transform: translateX(-50%);
+  transition: background-color 120ms ease, opacity 120ms ease;
+}
+
+.app-sidebar__resize-handle:hover::after,
+.app-sidebar__resize-handle:focus-visible::after,
+.app-sidebar[data-resizing="true"] .app-sidebar__resize-handle::after {
+  background: var(--cs2-accent);
+  opacity: 0.9;
+}
+
+.analysis-workspace-grid {
+  display: grid;
+  grid-template-columns: clamp(196px, 17vw, 228px) minmax(0, 1fr);
+  gap: 12px;
+  width: 100%;
+}
+
+.analysis-side-rail {
+  border: 1px solid var(--cs2-border-subtle);
+  border-radius: var(--cs2-radius-panel);
+  background: var(--cs2-bg-card);
+}
+
+.analysis-side-section + .analysis-side-section {
+  border-top: 1px solid var(--cs2-border-subtle);
+}
+
+.analysis-rail-card {
+  border: 1px solid var(--cs2-border-subtle);
+  border-radius: var(--cs2-radius-panel);
+  background: var(--cs2-bg-card);
+}
+
+.analysis-center-surface,
+.analysis-panel {
+  border: 1px solid var(--cs2-border-subtle);
+  border-radius: var(--cs2-radius-panel);
+  background: var(--cs2-bg-card);
+}
+
+.analysis-view-switcher {
+  display: flex;
+  min-width: 0;
+  min-height: 40px;
+  align-items: stretch;
+  overflow: hidden;
+  border: 1px solid var(--cs2-border-subtle);
+  border-radius: var(--cs2-radius-panel);
+  background: color-mix(in srgb, var(--cs2-bg-card) 92%, var(--cs2-bg-page));
+}
+
+.analysis-view-nav {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  gap: 2px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 4px;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.analysis-view-nav::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
+.analysis-view-nav > button {
+  position: relative;
+  display: flex;
+  min-width: 78px;
+  flex: 1 0 auto;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 0 10px;
+  border-radius: calc(var(--cs2-radius-panel) - 3px);
+  color: var(--cs2-text-muted);
+  font-size: 10px;
+  font-weight: 700;
+  isolation: isolate;
+  transition: color 140ms ease, background-color 140ms ease, box-shadow 140ms ease;
+}
+
+.analysis-view-nav > button > * {
+  position: relative;
+  z-index: 1;
+}
+
+.analysis-view-nav > button:hover {
+  color: var(--cs2-text-primary);
+  background: var(--cs2-bg-hover);
+}
+
+.analysis-view-nav > button[data-active="true"] {
+  color: var(--cs2-accent);
+  background: transparent;
+}
+
+.analysis-view-nav > button[data-active="true"]::before {
+  position: absolute;
+  inset: 0 7px;
+  z-index: 0;
+  border-radius: calc(var(--cs2-radius-panel) - 3px);
+  background: linear-gradient(to bottom, transparent 5%, var(--cs2-accent-soft));
+  content: "";
+}
+
+.analysis-view-nav > button[data-active="true"]::after {
+  position: absolute;
+  right: 7px;
+  bottom: 0;
+  left: 7px;
+  height: 2px;
+  border-radius: 999px;
+  background: var(--cs2-accent);
+  content: "";
+}
+
+.analysis-rail-action {
+  display: flex;
+  min-width: 0;
+  min-height: 29px;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  color: var(--cs2-text-secondary);
+  font-size: 9px;
+  font-weight: 700;
+  transition: color 120ms ease, background-color 120ms ease;
+}
+
+.analysis-rail-action:hover {
+  color: var(--cs2-text-primary);
+  background: var(--cs2-bg-hover);
+}
+
+.analysis-rail-action[data-tone="select"] {
+  color: var(--cs2-team-blue);
+}
+
+.analysis-rail-action[data-tone="select"]:hover {
+  background: color-mix(in srgb, var(--cs2-team-blue) 10%, transparent);
+}
+
+.analysis-rail-action[data-tone="clear"] {
+  color: var(--cs2-rose-on-surface);
+}
+
+.analysis-rail-action[data-tone="clear"]:hover {
+  background: var(--cs2-rose-surface);
+}
+
+.analysis-player-row {
+  position: relative;
+  border-left: 2px solid transparent;
+  border-radius: 0;
+}
+
+.analysis-player-row:hover {
+  background: var(--cs2-bg-hover);
+}
+
+.analysis-player-row[data-active="true"] {
+  border-left-color: var(--analysis-player-accent, var(--cs2-accent));
+}
+
+.analysis-player-team-card {
+  border: 1px solid var(--cs2-border-subtle);
+  border-radius: var(--cs2-radius-panel);
+  background: var(--cs2-bg-card);
+}
+
+.analysis-subnav {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  border-bottom: 1px solid var(--cs2-border-subtle);
+}
+
+.analysis-subnav > button {
+  position: relative;
+  min-height: 42px;
+  padding-inline: 14px;
+  color: var(--cs2-text-muted);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.analysis-subnav > button:hover,
+.analysis-subnav > button[data-active="true"] {
+  color: var(--cs2-text-primary);
+}
+
+.analysis-subnav > button[data-active="true"]::after {
+  position: absolute;
+  right: 8px;
+  bottom: -1px;
+  left: 8px;
+  height: 2px;
+  background: var(--cs2-accent);
+  content: "";
+}
+
+.analysis-filterbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 10px 14px;
+  padding: 12px 14px;
+}
+
+.analysis-filter-field {
+  display: grid;
+  gap: 4px;
+}
+
+.analysis-filter-field > span {
+  color: var(--cs2-text-muted);
+  font-size: 8px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.analysis-filter-select {
+  min-width: 108px;
+  height: 29px;
+  border: 1px solid var(--cs2-border);
+  border-radius: var(--cs2-radius-control);
+  background: var(--cs2-bg-input);
+  padding: 0 24px 0 9px;
+  color: var(--cs2-text-secondary);
+  font-size: 10px;
+  outline: none;
+}
+
+.analysis-filter-select:hover,
+.analysis-filter-select:focus-visible {
+  border-color: color-mix(in srgb, var(--cs2-accent) 55%, var(--cs2-border));
+  color: var(--cs2-text-primary);
+}
+
+.analysis-rail-filter-grid .analysis-filter-field {
+  min-width: 0;
+}
+
+.analysis-rail-filter-grid .analysis-filter-select {
+  width: 100%;
+  min-width: 0;
+  padding-left: 7px;
+  font-size: 9px;
+}
+
+.analysis-filter-toggle {
+  min-height: 28px;
+  border-radius: var(--cs2-radius-status);
+  padding: 0 8px;
+  color: var(--cs2-text-muted);
+  font-size: 9px;
+  font-weight: 700;
+  transition: color 120ms ease, background-color 120ms ease;
+}
+
+.analysis-filter-toggle:hover {
+  color: var(--cs2-text-primary);
+  background: var(--cs2-bg-hover);
+}
+
+.analysis-filter-toggle[data-active="true"] {
+  color: var(--cs2-accent);
+  background: var(--cs2-accent-soft);
+}
+
+.analysis-list-surface {
+  overflow: hidden;
+  border-block: 1px solid var(--cs2-border-subtle);
+  background: color-mix(in srgb, var(--cs2-bg-card) 86%, var(--cs2-bg-page));
+}
+
+.analysis-list-surface > * + * {
+  border-top: 1px solid var(--cs2-border-subtle);
+}
+
+.analysis-clip-row {
+  position: relative;
+  border-left: 3px solid transparent;
+  background: var(--cs2-bg-card);
+  transition: border-color 140ms ease, background-color 140ms ease;
+}
+
+.analysis-clip-row:hover {
+  background: var(--cs2-bg-hover);
+}
+
+.analysis-clip-row[data-category="highlight"] { border-left-color: var(--cs2-highlight); }
+.analysis-clip-row[data-category="fail"] { border-left-color: var(--cs2-fail); }
+.analysis-clip-row[data-category="compilation"] { border-left-color: var(--cs2-compilation); }
+.analysis-clip-row[data-category="meme_death"] { border-left-color: var(--cs2-fuchsia-on-surface); }
+
+.analysis-clip-row[data-selected="true"] {
+  background: color-mix(in srgb, var(--cs2-accent-soft) 44%, var(--cs2-bg-card));
+}
+
+.analysis-meta-token {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--cs2-text-secondary);
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.analysis-meta-token + .analysis-meta-token::before {
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: var(--cs2-border);
+  content: "";
+}
+
+.dockable-row {
+  overflow: hidden;
+}
+
+.dockable-row[data-resizing="true"] {
+  cursor: col-resize;
+  user-select: none;
+}
+
+.dock-panel {
+  container-type: inline-size;
+  transition: flex-basis 180ms cubic-bezier(0.2, 0, 0, 1), min-width 180ms cubic-bezier(0.2, 0, 0, 1);
+}
+
+.dockable-row[data-resizing="true"] .dock-panel {
+  transition: none;
+}
+
+.dock-panel[data-drop-target="true"] {
+  box-shadow: inset 0 0 0 2px var(--cs2-accent);
+}
+
+.dock-panel__chrome {
+  position: absolute;
+  z-index: 60;
+  top: 5px;
+  right: 5px;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--cs2-border-subtle);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--cs2-bg-card) 92%, transparent);
+  box-shadow: var(--cs2-shadow-sm);
+  opacity: 0;
+  backdrop-filter: blur(8px);
+  transition: opacity 120ms ease;
+}
+
+.dock-panel:hover .dock-panel__chrome,
+.dock-panel__chrome:focus-within,
+.dock-panel__chrome--editing {
+  opacity: 1;
+}
+
+.dock-panel__chrome-button {
+  display: inline-flex;
+  width: 24px;
+  height: 24px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 5px;
+  color: var(--cs2-text-muted);
+  transition: color 120ms ease, background-color 120ms ease;
+}
+
+.dock-panel__chrome-button:hover {
+  color: var(--cs2-accent);
+  background: var(--cs2-bg-hover);
+}
+
+.dock-panel__collapsed {
+  border: 1px solid var(--cs2-border-subtle);
+  border-radius: var(--cs2-radius-control);
+  background: var(--cs2-bg-card);
+}
+
+.dock-panel__vertical-label {
+  writing-mode: vertical-rl;
+}
+
+.dock-divider__line {
+  position: absolute;
+  top: 10px;
+  bottom: 10px;
+  left: 50%;
+  width: 2px;
+  border-radius: 999px;
+  background: var(--cs2-border-subtle);
+  opacity: 0.55;
+  transform: translateX(-50%);
+  transition: width 120ms ease, background-color 120ms ease, opacity 120ms ease;
+}
+
+.dock-divider:hover .dock-divider__line,
+.dock-divider:focus-visible .dock-divider__line,
+.dockable-row[data-resizing="true"] .dock-divider__line {
+  width: 3px;
+  background: var(--cs2-accent);
+  opacity: 0.95;
+}
+
+/* Replay and heatmap visualization shells follow the application surfaces.
+   The radar artwork and broadcast-style player HUD remain high-contrast. */
+.replay-roster-surface,
+.replay-radar-surface,
+.analysis-heatmap-panel,
+.heatmap-map-surface {
+  border-radius: var(--cs2-radius-panel);
+  box-shadow: none;
+}
+
+.replay-roster-surface {
+  background: var(--cs2-bg-card);
+}
+
+.replay-radar-surface,
+.heatmap-map-surface {
+  background: var(--cs2-bg-input);
+}
+
+.light .replay-roster-surface,
+.light .replay-radar-surface,
+.light .heatmap-map-surface {
+  background: var(--sand-4);
+}
+
+.replay-roster-slot {
+  height: 72px;
+  border-radius: var(--cs2-radius-panel);
+  box-shadow: none;
+}
+
+.replay-roster-slot-grid {
+  grid-template-rows: 34px 26px;
+  margin-top: 0;
+  row-gap: 2px;
+  padding-top: 2px;
+  padding-bottom: 4px;
+}
+
+.replay-roster-slot-name > span,
+.replay-roster-slot-health {
+  padding-top: 8px;
+}
+
+.replay-roster-health-fill {
+  background-color: var(--replay-health-color);
+}
+
+.replay-roster-health-fill--t {
+  --replay-health-color: #786317;
+}
+
+.replay-roster-health-fill--ct {
+  --replay-health-color: #185a86;
+}
+
+.replay-roster-title {
+  color: var(--cs2-text-primary);
+}
+
+.replay-roster[data-side="T"] {
+  --replay-roster-team-color: var(--cs2-team-amber);
+}
+
+.replay-roster[data-side="CT"] {
+  --replay-roster-team-color: var(--cs2-team-blue);
+}
+
+.replay-roster-count {
+  color: var(--replay-roster-team-color);
+}
+
+.dark .replay-roster-surface {
+  background: #07090c;
+}
+
+.dark .replay-radar-surface {
+  background: #060b0e;
+}
+
+.dark .heatmap-map-surface {
+  background: #04080a;
+}
+
+@container (max-width: 250px) {
+  .replay-roster {
+    padding: 7px;
+  }
+
+  .replay-roster-slot {
+    height: 62px;
+  }
+
+  .replay-roster-slot-grid {
+    grid-template-columns: minmax(0, 1fr) 48px !important;
+    grid-template-rows: minmax(0, 1fr) !important;
+    align-items: center;
+    gap: 5px !important;
+    padding: 0 7px 4px !important;
+  }
+
+  .replay-roster-slot[data-mirrored="true"] .replay-roster-slot-grid {
+    grid-template-columns: 48px minmax(0, 1fr) !important;
+  }
+
+  .replay-roster-slot-stats,
+  .replay-roster-slot-weapon,
+  .replay-roster-slot-gear,
+  .replay-roster-slot-armor {
+    display: none !important;
+  }
+
+  .replay-roster-slot-name {
+    grid-column: 1 !important;
+    grid-row: 1 !important;
+    align-self: center;
+  }
+
+  .replay-roster-slot-health {
+    grid-column: 2 !important;
+    grid-row: 1 !important;
+    align-self: center;
+    padding-top: 0 !important;
+  }
+
+  .replay-roster-slot[data-mirrored="true"] .replay-roster-slot-name {
+    grid-column: 2 !important;
+  }
+
+  .replay-roster-slot[data-mirrored="true"] .replay-roster-slot-health {
+    grid-column: 1 !important;
+  }
+
+  .replay-roster-slot-name > span {
+    padding-top: 0 !important;
+  }
+}
+
+@container (max-width: 205px) {
+  .replay-roster-slot-grid {
+    grid-template-columns: minmax(0, 1fr) 40px !important;
+    padding-inline: 5px !important;
+  }
+
+  .replay-roster-slot[data-mirrored="true"] .replay-roster-slot-grid {
+    grid-template-columns: 40px minmax(0, 1fr) !important;
+  }
+
+  .replay-roster-slot-name span[title] {
+    font-size: 10px;
+  }
+
+  .replay-roster-slot-health > span {
+    font-size: 21px;
+  }
+}

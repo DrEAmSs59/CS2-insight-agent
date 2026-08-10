@@ -405,7 +405,7 @@ export default function DemoHeatmapView({
   };
 
   return (
-    <section className="overflow-hidden rounded-xl border border-cs2-border bg-cs2-bg-card">
+    <section className="analysis-heatmap-panel overflow-hidden border border-cs2-border bg-cs2-bg-card xl:flex xl:h-full xl:min-h-0 xl:flex-col">
       <header className="flex flex-wrap items-center justify-between gap-3 border-b border-cs2-border px-4 py-3">
         <div>
           <h2 className="mt-0.5 text-[14px] font-black text-cs2-text-primary">{t("analysis.heatmap.title")}</h2>
@@ -451,7 +451,7 @@ export default function DemoHeatmapView({
         </div>
       </header>
 
-      <div className="grid gap-4 p-4 xl:grid-cols-[minmax(0,1fr)_240px]">
+      <div className="grid gap-4 p-4 xl:min-h-0 xl:flex-1 xl:grid-cols-[minmax(0,1fr)_240px]">
         <div
           ref={mapSurfaceRef}
           data-testid="heatmap-map-surface"
@@ -462,7 +462,7 @@ export default function DemoHeatmapView({
           onPointerMove={handleMapPointerMove}
           onPointerUp={finishMapDrag}
           onPointerCancel={finishMapDrag}
-          className={`relative mx-auto aspect-square w-full max-w-[860px] overflow-hidden rounded-xl border border-white/10 bg-[#04080a] shadow-inner ${
+          className={`heatmap-map-surface relative mx-auto aspect-square w-full max-w-[860px] overflow-hidden border border-cs2-border xl:h-full xl:max-h-full xl:max-w-full xl:w-auto ${
             Math.abs(mapCamera.zoom - 1) >= 0.001 ? "cursor-grab active:cursor-grabbing" : ""
           }`}
           style={{ touchAction: "none" }}

@@ -58,10 +58,10 @@ function ToolButton({ title, label, active = false, disabled = false, onClick, c
       title={title}
       disabled={disabled}
       onClick={onClick}
-      className={`inline-flex h-8 min-w-8 items-center justify-center gap-1 rounded-md border px-2 text-cs2-text-muted transition-colors hover:border-cs2-border-focus hover:bg-cs2-bg-hover hover:text-cs2-text-primary disabled:opacity-35 ${active ? "border-cs2-accent/35 bg-cs2-accent-soft text-cs2-accent" : "border-transparent"}`}
+      className={`litecut-timeline-tool-button inline-flex h-8 min-w-8 shrink-0 items-center justify-center gap-1 rounded-md border px-2 text-cs2-text-muted transition-colors hover:border-cs2-border-focus hover:bg-cs2-bg-hover hover:text-cs2-text-primary disabled:opacity-35 ${active ? "border-cs2-accent/35 bg-cs2-accent-soft text-cs2-accent" : "border-transparent"}`}
     >
       {children}
-      {label ? <span className="whitespace-nowrap text-[9px] font-semibold leading-none">{label}</span> : null}
+      {label ? <span className="litecut-timeline-tool-label whitespace-nowrap text-[9px] font-semibold leading-none">{label}</span> : null}
     </button>
   );
 }
@@ -833,7 +833,7 @@ export default function OpenCutTrackTimeline({ body, onDropMedia }) {
       <div className="litecut-timeline-toolbar flex shrink-0 items-center gap-1 border-b border-cs2-border px-2.5 py-1.5">
         <ToolButton title={t("liteCut.timeline.undo")} label={t("liteCut.timeline.undo")} disabled={!canUndo} onClick={undo}><Undo2 className="h-3.5 w-3.5" /></ToolButton>
         <ToolButton title={t("liteCut.timeline.redo")} label={t("liteCut.timeline.redo")} disabled={!canRedo} onClick={redo}><Redo2 className="h-3.5 w-3.5" /></ToolButton>
-        <span className="mx-1 h-5 w-px bg-cs2-border" />
+        <span className="mx-1 h-5 w-px shrink-0 bg-cs2-border" />
         <ToolButton title={t("liteCut.timeline.splitSelected")} label={t("liteCut.timeline.split")} disabled={!selectedClipId} onClick={splitAtPlayhead}><Scissors className="h-3.5 w-3.5" /></ToolButton>
         <ToolButton title={t("liteCut.timeline.deleteSelected")} label={t("liteCut.timeline.delete")} disabled={!selectedClipId} onClick={deleteSelected}><Trash2 className="h-3.5 w-3.5" /></ToolButton>
         <ToolButton title={t("liteCut.timeline.deleteLeftSide")} label={t("liteCut.timeline.deleteLeft")} onClick={() => deleteTimelineSide("left")}><PanelLeftClose className="h-3.5 w-3.5" /></ToolButton>
@@ -848,12 +848,12 @@ export default function OpenCutTrackTimeline({ body, onDropMedia }) {
         ><Crosshair className="h-3.5 w-3.5" /></ToolButton>
         <ToolButton title={t("liteCut.timeline.prevKeyframe")} label="◆‹" disabled={!keyframeTimes.some((time) => time < playheadSec - 0.001)} onClick={() => jumpKeyframe(-1)}><span className="text-[10px]">◆</span></ToolButton>
         <ToolButton title={t("liteCut.timeline.nextKeyframe")} label="›◆" disabled={!keyframeTimes.some((time) => time > playheadSec + 0.001)} onClick={() => jumpKeyframe(1)}><span className="text-[10px]">◆</span></ToolButton>
-        <span className="mx-1 h-5 w-px bg-cs2-border" />
+        <span className="mx-1 h-5 w-px shrink-0 bg-cs2-border" />
         <ToolButton title={t("liteCut.timeline.addVideoTrack")} label={t("liteCut.timeline.videoTrack")} onClick={() => addVideoTrack(selectedTrackId)}><span className="flex"><Plus className="h-3.5 w-3.5" /><Film className="h-3 w-3" /></span></ToolButton>
         <ToolButton title={t("liteCut.timeline.addOverlayTrack")} label={t("liteCut.timeline.overlayTrack")} onClick={addOverlayTrack}><span className="flex"><Plus className="h-3.5 w-3.5" /><Type className="h-3 w-3" /></span></ToolButton>
         <ToolButton title={t("liteCut.timeline.addAudioTrack")} label={t("liteCut.timeline.audioTrack")} onClick={() => addAudioTrack(selectedTrackId)}><span className="flex"><Plus className="h-3.5 w-3.5" /><Music2 className="h-3 w-3" /></span></ToolButton>
         <ToolButton title={t("liteCut.timeline.shortcutsTitle")} label={t("liteCut.timeline.shortcuts")} onClick={() => setShortcutHelpOpen(true)}><span className="font-mono text-[10px]">⌨</span></ToolButton>
-        <div className="ml-auto flex items-center gap-1">
+        <div className="litecut-timeline-zoom-group ml-auto flex shrink-0 items-center gap-1">
           <ToolButton title={t("liteCut.timeline.zoomOut")} onClick={() => applyTimelineZoom(timelineZoom / 1.25)}><ZoomOut className="h-3.5 w-3.5" /></ToolButton>
           <div className="mr-1 flex items-center gap-1.5 rounded-md border border-cs2-border bg-cs2-bg-input px-2 py-1">
           <input

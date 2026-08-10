@@ -1,0 +1,64 @@
+
+.litecut-property-collapse-header {
+  align-items: center;
+  min-height: 38px;
+  padding: 8px 11px;
+  border: 0;
+  background: var(--cs2-bg-card);
+  color: inherit;
+  cursor: pointer;
+  transition: background-color 160ms ease;
+}
+
+.litecut-property-collapse-header:hover {
+  background: var(--cs2-bg-hover);
+}
+
+.litecut-property-collapse-header[aria-expanded="true"] {
+  background: var(--cs2-bg-card);
+}
+
+.litecut-property-collapse-content {
+  padding: 2px 10px 12px;
+  background: var(--cs2-bg-card);
+}
+
+.litecut-keyframe-editor {
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.litecut-property-inline-group {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.litecut-property-number {
+  height: 26px;
+  padding: 0 6px;
+  border: 1px solid var(--cs2-border-subtle);
+  border-radius: 8px;
+  outline: none;
+  text-align: right;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--cs2-text-primary);
+  background: var(--cs2-bg-input);
+  box-shadow: none;
+  appearance: textfield;
+}
+
+.litecut-property-number:hover,
+.litecut-property-number:focus {
+  border-color: var(--cs2-accent);
+}
+
+.litecut-property-number::-webkit-inner-spin-button,
+.litecut-property-number::-webkit-outer-spin-button {
+  margin: 0;
+  appearance: none;
+}

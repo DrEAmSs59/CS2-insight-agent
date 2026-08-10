@@ -158,6 +158,9 @@ describe("OpenCutTrackTimeline", () => {
     expect(screen.getByText("Video · V1")).toBeTruthy();
     expect(screen.getByText("Audio (A) · A1")).toBeTruthy();
     expect(screen.getByText("Text 1")).toBeTruthy();
+    const videoTrackButton = screen.getByText("Video", { exact: true }).closest("button");
+    expect(videoTrackButton.className).toContain("shrink-0");
+    expect(videoTrackButton.querySelector(".litecut-timeline-tool-label")?.textContent).toBe("Video");
     expect(screen.getByRole("slider", { name: "Timeline zoom" })).toBeTruthy();
   });
 

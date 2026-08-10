@@ -10,6 +10,7 @@ describe("LiteCut canvas inspector", () => {
 
     expect(tabs.querySelectorAll("button")).toHaveLength(6);
     expect(tabs.querySelector("button").getAttribute("title")).toMatch(/Canvas|画布/);
+    expect(tabs.querySelector(".litecut-inspector-tab-label")).toBeTruthy();
     expect(screen.getByText(/Project canvas, fitting, and background|工程画布、适配与背景/)).toBeTruthy();
   });
 

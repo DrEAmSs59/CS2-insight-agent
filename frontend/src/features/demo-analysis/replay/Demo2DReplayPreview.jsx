@@ -406,7 +406,7 @@ const ReplayRosterSlot = memo(function ReplayRosterSlot({
       data-burning={burning ? "true" : "false"}
       data-blinded={blinded ? "true" : "false"}
       data-mirrored={mirrored ? "true" : "false"}
-      className={`replay-observer-slot replay-roster-slot relative isolate h-[84px] overflow-hidden rounded-[3px] border shadow-[0_5px_12px_rgba(0,0,0,0.35)] ${
+      className={`replay-observer-slot replay-roster-slot relative isolate h-[84px] overflow-hidden border ${
         isT
           ? "border-amber-200/45 bg-[#1b1707]"
           : "border-sky-300/45 bg-[#07182a]"
@@ -414,10 +414,9 @@ const ReplayRosterSlot = memo(function ReplayRosterSlot({
     >
       <span
         aria-hidden="true"
-        className={`absolute inset-y-0 ${
-          isT
-            ? "bg-gradient-to-r from-[#312805] via-[#806608] to-[#443707]"
-            : "bg-gradient-to-r from-[#071d39] via-[#0752a1] to-[#082544]"
+        data-health-fill
+        className={`replay-roster-health-fill absolute inset-y-0 ${
+          isT ? "replay-roster-health-fill--t" : "replay-roster-health-fill--ct"
         } ${mirrored ? "right-0" : "left-0"}`}
         style={{ width: `${alive ? health : 0}%` }}
       />
@@ -554,13 +553,13 @@ const ReplayRoster = memo(function ReplayRoster({
   const exclusiveCarrier = safeLabel(bombCarrierName).toLowerCase();
   const aliveCount = players.filter((player) => byName.get(safeLabel(player.name).toLowerCase())?.is_alive !== false).length;
   return (
-    <aside className={`replay-roster h-full rounded-xl border bg-[#07090c] p-2.5 shadow-xl ${isT ? "border-amber-300/20" : "border-sky-400/20"}`}>
+    <aside data-side={isT ? "T" : "CT"} className={`replay-roster replay-roster-surface h-fit self-start border p-2.5 ${isT ? "border-amber-300/20" : "border-sky-400/20"}`}>
       <div className={`mb-2 flex items-center justify-between border-b pb-2 ${mirrored ? "flex-row-reverse" : ""} ${isT ? "border-amber-300/20" : "border-sky-400/20"}`}>
         <div className={`flex items-center gap-2 ${mirrored ? "flex-row-reverse" : ""}`}>
           <span className={`h-5 min-w-7 rounded-sm px-1 text-center font-mono text-[11px] font-black leading-5 ${isT ? "bg-amber-300 text-amber-950" : "bg-sky-400 text-sky-950"}`}>{sideName}</span>
-          <h3 className={`max-w-[190px] truncate text-[12px] font-black uppercase tracking-[0.08em] ${isT ? "text-amber-50" : "text-sky-100"}`}>{title}</h3>
+          <h3 className="replay-roster-title max-w-[190px] truncate text-[12px] font-black uppercase tracking-[0.08em]">{title}</h3>
         </div>
-        <span className={`font-mono text-[12px] font-black ${isT ? "text-amber-200" : "text-sky-300"}`}>{aliveCount}/5</span>
+        <span className="replay-roster-count font-mono text-[12px] font-black">{aliveCount}/5</span>
       </div>
       <div className="space-y-1.5">
         {players.map((player, index) => {
@@ -1129,8 +1128,8 @@ export default function Demo2DReplayPreview({
   }
 
   return (
-    <div className="space-y-3">
-      <section className="rounded-xl border border-cs2-border bg-cs2-bg-card p-3">
+    <div className="space-y-3 xl:flex xl:h-full xl:min-h-0 xl:flex-col xl:gap-3 xl:space-y-0">
+      <section className="rounded-xl border border-cs2-border bg-cs2-bg-card p-3 xl:shrink-0">
         <div className="flex flex-wrap items-center gap-3">
           <button type="button" onClick={() => changeRound(roundIndex - 1)} disabled={loading || roundIndex <= 0} className="flex h-8 w-8 items-center justify-center rounded-md border border-cs2-border text-cs2-text-muted disabled:opacity-30"><ChevronLeft className="h-4 w-4" /></button>
           <select aria-label="选择回合" value={selectedRound.round_number} disabled={loading} onChange={(event) => { const nextRound = Number(event.target.value); pendingResumeRef.current = null; setRoundNumber(nextRound); onRoundChange?.(nextRound); }} className="h-8 rounded-md border border-cs2-border bg-cs2-bg-input px-3 text-[10px] font-bold text-cs2-text-primary outline-none disabled:opacity-40">
@@ -1175,7 +1174,7 @@ export default function Demo2DReplayPreview({
         ariaLabel={t("analysis.layout.replay")}
         editMode={layoutEditing}
         resetSignal={layoutResetSignal}
-        className="replay-dock-row min-h-[720px]"
+        className="replay-dock-row min-h-[720px] xl:min-h-0 xl:flex-1"
         panels={[
           {
             id: "team-a-hud",
@@ -1196,7 +1195,7 @@ export default function Demo2DReplayPreview({
             collapsible: false,
             className: "replay-radar-panel",
             content: (
-        <section className="relative h-full min-h-[720px] overflow-hidden rounded-xl border border-cs2-border bg-[#060b0e]">
+        <section className="replay-radar-surface relative h-full min-h-[720px] overflow-hidden border border-cs2-border xl:min-h-0">
           <div className="absolute left-3 top-3 z-30 flex items-center gap-2">
             {hasMapLayers && <div role="group" aria-label="地图楼层" className="flex rounded-md border border-cs2-border bg-cs2-bg-card/95 p-0.5">{[{ key: "upper", label: "上层" }, { key: "lower", label: "下层" }].map((item) => <button key={item.key} type="button" aria-pressed={mapLayer === item.key} onClick={() => setMapLayer(item.key)} className={`rounded px-2 py-1 text-[8px] font-bold ${mapLayer === item.key ? "bg-cs2-accent text-cs2-text-on-accent" : "text-cs2-text-muted"}`}>{item.label}</button>)}</div>}
             {smokeDebugOn && (

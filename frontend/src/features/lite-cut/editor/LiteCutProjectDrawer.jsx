@@ -137,13 +137,13 @@ export default function LiteCutProjectDrawer({
 
   return (
     <>
-      <div className="fixed inset-0 z-[100] bg-black/60 backdrop-blur-sm" aria-hidden />
+      <div className="fixed inset-0 z-[100] bg-cs2-bg-overlay backdrop-blur-sm" aria-hidden />
       <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 sm:p-6" onClick={onClose}>
       <section
         role="dialog"
         aria-modal="true"
         aria-labelledby="litecut-project-manager-title"
-        className="flex max-h-[88vh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl border border-cs2-border bg-cs2-bg-card shadow-2xl"
+        className="flex max-h-[88vh] w-full max-w-5xl flex-col overflow-hidden rounded-[var(--cs2-radius-panel)] border border-cs2-border bg-cs2-bg-card shadow-[var(--cs2-shadow-lg)]"
         onClick={(event) => event.stopPropagation()}
       >
         <header className="flex shrink-0 items-center gap-3 border-b border-cs2-border px-5 py-4">
@@ -159,14 +159,14 @@ export default function LiteCutProjectDrawer({
 
         <div className="min-h-0 flex-1 overflow-y-auto p-4 sm:p-5">
           <div className="mx-auto w-full max-w-4xl">
-          <section className="rounded-xl border border-cs2-accent/25 bg-cs2-accent-soft/30 p-3">
+          <section className="rounded-[var(--cs2-radius-panel)] border border-cs2-accent bg-cs2-bg-input p-3">
             <p className="text-[10px] font-semibold uppercase tracking-wide text-cs2-accent">{t("liteCut.project.current")}</p>
             <div className="mt-1 flex items-center justify-between gap-3">
-              <input value={projectName || ""} onChange={(event) => onProjectNameChange?.(event.target.value)} className="min-w-0 flex-1 border-b border-transparent bg-transparent text-sm font-bold text-cs2-text-primary outline-none hover:border-white/15 focus:border-cs2-accent" aria-label={t("liteCut.project.name")} />
-              <span className={`shrink-0 text-[10px] font-semibold ${dirty ? "text-amber-300" : "text-emerald-300"}`}>{dirty ? t("liteCut.project.unsaved") : t("liteCut.project.saved")}</span>
+              <input value={projectName || ""} onChange={(event) => onProjectNameChange?.(event.target.value)} className="min-w-0 flex-1 border-b border-transparent bg-transparent text-sm font-bold text-cs2-text-primary outline-none hover:border-cs2-border focus:border-cs2-accent" aria-label={t("liteCut.project.name")} />
+              <span className={`shrink-0 text-[10px] font-semibold ${dirty ? "text-cs2-amber-on-surface" : "text-cs2-emerald-on-surface"}`}>{dirty ? t("liteCut.project.unsaved") : t("liteCut.project.saved")}</span>
             </div>
             <p className="mt-2 text-[10px] text-cs2-text-muted">{t("liteCut.project.currentMeta", { id: projectId || t("liteCut.project.draft"), tracks: stats.tracks, clips: stats.clips })}</p>
-            <div className="mt-3 border-t border-white/10 pt-3">
+            <div className="mt-3 border-t border-cs2-border-subtle pt-3">
               <p className="text-[10px] font-semibold uppercase tracking-wide text-cs2-text-muted">{t("liteCut.project.outputSettings")}</p>
               <div className="mt-2 grid grid-cols-4 gap-1.5">
                 {[
@@ -175,7 +175,7 @@ export default function LiteCutProjectDrawer({
                   ["1:1", 1080, 1080],
                   ["4:3", 1440, 1080],
                 ].map(([label, nextWidth, nextHeight]) => (
-                  <button key={label} type="button" onClick={() => onProjectSettingsChange?.({ width: nextWidth, height: nextHeight })} className={`rounded-md border px-1.5 py-1 text-[10px] font-semibold ${width === nextWidth && height === nextHeight ? "border-cs2-accent bg-cs2-accent-soft text-cs2-accent" : "border-cs2-border-subtle text-cs2-text-muted hover:text-white"}`}>{label}</button>
+                  <button key={label} type="button" onClick={() => onProjectSettingsChange?.({ width: nextWidth, height: nextHeight })} className={`rounded-md border px-1.5 py-1 text-[10px] font-semibold ${width === nextWidth && height === nextHeight ? "border-cs2-accent bg-cs2-bg-card text-cs2-accent" : "border-cs2-border-subtle bg-cs2-bg-input text-cs2-text-muted hover:border-cs2-border-focus hover:bg-cs2-bg-hover hover:text-cs2-text-primary"}`}>{label}</button>
                 ))}
               </div>
               <div className="mt-2 grid grid-cols-[1fr_auto_1fr] items-center gap-1.5">
@@ -210,7 +210,7 @@ export default function LiteCutProjectDrawer({
             </div>
             <div className="grid grid-cols-2 gap-2">
               {projectTemplates.map((template) => (
-                <button key={template.id} type="button" onClick={() => { onNewProject?.(template); onClose?.(); }} className="min-w-0 rounded-lg border border-cs2-border-subtle bg-cs2-surface-1/60 px-3 py-2 text-left hover:border-cs2-accent/40 hover:bg-white/[0.03]">
+                <button key={template.id} type="button" onClick={() => { onNewProject?.(template); onClose?.(); }} className="min-w-0 rounded-lg border border-cs2-border-subtle bg-cs2-bg-input px-3 py-2 text-left hover:border-cs2-border-focus hover:bg-cs2-bg-hover">
                   <span className="block truncate text-[11px] font-semibold text-cs2-text-primary">{template.label}</span>
                   <span className="mt-0.5 block line-clamp-2 text-[9px] leading-relaxed text-cs2-text-muted">{template.detail}</span>
                 </button>
@@ -221,11 +221,11 @@ export default function LiteCutProjectDrawer({
           <section className="mt-5">
             <div className="mb-2 flex items-center gap-2">
               <p className="mr-auto text-xs font-bold text-cs2-text-secondary">{t("liteCut.project.allProjects", { count: projects.length })}</p>
-              {selectedProjectIds.size > 0 ? <button type="button" disabled={batchDeleting} onClick={() => void handleBatchDelete()} className="inline-flex h-7 items-center gap-1 rounded bg-rose-500/15 px-2 text-[10px] font-semibold text-rose-300 hover:bg-rose-500/25 disabled:opacity-50">
+              {selectedProjectIds.size > 0 ? <button type="button" disabled={batchDeleting} onClick={() => void handleBatchDelete()} className="inline-flex h-7 items-center gap-1 rounded bg-cs2-rose-surface px-2 text-[10px] font-semibold text-cs2-rose-on-surface hover:brightness-95 disabled:opacity-50">
                 {batchDeleting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
                 {t("liteCut.project.deleteSelected", { count: selectedProjectIds.size })}
               </button> : null}
-              <button type="button" title={t("liteCut.project.refresh")} onClick={onRefresh} className="inline-flex h-7 w-7 items-center justify-center rounded-md text-cs2-text-muted hover:bg-white/5 hover:text-cs2-text-primary">
+              <button type="button" title={t("liteCut.project.refresh")} onClick={onRefresh} className="inline-flex h-7 w-7 items-center justify-center rounded-md text-cs2-text-muted hover:bg-cs2-bg-hover hover:text-cs2-text-primary">
                 <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
               </button>
             </div>
@@ -233,7 +233,7 @@ export default function LiteCutProjectDrawer({
               <FolderOpen className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-cs2-text-muted" />
               <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={t("liteCut.project.searchPlaceholder")} className="w-full rounded-lg border border-cs2-border bg-cs2-bg-input py-2 pl-8 pr-3 text-xs outline-none focus:border-cs2-accent" />
             </div>
-            {matchingProjects.length > 0 ? <label className="mt-2 flex cursor-pointer items-center gap-2 rounded-lg border border-cs2-border-subtle bg-cs2-surface-1/40 px-2.5 py-1.5 text-[10px] text-cs2-text-secondary">
+            {matchingProjects.length > 0 ? <label className="mt-2 flex cursor-pointer items-center gap-2 rounded-lg border border-cs2-border-subtle bg-cs2-bg-input px-2.5 py-1.5 text-[10px] text-cs2-text-secondary">
               <input ref={selectAllRef} type="checkbox" checked={allMatchingSelected} onChange={toggleAllMatching} className="h-3.5 w-3.5 accent-cs2-accent" />
               <span>{t("liteCut.project.selectAllVisible", { count: matchingProjects.length })}</span>
               {selectedProjectIds.size > 0 ? <span className="ml-auto text-cs2-accent">{t("liteCut.project.selectedCount", { count: selectedProjectIds.size })}</span> : null}
@@ -244,16 +244,16 @@ export default function LiteCutProjectDrawer({
               {matchingProjects.map((project) => {
                 const active = Number(project.id) === Number(projectId);
                 const selected = selectedProjectIds.has(Number(project.id));
-                return <div key={project.id} className={`group flex items-center gap-2 rounded-lg border px-2 py-2 ${selected ? "border-cs2-accent/60 bg-cs2-accent-soft" : active ? "border-cs2-accent/45 bg-cs2-accent-soft/30" : "border-cs2-border-subtle bg-cs2-surface-1/50 hover:border-white/15"}`}>
+                return <div key={project.id} className={`group flex items-center gap-2 rounded-lg border px-2 py-2 ${selected ? "border-cs2-accent bg-cs2-accent-soft" : active ? "border-cs2-accent bg-cs2-bg-active" : "border-cs2-border-subtle bg-cs2-bg-input hover:border-cs2-border-focus hover:bg-cs2-bg-hover"}`}>
                   <input type="checkbox" checked={selected} onChange={() => toggleProject(Number(project.id))} aria-label={t("liteCut.project.selectProject", { name: project.name || t("liteCut.project.untitled") })} className="h-3.5 w-3.5 shrink-0 accent-cs2-accent" />
                   <button type="button" onClick={() => void chooseProject(project.id)} className="min-w-0 flex-1 text-left">
                     <span className="block truncate text-xs font-semibold text-cs2-text-primary">{project.name || t("liteCut.project.untitled")}</span>
                     <span className="mt-0.5 block text-[10px] text-cs2-text-muted">#{project.id} {formatProjectTime(project.updated_at, t("common.localeCode"))}</span>
                   </button>
-                  <button type="button" title={t("liteCut.project.duplicate")} onClick={() => { onDuplicateProject?.(project.id); onClose?.(); }} className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded text-cs2-text-muted opacity-0 hover:bg-white/10 hover:text-cs2-text-primary group-hover:opacity-100">
+                  <button type="button" title={t("liteCut.project.duplicate")} onClick={() => { onDuplicateProject?.(project.id); onClose?.(); }} className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded text-cs2-text-muted opacity-0 hover:bg-cs2-bg-hover hover:text-cs2-text-primary group-hover:opacity-100">
                     <Copy className="h-3.5 w-3.5" />
                   </button>
-                  <button type="button" title={t("liteCut.project.delete")} onClick={() => { if (window.confirm(t("liteCut.project.deleteConfirm", { name: project.name || t("liteCut.project.untitled") }))) { onDeleteProject?.(project.id, true); onClose?.(); } }} className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded text-cs2-text-muted opacity-0 hover:bg-rose-500/15 hover:text-rose-300 group-hover:opacity-100">
+                  <button type="button" title={t("liteCut.project.delete")} onClick={() => { if (window.confirm(t("liteCut.project.deleteConfirm", { name: project.name || t("liteCut.project.untitled") }))) { onDeleteProject?.(project.id, true); onClose?.(); } }} className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded text-cs2-text-muted opacity-0 hover:bg-cs2-rose-surface hover:text-cs2-rose-on-surface group-hover:opacity-100">
                     <Trash2 className="h-3.5 w-3.5" />
                   </button>
                 </div>;

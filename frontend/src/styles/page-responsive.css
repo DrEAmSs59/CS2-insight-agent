@@ -1,0 +1,206 @@
+
+/* ===== 页面级容器适配 =====
+ * 视口断点无法反映可用内容宽度：侧栏可以被拖到 340px，系统缩放也会
+ * 让同一个视口塞进更少的 CSS 像素。页面使用 inline-size 容器查询，因而
+ * 按实际剩余空间切换布局，避免控件在中间宽度硬挤到彼此上面。 */
+.page-container {
+  min-width: 0;
+  container: page / inline-size;
+}
+
+.demo-library-page,
+.demo-library-results,
+.demo-library-grid,
+.demo-library-list {
+  min-width: 0;
+}
+
+.demo-library-toolbar__actions {
+  align-content: flex-start;
+}
+
+.demo-library-toolbar__actions > *,
+.demo-library-querybar__controls > * {
+  max-width: 100%;
+}
+
+.demo-library-querybar__date-range {
+  flex: 1 1 18rem;
+}
+
+.demo-library-querybar__sort {
+  flex: 1 1 auto;
+}
+
+.demo-library-querybar__sort-select {
+  flex: 1 1 auto;
+}
+
+.demo-library-grid {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr));
+}
+
+.match-list-row__details {
+  min-width: 160px;
+}
+
+.match-list-row__details-normal,
+.match-list-row__details-actions,
+.match-list-row__team,
+.match-card__hero-main,
+.match-card__hero-meta {
+  min-width: 0;
+}
+
+/* 给居中比分留出中间通道，避免窄卡时地图名与比分重叠；不再用 container query 随缩放切换布局 */
+.match-card__hero-meta {
+  max-width: calc(50% - 2.75rem);
+}
+
+/* 斜体末字外溢；过长时才省略 */
+.match-card__hero-meta > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding-right: 0.28em;
+}
+
+/* Demo cards use theme-specific source marks. White publisher logos disappear
+   against the light canvas, while black assets lose contrast in dark mode. */
+.match-source-logo--light {
+  display: block;
+}
+
+.match-source-logo--dark {
+  display: none;
+}
+
+.dark .match-source-logo--light {
+  display: none;
+}
+
+.dark .match-source-logo--dark {
+  display: block;
+}
+
+/* Keep the map art present in light mode without sacrificing the semantic text
+   colors. The former 40% image plus opaque card gradient washed out the whole
+   hero, including publisher marks and the match date. */
+.match-card__hero-image {
+  opacity: 0.42;
+  filter: saturate(0.9) contrast(1.03);
+}
+
+.match-card__hero-shade {
+  background: linear-gradient(
+    to top,
+    var(--cs2-bg-card) 0%,
+    color-mix(in srgb, var(--cs2-bg-card) 54%, transparent) 48%,
+    color-mix(in srgb, var(--cs2-bg-card) 18%, transparent) 100%
+  );
+}
+
+.light .match-card__hero-image {
+  opacity: 0.62;
+  filter: saturate(0.86) contrast(1.08);
+}
+
+.light .match-card__hero-shade {
+  background: linear-gradient(
+    to top,
+    color-mix(in srgb, var(--cs2-bg-card) 88%, transparent) 0%,
+    color-mix(in srgb, var(--cs2-bg-card) 38%, transparent) 48%,
+    color-mix(in srgb, var(--cs2-bg-card) 16%, transparent) 100%
+  );
+}
+
+.match-card__source-logo {
+  opacity: 0.9;
+}
+
+.light .match-card__source-logo {
+  opacity: 0.82;
+}
+
+@container page (min-width: 920px) {
+  .demo-library-toolbar {
+    flex-direction: row;
+    align-items: flex-start;
+    justify-content: space-between;
+  }
+
+  .demo-library-toolbar__actions {
+    width: auto;
+    max-width: 72%;
+    flex: 0 1 auto;
+  }
+}
+
+@container page (max-width: 760px) {
+  .match-list-row {
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    padding: 0.75rem;
+  }
+
+  .match-list-row__map {
+    width: auto;
+    min-width: 0;
+    flex: 1 1 11rem;
+  }
+
+  .match-list-row__details {
+    min-width: 0;
+    flex: 1 1 10rem;
+  }
+
+  .match-list-row__details-normal {
+    width: 100%;
+    justify-content: space-between;
+    gap: 0.75rem;
+  }
+
+  .match-list-row__teams {
+    order: 3;
+    width: 100%;
+    flex: 1 1 100%;
+    gap: 0.75rem;
+    padding-inline: 0;
+  }
+}
+
+@container page (max-width: 720px) {
+  .demo-library-toolbar__actions {
+    justify-content: flex-start;
+  }
+
+  .demo-library-querybar__search,
+  .demo-library-querybar__date-range,
+  .demo-library-querybar__sort {
+    flex-basis: 100%;
+  }
+
+  .demo-library-querybar__sort-select {
+    min-width: 0;
+  }
+
+  .demo-library-advanced-grid {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+}
+
+@container page (max-width: 520px) {
+  .demo-library-results {
+    padding: 0.75rem;
+  }
+
+  .match-list-row__map,
+  .match-list-row__details {
+    flex-basis: 100%;
+  }
+
+  .match-list-row__details {
+    margin-left: 0;
+  }
+}

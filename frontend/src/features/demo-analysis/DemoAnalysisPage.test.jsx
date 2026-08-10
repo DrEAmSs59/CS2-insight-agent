@@ -424,6 +424,10 @@ describe("DemoAnalysisPage Insight Agent flow", () => {
     const ctRosterSlot = view.container.querySelector('[data-replay-roster-slot="ZywOo"]');
     expect(ctRosterSlot?.getAttribute("data-side")).toBe("CT");
     expect(ctRosterSlot?.className).toContain("border-sky-300");
+    expect(ctRosterSlot?.querySelector("[data-health-fill]")?.className).toContain("replay-roster-health-fill--ct");
+    expect(ctRosterSlot?.closest(".replay-roster-surface")).toBeTruthy();
+    expect(ctRosterSlot?.closest(".replay-roster")?.className).toContain("h-fit");
+    expect(view.container.querySelector(".replay-radar-surface")).toBeTruthy();
     expect(ctRosterSlot?.getAttribute("data-smoked")).toBe("false");
     expect(ctRosterSlot?.getAttribute("data-burning")).toBe("false");
     expect(ctRosterSlot?.getAttribute("data-blinded")).toBe("false");
@@ -432,6 +436,7 @@ describe("DemoAnalysisPage Insight Agent flow", () => {
     const tRosterSlot = view.container.querySelector('[data-replay-roster-slot="b1t"]');
     expect(tRosterSlot?.getAttribute("data-side")).toBe("T");
     expect(tRosterSlot?.className).toContain("border-amber-200");
+    expect(tRosterSlot?.querySelector("[data-health-fill]")?.className).toContain("replay-roster-health-fill--t");
     expect(tRosterSlot?.className).toContain("replay-observer-slot");
     expect(screen.getByLabelText("ZywOo 携带 C4").querySelector('img[src$="/c4.svg"]')).toBeTruthy();
     expect(screen.getByRole("button", { name: "定位事件：ZywOo 投掷 HE 手雷" })).toBeTruthy();
@@ -558,6 +563,7 @@ describe("DemoAnalysisPage Insight Agent flow", () => {
     expect(within(sideSelector).getByRole("button", { name: "全部" }).getAttribute("aria-pressed")).toBe("true");
     expect(screen.queryByRole("group", { name: "热力图玩家列表" })).toBeNull();
     expect(screen.getByTestId("heatmap-focused-player").textContent).toBe("ZywOo");
+    expect(screen.getByTestId("heatmap-map-surface").className).toContain("heatmap-map-surface");
     const zoomGroup = screen.getByTestId("heatmap-map-surface").querySelector('[role="group"]');
     const zoomButtons = within(zoomGroup).getAllByRole("button");
     fireEvent.click(zoomButtons[1]);

@@ -1,0 +1,114 @@
+/* ===== 语义主题 =====
+ * Radix Colors owns the actual light/dark scales.  Application code consumes
+ * only these semantic aliases so a component never has to guess whether
+ * white, black, or a zinc shade is readable in the active theme.
+ */
+:root {
+  /* 背景层次 */
+  --cs2-bg-page: var(--sand-1);
+  --cs2-bg-card: var(--sand-2);
+  --cs2-bg-sidebar: var(--sand-2);
+  --cs2-bg-input: var(--sand-3);
+  --cs2-bg-elevated: var(--sand-4);
+
+  /* 交互状态 */
+  --cs2-bg-hover: var(--sand-3);
+  --cs2-bg-active: var(--sand-4);
+  --cs2-bg-overlay: color-mix(in srgb, var(--sand-12) 58%, transparent);
+  --cs2-bg-skeleton: var(--sand-4);
+
+  /* 边框 */
+  --cs2-border: var(--sand-7);
+  --cs2-border-subtle: var(--sand-6);
+  --cs2-border-focus: var(--cs2-accent);
+  --cs2-border-error: var(--red-9);
+
+  /* 文字 */
+  --cs2-text-primary: var(--sand-12);
+  --cs2-text-secondary: var(--sand-11);
+  --cs2-text-muted: var(--sand-10);
+  --cs2-text-on-accent: #ffffff;
+  --cs2-text-inverse: var(--sand-1);
+  --cs2-text-error: var(--red-11);
+  --cs2-text-success: var(--green-11);
+
+  /* 品牌色 */
+  --cs2-accent: var(--orange-9);
+  --cs2-accent-light: var(--orange-10);
+  --cs2-accent-soft: var(--orange-3);
+  --cs2-team-blue: var(--blue-9);
+  --cs2-team-blue-soft: var(--blue-3);
+  --cs2-team-amber: var(--amber-9);
+  --cs2-team-amber-soft: var(--amber-3);
+
+  /* Demo 原生玩家颜色（blue / green / yellow / orange / purple） */
+  --cs2-player-blue: var(--blue-9);
+  --cs2-player-blue-soft: var(--blue-3);
+  --cs2-player-green: var(--green-9);
+  --cs2-player-green-soft: var(--green-3);
+  --cs2-player-yellow: var(--yellow-9);
+  --cs2-player-yellow-soft: var(--yellow-3);
+  --cs2-player-orange: var(--orange-9);
+  --cs2-player-orange-soft: var(--orange-3);
+  --cs2-player-purple: var(--purple-9);
+  --cs2-player-purple-soft: var(--purple-3);
+
+  /* 语义色 */
+  --cs2-highlight: var(--green-9);
+  --cs2-fail: var(--red-9);
+  --cs2-compilation: var(--amber-9);
+  --cs2-info: var(--cyan-9);
+  --cs2-neutral-tone: #8d8d86;
+
+  /* 表面层次 */
+  --cs2-surface-0: var(--cs2-bg-page);
+  --cs2-surface-1: var(--cs2-bg-card);
+  --cs2-surface-2: var(--cs2-bg-elevated);
+  --cs2-surface-3: var(--sand-5);
+
+  /* 滚动条 */
+  --cs2-scrollbar-track: transparent;
+  --cs2-scrollbar-thumb: var(--sand-7);
+  --cs2-scrollbar-thumb-hover: var(--sand-8);
+
+  /* 状态色 surface（badge/tag 背景） */
+  --cs2-rose-surface: var(--red-3);
+  --cs2-emerald-surface: var(--green-3);
+  --cs2-amber-surface: var(--amber-3);
+  --cs2-cyan-surface: var(--cyan-3);
+  --cs2-fuchsia-surface: var(--purple-3);
+  --cs2-violet-surface: var(--violet-3);
+  --cs2-red-surface: var(--red-3);
+
+  /* 状态色 on-surface（badge/tag 文字） */
+  --cs2-rose-on-surface: var(--red-11);
+  --cs2-emerald-on-surface: var(--green-11);
+  --cs2-amber-on-surface: var(--amber-11);
+  --cs2-cyan-on-surface: var(--cyan-11);
+  --cs2-fuchsia-on-surface: var(--purple-11);
+  --cs2-violet-on-surface: var(--violet-11);
+  --cs2-red-on-surface: var(--red-11);
+
+  /* 阴影 */
+  --cs2-shadow: rgba(0,0,0,0.20);
+  --cs2-shadow-sm: 0 1px 2px rgba(0,0,0,0.15);
+  --cs2-shadow-md: 0 4px 12px rgba(0,0,0,0.20);
+  --cs2-shadow-lg: 0 8px 32px rgba(0,0,0,0.30);
+  --cs2-shadow-glow-accent: 0 0 16px rgba(255,140,0,0.20);
+
+  /* 动态颜色替换 (白/黑，各种 zinc) */
+  --cs2-dynamic-white: var(--cs2-text-primary);
+  --cs2-dynamic-zinc-400: var(--cs2-text-secondary);
+  --cs2-dynamic-zinc-300: var(--sand-12);
+  --cs2-dynamic-zinc-200: var(--sand-12);
+  --cs2-dynamic-zinc-100: var(--sand-12);
+
+  /* 动画 */
+  --cs2-transition-fast: 150ms ease;
+  --cs2-transition-normal: 200ms ease;
+
+  /* 几何：模块、控件与微型状态只允许这三个层级 */
+  --cs2-radius-panel: 10px;
+  --cs2-radius-control: 6px;
+  --cs2-radius-status: 4px;
+}
