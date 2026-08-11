@@ -1366,7 +1366,7 @@ def test_overlay_wipe_uses_an_alpha_reveal_without_sliding_the_overlay_box():
         transition_in={"type": "wipe_l", "duration_sec": 1.0},
     )
     assert "geq=r='r(X,Y)':g='g(X,Y)':b='b(X,Y)'" in fc
-    assert "alpha(X,Y)*lte(X/W\\,clip((T-0.000000)/1.000000" in fc
+    assert "alpha(X,Y)*gte(X/W\\,1-(clip((T-0.000000)/1.000000" in fc
     assert "main_w*((0.500000)-(1-" not in fc
 
 

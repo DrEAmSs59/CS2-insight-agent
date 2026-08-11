@@ -14,35 +14,28 @@ from .ffmpeg_runtime import (
     raise_if_cancelled as _raise_if_cancelled,
     run_ffmpeg_process as _run_ffmpeg_process,
 )
-from .filter_graphs import (
-    _atempo_chain,
-    _audio_filter_chain,
-    _audio_mix_filter_complex,
-    _boundary_transition_filter_complex,
-    _clip_canvas_transform_graph,
-    _clip_video_filter_chain,
-    _drawtext_filter_complex,
-    _eq_filter,
-    _overlay_filter_complex,
-    _overlay_height_from_transform,
-    _overlay_layout_from_transform,
-    _overlay_opacity_from_transform,
-    _stage_custom_font_for_ffmpeg,
+from .filter_graphs import _atempo_chain
+from .graph_builders import (
+    build_audio_filter_chain as _audio_filter_chain,
+    build_audio_mix_graph as _audio_mix_filter_complex,
+    build_boundary_transition_graph as _boundary_transition_filter_complex,
+    build_clip_canvas_graph as _clip_canvas_transform_graph,
+    build_clip_video_filter_chain as _clip_video_filter_chain,
+    build_text_overlay_graph as _drawtext_filter_complex,
+    build_equalizer_filter as _eq_filter,
+    build_overlay_graph as _overlay_filter_complex,
+    overlay_height_from_transform as _overlay_height_from_transform,
+    overlay_layout_from_transform as _overlay_layout_from_transform,
+    overlay_opacity_from_transform as _overlay_opacity_from_transform,
+    stage_custom_font_for_ffmpeg as _stage_custom_font_for_ffmpeg,
 )
+from .export_plan import build_lite_cut_export_plan
 from .timeline import (
     _all_overlay_clips_for_export,
     _audio_track_clips_for_export,
     _base_video_track_for_export,
     _build_positional_transitions,
     _clip_crop_filter,
-    _clip_duration_sec,
-    _clip_freeze_frame_sec,
-    _clip_has_speed_ramp,
-    _clip_preserve_pitch,
-    _clip_reverse,
-    _clip_speed,
-    _clip_speed_segments,
-    _clip_timeline_duration_sec,
     _clip_visual_fade,
     _clip_volume,
     _clip_volume_filter,
@@ -50,15 +43,27 @@ from .timeline import (
     _has_solo_audio_tracks,
     _is_main_file_clip,
     _project_bgm_clip_for_export,
-    _project_canvas_settings,
-    _project_encoder_tier,
-    _project_export_range,
-    _project_master_volume,
-    _project_output_settings,
     _resolve_audio_clip_paths,
     _resolve_overlay_clip_paths,
     _timeline_gap_plan,
     _video_layer_audio_clips_for_export,
+)
+from .export_projection import (
+    project_canvas_settings as _project_canvas_settings,
+    project_encoder_tier as _project_encoder_tier,
+    project_export_range as _project_export_range,
+    project_master_volume as _project_master_volume,
+    project_output_settings as _project_output_settings,
+)
+from .timeline_math import (
+    clip_duration_sec as _clip_duration_sec,
+    clip_freeze_frame_sec as _clip_freeze_frame_sec,
+    clip_has_speed_ramp as _clip_has_speed_ramp,
+    clip_preserve_pitch as _clip_preserve_pitch,
+    clip_reverse as _clip_reverse,
+    clip_speed as _clip_speed,
+    clip_speed_segments as _clip_speed_segments,
+    clip_timeline_duration_sec as _clip_timeline_duration_sec,
 )
 from ...video_composer import (
     MontageComposerError,
@@ -866,8 +871,8 @@ def _compose_lite_cut_montage_once(
     rife_device_plan: FrameMeldRifeDevicePlan | None = None,
 ) -> None:
     """Export LiteCut schema v2 body — V1 main track with trim, eq, and transitions."""
-    output_settings = project_body.get("output") if isinstance(project_body.get("output"), dict) else {}
-    framemeld_requested = bool(output_settings.get("framemeld_enabled"))
+    export_plan = build_lite_cut_export_plan(project_body)
+    framemeld_requested = export_plan.framemeld_enabled
     external_progress_callback = progress_callback
 
     def mapped_progress_callback(
@@ -885,7 +890,7 @@ def _compose_lite_cut_montage_once(
     progress_callback = mapped_progress_callback
     _emit_progress(progress_callback, 0.02, "checking")
     _raise_if_cancelled(cancel_event)
-    base_track_id, clips = _base_video_track_for_export(project_body)
+    base_track_id, clips = export_plan.base_track_id, list(export_plan.base_clips)
     if not clips:
         raise MontageComposerError("MONTAGE_NO_CLIPS")
     missing_asset = _first_missing_file_asset_for_export(project_body, base_track_id=base_track_id)
@@ -914,7 +919,7 @@ def _compose_lite_cut_montage_once(
     if gap_plan is None:
         raise MontageComposerError("LITECUT_TIMELINE_OVERLAP")
 
-    transitions = _build_positional_transitions(clips)
+    transitions = export_plan.transitions
     _codec = str(montage_encoder or "libx264").strip().lower()
     video_encode_quality = apply_encoder_device_args(
         h264_encode_cli_args(_codec, _project_encoder_tier(project_body)),
@@ -923,7 +928,7 @@ def _compose_lite_cut_montage_once(
     ffprobe = resolve_ffprobe_binary(ffmpeg_bin)
 
     overlay_clips = _resolve_overlay_clip_paths(
-        _all_overlay_clips_for_export(project_body, base_track_id=base_track_id),
+        list(export_plan.video_layers),
         clip_path_by_id,
     )
     framemeld_source_paths = list(paths)
@@ -1093,15 +1098,9 @@ def _compose_lite_cut_montage_once(
         else:
             _emit_progress(progress_callback, 0.84, "overlays")
 
-        audio_clips = [
-            *_audio_track_clips_for_export(project_body),
-            *_video_layer_audio_clips_for_export(project_body, base_track_id=base_track_id),
-        ]
+        audio_clips = list(export_plan.audio_events)
         audio_clips = _resolve_audio_clip_paths(audio_clips, clip_path_by_id)
-        bgm_clip = _project_bgm_clip_for_export(project_body)
-        if bgm_clip and not _has_solo_audio_tracks(project_body):
-            audio_clips = [*audio_clips, bgm_clip]
-        master_volume = _project_master_volume(project_body)
+        master_volume = export_plan.master_volume
         if audio_clips or abs(master_volume - 1.0) > 1e-6:
             _raise_if_cancelled(cancel_event)
             _emit_progress(progress_callback, 0.88, "audio")
@@ -1300,7 +1299,8 @@ def compose_lite_cut_montage(
     from .export_preflight import validate_export_output
 
     _raise_if_cancelled(cancel_event)
-    base_track_id, clips = _base_video_track_for_export(project_body)
+    export_plan = build_lite_cut_export_plan(project_body)
+    base_track_id, clips = export_plan.base_track_id, list(export_plan.base_clips)
     if not clips:
         raise MontageComposerError("MONTAGE_NO_CLIPS")
     paths: list[Path] = []
@@ -1334,7 +1334,8 @@ def compose_lite_cut_montage(
                 raise
             raise hinted from exc
     ref = source_info[paths[0]]
-    width, height, fps = _project_output_settings(project_body, ref)
+    export_plan = build_lite_cut_export_plan(project_body, ref)
+    width, height, fps = export_plan.output_width, export_plan.output_height, export_plan.output_fps
     if width <= 0 or height <= 0 or fps <= 0:
         raise MontageComposerError("MONTAGE_FIRST_CLIP_NO_RESOLUTION")
 
@@ -1343,12 +1344,7 @@ def compose_lite_cut_montage(
     if "h264_nvenc" in available:
         adapters = map_nvenc_device_indices(ffmpeg_bin, adapters)
     export_gpu_inventory(adapters)
-    output_settings = (
-        project_body.get("output")
-        if isinstance(project_body.get("output"), dict)
-        else {}
-    )
-    framemeld_enabled = bool(output_settings.get("framemeld_enabled"))
+    framemeld_enabled = export_plan.framemeld_enabled
     rife_device_plan = (
         plan_framemeld_rife_device(ffmpeg_bin, adapters)
         if framemeld_enabled
@@ -1386,7 +1382,7 @@ def compose_lite_cut_montage(
             for candidate in candidates
         ],
     )
-    tier = _project_encoder_tier(project_body)
+    tier = export_plan.encoder_tier
     spec = EncoderTargetSpec(
         width=int(width),
         height=int(height),
