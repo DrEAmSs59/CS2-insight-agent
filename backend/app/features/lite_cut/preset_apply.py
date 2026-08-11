@@ -19,8 +19,8 @@ from .models import (
     Transition,
     TransitionRhythmPresetBody,
     _new_overlay_id,
-    empty_project,
 )
+from .project_codec import read_project_body
 
 _PLACEHOLDER_RE = re.compile(r"\{\{(\w+)\}\}")
 
@@ -296,6 +296,5 @@ def apply_preset_to_project(
 
 
 def parse_project_body(raw: dict[str, Any] | None) -> LiteCutProjectBody:
-    if not raw:
-        return empty_project()
-    return LiteCutProjectBody.model_validate(raw)
+    """Compatibility facade; project decoding is owned by project_codec."""
+    return read_project_body(raw)
