@@ -11,6 +11,13 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from ...env_utils import load_config, save_config
+from .dependencies import build_lite_cut_services
+from .proxy_executor import (
+    _row_requires_or_has_preview_proxy,
+    cleanup_orphan_preview_files,
+    proxy_cache_inventory,
+    remove_asset_preview_files,
+)
 from .runtime import (
     LiteCutPreviewProxyJob,
     get_lite_cut_db,
@@ -20,6 +27,10 @@ from .runtime import (
 
 router = APIRouter(prefix="/api/lite-cut", tags=["lite-cut-proxy"])
 logger = logging.getLogger(__name__)
+
+
+def _services():
+    return build_lite_cut_services(get_lite_cut_db())
 
 
 def _preview_proxy_job_snapshot(job: LiteCutPreviewProxyJob) -> dict[str, Any]:
@@ -34,89 +45,9 @@ def _preview_proxy_job_snapshot(job: LiteCutPreviewProxyJob) -> dict[str, Any]:
 
 
 def _create_preview_proxy_sync(job: LiteCutPreviewProxyJob, row: dict[str, Any]) -> tuple[Path | None, bool]:
-    from ...env_utils import load_config
-    from ...montage_encoder import h264_encode_cli_args
-    from ...video_composer import (
-        probe_video_audio_summary,
-        resolve_ffmpeg_binary,
-        resolve_ffprobe_binary,
-        resolve_h264_codec_name,
-    )
-    from .assets import (
-        asset_exceeds_direct_preview_limits,
-        create_browser_preview_proxy,
-        ensure_alpha_mov_preview_proxy,
-    )
+    from .proxy_executor import execute_preview_proxy
 
-    source = Path(str(row.get("file_path") or ""))
-    if job.cancel_event.is_set():
-        return None, bool(job.has_alpha)
-    cfg = load_config()
-    ffmpeg_bin = resolve_ffmpeg_binary(cfg.ffmpeg_path)
-    max_edge = max(360, min(2160, int(getattr(cfg, "lite_cut_proxy_resolution", 720) or 720)))
-    video_codec = str(job.video_codec or "").strip().lower()
-    audio_codec = job.audio_codec
-    pixel_format = job.pixel_format
-    source_fps = job.source_fps
-    if not video_codec or audio_codec is None or pixel_format is None or source_fps is None or (source.suffix.lower() == ".mov" and job.has_alpha is None):
-        try:
-            info = probe_video_audio_summary(source, resolve_ffprobe_binary(ffmpeg_bin))
-            video_codec = str(info.get("codec_name") or "").strip().lower()
-            job.video_codec = video_codec or None
-            audio_codec = str(info.get("audio_codec_name") or "").strip().lower()
-            job.audio_codec = audio_codec
-            pixel_format = str(info.get("pixel_format") or "").strip().lower()
-            job.pixel_format = pixel_format
-            try:
-                source_fps = float(info.get("fps") or 0) or None
-            except (TypeError, ValueError):
-                source_fps = None
-            job.source_fps = source_fps
-            if job.has_alpha is None and "has_alpha" in info:
-                job.has_alpha = bool(info.get("has_alpha"))
-        except Exception:
-            logger.warning("LiteCut proxy media probe failed for %s", source.name, exc_info=True)
-    if source.suffix.lower() == ".mov" and job.has_alpha is not False:
-        job.mode = "alpha_transcode"
-        alpha_proxy = ensure_alpha_mov_preview_proxy(
-            source,
-            ffmpeg_bin=ffmpeg_bin,
-            duration_sec=row.get("duration_sec"),
-            cancel_event=job.cancel_event,
-            max_edge=max_edge,
-            has_alpha=job.has_alpha,
-        )
-        if alpha_proxy:
-            return alpha_proxy, True
-        if job.has_alpha is True or job.cancel_event.is_set():
-            return None, bool(job.has_alpha)
-    performance_proxy = asset_exceeds_direct_preview_limits(
-        source,
-        duration_sec=row.get("duration_sec"),
-        fps=source_fps,
-    )
-    proxy = create_browser_preview_proxy(
-        source,
-        ffmpeg_bin=ffmpeg_bin,
-        video_encode_quality=lambda: h264_encode_cli_args(
-            resolve_h264_codec_name(ffmpeg_bin, "auto"),
-            "fast",
-        ),
-        duration_sec=row.get("duration_sec"),
-        cancel_event=job.cancel_event,
-        max_edge=max_edge,
-        # High-load H.264 must be decoded and reduced to the 60-fps proxy.
-        # A remux would retain the original bitrate/cadence and the stutter.
-        copy_video=(
-            not performance_proxy
-            and video_codec == "h264"
-            and pixel_format in {"nv12", "yuv420p", "yuvj420p"}
-        ),
-        copy_audio=audio_codec in {"", "aac"},
-        force=True,
-        on_mode_change=lambda mode: setattr(job, "mode", mode),
-    )
-    return proxy, False
+    return execute_preview_proxy(job, row)
 
 
 async def _run_preview_proxy_job(job: LiteCutPreviewProxyJob, row: dict[str, Any]) -> None:
@@ -138,7 +69,7 @@ async def _run_preview_proxy_job(job: LiteCutPreviewProxyJob, row: dict[str, Any
         job.status = "ready"
         job.error = ""
         if has_alpha and row.get("kind") != "video":
-            await get_lite_cut_db().update_asset_kind(job.asset_id, "video", row.get("mime_type") or "video/quicktime")
+            await _services().assets.update_kind(job.asset_id, "video", row.get("mime_type") or "video/quicktime")
     except Exception as exc:
         if job.cancel_event.is_set():
             job.status = "cancelled"
@@ -270,78 +201,13 @@ class LiteCutProxyRegenerateBody(BaseModel):
     asset_ids: list[int] = Field(default_factory=list, max_length=1000)
 
 
-def _proxy_cache_snapshot(asset_rows: list[dict[str, Any]]) -> dict[str, Any]:
-    """Return cache accounting without treating originals as disposable cache."""
-    from .assets import alpha_preview_proxy_path_for_asset, preview_proxy_path_for_asset
-
-    used = 0
-    files = 0
-    ready = 0
-    for row in asset_rows:
-        source = Path(str(row.get("file_path") or ""))
-        for candidate in (preview_proxy_path_for_asset(source), alpha_preview_proxy_path_for_asset(source)):
-            try:
-                if candidate.is_file():
-                    used += candidate.stat().st_size
-                    files += 1
-                    ready += 1
-            except OSError:
-                pass
-    return {"proxy_bytes": used, "proxy_files": files, "ready_assets": ready}
-
-
-def _row_requires_or_has_preview_proxy(row: dict[str, Any]) -> bool:
-    """Classify cache entries without depending on transient probe metadata."""
-    from .assets import (
-        alpha_preview_proxy_path_for_asset,
-        asset_needs_browser_proxy,
-        preview_proxy_path_for_asset,
-    )
-
-    source = Path(str(row.get("file_path") or ""))
-    if not source.is_file():
-        return False
-    if preview_proxy_path_for_asset(source).is_file() or alpha_preview_proxy_path_for_asset(source).is_file():
-        return True
-    return asset_needs_browser_proxy(source, duration_sec=row.get("duration_sec"))
-
-
 @router.get("/proxy-cache")
 async def get_lite_cut_proxy_cache():
-    from .assets import lite_cut_assets_dir
-
-    assets = await get_lite_cut_db().list_assets(limit=1000)
-    snapshot = await asyncio.to_thread(_proxy_cache_snapshot, assets)
-    root = lite_cut_assets_dir().resolve()
-    orphan_bytes = 0
-    orphan_files = 0
-    source_requirements = {
-        (source.parent, source.stem): _row_requires_or_has_preview_proxy(row)
-        for row in assets
-        if row.get("file_path")
-        for source in [Path(str(row["file_path"])).resolve()]
-    }
-    for candidate in root.rglob("*.preview*"):
-        if not candidate.is_file():
-            continue
-        stem = candidate.name.split(".preview", 1)[0]
-        if source_requirements.get((candidate.parent, stem)) is not True:
-            try:
-                orphan_bytes += candidate.stat().st_size
-                orphan_files += 1
-            except OSError:
-                pass
+    assets = (await _services().assets.list(project_id=None, limit=1000, offset=0))["items"]
+    snapshot = await asyncio.to_thread(proxy_cache_inventory, assets)
     cfg = load_config()
     return {
         **snapshot,
-        "asset_count": len(assets),
-        "proxy_required_assets": sum(
-            1
-            for row in assets
-            if _row_requires_or_has_preview_proxy(row)
-        ),
-        "orphan_bytes": orphan_bytes,
-        "orphan_files": orphan_files,
         "resolution": max(360, min(2160, int(getattr(cfg, "lite_cut_proxy_resolution", 720) or 720))),
     }
 
@@ -358,9 +224,7 @@ async def patch_lite_cut_proxy_settings(body: LiteCutProxySettingsBody):
 
 @router.post("/proxy-cache/regenerate")
 async def regenerate_lite_cut_proxies(body: LiteCutProxyRegenerateBody):
-    from .assets import asset_companion_paths
-
-    all_assets = await get_lite_cut_db().list_assets(limit=1000)
+    all_assets = (await _services().assets.list(project_id=None, limit=1000, offset=0))["items"]
     wanted = {int(asset_id) for asset_id in body.asset_ids if int(asset_id) > 0}
     targets = [
         row
@@ -370,38 +234,12 @@ async def regenerate_lite_cut_proxies(body: LiteCutProxyRegenerateBody):
     ]
     for row in targets:
         await _stop_preview_proxy_job(int(row["id"]))
-        source = Path(str(row.get("file_path") or ""))
-        for candidate in asset_companion_paths(source):
-            if ".preview" in candidate.name:
-                await asyncio.to_thread(candidate.unlink, missing_ok=True)
+        await asyncio.to_thread(remove_asset_preview_files, row)
         _start_preview_proxy_job(row, force=True)
     return {"queued": len(targets), "asset_ids": [int(row["id"]) for row in targets]}
 
 
 @router.post("/proxy-cache/cleanup")
 async def cleanup_lite_cut_proxy_cache():
-    from .assets import lite_cut_assets_dir
-
-    assets = await get_lite_cut_db().list_assets(limit=1000)
-    source_requirements = {
-        (source.parent, source.stem): _row_requires_or_has_preview_proxy(row)
-        for row in assets
-        if row.get("file_path")
-        for source in [Path(str(row["file_path"])).resolve()]
-    }
-    root = lite_cut_assets_dir().resolve()
-    removed_bytes = 0
-    removed_files = 0
-    for candidate in root.rglob("*.preview*"):
-        if not candidate.is_file():
-            continue
-        base = candidate.name.split(".preview", 1)[0]
-        if source_requirements.get((candidate.parent, base)) is True:
-            continue
-        try:
-            removed_bytes += candidate.stat().st_size
-            candidate.unlink()
-            removed_files += 1
-        except OSError:
-            pass
-    return {"removed_files": removed_files, "removed_bytes": removed_bytes}
+    assets = (await _services().assets.list(project_id=None, limit=1000, offset=0))["items"]
+    return await asyncio.to_thread(cleanup_orphan_preview_files, assets)

@@ -15,7 +15,8 @@ from pydantic import ValidationError
 from ...env_utils import resolve_config_path
 from ...montage_db import MontageDB
 from .db import LiteCutDB
-from .preset_apply import parse_project_body
+from .project_codec import serialize_project_body
+from .job_runtime import JobRegistry
 
 LITE_CUT_ENCODERS = {"auto", "h264_nvenc", "h264_qsv", "h264_amf", "libx264"}
 
@@ -96,10 +97,11 @@ class LiteCutPortablePackageJob:
 
 lite_cut_db: Optional[LiteCutDB] = None
 montage_db: Optional[MontageDB] = None
-export_jobs: dict[int, LiteCutExportJob] = {}
-preview_proxy_jobs: dict[int, LiteCutPreviewProxyJob] = {}
-storage_migration_jobs: dict[str, LiteCutStorageMigrationJob] = {}
-portable_package_jobs: dict[str, LiteCutPortablePackageJob] = {}
+job_registry = JobRegistry()
+export_jobs: dict[int, LiteCutExportJob] = job_registry.bucket("export")  # type: ignore[assignment]
+preview_proxy_jobs: dict[int, LiteCutPreviewProxyJob] = job_registry.bucket("preview_proxy")  # type: ignore[assignment]
+storage_migration_jobs: dict[str, LiteCutStorageMigrationJob] = job_registry.bucket("storage_migration")  # type: ignore[assignment]
+portable_package_jobs: dict[str, LiteCutPortablePackageJob] = job_registry.bucket("portable_package")  # type: ignore[assignment]
 preview_proxy_slots: asyncio.Semaphore | None = None
 preview_proxy_slots_loop: asyncio.AbstractEventLoop | None = None
 
@@ -123,30 +125,14 @@ def get_montage_db() -> MontageDB:
 def get_preview_proxy_slots() -> asyncio.Semaphore:
     global preview_proxy_slots, preview_proxy_slots_loop
     loop = asyncio.get_running_loop()
-    if preview_proxy_slots is None or preview_proxy_slots_loop is not loop:
-        preview_proxy_slots = asyncio.Semaphore(2)
-        preview_proxy_slots_loop = loop
+    preview_proxy_slots = job_registry.semaphore("preview_proxy", 2)
+    preview_proxy_slots_loop = loop
     return preview_proxy_slots
 
 
 async def shutdown_lite_cut_jobs(timeout_sec: float = 10.0) -> bool:
     """Cancel all owned jobs and wait briefly for cooperative cleanup."""
-    jobs = [
-        *export_jobs.values(),
-        *preview_proxy_jobs.values(),
-        *storage_migration_jobs.values(),
-        *portable_package_jobs.values(),
-    ]
-    active = [job for job in jobs if job.task is not None and not job.task.done()]
-    for job in active:
-        job.cancel_event.set()
-    if not active:
-        return True
-    _done, pending = await asyncio.wait(
-        [job.task for job in active if job.task is not None],
-        timeout=max(0.0, timeout_sec),
-    )
-    return not pending
+    return await job_registry.shutdown(timeout_sec)
 
 
 def resolve_lite_cut_encoder(
@@ -162,7 +148,7 @@ def resolve_lite_cut_encoder(
 
 def normalize_project_body(raw: dict[str, Any] | None) -> dict[str, Any]:
     try:
-        return parse_project_body(raw).model_dump(mode="json")
+        return serialize_project_body(raw)
     except ValidationError as exc:
         raise HTTPException(
             422,

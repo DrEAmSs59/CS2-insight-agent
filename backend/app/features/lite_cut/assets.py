@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import re
 import logging
-import math
 import os
 import shutil
 import subprocess
@@ -19,6 +18,15 @@ from fastapi import HTTPException, UploadFile
 
 from ...env_utils import get_data_dir, load_config
 from ...ffmpeg_process import decode_process_output
+from .media_policy import (
+    alpha_preview_proxy_command as build_alpha_preview_proxy_command,
+    asset_exceeds_direct_preview_limits as exceeds_direct_preview_limits,
+    asset_kind_for_path as classify_asset_path,
+    asset_needs_browser_proxy as needs_browser_proxy,
+    mp4_container_mentions_hevc,
+    preview_proxy_command as build_preview_proxy_command,
+    preview_proxy_remux_command as build_preview_proxy_remux_command,
+)
 
 _ASSET_MAX_BYTES = 20 * 1024 * 1024 * 1024
 _ASSET_UPLOAD_CHUNK_BYTES = 1024 * 1024
@@ -48,38 +56,6 @@ _ALLOWED_EXT = frozenset({
     ".otf",
 })
 
-_KIND_BY_EXT = {
-    ".webm": "webm",
-    ".mp4": "video",
-    ".mov": "video",
-    ".m4v": "video",
-    ".mkv": "video",
-    ".avi": "video",
-    ".mp3": "audio",
-    ".wav": "audio",
-    ".m4a": "audio",
-    ".aac": "audio",
-    ".ogg": "audio",
-    ".flac": "audio",
-    ".png": "image",
-    # GIFs are animated timeline media.  Keep the original for export, while
-    # serving a seekable MP4 proxy to the browser preview.
-    ".gif": "video",
-    ".jpg": "image",
-    ".jpeg": "image",
-    ".webp": "image",
-    ".woff": "font",
-    ".woff2": "font",
-    ".ttf": "font",
-    ".otf": "font",
-}
-
-_BROWSER_PROXY_EXTS = frozenset({".avi", ".mkv", ".gif", ".mov"})
-_MP4_LIKE_EXTS = frozenset({".mp4", ".m4v"})
-_HEVC_SAMPLE_ENTRY_TAGS = (b"hvc1", b"hev1", b"dvhe", b"dvh1")
-_MP4_CODEC_SCAN_BYTES = 2 * 1024 * 1024
-_DIRECT_PREVIEW_MAX_FPS = 120.0
-_DIRECT_PREVIEW_MAX_BITRATE = 40_000_000.0
 _PROXY_LOCKS = tuple(threading.Lock() for _ in range(64))
 
 
@@ -141,7 +117,7 @@ def stable_project_asset_directory(project_id: int, project_name: str, existing_
 
 
 def asset_kind_for_path(path: Path) -> str:
-    return _KIND_BY_EXT.get(path.suffix.lower(), "file")
+    return classify_asset_path(path)
 
 
 def probe_image_dimensions(path: Path) -> tuple[int, int] | None:
@@ -307,22 +283,7 @@ def asset_stream_path(
 
 
 def _mp4_container_mentions_hevc(path: Path) -> bool:
-    """Detect HEVC sample entries without an ffprobe subprocess on every list call."""
-    if path.suffix.lower() not in _MP4_LIKE_EXTS:
-        return False
-    try:
-        size = path.stat().st_size
-        with path.open("rb") as source:
-            head = source.read(_MP4_CODEC_SCAN_BYTES)
-            chunks = [head]
-            # Fast-start MP4 stores the sample entry near the front.  For files
-            # with their moov atom at the end, inspect the tail as well.
-            if size > _MP4_CODEC_SCAN_BYTES:
-                source.seek(max(0, size - _MP4_CODEC_SCAN_BYTES))
-                chunks.append(source.read(_MP4_CODEC_SCAN_BYTES))
-    except OSError:
-        return False
-    return any(tag in chunk for chunk in chunks for tag in _HEVC_SAMPLE_ENTRY_TAGS)
+    return mp4_container_mentions_hevc(path)
 
 
 def asset_exceeds_direct_preview_limits(
@@ -331,25 +292,7 @@ def asset_exceeds_direct_preview_limits(
     duration_sec: float | None = None,
     fps: float | None = None,
 ) -> bool:
-    """Whether native playback is likely to overload WebView2's media pipeline."""
-    try:
-        source_fps = float(fps or 0)
-    except (TypeError, ValueError):
-        source_fps = 0.0
-    if math.isfinite(source_fps) and source_fps > _DIRECT_PREVIEW_MAX_FPS:
-        return True
-
-    try:
-        duration = float(duration_sec or 0)
-    except (TypeError, ValueError):
-        duration = 0.0
-    if not math.isfinite(duration) or duration <= 0:
-        return False
-    try:
-        bitrate = path.stat().st_size * 8.0 / duration
-    except OSError:
-        return False
-    return bitrate > _DIRECT_PREVIEW_MAX_BITRATE
+    return exceeds_direct_preview_limits(path, duration_sec=duration_sec, fps=fps)
 
 
 def asset_needs_browser_proxy(
@@ -359,23 +302,7 @@ def asset_needs_browser_proxy(
     duration_sec: float | None = None,
     fps: float | None = None,
 ) -> bool:
-    """Whether preview must be converted for compatibility or smooth playback."""
-    extension = path.suffix.lower()
-    if extension in _BROWSER_PROXY_EXTS:
-        return True
-    if extension not in _MP4_LIKE_EXTS:
-        return False
-    # HEVC MP4 is container-valid but frequently black in WebView2 when the OS
-    # codec extension or hardware decoder is unavailable. Very high cadence or
-    # bitrate H.264 is browser-native but still expensive to seek and decode;
-    # those sources get a lightweight 60-fps preview while export keeps using
-    # the untouched original.
-    codec = str(video_codec or "").strip().lower()
-    return (
-        codec in {"hevc", "h265", "h.265"}
-        or _mp4_container_mentions_hevc(path)
-        or asset_exceeds_direct_preview_limits(path, duration_sec=duration_sec, fps=fps)
-    )
+    return needs_browser_proxy(path, video_codec=video_codec, duration_sec=duration_sec, fps=fps)
 
 
 def preview_proxy_remux_command(
@@ -386,40 +313,13 @@ def preview_proxy_remux_command(
     duration_sec: float | None = None,
     copy_audio: bool = False,
 ) -> list[str]:
-    """Repackage browser-decodable H.264 without recompressing its video."""
-    command = [
-        str(ffmpeg_bin),
-        "-y",
-        "-hide_banner",
-        "-loglevel",
-        "error",
-        "-i",
-        str(source),
-    ]
-    if duration_sec is not None and duration_sec > 0:
-        command.extend(["-t", f"{float(duration_sec):.6f}"])
-    command.extend([
-        "-map",
-        "0:v:0",
-        "-map",
-        "0:a?",
-        "-c:v",
-        "copy",
-        # Normalize arbitrary container audio to the one codec WebView2 can
-        # consistently decode inside an MP4. Video remains bit-for-bit copied.
-        "-c:a",
-        "copy" if copy_audio else "aac",
-    ])
-    if not copy_audio:
-        command.extend(["-b:a", "96k"])
-    command.extend([
-        "-movflags",
-        "+faststart",
-        "-avoid_negative_ts",
-        "make_zero",
-        str(output),
-    ])
-    return command
+    return build_preview_proxy_remux_command(
+        ffmpeg_bin=ffmpeg_bin,
+        source=source,
+        output=output,
+        duration_sec=duration_sec,
+        copy_audio=copy_audio,
+    )
 
 
 def preview_proxy_command(
@@ -431,43 +331,14 @@ def preview_proxy_command(
     duration_sec: float | None = None,
     max_edge: int = 1280,
 ) -> list[str]:
-    edge = max(360, min(2160, int(max_edge or 1280)))
-    command = [
-        str(ffmpeg_bin),
-        "-y",
-        "-hide_banner",
-        "-loglevel",
-        "error",
-        "-i",
-        str(source),
-    ]
-    if duration_sec is not None and duration_sec > 0:
-        command.extend(["-t", f"{float(duration_sec):.6f}"])
-    command.extend([
-        "-map",
-        "0:v:0",
-        "-map",
-        "0:a?",
-        "-vf",
-        f"scale=w='if(gte(iw,ih),min({edge},iw),-2)':h='if(gte(iw,ih),-2,min({edge},ih))'",
-        *video_encode_quality,
-        "-fpsmax",
-        "60",
-        "-g",
-        "30",
-        "-force_key_frames",
-        "expr:gte(t,n_forced*0.5)",
-        "-pix_fmt",
-        "yuv420p",
-        "-c:a",
-        "aac",
-        "-b:a",
-        "96k",
-        "-movflags",
-        "+faststart",
-        str(output),
-    ])
-    return command
+    return build_preview_proxy_command(
+        ffmpeg_bin=ffmpeg_bin,
+        source=source,
+        output=output,
+        video_encode_quality=video_encode_quality,
+        duration_sec=duration_sec,
+        max_edge=max_edge,
+    )
 
 
 def _run_proxy_process(
@@ -597,29 +468,13 @@ def create_browser_preview_proxy(
 
 
 def alpha_preview_proxy_command(*, ffmpeg_bin: Path, source: Path, output: Path, duration_sec: float | None = None, max_edge: int = 1280) -> list[str]:
-    edge = max(360, min(2160, int(max_edge or 1280)))
-    command = [str(ffmpeg_bin), "-y", "-hide_banner", "-loglevel", "error", "-i", str(source)]
-    if duration_sec is not None and duration_sec > 0:
-        command.extend(["-t", f"{min(600.0, float(duration_sec)):.6f}"])
-    command.extend([
-        "-map", "0:v:0",
-        "-map", "0:a:0?",
-        "-vf", f"scale=w='if(gte(iw,ih),min({edge},iw),-2)':h='if(gte(iw,ih),-2,min({edge},ih))',format=yuva420p",
-        "-c:v", "libvpx-vp9",
-        "-pix_fmt", "yuva420p",
-        "-auto-alt-ref", "0",
-        "-deadline", "good",
-        "-cpu-used", "5",
-        "-row-mt", "1",
-        "-b:v", "0",
-        "-crf", "28",
-        "-fpsmax", "30",
-        "-metadata:s:v:0", "alpha_mode=1",
-        "-c:a", "libopus",
-        "-b:a", "128k",
-        str(output),
-    ])
-    return command
+    return build_alpha_preview_proxy_command(
+        ffmpeg_bin=ffmpeg_bin,
+        source=source,
+        output=output,
+        duration_sec=duration_sec,
+        max_edge=max_edge,
+    )
 
 
 def create_alpha_browser_preview_proxy(

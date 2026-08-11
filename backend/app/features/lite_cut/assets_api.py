@@ -12,14 +12,21 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from ...api_errors import error_detail
-from ...env_utils import load_config
-from ...file_quarantine import quarantine_files
+from .asset_executor import (
+    attach_video_facts as _attach_video_fps,
+    build_asset_waveform,
+    probe_asset_metadata,
+    quarantine_asset_files,
+    save_and_probe_upload,
+)
 from .proxy_api import (
     _decorate_asset_preview_state,
     _preview_proxy_job_snapshot,
     _start_preview_proxy_job,
     _stop_preview_proxy_job,
 )
+from .dependencies import build_lite_cut_services
+from .service_http import service_call
 from .runtime import (
     get_lite_cut_db,
     get_montage_db,
@@ -30,50 +37,8 @@ router = APIRouter(prefix="/api/lite-cut", tags=["lite-cut-assets"])
 logger = logging.getLogger(__name__)
 
 
-async def _attach_video_fps(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Add probed video facts used by labels and preview-proxy selection."""
-    video_items = [item for item in items if str(item.get("kind") or "").lower() in {"video", "webm"}]
-    if not video_items:
-        return items
-    try:
-        from ...video_composer import probe_video_audio_summary, resolve_ffmpeg_binary, resolve_ffprobe_binary
-
-        ffprobe = resolve_ffprobe_binary(resolve_ffmpeg_binary(load_config().ffmpeg_path))
-    except Exception:
-        logger.debug("Unable to prepare ffprobe for LiteCut asset FPS labels", exc_info=True)
-        return items
-
-    semaphore = asyncio.Semaphore(8)
-
-    async def enrich(item: dict[str, Any]) -> dict[str, Any]:
-        path = Path(str(item.get("file_path") or ""))
-        if not path.is_file():
-            return item
-        async with semaphore:
-            try:
-                info = await asyncio.to_thread(
-                    probe_video_audio_summary,
-                    path,
-                    ffprobe,
-                    "lite_cut_asset_fps_probe",
-                    "lite_cut_asset",
-                )
-                fps = float(info.get("fps") or 0)
-                return {
-                    **item,
-                    "fps": fps if fps > 0 else None,
-                    "codec_name": str(info.get("codec_name") or "") or None,
-                    "audio_codec_name": str(info.get("audio_codec_name") or ""),
-                    "pixel_format": str(info.get("pixel_format") or ""),
-                    "has_alpha": bool(info.get("has_alpha")) if "has_alpha" in info else None,
-                }
-            except Exception:
-                logger.debug("Unable to probe LiteCut asset FPS: %s", path, exc_info=True)
-        return item
-
-    enriched = await asyncio.gather(*(enrich(item) for item in video_items))
-    by_id = {int(item["id"]): item for item in enriched if item.get("id") is not None}
-    return [by_id.get(int(item["id"]), item) if item.get("id") is not None else item for item in items]
+def _services():
+    return build_lite_cut_services(get_lite_cut_db())
 
 
 class LiteCutAssetValidationBody(BaseModel):
@@ -111,7 +76,9 @@ async def list_lite_cut_assets(
     limit: int = Query(default=500, ge=1, le=1000),
     offset: int = Query(default=0, ge=0),
 ):
-    items = await get_lite_cut_db().list_assets(project_id=project_id, limit=limit, offset=offset)
+    services = _services()
+    result = await service_call(services.assets.list(project_id=project_id, limit=limit, offset=offset))
+    items = result["items"]
     from .assets import probe_image_dimensions
     for item in items:
         if item.get("kind") != "image" or (item.get("width") and item.get("height")):
@@ -119,7 +86,7 @@ async def list_lite_cut_assets(
         dimensions = await asyncio.to_thread(probe_image_dimensions, Path(str(item.get("file_path") or "")))
         if dimensions:
             item["width"], item["height"] = dimensions
-            await get_lite_cut_db().update_asset_dimensions(int(item["id"]), *dimensions)
+            await services.assets.update_dimensions(int(item["id"]), *dimensions)
     items = await _attach_video_fps(items)
     for item in items:
         _decorate_asset_preview_state(
@@ -141,54 +108,30 @@ async def upload_lite_cut_asset(
 ):
     from pathlib import Path
 
-    from .assets import probe_image_dimensions, save_uploaded_asset, stable_project_asset_directory
+    from .assets import stable_project_asset_directory
 
     project = None
     if project_id is not None:
-        proj = await get_lite_cut_db().get_project(int(project_id))
+        proj = await _services().projects.get(int(project_id))
         if not proj:
             raise HTTPException(404, error_detail("LITECUT_PROJECT_NOT_FOUND"))
         project = proj
 
     destination_dir = None
     if project is not None and project_id is not None:
-        existing_assets = await get_lite_cut_db().list_project_assets(int(project_id))
+        existing_assets = await _services().assets.list_for_project(int(project_id))
         destination_dir = stable_project_asset_directory(
             int(project_id),
             str(project.get("name") or "未命名工程"),
             [str(item.get("file_path") or "") for item in existing_assets],
         )
-    dest, kind, mime = await save_uploaded_asset(
+    dest, kind, mime, duration_sec, media_info = await save_and_probe_upload(
         file,
         project_name=project.get("name") if project else None,
         destination_dir=destination_dir,
+        client_duration_sec=client_duration_sec,
     )
-    duration_sec = None
-    media_info: dict[str, Any] = {}
-    if kind == "image":
-        dimensions = probe_image_dimensions(dest)
-        if dimensions:
-            media_info["width"], media_info["height"] = dimensions
-    if kind in {"video", "webm", "audio", "image"} or dest.suffix.lower() == ".gif":
-        try:
-            from ...env_utils import load_config
-            from ...video_composer import probe_video_audio_summary, resolve_ffmpeg_binary, resolve_ffprobe_binary
-
-            cfg = load_config()
-            ffmpeg_bin = resolve_ffmpeg_binary(cfg.ffmpeg_path)
-            ffprobe = resolve_ffprobe_binary(ffmpeg_bin)
-            info = probe_video_audio_summary(dest, ffprobe)
-            media_info = info
-            duration = float(info.get("duration") or 0)
-            if duration > 0:
-                duration_sec = duration
-        except Exception:
-            duration_sec = None
-    if duration_sec is None and client_duration_sec is not None and client_duration_sec > 0:
-        # ffprobe may be unavailable (e.g. dev setups without bundled ffmpeg);
-        # trust the browser-side metadata probe so clips get a real trim range.
-        duration_sec = float(client_duration_sec)
-    asset_id = await get_lite_cut_db().create_asset(
+    item = await service_call(_services().assets.create(
         name=Path(file.filename or dest.name).name,
         kind=kind,
         file_path=str(dest),
@@ -197,10 +140,7 @@ async def upload_lite_cut_asset(
         width=int(media_info.get("width") or 0) or None,
         height=int(media_info.get("height") or 0) or None,
         project_id=int(project_id) if project_id is not None else None,
-    )
-    item = await get_lite_cut_db().get_asset(asset_id)
-    if not item:
-        raise HTTPException(500, error_detail("LITECUT_ASSET_SAVE_FAILED"))
+    ))
     alpha_hint = bool(media_info.get("has_alpha")) if "has_alpha" in media_info else None
     return _decorate_asset_preview_state(
         {**item, "fps": media_info.get("fps") if kind in {"video", "webm"} else None},
@@ -215,52 +155,9 @@ async def upload_lite_cut_asset(
 @router.get("/assets/{asset_id}/metadata")
 async def get_lite_cut_asset_metadata(asset_id: int):
     """Return source-media facts used by the inspector's read-only summary."""
-    row = await get_lite_cut_db().get_asset(int(asset_id))
-    if not row:
-        raise HTTPException(404, error_detail("LITECUT_ASSET_NOT_FOUND"))
+    row = await service_call(_services().assets.get(int(asset_id)))
 
-    from pathlib import Path
-
-    from .assets import probe_image_dimensions, validate_stored_asset_path
-
-    path = validate_stored_asset_path(str(row["file_path"]))
-    kind = str(row.get("kind") or "file").lower()
-    result: dict[str, Any] = {
-        "id": int(row["id"]),
-        "kind": kind,
-        "name": row.get("name") or path.name,
-        "extension": path.suffix.lstrip(".").upper(),
-        "mime_type": row.get("mime_type"),
-        "duration_sec": row.get("duration_sec"),
-        "width": row.get("width"),
-        "height": row.get("height"),
-        "fps": None,
-        "codec_name": None,
-        "has_audio": None,
-    }
-    if kind == "image":
-        dimensions = await asyncio.to_thread(probe_image_dimensions, path)
-        if dimensions:
-            result["width"], result["height"] = dimensions
-        return result
-
-    try:
-        from ...env_utils import load_config
-        from ...video_composer import probe_video_audio_summary, resolve_ffmpeg_binary, resolve_ffprobe_binary
-
-        ffmpeg_bin = resolve_ffmpeg_binary(load_config().ffmpeg_path)
-        info = await asyncio.to_thread(probe_video_audio_summary, path, resolve_ffprobe_binary(ffmpeg_bin))
-        result.update({
-            "duration_sec": info.get("duration") or result["duration_sec"],
-            "width": info.get("width") if kind not in {"audio"} else None,
-            "height": info.get("height") if kind not in {"audio"} else None,
-            "fps": info.get("fps") if kind not in {"audio"} else None,
-            "codec_name": info.get("codec_name") or None,
-            "has_audio": bool(info.get("has_audio")),
-        })
-    except Exception:
-        logger.warning("LiteCut asset metadata probe failed for %s", path.name, exc_info=True)
-    return result
+    return await probe_asset_metadata(row)
 
 
 @router.get("/assets/{asset_id}/waveform")
@@ -270,25 +167,17 @@ async def get_lite_cut_asset_waveform(
     start_sec: float = Query(default=0, ge=0),
     end_sec: float | None = Query(default=None, ge=0),
 ):
-    row = await get_lite_cut_db().get_asset(int(asset_id))
-    if not row:
-        raise HTTPException(404, error_detail("LITECUT_ASSET_NOT_FOUND"))
-    from ...video_composer import resolve_ffmpeg_binary
-    from .assets import validate_stored_asset_path
-    from .waveform import load_or_create_waveform_cache, waveform_view
-
-    path = validate_stored_asset_path(str(row["file_path"]))
+    row = await service_call(_services().assets.get(int(asset_id)))
     try:
-        payload, cached = await asyncio.to_thread(
-            load_or_create_waveform_cache,
-            path,
-            ffmpeg_bin=resolve_ffmpeg_binary(load_config().ffmpeg_path),
-            duration_sec=row.get("duration_sec"),
+        return await build_asset_waveform(
+            row,
+            buckets=buckets,
+            start_sec=start_sec,
+            end_sec=end_sec,
         )
     except Exception as exc:
-        logger.warning("LiteCut waveform generation failed for %s", path.name, exc_info=True)
+        logger.warning("LiteCut waveform generation failed for asset %s", asset_id, exc_info=True)
         raise HTTPException(422, str(exc) or "无法生成素材波形") from exc
-    return {**waveform_view(payload, start_sec=start_sec, end_sec=end_sec, buckets=buckets), "cached": cached}
 
 
 @router.get("/fonts/{font_name}")
@@ -311,9 +200,7 @@ async def stream_lite_cut_asset(asset_id: int, request: Request):
     from .assets import asset_stream_path, validate_stored_asset_path
     from .stream import stream_file_with_range
 
-    row = await get_lite_cut_db().get_asset(int(asset_id))
-    if not row:
-        raise HTTPException(404, error_detail("LITECUT_ASSET_NOT_FOUND"))
+    row = await service_call(_services().assets.get(int(asset_id)))
     path = validate_stored_asset_path(str(row["file_path"]))
     if str(row.get("kind") or "").lower() == "font":
         font_mime = {
@@ -339,9 +226,7 @@ async def stream_lite_cut_asset(asset_id: int, request: Request):
 
 @router.post("/assets/{asset_id}/proxy/retry")
 async def retry_lite_cut_asset_preview_proxy(asset_id: int):
-    row = await get_lite_cut_db().get_asset(int(asset_id))
-    if not row:
-        raise HTTPException(404, error_detail("LITECUT_ASSET_NOT_FOUND"))
+    row = await service_call(_services().assets.get(int(asset_id)))
     state = _decorate_asset_preview_state(dict(row), schedule=False)
     if not state.get("preview_proxy_required"):
         return state
@@ -353,21 +238,14 @@ async def retry_lite_cut_asset_preview_proxy(asset_id: int):
 
 @router.delete("/assets/{asset_id}")
 async def delete_lite_cut_asset(asset_id: int):
-    from .assets import asset_file_bundle_paths
-
-    row = await get_lite_cut_db().get_asset(int(asset_id))
-    if not row:
-        raise HTTPException(404, error_detail("LITECUT_ASSET_NOT_FOUND"))
+    row = await service_call(_services().assets.get(int(asset_id)))
     await _stop_preview_proxy_job(int(asset_id))
-    paths = await asyncio.to_thread(asset_file_bundle_paths, str(row["file_path"]))
     try:
-        quarantined = await asyncio.to_thread(quarantine_files, paths, "lite-cut")
+        quarantined = await quarantine_asset_files(row)
     except OSError as exc:
         raise HTTPException(409, f"Asset files could not be moved to the recovery area: {exc}") from exc
     try:
-        ok = await get_lite_cut_db().delete_asset(int(asset_id))
-        if not ok:
-            raise HTTPException(404, error_detail("LITECUT_ASSET_NOT_FOUND"))
+        await service_call(_services().assets.delete_record(int(asset_id)))
     except Exception:
         await asyncio.to_thread(quarantined.restore)
         raise
