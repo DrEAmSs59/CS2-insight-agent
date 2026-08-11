@@ -9,13 +9,12 @@ const failures = [];
 const migratedUiFiles = [
   "App.jsx",
   "components/CustomTitleBar.jsx",
-  "pages/DemoAnalysisPreviewPage.jsx",
   "pages/SettingsPage.jsx",
-  "components/analysis/DemoHeatmapView.jsx",
-  "components/liteCut/editor/OpenCutTrackTimeline.jsx",
-  "components/liteCut/editor/TimelineClip.jsx",
-  "components/liteCut/editor/TimelineTrackHeader.jsx",
-  "components/liteCut/editor/LiteCutMarkerManager.jsx",
+  "features/demo-analysis/replay/DemoHeatmapView.jsx",
+  "features/lite-cut/editor/OpenCutTrackTimeline.jsx",
+  "features/lite-cut/editor/TimelineClip.jsx",
+  "features/lite-cut/editor/TimelineTrackHeader.jsx",
+  "features/lite-cut/editor/LiteCutMarkerManager.jsx",
 ];
 
 function fail(message) {
@@ -104,10 +103,6 @@ for (const relativePath of migratedUiFiles) {
   body = body
     .replace(/\/\*[\s\S]*?\*\//g, "")
     .replace(/^\s*\/\/.*$/gm, "");
-  if (relativePath === "pages/DemoAnalysisPreviewPage.jsx") {
-    // One release of sessionStorage used this localized value as an ID.
-    body = body.replace('storedSelectedTag === "全部"', "storedSelectedTag === LEGACY_ALL_TAG");
-  }
   const han = body.match(/[\p{Script=Han}]/u);
   if (han) fail(`${relativePath} contains hard-coded Han UI text near index ${han.index}`);
 }

@@ -1,4 +1,4 @@
-import API from "../../../api/api.js";
+import { liteCutClient } from "../api/liteCutClient.js";
 import { ensureMp4Filename } from "../../../utils/montageUtils.js";
 import { mainVideoClips } from "./timelineUtils.js";
 
@@ -111,7 +111,7 @@ export async function startLiteCutExport({ projectId, body, outputDir, filename 
     err.code = "MONTAGE_OUTPUT_PATH_EMPTY";
     throw err;
   }
-  const { data } = await API.post("/lite-cut/export/start", {
+  const data = await liteCutClient.startExport({
     project_id: projectId ?? null,
     body,
     output_path,
@@ -120,18 +120,13 @@ export async function startLiteCutExport({ projectId, body, outputDir, filename 
 }
 
 export async function getLiteCutExportStatus(exportId) {
-  const { data } = await API.get(`/lite-cut/exports/${encodeURIComponent(String(exportId))}`);
-  return data;
+  return liteCutClient.getExport(exportId);
 }
 
 export async function cancelLiteCutExport(exportId) {
-  const { data } = await API.post(`/lite-cut/exports/${encodeURIComponent(String(exportId))}/cancel`);
-  return data;
+  return liteCutClient.cancelExport(exportId);
 }
 
 export async function listLiteCutExports({ projectId = null, limit = 8, offset = 0 } = {}) {
-  const params = { limit, offset };
-  if (projectId != null) params.project_id = projectId;
-  const { data } = await API.get("/lite-cut/exports", { params });
-  return data;
+  return liteCutClient.listExports({ projectId, limit, offset });
 }

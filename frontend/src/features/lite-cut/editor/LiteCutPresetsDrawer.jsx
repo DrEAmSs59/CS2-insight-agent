@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { Loader2, Trash2, Wand2, X } from "lucide-react";
-import API from "../../../api/api.js";
+import { liteCutClient } from "../api/liteCutClient.js";
 import { useT } from "../../../i18n/useT.js";
 
 export default function LiteCutPresetsDrawer({
@@ -27,7 +27,7 @@ export default function LiteCutPresetsDrawer({
     setLoading(true);
     setError(null);
     try {
-      const { data } = await API.get("/lite-cut/presets", { params: { limit: 200 } });
+      const data = await liteCutClient.listPresets({ limit: 200 });
       setItems(data.items || []);
     } catch {
       setError(t("liteCut.preset.loadFailed"));
@@ -53,7 +53,7 @@ export default function LiteCutPresetsDrawer({
           : saveKind === "transition_rhythm"
             ? buildTransitionBody?.() || {}
             : buildPackagingBody?.() || {};
-      await API.post("/lite-cut/presets", {
+      await liteCutClient.createPreset({
         name,
         kind: saveKind,
         body: presetPayload,
@@ -74,7 +74,7 @@ export default function LiteCutPresetsDrawer({
     setError(null);
     setApplyWarnings([]);
     try {
-      const { data } = await API.post(`/lite-cut/presets/${preset.id}/apply`, {
+      const data = await liteCutClient.applyPreset(preset.id, {
         project_id: projectId ?? null,
         project_body: body,
         scope: "project",
@@ -91,7 +91,7 @@ export default function LiteCutPresetsDrawer({
   const handleDelete = async (preset) => {
     if (!window.confirm(t("liteCut.preset.deleteConfirm", { name: preset.name }))) return;
     try {
-      await API.delete(`/lite-cut/presets/${preset.id}`);
+      await liteCutClient.deletePreset(preset.id);
       await load();
     } catch {
       setError(t("liteCut.preset.deleteFailed"));

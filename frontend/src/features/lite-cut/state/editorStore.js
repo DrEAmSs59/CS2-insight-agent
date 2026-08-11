@@ -1,6 +1,7 @@
 import { create } from "zustand";
-import API from "../../../api/api.js";
+import { liteCutClient } from "../api/liteCutClient.js";
 import { useLiteCutHistoryStore } from "./historyStore.js";
+import { normalizeLiteCutBody } from "./projectCodec.js";
 import {
   clearLiteCutRecoveryDraft,
   forgetRememberedLiteCutProject,
@@ -22,7 +23,7 @@ async function patchProjectWithRetry(projectId, payload) {
   for (const delay of delays) {
     if (delay) await wait(delay);
     try {
-      return await API.patch(`/lite-cut/projects/${projectId}`, payload);
+      return await liteCutClient.updateProject(projectId, payload);
     } catch (error) {
       lastError = error;
       const status = Number(error?.response?.status) || 0;
@@ -42,144 +43,8 @@ function recoveryCandidateForProject(data, normalizedBody) {
   return { ...draft, body: normalizeLiteCutBody(draft.body).body };
 }
 
-export function normalizeLiteCutBody(rawBody) {
-  const body = rawBody && typeof rawBody === "object" ? structuredClone(rawBody) : {};
-  let changed = false;
-  if (!Array.isArray(body.tracks)) {
-    body.tracks = [];
-    changed = true;
-  } else {
-    body.tracks = body.tracks.map((track) => {
-      if (!track || typeof track !== "object" || typeof track.solo === "boolean") return track;
-      changed = true;
-      return { ...track, solo: false };
-    });
-  }
-  if (!body.output || typeof body.output !== "object") {
-    body.output = {
-      dir: "",
-      filename: "lite_cut_export.mp4",
-      width: 1920,
-      height: 1080,
-      fps: 60,
-      encoder: "auto",
-      framemeld_enabled: false,
-      range_mode: "full",
-      range_start_sec: 0,
-      range_end_sec: null,
-    };
-    changed = true;
-  } else {
-    const outputDefaults = { width: 1920, height: 1080, fps: 60 };
-    for (const [key, fallback] of Object.entries(outputDefaults)) {
-      const raw = Number(body.output[key]);
-      if (!Number.isInteger(raw) || raw < 1 || (key === "fps" && raw > 1000)) {
-        body.output[key] = fallback;
-        changed = true;
-      }
-    }
-    if (!["auto", "h264_nvenc", "h264_qsv", "h264_amf", "libx264"].includes(body.output.encoder)) {
-      body.output.encoder = "auto";
-      changed = true;
-    }
-    for (const legacyKey of ["frame_blend_enabled", "frame_blend_frames", "high_frame_downsample_enabled", "delivery_fps"]) {
-      if (legacyKey in body.output) {
-        delete body.output[legacyKey];
-        changed = true;
-      }
-    }
-    if (typeof body.output.framemeld_enabled !== "boolean") {
-      body.output.framemeld_enabled = false;
-      changed = true;
-    }
-    if (!["full", "custom"].includes(body.output.range_mode)) {
-      body.output.range_mode = "full";
-      changed = true;
-    }
-    const rawRangeStart = Number(body.output.range_start_sec);
-    if (!Number.isFinite(rawRangeStart) || rawRangeStart < 0) {
-      body.output.range_start_sec = 0;
-      changed = true;
-    }
-  }
-  if (!body.tracks.some((t) => t?.type === "video")) {
-    body.tracks.unshift({
-      id: "v1",
-      type: "video",
-      label: "V1",
-      locked: false,
-      hidden: false,
-      muted: false,
-      solo: false,
-      clips: [],
-    });
-    changed = true;
-  }
-  // Repair duplicate/missing video track labels left behind by older builds
-  // that force-injected a second "V1" whenever the id "v1" was absent.
-  const videoTrackLabels = body.tracks.filter((t) => t?.type === "video").map((t) => String(t?.label || ""));
-  if (videoTrackLabels.some((label) => !label) || new Set(videoTrackLabels).size !== videoTrackLabels.length) {
-    let nextVideoLabel = 1;
-    for (const track of body.tracks) {
-      if (track?.type === "video") track.label = `V${nextVideoLabel++}`;
-    }
-    changed = true;
-  }
-  if (!body.tracks.some((t) => t?.type === "audio")) {
-    body.tracks.push({
-      id: "a1",
-      type: "audio",
-      label: "A1",
-      locked: false,
-      hidden: false,
-      muted: false,
-      solo: false,
-      clips: [],
-    });
-    changed = true;
-  }
-  if (!Array.isArray(body.overlays)) {
-    body.overlays = [];
-    changed = true;
-  }
-  for (const overlay of body.overlays) {
-    if (overlay?.type !== "text" || !overlay.text || typeof overlay.text !== "object") continue;
-    if (!/^rajdhani(?:\s+bold)?$/i.test(String(overlay.text.font_family || ""))) continue;
-    overlay.text.font_family = "微软雅黑";
-    overlay.text.font_file = null;
-    changed = true;
-  }
-  if (!Array.isArray(body.markers)) {
-    body.markers = [];
-    changed = true;
-  } else {
-    body.markers = body.markers
-      .map((m) => ({
-        id: String(m?.id || `marker-${globalThis.crypto?.randomUUID?.()?.slice?.(0, 10) || Date.now()}`),
-        time_sec: Math.max(0, Number(m?.time_sec) || 0),
-        label: String(m?.label || ""),
-        color: /^#[0-9a-f]{6}$/i.test(String(m?.color || "")) ? m.color : "#f59e0b",
-      }))
-      .sort((a, b) => a.time_sec - b.time_sec);
-  }
-  if (!body.audio || typeof body.audio !== "object") {
-    body.audio = { master_volume: 1 };
-    changed = true;
-  } else {
-    const raw = Number(body.audio.master_volume);
-    if (!Number.isFinite(raw)) {
-      body.audio.master_volume = 1;
-      changed = true;
-    } else {
-      const next = Math.max(0, Math.min(2, raw));
-      if (next !== raw) {
-        body.audio.master_volume = next;
-        changed = true;
-      }
-    }
-  }
-  return { body, changed };
-}
+// Compatibility facade for callers that still import the codec from the store.
+export { normalizeLiteCutBody } from "./projectCodec.js";
 
 export const useLiteCutEditorStore = create((set, get) => ({
   projectId: null,
@@ -198,7 +63,7 @@ export const useLiteCutEditorStore = create((set, get) => ({
   listProjects: async () => {
     set({ projectListLoading: true });
     try {
-      const { data } = await API.get("/lite-cut/projects", { params: { limit: 50, offset: 0 } });
+      const data = await liteCutClient.listProjects({ limit: 50, offset: 0 });
       set({ projectList: data.items || [], projectListLoading: false });
       return data.items || [];
     } catch {
@@ -224,7 +89,7 @@ export const useLiteCutEditorStore = create((set, get) => ({
       const storedId = stored ? Number(stored) : rememberedHasDraft ? rememberedId : null;
       if (Number.isFinite(storedId) && storedId > 0) {
         try {
-          const { data } = await API.get(`/lite-cut/projects/${storedId}`);
+          const data = await liteCutClient.getProject(storedId);
           const normalizedBody = normalizeLiteCutBody(data.body).body;
           rememberLiteCutProject(data.id);
           set({
@@ -243,7 +108,7 @@ export const useLiteCutEditorStore = create((set, get) => ({
           forgetRememberedLiteCutProject(storedId);
         }
       }
-      const { data } = await API.get("/lite-cut/projects", { params: { limit: 50, offset: 0 } });
+      const data = await liteCutClient.listProjects({ limit: 50, offset: 0 });
       set({
         projectId: null,
         projectName: "",
@@ -278,7 +143,7 @@ export const useLiteCutEditorStore = create((set, get) => ({
         set({ saving: true, error: null });
         try {
           const normalized = normalizeLiteCutBody(body);
-          const { data } = await patchProjectWithRetry(projectId, {
+          const data = await patchProjectWithRetry(projectId, {
             name: projectName,
             body: normalized.body,
           });
@@ -329,7 +194,7 @@ export const useLiteCutEditorStore = create((set, get) => ({
     set({ loading: true, error: null });
     useLiteCutHistoryStore.getState().clear();
     try {
-      const { data } = await API.get(`/lite-cut/projects/${id}`);
+      const data = await liteCutClient.getProject(id);
       sessionStorage.setItem(SESSION_PROJECT_KEY, String(data.id));
       rememberLiteCutProject(data.id);
       const normalizedBody = normalizeLiteCutBody(data.body).body;
@@ -358,7 +223,7 @@ export const useLiteCutEditorStore = create((set, get) => ({
     useLiteCutHistoryStore.getState().clear();
     try {
       const payload = body && typeof body === "object" ? { name, body } : { name };
-      const { data } = await API.post("/lite-cut/projects", payload);
+      const data = await liteCutClient.createProject(payload);
       sessionStorage.setItem(SESSION_PROJECT_KEY, String(data.id));
       rememberLiteCutProject(data.id);
       clearLiteCutRecoveryDraft(data.id);
@@ -390,7 +255,7 @@ export const useLiteCutEditorStore = create((set, get) => ({
     try {
       const normalized = normalizeLiteCutBody(body).body;
       const importName = String(name || "Imported LiteCut Project").trim().slice(0, 240) || "Imported LiteCut Project";
-      const { data } = await API.post("/lite-cut/projects", { name: importName, body: normalized });
+      const data = await liteCutClient.createProject({ name: importName, body: normalized });
       sessionStorage.setItem(SESSION_PROJECT_KEY, String(data.id));
       rememberLiteCutProject(data.id);
       clearLiteCutRecoveryDraft(data.id);
@@ -421,12 +286,12 @@ export const useLiteCutEditorStore = create((set, get) => ({
     useLiteCutHistoryStore.getState().clear();
     try {
       if (Number.isFinite(id) && id > 0 && id !== Number(projectId)) {
-        const { data } = await API.get(`/lite-cut/projects/${id}`);
+        const data = await liteCutClient.getProject(id);
         sourceName = data.name || sourceName;
         sourceBody = normalizeLiteCutBody(data.body).body;
       }
       const copyName = `${sourceName || "LiteCut"} Copy`;
-      const { data } = await API.post("/lite-cut/projects", {
+      const data = await liteCutClient.createProject({
         name: copyName,
         body: normalizeLiteCutBody(sourceBody).body,
       });
@@ -475,7 +340,7 @@ export const useLiteCutEditorStore = create((set, get) => ({
       set({ error: null });
     }
     try {
-      await API.delete(`/lite-cut/projects/${id}`);
+      await liteCutClient.deleteProject(id);
       clearLiteCutRecoveryDraft(id);
       if (isCurrent) {
         useLiteCutHistoryStore.getState().clear();
@@ -519,7 +384,7 @@ export const useLiteCutEditorStore = create((set, get) => ({
       set({ error: null });
     }
     try {
-      const { data } = await API.post("/lite-cut/projects/batch-delete", { ids });
+      const data = await liteCutClient.deleteProjects(ids);
       for (const id of ids) clearLiteCutRecoveryDraft(id);
       if (deletesCurrent) {
         useLiteCutHistoryStore.getState().clear();

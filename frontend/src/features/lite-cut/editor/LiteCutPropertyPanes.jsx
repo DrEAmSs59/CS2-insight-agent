@@ -24,7 +24,7 @@ import { useEffect, useRef, useState } from "react";
 import { useLiteCutTimelineStore } from "../state/timelineStore.js";
 import { useT } from "../../../i18n/useT.js";
 import { messageFromApiCode } from "../../../utils/apiErrorMessages.js";
-import API from "../../../api/api.js";
+import { liteCutClient } from "../api/liteCutClient.js";
 import { desktopBridge } from "../../../desktop/desktopBridge.js";
 import { summarizeFrameMeldSources } from "../../../utils/framemeld.js";
 import AudioWaveformBars from "./AudioWaveformBars.jsx";
@@ -187,8 +187,8 @@ export function ClipPane({
     if (media?.mediaKind !== "asset" || !Number.isFinite(assetId) || assetId <= 0 || media?.kind === "text") return undefined;
     if (cachedMetadata) return undefined;
     let cancelled = false;
-    API.get(`/lite-cut/assets/${assetId}/metadata`)
-      .then(({ data }) => {
+    liteCutClient.getAssetMetadata(assetId)
+      .then((data) => {
         if (!data) return;
         SOURCE_METADATA_CACHE.set(metadataCacheKey, data);
         if (!cancelled) setSourceMetadata((current) => ({ ...current, ...data }));
@@ -1400,8 +1400,8 @@ export function ExportPane({
     setEncoderDetecting(true);
     setEncoderDetection(null);
     try {
-      const response = await API.post("/config/detect-encoder");
-      setEncoderDetection(response.data || null);
+      const data = await liteCutClient.detectEncoder();
+      setEncoderDetection(data || null);
     } catch (error) {
       const detail = error?.response?.data?.detail;
       setEncoderDetection({ error: typeof detail === "string" ? detail : error?.message || "编码器检测失败" });

@@ -2,10 +2,16 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react
 import { Maximize2, Minimize2, Pause, Play, SkipBack, SkipForward, Volume2, ZoomIn, ZoomOut } from "lucide-react";
 import { TEXT_STYLE_CARDS } from "./editorPresets.js";
 import { startPendingDrag } from "./timelineInteraction.js";
-import { handoffFrameAction, normalizePreviewLayerTransform, previewFrameTimes, previewMediaIdentity, promotedUnderlayForMain, shouldApplyPreviewSeek, shouldPublishPreviewClock, shouldPublishVideoTimeUpdate, shouldUseMediaPreviewClock, transitionVisualAtLocalTime } from "./previewFrameUtils.js";
+import { normalizePreviewLayerTransform, previewMediaIdentity, promotedUnderlayForMain, shouldPublishVideoTimeUpdate, shouldUseMediaPreviewClock, transitionVisualAtLocalTime } from "./previewFrameUtils.js";
 import PreviewAudioItem from "./PreviewAudioItem.jsx";
 import { createMediaElementRefRegistry, drawVideoFrame, isInterruptedPlaybackError, releaseMediaElement } from "./previewMediaElementUtils.js";
 import PreviewOverlayItem from "./LiteCutPreviewOverlay.jsx";
+import {
+  usePreviewFullscreen,
+  usePreviewMediaCleanup,
+  usePreviewViewportFit,
+} from "./usePreviewMediaLifecycle.js";
+import { usePreviewFrameClock, usePreviewSeekGuard } from "./usePreviewMediaClock.js";
 
 function formatTime(sec) {
   const s = Math.max(0, sec);
@@ -53,6 +59,8 @@ export default function LiteCutPreviewPanel({
   transitionMainOpacity = 1,
   transitionMainTransform = "",
   transitionMainClipPath = "",
+  transitionOutgoingTransform = "",
+  transitionOutgoingTransformOrigin = "",
   transitionFlashOpacity = 0,
   transitionBlackOpacity = 0,
   transitionSpec = null,
@@ -110,9 +118,9 @@ export default function LiteCutPreviewPanel({
   const [heldSwitchFrame, setHeldSwitchFrame] = useState(null);
   const [dropHover, setDropHover] = useState(false);
   const [mainLayerDragging, setMainLayerDragging] = useState(false);
-  const [isFullscreen, setIsFullscreen] = useState(false);
   const [previewZoom, setPreviewZoom] = useState(100);
-  const [previewFitWidth, setPreviewFitWidth] = useState(920);
+  const previewFitWidth = usePreviewViewportFit(previewViewportRef, { canvasWidth, canvasHeight });
+  const { isFullscreen, toggleFullscreen } = usePreviewFullscreen(canvasRef);
   const [timeDraft, setTimeDraft] = useState(formatTime(timelinePlayhead ?? playheadSec));
   const [editingTime, setEditingTime] = useState(false);
   const [alignmentGuides, setAlignmentGuides] = useState({ x: null, y: null });
@@ -122,153 +130,45 @@ export default function LiteCutPreviewPanel({
   const safePlaybackRate = Math.max(0.25, Math.min(4, Number(playbackRate) || 1));
   const inputTimelineTime = Math.max(0, Number(timelinePlayhead ?? playheadSec) || 0);
   const inputLocalTime = Math.max(0, Number(clipLocalTime) || 0);
-  const [previewClock, setPreviewClock] = useState(() => ({
-    sourceTime: Math.max(0, Number(playheadSec) || 0),
-    timelineTime: inputTimelineTime,
-    clipLocalTime: inputLocalTime,
-  }));
-  const frameAnchorRef = useRef({
-    sourceTime: Math.max(0, Number(playheadSec) || 0),
-    timelineTime: inputTimelineTime,
-    clipLocalTime: inputLocalTime,
-    playbackRate: safePlaybackRate,
-  });
-  const clockClipRef = useRef(previewClipId);
-  const previewClipIdRef = useRef(previewClipId);
-  const onPlayheadChangeRef = useRef(onPlayheadChange);
-  const presentedStreamRef = useRef(null);
-  const lastPreviewClockAtRef = useRef(Number.NEGATIVE_INFINITY);
-  const lastGlobalClockAtRef = useRef(0);
   const previousUnderlayLayersRef = useRef([]);
-  const retainedPromotionLayerRef = useRef(null);
-  const handoffStartedAtRef = useRef(0);
-  const handoffSeekAtRef = useRef(0);
-  const appliedUserSeekTokenRef = useRef(0);
-  const reverseSeekTargetRef = useRef(null);
-  const [, forcePromotionRender] = useState(0);
 
-  useLayoutEffect(() => () => {
-    const elements = new Set([
-      videoRef.current,
-      bgVideoRef.current,
-      preloadVideoRef.current,
-      ...underlayVideoRefs.current.values(),
-      ...(canvasRef.current?.querySelectorAll("video, audio") || []),
-    ]);
-    elements.forEach(releaseMediaElement);
-    underlayVideoRefs.current.clear();
-  }, []);
+  usePreviewMediaCleanup({
+    videoRef,
+    backgroundVideoRef: bgVideoRef,
+    preloadVideoRef,
+    underlayVideoRefs,
+    canvasRef,
+  });
 
-  const releasePromotedUnderlay = useCallback(() => {
-    if (!retainedPromotionLayerRef.current) return;
-    retainedPromotionLayerRef.current = null;
-    forcePromotionRender((version) => version + 1);
-  }, []);
-  const promotedPlaybackTime = useCallback((fallback) => {
-    const promoted = retainedPromotionLayerRef.current;
-    const promotedElement = promoted ? underlayVideoRefs.current.get(String(promoted.id)) : null;
-    return promotedElement?.readyState >= 2 && Number.isFinite(promotedElement.currentTime)
-      ? promotedElement.currentTime
-      : fallback;
-  }, []);
-
-  useLayoutEffect(() => {
-    onPlayheadChangeRef.current = onPlayheadChange;
-    previewClipIdRef.current = previewClipId;
-    const clipChanged = clockClipRef.current !== previewClipId;
-    clockClipRef.current = previewClipId;
-    const nextClock = {
-      sourceTime: Math.max(0, Number(playheadSec) || 0),
-      timelineTime: inputTimelineTime,
-      clipLocalTime: inputLocalTime,
-    };
-    frameAnchorRef.current = { ...nextClock, playbackRate: safePlaybackRate };
-    if (!isPlaying || clipChanged || reversePlayback || freezePlayback) {
-      setPreviewClock(nextClock);
-    }
-  }, [clipLocalTime, freezePlayback, inputLocalTime, inputTimelineTime, isPlaying, onPlayheadChange, playheadSec, previewClipId, reversePlayback, safePlaybackRate]);
-
-  useEffect(() => {
-    const el = videoRef.current;
-    if (!el || !hasStream || !isPlaying || reversePlayback || freezePlayback) return;
-    lastPreviewClockAtRef.current = Number.NEGATIVE_INFINITY;
-    let cancelled = false;
-    let videoFrameId = null;
-    let animationFrameId = null;
-
-    const publishFrame = (now, mediaTime) => {
-      if (cancelled || !Number.isFinite(mediaTime) || el.readyState < 2) return;
-      const hasPromotedLayer = Boolean(retainedPromotionLayerRef.current);
-      const action = handoffFrameAction({
-        mediaTime,
-        expectedMediaTime: promotedPlaybackTime(frameAnchorRef.current.sourceTime),
-        awaitingHandoff: hasPromotedLayer || presentedStreamRef.current !== mediaIdentity,
-        hasPromotedLayer,
-        keepPromotedFrameUntilCaughtUp: Boolean(retainedPromotionLayerRef.current?.prewarm),
-        handoffStartedAt: handoffStartedAtRef.current,
-        lastCorrectiveSeekAt: handoffSeekAtRef.current,
-        seeking: Boolean(el.seeking),
-        now,
-      });
-      if (action.type !== "present") {
-        handoffStartedAtRef.current = action.startedAt;
-        if (action.type === "seek") {
-          handoffSeekAtRef.current = now;
-          try {
-            el.currentTime = action.target;
-          } catch {
-            // A transient decoder failure is retried on the next presented frame.
-          }
-        }
-        return;
-      }
-      handoffStartedAtRef.current = 0;
-      const frame = previewFrameTimes(frameAnchorRef.current, mediaTime);
-      if (shouldPublishPreviewClock(now, lastPreviewClockAtRef.current)) {
-        lastPreviewClockAtRef.current = now;
-        setPreviewClock((previous) => (
-          Math.abs(previous.sourceTime - frame.sourceTime) < 0.0005
-          && Math.abs(previous.timelineTime - frame.timelineTime) < 0.0005
-            ? previous
-            : frame
-        ));
-      }
-      releasePromotedUnderlay();
-      if (presentedStreamRef.current !== mediaIdentity) {
-        presentedStreamRef.current = mediaIdentity;
-        setHeldSwitchFrame(null);
-      }
-      if (now - lastGlobalClockAtRef.current >= 45) {
-        lastGlobalClockAtRef.current = now;
-        onPlayheadChangeRef.current?.(mediaTime, {
-          clipId: previewClipIdRef.current,
-          timelineSec: frame.timelineTime,
-        });
-      }
-    };
-
-    if (typeof el.requestVideoFrameCallback === "function") {
-      const requestNext = () => {
-        videoFrameId = el.requestVideoFrameCallback((now, metadata) => {
-          publishFrame(now, Number(metadata?.mediaTime ?? el.currentTime));
-          if (!cancelled) requestNext();
-        });
-      };
-      requestNext();
-    } else {
-      const requestNext = (now) => {
-        publishFrame(now, Number(el.currentTime));
-        if (!cancelled) animationFrameId = window.requestAnimationFrame(requestNext);
-      };
-      animationFrameId = window.requestAnimationFrame(requestNext);
-    }
-
-    return () => {
-      cancelled = true;
-      if (videoFrameId != null && typeof el.cancelVideoFrameCallback === "function") el.cancelVideoFrameCallback(videoFrameId);
-      if (animationFrameId != null) window.cancelAnimationFrame(animationFrameId);
-    };
-  }, [freezePlayback, hasStream, isPlaying, mediaIdentity, previewClipId, promotedPlaybackTime, releasePromotedUnderlay, reversePlayback, streamUrl]);
+  const {
+    previewClock,
+    frameAnchorRef,
+    previewClipIdRef,
+    onPlayheadChangeRef,
+    presentedStreamRef,
+    retainedPromotionLayerRef,
+    handoffStartedAtRef,
+    handoffSeekAtRef,
+    releasePromotedUnderlay,
+    promotedPlaybackTime,
+  } = usePreviewFrameClock({
+    clipLocalTime,
+    freezePlayback,
+    hasStream,
+    inputLocalTime,
+    inputTimelineTime,
+    isPlaying,
+    mediaIdentity,
+    onPlayheadChange,
+    playheadSec,
+    previewClipId,
+    reversePlayback,
+    safePlaybackRate,
+    setHeldSwitchFrame,
+    streamUrl,
+    underlayVideoRefs,
+    videoRef,
+  });
 
   const useMediaClock = shouldUseMediaPreviewClock({ hasStream, isPlaying, reversePlayback, freezePlayback });
   const localTime = useMediaClock ? previewClock.clipLocalTime : inputLocalTime;
@@ -283,6 +183,8 @@ export default function LiteCutPreviewPanel({
   const resolvedTransitionOpacity = liveTransitionVisual?.mainOpacity ?? transitionMainOpacity;
   const resolvedTransitionTransform = liveTransitionVisual?.mainTransform ?? transitionMainTransform;
   const resolvedTransitionClipPath = liveTransitionVisual?.mainClipPath ?? transitionMainClipPath;
+  const resolvedOutgoingTransitionTransform = liveTransitionVisual?.outgoingTransform ?? transitionOutgoingTransform;
+  const resolvedOutgoingTransitionTransformOrigin = liveTransitionVisual?.outgoingTransformOrigin ?? transitionOutgoingTransformOrigin;
   const resolvedFlashOpacity = liveTransitionVisual?.flashOpacity ?? transitionFlashOpacity;
   const resolvedBlackOpacity = liveTransitionVisual?.blackOpacity ?? transitionBlackOpacity;
   const videoOpacity = Math.min(clipFadeInFactor, clipFadeOutFactor) * Math.max(0, Math.min(1, Number(resolvedTransitionOpacity) || 0));
@@ -374,6 +276,8 @@ export default function LiteCutPreviewPanel({
   const safeMainFilter = String(mainFilter || "").trim();
   const safeTransitionTransform = String(resolvedTransitionTransform || "").trim();
   const safeTransitionClipPath = String(resolvedTransitionClipPath || "").trim();
+  const safeOutgoingTransitionTransform = String(resolvedOutgoingTransitionTransform || "").trim();
+  const safeOutgoingTransitionTransformOrigin = String(resolvedOutgoingTransitionTransformOrigin || "").trim();
   const flashOpacity = Math.max(0, Math.min(1, Number(resolvedFlashOpacity) || 0));
   const blackOpacity = Math.max(0, Math.min(1, Number(resolvedBlackOpacity) || 0));
   const safeMainVolume = Math.max(0, Math.min(1, Number(mainVolume) || 0));
@@ -581,89 +485,27 @@ export default function LiteCutPreviewPanel({
     }
   }, [underlayLayerSignature]);
 
-  useEffect(() => {
-    // During ordinary forward playback the media element is the clock. Seeking
-    // it again whenever React publishes the playhead causes large sources to
-    // discard decoded frames and repeatedly rebuffer. Stream hand-offs perform
-    // their own initial seek in handleVideoCanPlay below.
-    const shouldSeek = shouldApplyPreviewSeek({
-      isPlaying,
-      reversePlayback: mainReverse,
-      freezePlayback,
-      userSeekToken,
-      appliedUserSeekToken: appliedUserSeekTokenRef.current,
-    });
-    if (!shouldSeek) return;
-    const pendingUserSeek = Number(userSeekToken) > 0 && userSeekToken !== appliedUserSeekTokenRef.current;
-    const applySeek = (el) => {
-      try {
-        const fallback = Math.max(0, playheadSec);
-        const seekTo = el === videoRef.current ? promotedPlaybackTime(fallback) : fallback;
-        const seekTolerance = el === videoRef.current && retainedPromotionLayerRef.current ? 0.04 : 0.15;
-        if (Math.abs(el.currentTime - seekTo) > seekTolerance) el.currentTime = seekTo;
-      } catch {
-        // ignore seek before metadata
-      }
-    };
-    const cleanup = [];
-    let seekScheduled = false;
-    for (const el of [videoRef.current, bgVideoRef.current]) {
-      if (!el || !hasStream) continue;
-      seekScheduled = true;
-      const onLoaded = () => applySeek(el);
-      if (el.readyState >= 1) applySeek(el);
-      else {
-        el.addEventListener("loadedmetadata", onLoaded, { once: true });
-        cleanup.push(() => el.removeEventListener("loadedmetadata", onLoaded));
-      }
-    }
-    if (pendingUserSeek && seekScheduled) appliedUserSeekTokenRef.current = userSeekToken;
-    return () => cleanup.forEach((fn) => fn());
-  }, [mediaIdentity, hasStream, playheadSec, fitMode, isPlaying, mainReverse, freezePlayback, promotedPlaybackTime, userSeekToken]);
-
-  useEffect(() => {
-    if (!hasStream || !isPlaying || !mainReverse || freezePlayback) {
-      reverseSeekTargetRef.current = null;
-      return;
-    }
-    const el = videoRef.current;
-    const target = Math.max(0, Number(playheadSec) || 0);
-    reverseSeekTargetRef.current = target;
-    if (!el || el.readyState < 1 || el.seeking) return;
-    if (Math.abs(el.currentTime - target) <= 0.012) return;
-    try {
-      el.currentTime = target;
-    } catch {
-      // Metadata or a previous decoder seek may still be settling. The latest
-      // target stays queued and is retried by handleVideoSeeked.
-    }
-  }, [freezePlayback, hasStream, isPlaying, mainReverse, mediaIdentity, playheadSec]);
-
   const underlaySeekSignature = resolvedUnderlayLayers
     .map((layer) => `${layer.id}:${Number(layer.sourceTime) || 0}`)
     .join("|");
-
-  useEffect(() => {
-    const cleanup = [];
-    for (const layer of resolvedUnderlayLayers) {
-      const el = underlayVideoRefs.current.get(String(layer.id));
-      if (!el) continue;
-      const seekTo = Math.max(0, Number(layer.sourceTime) || 0);
-      const applySeek = () => {
-        try {
-          if (Math.abs(el.currentTime - seekTo) > 0.15) el.currentTime = seekTo;
-        } catch {
-          // ignore seek before metadata
-        }
-      };
-      if (el.readyState >= 1) applySeek();
-      else {
-        el.addEventListener("loadedmetadata", applySeek, { once: true });
-        cleanup.push(() => el.removeEventListener("loadedmetadata", applySeek));
-      }
-    }
-    return () => cleanup.forEach((fn) => fn());
-  }, [underlayLayerSignature, underlaySeekSignature, isPlaying]);
+  const { reverseSeekTargetRef } = usePreviewSeekGuard({
+    backgroundVideoRef: bgVideoRef,
+    fitMode,
+    freezePlayback,
+    hasStream,
+    isPlaying,
+    mainReverse,
+    mediaIdentity,
+    playheadSec,
+    promotedPlaybackTime,
+    resolvedUnderlayLayers,
+    retainedPromotionLayerRef,
+    underlayLayerSignature,
+    underlaySeekSignature,
+    underlayVideoRefs,
+    userSeekToken,
+    videoRef,
+  });
 
   useEffect(() => {
     if (!hasStream) return;
@@ -833,50 +675,10 @@ export default function LiteCutPreviewPanel({
     setPreviewZoom(values[Math.max(0, Math.min(values.length - 1, index + direction))]);
   };
 
-  useLayoutEffect(() => {
-    const viewport = previewViewportRef.current;
-    if (!viewport) return undefined;
-
-    const updatePreviewFit = () => {
-      const aspect = Math.max(1, Number(canvasWidth) || 1920) / Math.max(1, Number(canvasHeight) || 1080);
-      const availableWidth = Math.max(1, viewport.clientWidth - 40);
-      const availableHeight = Math.max(1, viewport.clientHeight - 40);
-      const nextWidth = Math.max(1, Math.min(920, availableWidth, availableHeight * aspect));
-      setPreviewFitWidth((current) => (Math.abs(current - nextWidth) < 0.5 ? current : nextWidth));
-    };
-
-    updatePreviewFit();
-    const observer = typeof ResizeObserver !== "undefined" ? new ResizeObserver(updatePreviewFit) : null;
-    observer?.observe(viewport);
-    window.addEventListener("resize", updatePreviewFit);
-    return () => {
-      observer?.disconnect();
-      window.removeEventListener("resize", updatePreviewFit);
-    };
-  }, [canvasHeight, canvasWidth]);
-
   const handleCanvasPointerDown = (e) => {
     if (e.target.closest("[data-preview-overlay]") || e.target.closest("[data-preview-video-layer]")) return;
     onOverlayDeselect?.();
   };
-
-  const toggleFullscreen = useCallback(async () => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    try {
-      if (document.fullscreenElement === canvas) await document.exitFullscreen();
-      else await canvas.requestFullscreen?.();
-    } catch {
-      // The browser can reject fullscreen outside a trusted user gesture.
-    }
-  }, []);
-
-  useEffect(() => {
-    const syncFullscreenState = () => setIsFullscreen(document.fullscreenElement === canvasRef.current);
-    document.addEventListener("fullscreenchange", syncFullscreenState);
-    syncFullscreenState();
-    return () => document.removeEventListener("fullscreenchange", syncFullscreenState);
-  }, []);
 
   const handleCanvasDragOver = (e) => {
     if (!e.dataTransfer.types.includes("application/x-litecut-media")) return;
@@ -943,6 +745,9 @@ export default function LiteCutPreviewPanel({
               <>
                 {hasUnderlay
                   ? renderedUnderlayLayers.map((layer) => {
+                      const isTransitionLayer = String(layer?.id || "").startsWith("transition-");
+                      const boundaryTransform = isTransitionLayer ? safeOutgoingTransitionTransform : "";
+                      const boundaryTransformOrigin = isTransitionLayer ? safeOutgoingTransitionTransformOrigin : "";
                       const flip = layer.flipHorizontal || layer.flipVertical
                         ? `scale(${layer.flipHorizontal ? -1 : 1}, ${layer.flipVertical ? -1 : 1})`
                         : undefined;
@@ -975,7 +780,8 @@ export default function LiteCutPreviewPanel({
                               height: `${(height * 100).toFixed(2)}%`,
                               opacity,
                               filter: layer.filter || undefined,
-                              transform: `translate(-50%, -50%) scale(${scale * (layer.flipHorizontal ? -1 : 1)}, ${scale * (layer.flipVertical ? -1 : 1)}) rotate(${rotation}deg)`,
+                              transformOrigin: boundaryTransformOrigin || undefined,
+                              transform: `${boundaryTransform} translate(-50%, -50%) scale(${scale * (layer.flipHorizontal ? -1 : 1)}, ${scale * (layer.flipVertical ? -1 : 1)}) rotate(${rotation}deg)`.trim(),
                             }}
                           >
                             <video ref={ref} src={layer.streamUrl} className={`block h-full w-full ${objectFit}`} playsInline preload="auto" muted onLoadedMetadata={reportUnderlayDuration} />
@@ -988,7 +794,7 @@ export default function LiteCutPreviewPanel({
                           key={`underlay:${layer.streamUrl}:${layer.id}`}
                           src={layer.streamUrl}
                           className="absolute inset-0 z-0 h-full w-full object-contain"
-                          style={{ opacity, filter: layer.filter || undefined, transform: flip }}
+                          style={{ opacity, filter: layer.filter || undefined, transformOrigin: boundaryTransformOrigin || undefined, transform: `${boundaryTransform} ${flip || ""}`.trim() || undefined }}
                           playsInline
                           preload="auto"
                           muted

@@ -2,7 +2,11 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { AlertTriangle, FileSearch, FileVideo2, Film, ImageIcon, Layers, Loader2, Music, RefreshCw, Search, Trash2, Type, X } from "lucide-react";
 import { useRef } from "react";
 
-import API, { getLiteCutAssetStreamUrl, getRecordedClipStreamUrl } from "../../../api/api.js";
+import {
+  getLiteCutAssetStreamUrl,
+  getRecordedClipStreamUrl,
+  liteCutClient,
+} from "../api/liteCutClient.js";
 import { mapAssetRow } from "../state/assetUtils.js";
 import { mapRecordedClipRow, reconcileRecordedClipDuration } from "../state/mediaUtils.js";
 import { replacementAcceptForWarning, replacementMatchesWarning } from "../state/relinkUtils.js";
@@ -315,7 +319,7 @@ export default function LiteCutMediaBin({
     const patchKey = `${Number(clipId)}:${duration.toFixed(3)}`;
     if (durationPatchRef.current.has(patchKey)) return;
     durationPatchRef.current.add(patchKey);
-    void API.patch(`/recorded-clips/${Number(clipId)}/duration`, { duration_sec: duration })
+    void liteCutClient.patchRecordedClipDuration(Number(clipId), duration)
       .catch(() => {})
       .finally(() => durationPatchRef.current.delete(patchKey));
   }, [onRecordedDurationChange]);
@@ -348,7 +352,7 @@ export default function LiteCutMediaBin({
     }
     setAssetWarningsLoading(true);
     try {
-      const { data } = await API.post("/lite-cut/assets/validate", { body: projectBody });
+      const data = await liteCutClient.validateAssets(projectBody);
       setAssetWarnings(Array.isArray(data?.items) ? data.items : []);
     } catch {
       setAssetWarnings([]);
@@ -359,9 +363,7 @@ export default function LiteCutMediaBin({
 
   const loadAssets = useCallback(async () => {
     try {
-      const { data } = await API.get("/lite-cut/assets", {
-        params: { project_id: projectId ?? undefined, limit: 500 },
-      });
+      const data = await liteCutClient.listAssets({ projectId, limit: 500 });
       const mapped = (data.items || []).map(mapAssetRow).filter(Boolean);
       setLocalAssets(mapped);
       onAssetsLoaded?.(mapped);
@@ -376,11 +378,11 @@ export default function LiteCutMediaBin({
     setLoadError(null);
     try {
       try {
-        await API.post("/recorded-clips/purge-missing");
+        await liteCutClient.purgeMissingRecordedClips();
       } catch {
         // non-fatal
       }
-      const { data } = await API.get("/recorded-clips", { params: { limit: 500, offset: 0 } });
+      const data = await liteCutClient.listRecordedClips({ limit: 500, offset: 0 });
       const mapped = (data.items || []).map(mapRecordedClipRow).filter(Boolean);
       setItems(mapped);
       onItemsLoaded?.(mapped);
@@ -425,16 +427,11 @@ export default function LiteCutMediaBin({
     try {
       for (const [index, file] of queue.entries()) {
         setUploadProgress({ current: index, total: queue.length, percent: 0, name: file.name || "" });
-        const form = new FormData();
-        form.append("file", file);
-        const params = new URLSearchParams();
-        if (projectId) params.set("project_id", String(projectId));
         const probedDuration = await probeLocalMediaDurationSec(file);
-        if (probedDuration != null) params.set("client_duration_sec", probedDuration.toFixed(3));
-        const search = params.toString();
-        const url = search ? `/lite-cut/assets/upload?${search}` : "/lite-cut/assets/upload";
-        await API.post(url, form, {
-          headers: { "Content-Type": "multipart/form-data" },
+        await liteCutClient.uploadAsset({
+          file,
+          projectId: projectId || null,
+          clientDurationSec: probedDuration != null ? probedDuration.toFixed(3) : null,
           signal: controller.signal,
           onUploadProgress: (event) => {
             const total = Number(event.total) || 0;
@@ -471,17 +468,15 @@ export default function LiteCutMediaBin({
     setAssetWarningsLoading(true);
     setUploadError(null);
     try {
-      const form = new FormData();
-      form.append("file", file);
-      const params = new URLSearchParams({ project_id: String(projectId) });
       const duration = await probeLocalMediaDurationSec(file);
-      if (duration != null) params.set("client_duration_sec", duration.toFixed(3));
-      const { data } = await API.post(`/lite-cut/assets/upload?${params}`, form, {
-        headers: { "Content-Type": "multipart/form-data" },
+      const data = await liteCutClient.uploadAsset({
+        file,
+        projectId,
+        clientDurationSec: duration != null ? duration.toFixed(3) : null,
       });
       const asset = mapAssetRow(data);
       if (!replacementMatchesWarning(warning, asset)) {
-        await API.delete(`/lite-cut/assets/${Number(asset.id)}`).catch(() => {});
+        await liteCutClient.deleteAsset(Number(asset.id)).catch(() => {});
         throw new Error("incompatible_replacement");
       }
       const changed = await onRelinkMissingAsset?.(warning, asset);
@@ -506,7 +501,7 @@ export default function LiteCutMediaBin({
     if (typeof window !== "undefined" && !window.confirm(t("liteCut.media.deleteAssetConfirm", { name: asset.name || id }))) return;
     setDeletingAssetId(id);
     try {
-      await API.delete(`/lite-cut/assets/${id}`);
+      await liteCutClient.deleteAsset(id);
       await loadAssets();
     } finally {
       setDeletingAssetId(null);
@@ -518,7 +513,7 @@ export default function LiteCutMediaBin({
     if (!Number.isFinite(id) || id <= 0) return;
     setRetryingAssetId(id);
     try {
-      await API.post(`/lite-cut/assets/${id}/proxy/retry`);
+      await liteCutClient.retryAssetProxy(id);
       await loadAssets();
     } finally {
       setRetryingAssetId(null);

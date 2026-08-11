@@ -1,5 +1,5 @@
 import { CheckCircle2, Copy, FolderOpen, Loader2, X } from "lucide-react";
-import API from "../../../api/api.js";
+import { liteCutClient } from "../api/liteCutClient.js";
 import { desktopBridge } from "../../../desktop/desktopBridge.js";
 
 function basenameFromPath(path) {
@@ -82,7 +82,7 @@ export default function LiteCutExportProgressDialog({
     if (!outputPath) return;
     try {
       if (desktopBridge?.showItemInFolder && await desktopBridge.showItemInFolder(outputPath)) return;
-      await API.post("/reveal-file-in-explorer", { path: outputPath });
+      await liteCutClient.revealFile(outputPath);
     } catch {
       // Keep the completed export visible even if Explorer could not open.
     }

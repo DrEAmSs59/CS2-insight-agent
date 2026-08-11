@@ -13,49 +13,34 @@ import LiteCutProjectStartPage from "./LiteCutProjectStartPage.jsx";
 import LiteCutExportProgressDialog from "./LiteCutExportProgressDialog.jsx";
 import FfmpegRequiredDialog from "../../../components/FfmpegRequiredDialog.jsx";
 import { filterStyleFromColor, TEXT_STYLE_CARDS } from "./editorPresets.js";
-import { transitionPreviewVisual } from "./transitionPreviewUtils.js";
-import { LITECUT_PROJECT_TEMPLATES, projectBodyFromTemplate } from "./projectTemplates.js";
+import { boundaryTransitionPreviewVisual } from "./transitionPreviewUtils.js";
+import { LITECUT_PROJECT_TEMPLATES } from "./projectTemplates.js";
 import { inspectorTabForTimelineSelection } from "./inspectorSelectionUtils.js";
-import API, { getLiteCutAssetStreamUrl, getRecordedClipStreamUrl } from "../../../api/api.js";
-import { desktopBridge } from "../../../desktop/desktopBridge.js";
-import { useLiteCutEditorStore } from "../state/editorStore.js";
-import { collectUsedLiteCutAssetIds, mapAssetRow } from "../state/assetUtils.js";
-import { liteCutClipStreamUrl } from "./clipStreamUrlUtils.js";
 import {
-  LITE_CUT_AUTOSAVE_FLUSH_EVENTS,
-  LITE_CUT_AUTOSAVE_DELAY_MS,
-  shouldScheduleLiteCutAutosave,
-  shouldFlushLiteCutAutosave,
-} from "../state/autosaveUtils.js";
+  getLiteCutAssetStreamUrl,
+  getRecordedClipStreamUrl,
+} from "../api/liteCutClient.js";
+import { useLiteCutEditorStore } from "../state/editorStore.js";
+import { collectUsedLiteCutAssetIds } from "../state/assetUtils.js";
+import { liteCutClipStreamUrl } from "./clipStreamUrlUtils.js";
 import { mapRecordedClipRow } from "../state/mediaUtils.js";
 import { overlayTransformAt, VIDEO_LAYER_TRANSFORM_DEFAULTS } from "../state/overlayKeyframeUtils.js";
 import { audioKeyframeNearPlayhead, clipVolumeAt } from "../state/audioKeyframeUtils.js";
-import { relinkMissingAssetReferences } from "../state/relinkUtils.js";
 import {
   defaultLiteCutFilename,
-  cancelLiteCutExport,
-  getLiteCutExportStatus,
-  listLiteCutExports,
   liteCutRangePatchFromPlayhead,
   normalizeLiteCutExportRange,
   resolveLiteCutOutputDir,
-  startLiteCutExport,
 } from "../state/exportUtils.js";
 import {
   nextTopVideoPlaybackAfter,
   hasSoloAudioTracks,
   partitionMainVideoAudioPreview,
-  resolveAudioPreviewPreloadItems,
-  resolveAudioPreviewItems,
-  resolveBaseVideoTrackId,
-  resolveIncomingTransitionPlayback,
-  resolveOutgoingTransitionPreload,
   selectedClipPreviewSourceTime,
   resolveTopVideoPlaybackAt,
-  resolveVideoUnderlayPlaybackAt,
-  resolveVideoUnderlayPlaybacksAt,
 } from "../state/playbackUtils.js";
 import { useLiteCutHistoryStore } from "../state/historyStore.js";
+import { buildPreviewScene } from "../state/previewScene.js";
 import {
   isEditableShortcutTarget,
   resolveLiteCutShortcut,
@@ -68,39 +53,36 @@ import {
 } from "../state/presetUtils.js";
 import { useLiteCutTimelineStore } from "../state/timelineStore.js";
 import {
-  clipPlaybackSpeed,
-  clipSpeedAtTimeline,
-  clipTimelineEnd,
-  clipTimelineTimeForSource,
-  clipCanvasFit,
-  clipFreezeFrameSec,
-  clipPreservePitch,
-  clipReversePlayback,
-  clipSourceDuration,
-  clipTrimmedSourceDuration,
   findClipById,
   getTrack,
   isAssetMediaItem,
   mainVideoClips,
-  overlaysActiveAt,
   projectFrameStepSec,
   resolveAudioEditingTarget,
   selectedTimelineRange,
   timelineTotalSec,
 } from "../state/timelineUtils.js";
-import { formatMontageApiError } from "../../../utils/formatMontageApiError.js";
-import { ffmpegGateSubtitle } from "../../../utils/ffmpegGateMessages.js";
-import { messageFromApiCode } from "../../../utils/apiErrorMessages.js";
+import {
+  clipCanvasFit,
+  clipFreezeFrameSec,
+  clipPlaybackSpeed,
+  clipPreservePitch,
+  clipReversePlayback,
+  clipSourceDuration,
+  clipSpeedAtTimeline,
+  clipTimelineEnd,
+  clipTimelineTimeForSource,
+  clipTrimmedSourceDuration,
+} from "../domain/timelineMath.js";
 import { stripMp4Extension } from "../../../utils/montageUtils.js";
 import { useT } from "../../../i18n/useT.js";
-
-const FFMPEG_GATE_IDLE = {
-  loading: true,
-  blocked: false,
-  subtitle: "",
-  message: "",
-  framemeldAvailable: false,
-};
+import { useLiteCutFfmpegGateController } from "../controllers/useLiteCutFfmpegGateController.js";
+import { useLiteCutExportController } from "../controllers/useLiteCutExportController.js";
+import { useLiteCutMediaController } from "../controllers/useLiteCutMediaController.js";
+import {
+  useLiteCutProjectController,
+  useLiteCutProjectSessionController,
+} from "../controllers/useLiteCutProjectController.js";
 
 function collectLiteCutFrameMeldSourceItems(body, mediaCache, mediaAssets) {
   const assetsById = new Map((mediaAssets || []).map((asset) => [String(asset?.id), asset]));
@@ -167,7 +149,6 @@ export default function LiteCutEditorShell({
   const t = useT();
   const navigate = useNavigate();
   const location = useLocation();
-  const [ffmpegGate, setFfmpegGate] = useState(FFMPEG_GATE_IDLE);
   const {
     projectId,
     projectName,
@@ -280,15 +261,6 @@ export default function LiteCutEditorShell({
   const [textStyleId, setTextStyleId] = useState("clutch");
   const [overlayText, setOverlayText] = useState("CLUTCH");
   const [textDefaults, setTextDefaults] = useState({ font_family: "微软雅黑", font_file: null, font_size: 64, align: "center" });
-  const [fontAssets, setFontAssets] = useState([]);
-  const [audioAssets, setAudioAssets] = useState([]);
-  const [mediaAssets, setMediaAssets] = useState([]);
-  const [assetPreviewVersions, setAssetPreviewVersions] = useState({});
-  const [assetProxyBusy, setAssetProxyBusy] = useState(false);
-  const [exporting, setExporting] = useState(false);
-  const [exportError, setExportError] = useState(null);
-  const [exportJob, setExportJob] = useState(null);
-  const [exportDialog, setExportDialog] = useState({ phase: "idle", result: null, error: "" });
   const playheadAuthorityRef = useRef(0);
   const prevPlayingRef = useRef(isPlaying);
 
@@ -302,7 +274,6 @@ export default function LiteCutEditorShell({
       prevPlayingRef.current = isPlaying;
     }
   }, [isPlaying, playheadSec]);
-  const [exportHistory, setExportHistory] = useState([]);
   const [exportSettingsOpen, setExportSettingsOpen] = useState(defaultExportOpen || defaultInspectorTab === "export");
   const [presetsOpen, setPresetsOpen] = useState(false);
   const selectionInspectorTab = useMemo(
@@ -314,163 +285,8 @@ export default function LiteCutEditorShell({
     if (selectionInspectorTab) setInspectorTab(selectionInspectorTab);
   }, [selectedClipId, selectedTrackId, selectionInspectorTab]);
 
-  const checkFfmpegGate = useCallback(async ({ showLoading = true } = {}) => {
-    if (showLoading) {
-      setFfmpegGate((prev) => ({ ...prev, loading: true }));
-    }
-    try {
-      const { data } = await API.get("config/ffmpeg-check");
-      if (data?.ok) {
-        setFfmpegGate({
-          loading: false,
-          blocked: false,
-          subtitle: "",
-          message: "",
-          framemeldAvailable: data?.framemeld_available === true,
-        });
-        return;
-      }
-      setFfmpegGate({
-        loading: false,
-        blocked: true,
-        subtitle: ffmpegGateSubtitle(data?.reason, t),
-        message: t("liteCut.ffmpegGateDefaultMessage"),
-        framemeldAvailable: false,
-      });
-    } catch {
-      setFfmpegGate({
-        loading: false,
-        blocked: true,
-        subtitle: t("montage.ffmpegGateDetectFail"),
-        message: t("montage.ffmpegGateConnectFail"),
-        framemeldAvailable: false,
-      });
-    }
-  }, [t]);
-
-  useEffect(() => {
-    void checkFfmpegGate();
-  }, [checkFfmpegGate, location.pathname]);
-
-  useEffect(() => {
-    if (
-      !ffmpegGate.loading
-      && !ffmpegGate.framemeldAvailable
-      && body?.output?.framemeld_enabled === true
-    ) {
-      patchOutput({ framemeld_enabled: false });
-    }
-  }, [body?.output?.framemeld_enabled, ffmpegGate.framemeldAvailable, ffmpegGate.loading, patchOutput]);
-
-  useEffect(() => {
-    // Native file pickers temporarily blur the window. Recheck FFmpeg after
-    // focus returns without unmounting the editor and losing the file input's
-    // pending change event or the media-bin tab state.
-    const onFocus = () => void checkFfmpegGate({ showLoading: false });
-    window.addEventListener("focus", onFocus);
-    return () => window.removeEventListener("focus", onFocus);
-  }, [checkFfmpegGate]);
-
-  useEffect(() => {
-    if (ffmpegGate.loading || ffmpegGate.blocked) return;
-    void loadOrCreateProject();
-  }, [loadOrCreateProject, ffmpegGate.loading, ffmpegGate.blocked]);
-
-  useEffect(() => {
-    if (dirty && projectId && body) persistRecoveryDraft();
-  }, [body, dirty, persistRecoveryDraft, projectId, projectName]);
-
-  useEffect(() => {
-    const stateAtSchedule = useLiteCutEditorStore.getState();
-    if (!shouldScheduleLiteCutAutosave(stateAtSchedule)) return undefined;
-    const projectIdAtSchedule = stateAtSchedule.projectId;
-    const timer = window.setTimeout(() => {
-      const state = useLiteCutEditorStore.getState();
-      if (
-        shouldScheduleLiteCutAutosave({
-          projectId: state.projectId,
-          body: state.body,
-          dirty: state.dirty,
-          loading: state.loading,
-          saving: state.saving,
-        }) &&
-        Number(state.projectId) === Number(projectIdAtSchedule)
-      ) {
-        void saveProject();
-      }
-    }, LITE_CUT_AUTOSAVE_DELAY_MS);
-    return () => window.clearTimeout(timer);
-  }, [projectId, body, projectName, dirty, loading, saveProject]);
-
-  useEffect(() => {
-    const flushAutosave = (event) => {
-      if (shouldFlushLiteCutAutosave(event, useLiteCutEditorStore.getState())) {
-        void saveProject();
-        if (event.type === "beforeunload") {
-          event.preventDefault();
-          event.returnValue = "";
-        }
-      }
-    };
-    for (const eventName of LITE_CUT_AUTOSAVE_FLUSH_EVENTS) {
-      window.addEventListener(eventName, flushAutosave);
-    }
-    return () => {
-      for (const eventName of LITE_CUT_AUTOSAVE_FLUSH_EVENTS) {
-        window.removeEventListener(eventName, flushAutosave);
-      }
-    };
-  }, [saveProject]);
-
-  const loadFontAssets = useCallback(async () => {
-    try {
-      const { data } = await API.get("/lite-cut/assets", {
-        params: { project_id: projectId ?? undefined, limit: 500 },
-      });
-      const mapped = (data.items || []).map(mapAssetRow).filter(Boolean);
-      setMediaAssets(mapped);
-      setFontAssets(mapped.filter((a) => a?.kind === "font"));
-      setAudioAssets(mapped.filter((a) => a?.kind === "audio"));
-      setAssetPreviewVersions(Object.fromEntries(mapped.map((asset) => [Number(asset.id), asset.preview_proxy_version || "source"])));
-      setAssetProxyBusy(mapped.some((asset) => ["queued", "running"].includes(asset.preview_proxy_status)));
-    } catch {
-      setFontAssets([]);
-      setAudioAssets([]);
-      setMediaAssets([]);
-      setAssetPreviewVersions({});
-      setAssetProxyBusy(false);
-    }
-  }, [projectId]);
-
-  useEffect(() => {
-    void loadFontAssets();
-  }, [loadFontAssets]);
-
-  useEffect(() => {
-    if (!assetProxyBusy) return undefined;
-    const timer = window.setInterval(() => void loadFontAssets(), 1000);
-    return () => window.clearInterval(timer);
-  }, [assetProxyBusy, loadFontAssets]);
-
-  const loadExportHistory = useCallback(async () => {
-    try {
-      const { items } = await listLiteCutExports({ projectId: projectId ?? null, limit: 8 });
-      setExportHistory(Array.isArray(items) ? items : []);
-    } catch {
-      setExportHistory([]);
-    }
-  }, [projectId]);
-
-  useEffect(() => {
-    void loadExportHistory();
-  }, [loadExportHistory]);
-
   const totalSec = useMemo(() => timelineTotalSec(body, 30), [body]);
   const exportableClipCount = useMemo(() => mainVideoClips(body).length, [body]);
-  const framemeldSourceItems = useMemo(
-    () => collectLiteCutFrameMeldSourceItems(body, mediaCache, mediaAssets),
-    [body, mediaAssets, mediaCache],
-  );
 
   const restartOrTogglePlayback = useCallback((forced) => {
     if (typeof forced === "boolean") {
@@ -533,54 +349,122 @@ export default function LiteCutEditorShell({
     [body, projectName],
   );
 
-  const playback = useMemo(() => resolveTopVideoPlaybackAt(body, playheadSec), [body, playheadSec]);
-  const baseVideoTrackId = useMemo(() => resolveBaseVideoTrackId(body), [body]);
+  const { ffmpegGate } = useLiteCutFfmpegGateController({
+    pathname: location.pathname,
+    outputFrameMeldEnabled,
+    patchOutput,
+    t,
+  });
+  useLiteCutProjectSessionController({
+    body,
+    dirty,
+    ffmpegBlocked: ffmpegGate.blocked,
+    ffmpegLoading: ffmpegGate.loading,
+    loadOrCreateProject,
+    loading,
+    persistRecoveryDraft,
+    projectId,
+    projectName,
+    saveProject,
+    saving,
+  });
+  const {
+    fontAssets,
+    audioAssets,
+    mediaAssets,
+    assetPreviewVersions,
+    handleAssetsLoaded,
+    handleRelinkMissingAsset,
+  } = useLiteCutMediaController({
+    body,
+    migrateAlphaMovOverlaysToVideoTracks,
+    outputHeight,
+    outputWidth,
+    projectId,
+    updateOverlay,
+  });
+  const framemeldSourceItems = useMemo(
+    () => collectLiteCutFrameMeldSourceItems(body, mediaCache, mediaAssets),
+    [body, mediaAssets, mediaCache],
+  );
+  const {
+    exporting,
+    exportError,
+    exportJob,
+    exportDialog,
+    exportHistory,
+    handleExport,
+    handleCancelExport,
+    dismissExportDialog,
+    loadExportHistory,
+  } = useLiteCutExportController({
+    body,
+    dirty,
+    exportableClipCount,
+    onExportPhaseChange,
+    outputDir,
+    outputDirHint,
+    outputFilename,
+    patchOutput,
+    projectId,
+    projectName,
+    saveProject,
+    t,
+  });
+  const {
+    handleNewProject,
+    handleExportProject,
+    handleImportProject,
+    handleOpenProject,
+    handleDuplicateProject,
+    handleDeleteProject,
+    handleDeleteProjects,
+    handleRestoreSnapshot,
+    handleImportPortable,
+    handleStartPortableExport,
+  } = useLiteCutProjectController({
+    clearSelection,
+    createNewProject,
+    deleteProject,
+    deleteProjects,
+    dirty,
+    duplicateProject,
+    importProject,
+    openProject,
+    projectId,
+    projectName,
+    saveProject,
+    saving,
+    setPlaying,
+    setPlayhead,
+    t,
+  });
+
+  const previewScene = useMemo(
+    () => buildPreviewScene(body, playheadSec, { masterVolume }),
+    [body, masterVolume, playheadSec],
+  );
+  const playback = previewScene.top;
+  const baseVideoTrackId = previewScene.baseVideoTrackId;
   const playbackIsVideoLayer = Boolean(playback?.trackId && getTrack(body, playback.trackId)?.type === "video");
-  const underlayPlayback = useMemo(
-    () => resolveVideoUnderlayPlaybackAt(body, playheadSec, playback),
-    [body, playheadSec, playback],
-  );
-  const underlayPlaybacks = useMemo(
-    () => resolveVideoUnderlayPlaybacksAt(body, playheadSec, playback),
-    [body, playheadSec, playback],
-  );
-  const incomingTransitionPlayback = useMemo(
-    () => resolveIncomingTransitionPlayback(body, playback),
-    [body, playback],
-  );
-  const outgoingTransitionPreload = useMemo(
-    () => resolveOutgoingTransitionPreload(body, playback),
-    [body, playback],
-  );
+  const underlayPlayback = previewScene.underlay;
+  const underlayPlaybacks = previewScene.underlays;
+  const incomingTransitionPlayback = previewScene.incomingTransition;
+  const outgoingTransitionPreload = previewScene.outgoingTransitionPreload;
   const backgroundTransition = useMemo(() => {
-    if (!playback?.clip || !playback?.trackId) return null;
-    const clips = [...(getTrack(body, playback.trackId)?.clips || [])].sort((a, b) => (Number(a.timeline_start) || 0) - (Number(b.timeline_start) || 0));
-    const index = clips.findIndex((clip) => clip.id === playback.clip.id);
-    const local = Math.max(0, Number(playback.localTime) || 0);
-    const clipDuration = Math.max(0, (Number(playback.clipEnd) || 0) - (Number(playback.clipStart) || 0));
-    if (index === 0) {
-      const transition = playback.clip.transition_in;
-      const duration = Math.max(0, Math.min(1.5, Number(transition?.duration_sec) || 0));
-      if (transition?.type && transition.type !== "cut" && duration >= 0.02 && local < duration) {
-        return {
-          visual: transitionPreviewVisual(transition.type, local / duration),
-          spec: { type: transition.type, phase: "in", duration, startLocalTime: 0 },
-        };
-      }
-    }
-    if (index === clips.length - 1) {
-      const transition = playback.clip.transition_out;
-      const duration = Math.max(0, Math.min(1.5, Number(transition?.duration_sec) || 0));
-      if (transition?.type && transition.type !== "cut" && duration >= 0.02 && local >= clipDuration - duration) {
-        return {
-          visual: transitionPreviewVisual(transition.type, 1 - ((local - (clipDuration - duration)) / duration)),
-          spec: { type: transition.type, phase: "out", duration, startLocalTime: clipDuration - duration },
-        };
-      }
-    }
-    return null;
-  }, [body, playback]);
-  const previewOverlays = useMemo(() => overlaysActiveAt(body, playheadSec), [body, playheadSec]);
+    const transition = previewScene.backgroundTransition;
+    if (!transition) return null;
+    return {
+      visual: boundaryTransitionPreviewVisual(transition.type, transition.progress),
+      spec: {
+        type: transition.type,
+        phase: transition.phase,
+        duration: transition.duration,
+        startLocalTime: transition.startLocalTime,
+      },
+    };
+  }, [previewScene.backgroundTransition]);
+  const previewOverlays = previewScene.overlays;
   const { clip: selectedClip } = useMemo(
     () => {
       if (selectedTrackId === "overlay" && selectedClipId) {
@@ -873,8 +757,8 @@ export default function LiteCutEditorShell({
     [baseVideoTrackId, clipStreamUrl, incomingTransitionPlayback, isPlaying, nextPreviewPlayback, outgoingTransitionPreload, playback?.clipEnd, playheadSec, selectedClipPreviewSourceTime, underlayPlaybacks],
   );
   const transitionPreview = incomingTransitionPlayback
-    ? transitionPreviewVisual(incomingTransitionPlayback.transitionType, incomingTransitionPlayback.progress)
-    : backgroundTransition?.visual || transitionPreviewVisual("none", 1);
+    ? boundaryTransitionPreviewVisual(incomingTransitionPlayback.transitionType, incomingTransitionPlayback.progress)
+    : backgroundTransition?.visual || boundaryTransitionPreviewVisual("none", 1);
   const transitionPreviewSpec = incomingTransitionPlayback
     ? {
         type: incomingTransitionPlayback.transitionType,
@@ -910,13 +794,13 @@ export default function LiteCutEditorShell({
           preloadOnly: Boolean(item.preloadOnly),
         };
       };
-      const items = resolveAudioPreviewItems(body, playheadSec, masterVolume)
+      const items = previewScene.audio
         .map((item) => {
           return toPreviewItem(item);
         })
         .filter(Boolean),
         activeKeys = new Set(items.map((item) => `${item.trackId}:${item.id}`)),
-        preloadItems = resolveAudioPreviewPreloadItems(body, playheadSec, masterVolume)
+        preloadItems = previewScene.audioPreload
           .map((item) => toPreviewItem(item))
           .filter((item) => item && !activeKeys.has(`${item.trackId}:${item.id}`)),
         allItems = [...items, ...preloadItems],
@@ -926,7 +810,7 @@ export default function LiteCutEditorShell({
       if (!duckingEnabled || !hasForeground) return allItems;
       return allItems.map((item) => (item.trackId === "bgm" && !item.preloadOnly ? { ...item, volume: item.volume * duckingVolume } : item));
     },
-    [assetPreviewVersions, bgm?.ducking_enabled, bgm?.ducking_volume, body, masterVolume, playheadSec],
+    [assetPreviewVersions, bgm?.ducking_enabled, bgm?.ducking_volume, previewScene.audio, previewScene.audioPreload],
   );
   const { mainAudioItem, audioItems: dedicatedAudioPreviewItems } = useMemo(
     () => partitionMainVideoAudioPreview(audioPreviewItems, {
@@ -1242,121 +1126,6 @@ export default function LiteCutEditorShell({
     [backfillClipSourceDuration],
   );
 
-  const publishExportPhase = useCallback((phase, payload = null) => {
-    setExportDialog({
-      phase,
-      result: phase === "error" ? null : payload,
-      error: phase === "error" ? (payload?.error || "导出失败") : "",
-    });
-    onExportPhaseChange?.(phase, payload);
-  }, [onExportPhaseChange]);
-
-  const handleExport = useCallback(async () => {
-    if (!body || exportableClipCount === 0) return;
-    const dir = outputDir.trim() || outputDirHint;
-    const fn = defaultLiteCutFilename({ output: { filename: outputFilename } }, projectName);
-    if (!dir) {
-      setExportError("请填写导出目录（绝对路径）");
-      return;
-    }
-    setExporting(true);
-    setExportError(null);
-    setExportJob(null);
-    publishExportPhase("running", { progress: 0, stage: "queued" });
-    try {
-      if (dirty) await saveProject();
-      const result = await startLiteCutExport({
-        projectId,
-        body: useLiteCutEditorStore.getState().body,
-        outputDir: dir,
-        filename: fn,
-      });
-      setExportJob(result);
-      setExportHistory((prev) => [result, ...prev.filter((item) => item.export_id !== result.export_id)].slice(0, 8));
-      patchOutput({ dir: outputDir.trim() || dir, filename: fn });
-      publishExportPhase("running", result);
-    } catch (e) {
-      const msg = formatMontageApiError(e, t, e?.message || "导出失败");
-      setExportError(msg);
-      publishExportPhase("error", { error: msg });
-      setExporting(false);
-    }
-  }, [
-    body,
-    exportableClipCount,
-    outputDir,
-    outputDirHint,
-    outputFilename,
-    projectName,
-    dirty,
-    saveProject,
-    projectId,
-    patchOutput,
-    loadExportHistory,
-    publishExportPhase,
-    t,
-  ]);
-
-  useEffect(() => {
-    if (!exporting || !exportJob?.export_id) return undefined;
-    let stopped = false;
-    let intervalId = null;
-    const poll = async () => {
-      try {
-        const next = await getLiteCutExportStatus(exportJob.export_id);
-        if (stopped) return;
-        setExportJob(next);
-        if (next.status === "done") {
-          setExporting(false);
-          setExportError(null);
-          publishExportPhase("done", next);
-          void loadExportHistory();
-          return;
-        }
-        if (next.status === "cancelled") {
-          setExporting(false);
-          setExportError(null);
-          publishExportPhase("cancelled", next);
-          void loadExportHistory();
-          return;
-        }
-        if (next.status === "error") {
-          const msg = messageFromApiCode(next.error, t) || next.error || "导出失败";
-          setExporting(false);
-          setExportError(msg);
-          publishExportPhase("error", { ...next, error: msg });
-          void loadExportHistory();
-          return;
-        }
-        publishExportPhase("running", next);
-      } catch (e) {
-        if (stopped) return;
-        const msg = formatMontageApiError(e, t, e?.message || "导出状态读取失败");
-        setExporting(false);
-        setExportError(msg);
-        publishExportPhase("error", { error: msg });
-      }
-    };
-    void poll();
-    intervalId = window.setInterval(() => void poll(), 1000);
-    return () => {
-      stopped = true;
-      if (intervalId) window.clearInterval(intervalId);
-    };
-  }, [exporting, exportJob?.export_id, loadExportHistory, publishExportPhase, t]);
-
-  const handleCancelExport = useCallback(async () => {
-    if (!exportJob?.export_id) return;
-    try {
-      const next = await cancelLiteCutExport(exportJob.export_id);
-      setExportJob(next);
-      publishExportPhase("running", next);
-    } catch (e) {
-      const msg = formatMontageApiError(e, t, e?.message || "取消导出失败");
-      setExportError(msg);
-    }
-  }, [exportJob?.export_id, publishExportPhase, t]);
-
   const handleMediaItemsLoaded = useCallback(
     (items) => {
       setMediaCache(items);
@@ -1384,43 +1153,6 @@ export default function LiteCutEditorShell({
       .find((clip) => clip?.source_type === "recorded_clip" && Number(clip.source_id) === id);
     if (matchingClip?.id) backfillClipSourceDuration(matchingClip.id, duration);
   }, [backfillClipSourceDuration]);
-
-  const handleAssetsLoaded = useCallback((assets) => {
-    const allAssets = assets || [];
-    setMediaAssets(allAssets);
-    setFontAssets(allAssets.filter((a) => a?.kind === "font"));
-    setAudioAssets(allAssets.filter((a) => a?.kind === "audio"));
-    setAssetPreviewVersions(Object.fromEntries(allAssets.map((asset) => [Number(asset.id), asset.preview_proxy_version || "source"])));
-    setAssetProxyBusy(allAssets.some((asset) => ["queued", "running"].includes(asset.preview_proxy_status)));
-    migrateAlphaMovOverlaysToVideoTracks(allAssets);
-
-    // Repair overlays created before image dimensions were persisted. Keep
-    // their visible width, but derive height from the real source aspect ratio
-    // so neither preview nor export stretches the image.
-    const byId = new Map(allAssets.map((asset) => [Number(asset.id), asset]));
-    for (const overlay of body?.overlays || []) {
-      if (overlay?.meta?.kind !== "image" || (overlay.meta.source_width && overlay.meta.source_height)) continue;
-      const asset = byId.get(Number(overlay.meta?.asset_id));
-      const sourceWidth = Number(asset?.width) || 0;
-      const sourceHeight = Number(asset?.height) || 0;
-      if (sourceWidth <= 0 || sourceHeight <= 0) continue;
-      const widthFraction = Math.max(0.01, Number(overlay.transform?.width) || 0.33);
-      const correctedHeight = widthFraction * (outputWidth / outputHeight) * (sourceHeight / sourceWidth);
-      updateOverlay(overlay.id, {
-        transform: { ...(overlay.transform || {}), width: widthFraction, height: correctedHeight },
-        meta: { ...(overlay.meta || {}), source_width: sourceWidth, source_height: sourceHeight },
-      });
-    }
-  }, [body?.overlays, migrateAlphaMovOverlaysToVideoTracks, outputHeight, outputWidth, updateOverlay]);
-
-  const handleRelinkMissingAsset = useCallback((warning, asset) => {
-    const current = useLiteCutEditorStore.getState().body;
-    const result = relinkMissingAssetReferences(current, warning, asset);
-    if (!result.changed) return false;
-    useLiteCutHistoryStore.getState().push(current);
-    useLiteCutEditorStore.setState({ body: result.body, dirty: true });
-    return true;
-  }, []);
 
   const handleSelectMedia = useCallback(
     (mediaItem) => {
@@ -1548,174 +1280,6 @@ export default function LiteCutEditorShell({
     },
     [selectedTextOverlay, updateOverlayText],
   );
-
-  const handleNewProject = useCallback(async (template = null) => {
-    if (dirty || saving) await saveProject();
-    if (template?.isCustomProject) {
-      const customBody = projectBodyFromTemplate("highlight-16x9");
-      customBody.output = {
-        ...(customBody.output || {}),
-        width: template.width,
-        height: template.height,
-        fps: template.fps,
-      };
-      const result = await createNewProject(template.name, customBody);
-      if (result?.ok) {
-        setPlayhead(0);
-        clearSelection();
-      }
-      return result;
-    }
-    const stamp = new Date();
-    const prefix = template?.label ? `LiteCut ${template.label}` : "LiteCut";
-    const name = `${prefix} ${String(stamp.getMonth() + 1).padStart(2, "0")}-${String(stamp.getDate()).padStart(2, "0")} ${String(stamp.getHours()).padStart(2, "0")}:${String(stamp.getMinutes()).padStart(2, "0")}`;
-    const result = await createNewProject(name, template?.id ? projectBodyFromTemplate(template.id) : null);
-    setPlayhead(0);
-    clearSelection();
-    return result;
-  }, [dirty, saving, saveProject, createNewProject, setPlayhead, clearSelection]);
-
-  const handleExportProject = useCallback(() => {
-    const currentBody = useLiteCutEditorStore.getState().body;
-    if (!currentBody) return;
-    const safeName = String(projectName || "litecut-project").trim().replace(/[\\/:*?\"<>|]+/g, "-") || "litecut-project";
-    const payload = {
-      format: "litecut-project",
-      schema_version: 2,
-      exported_at: new Date().toISOString(),
-      name: projectName || "LiteCut Project",
-      body: currentBody,
-    };
-    const url = URL.createObjectURL(new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" }));
-    const anchor = document.createElement("a");
-    anchor.href = url;
-    anchor.download = `${safeName}.litecut.json`;
-    anchor.click();
-    window.setTimeout(() => URL.revokeObjectURL(url), 0);
-  }, [projectName]);
-
-  const handleImportProject = useCallback(
-    async (file) => {
-      try {
-        if (dirty || saving) {
-          const saved = await saveProject();
-          if (!saved?.ok) return { ok: false };
-        }
-        const raw = JSON.parse(await file.text());
-        const importedBody = raw?.body && typeof raw.body === "object" ? raw.body : raw;
-        if (!importedBody || typeof importedBody !== "object" || !Array.isArray(importedBody.tracks)) return { ok: false };
-        const importedName = raw?.name || String(file.name || "Imported LiteCut Project").replace(/\.litecut\.json$|\.json$/i, "");
-        const result = await importProject({ name: importedName, body: importedBody });
-        if (result.ok) {
-          setPlayhead(0);
-          clearSelection();
-        }
-        return result;
-      } catch {
-        return { ok: false };
-      }
-    },
-    [dirty, saving, saveProject, importProject, setPlayhead, clearSelection],
-  );
-
-  const handleOpenProject = useCallback(
-    async (nextProjectId) => {
-      if (Number(nextProjectId) === Number(projectId)) return;
-      if (dirty || saving) await saveProject();
-      await openProject(nextProjectId);
-      setPlayhead(0);
-      clearSelection();
-    },
-    [projectId, dirty, saving, saveProject, openProject, setPlayhead, clearSelection],
-  );
-
-  const handleDuplicateProject = useCallback(
-    async (sourceProjectId) => {
-      if (Number(sourceProjectId) === Number(projectId) && (dirty || saving)) await saveProject();
-      await duplicateProject(sourceProjectId);
-      setPlayhead(0);
-      clearSelection();
-    },
-    [projectId, dirty, saving, saveProject, duplicateProject, setPlayhead, clearSelection],
-  );
-
-  const handleDeleteProject = useCallback(
-    async (targetProjectId, confirmed = false) => {
-      const id = Number(targetProjectId);
-      if (!Number.isFinite(id) || id <= 0) return;
-      if (!confirmed && typeof window !== "undefined" && !window.confirm(t("liteCut.project.deleteIdConfirm", { id }))) return;
-      if (id === Number(projectId)) {
-        setPlaying(false);
-        if (saving) await saveProject();
-      }
-      await deleteProject(id);
-      setPlayhead(0);
-      clearSelection();
-    },
-    [projectId, saving, setPlaying, saveProject, deleteProject, setPlayhead, clearSelection, t],
-  );
-
-  const handleDeleteProjects = useCallback(
-    async (targetProjectIds) => {
-      if ((targetProjectIds || []).map(Number).includes(Number(projectId))) {
-        setPlaying(false);
-        if (saving) await saveProject();
-      }
-      const result = await deleteProjects(targetProjectIds);
-      if (result?.ok) {
-        setPlayhead(0);
-        clearSelection();
-      }
-      return result;
-    },
-    [projectId, saving, setPlaying, saveProject, deleteProjects, setPlayhead, clearSelection],
-  );
-
-  const handleRestoreSnapshot = useCallback(async (snapshotId) => {
-    if (!projectId) return { ok: false };
-    if (dirty || saving) await saveProject();
-    const current = useLiteCutEditorStore.getState().body;
-    const { data } = await API.post(`/lite-cut/projects/${projectId}/snapshots/${snapshotId}/restore`);
-    if (current) useLiteCutHistoryStore.getState().push(current);
-    useLiteCutEditorStore.setState({
-      projectName: data.name || projectName,
-      body: data.body,
-      dirty: false,
-      projectUpdatedAt: data.updated_at || null,
-      recoveryCandidate: null,
-    });
-    setPlaying(false);
-    setPlayhead(0);
-    clearSelection();
-    return { ok: true };
-  }, [projectId, dirty, saving, saveProject, projectName, setPlaying, setPlayhead, clearSelection]);
-
-  const handleImportPortable = useCallback(async (file) => {
-    if (dirty || saving) {
-      const saved = await saveProject();
-      if (!saved?.ok) return { ok: false };
-    }
-    const form = new FormData();
-    form.append("file", file);
-    const { data } = await API.post("/lite-cut/projects/portable-import", form, { headers: { "Content-Type": "multipart/form-data" } });
-    await openProject(data.id);
-    setPlayhead(0);
-    clearSelection();
-    return { ok: true };
-  }, [dirty, saving, saveProject, openProject, setPlayhead, clearSelection]);
-
-  const handleStartPortableExport = useCallback(async () => {
-    if (!projectId) return { cancelled: true };
-    // Desktop builds use the native folder chooser so the final location is
-    // explicit. Browser builds retain a normal download after preparation.
-    let destination = "";
-    if (desktopBridge?.chooseDirectory) {
-      destination = await desktopBridge.chooseDirectory("");
-      if (!destination) return { cancelled: true };
-    }
-    const { data } = await API.post(`/lite-cut/projects/${projectId}/portable-package/start`, { destination });
-    return { data };
-  }, [projectId]);
 
   const handleApplyPresetBody = useCallback(
     (newBody) => {
@@ -1886,6 +1450,8 @@ export default function LiteCutEditorShell({
               transitionMainOpacity={transitionPreview.mainOpacity}
               transitionMainTransform={transitionPreview.mainTransform}
               transitionMainClipPath={transitionPreview.mainClipPath}
+              transitionOutgoingTransform={transitionPreview.outgoingTransform}
+              transitionOutgoingTransformOrigin={transitionPreview.outgoingTransformOrigin}
               transitionFlashOpacity={transitionPreview.flashOpacity}
               transitionBlackOpacity={transitionPreview.blackOpacity}
               transitionSpec={transitionPreviewSpec}
@@ -2155,7 +1721,7 @@ export default function LiteCutEditorShell({
         phase={exportDialog.phase}
         result={exportDialog.result}
         error={exportDialog.error}
-        onClose={() => setExportDialog({ phase: "idle", result: null, error: "" })}
+        onClose={dismissExportDialog}
         onCancel={() => void handleCancelExport()}
       />
     </div>

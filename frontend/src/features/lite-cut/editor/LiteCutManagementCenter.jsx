@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { Archive, Download, History, Loader2, RefreshCw, RotateCcw, Trash2, X, Zap } from "lucide-react";
-import API from "../../../api/api.js";
+import { liteCutClient } from "../api/liteCutClient.js";
 import { desktopBridge } from "../../../desktop/desktopBridge.js";
 
 const formatBytes = (value) => {
@@ -26,12 +26,12 @@ export default function LiteCutManagementCenter({ open, onClose, projectId, onRe
     setError("");
     try {
       const [cacheResult, snapshotsResult] = await Promise.all([
-        API.get("/lite-cut/proxy-cache"),
-        projectId ? API.get(`/lite-cut/projects/${projectId}/snapshots`) : Promise.resolve({ data: { items: [] } }),
+        liteCutClient.getProxyCache(),
+        projectId ? liteCutClient.listSnapshots(projectId) : Promise.resolve({ items: [] }),
       ]);
-      setCache(cacheResult.data || null);
-      setResolution(Number(cacheResult.data?.resolution) || 720);
-      setSnapshots(snapshotsResult.data?.items || []);
+      setCache(cacheResult || null);
+      setResolution(Number(cacheResult?.resolution) || 720);
+      setSnapshots(snapshotsResult?.items || []);
     } catch {
       setError("读取管理信息失败，请稍后重试。");
     }
@@ -43,7 +43,7 @@ export default function LiteCutManagementCenter({ open, onClose, projectId, onRe
     if (!portableJob?.job_id || !["queued", "running", "cancelling"].includes(portableJob.status)) return undefined;
     const timer = window.setInterval(async () => {
       try {
-        const { data } = await API.get(`/lite-cut/portable-package/jobs/${portableJob.job_id}`);
+        const data = await liteCutClient.getPortableJob(portableJob.job_id);
         setPortableJob(data);
         if (!["queued", "running", "cancelling"].includes(data.status)) setBusy("");
       } catch {
@@ -75,7 +75,7 @@ export default function LiteCutManagementCenter({ open, onClose, projectId, onRe
   const cancelPortableExport = async () => {
     if (!portableJob?.job_id || !["queued", "running"].includes(portableJob.status)) return;
     try {
-      const { data } = await API.delete(`/lite-cut/portable-package/jobs/${portableJob.job_id}`);
+      const data = await liteCutClient.cancelPortableJob(portableJob.job_id);
       setPortableJob(data);
     } catch (err) {
       setError(err?.response?.data?.detail || "取消打包失败，请稍后重试。");
@@ -98,9 +98,9 @@ export default function LiteCutManagementCenter({ open, onClose, projectId, onRe
           </div>
           <div className="mt-3 flex flex-wrap items-center gap-2">
             <label className="flex items-center gap-2 text-[11px] text-cs2-text-secondary">预览最长边<select value={resolution} onChange={(e) => setResolution(Number(e.target.value))} className="rounded border border-cs2-border bg-cs2-bg-input px-2 py-1 text-xs text-cs2-text-primary"><option value={540}>540p</option><option value={720}>720p</option><option value={1080}>1080p</option><option value={1440}>1440p</option></select></label>
-            <button type="button" disabled={busy} onClick={() => void run("settings", () => API.patch("/lite-cut/proxy-cache/settings", { resolution }))} className="rounded-md border border-cs2-border px-2.5 py-1.5 text-[11px] font-semibold text-cs2-text-secondary hover:bg-white/5 disabled:opacity-50">保存设置</button>
-            <button type="button" disabled={busy} onClick={() => void run("regen", () => API.post("/lite-cut/proxy-cache/regenerate", {}))} className="rounded-md border border-cs2-accent/40 bg-cs2-accent-soft px-2.5 py-1.5 text-[11px] font-semibold text-cs2-accent disabled:opacity-50">{busy === "regen" ? "正在加入队列…" : "重新生成全部代理"}</button>
-            <button type="button" disabled={busy || !(cache?.orphan_files > 0)} onClick={() => void run("cleanup", () => API.post("/lite-cut/proxy-cache/cleanup"))} className="rounded-md border border-cs2-border px-2.5 py-1.5 text-[11px] font-semibold text-cs2-text-secondary hover:bg-white/5 disabled:opacity-50"><Trash2 className="mr-1 inline h-3.5 w-3.5" />清理无用代理</button>
+            <button type="button" disabled={busy} onClick={() => void run("settings", () => liteCutClient.updateProxySettings(resolution))} className="rounded-md border border-cs2-border px-2.5 py-1.5 text-[11px] font-semibold text-cs2-text-secondary hover:bg-white/5 disabled:opacity-50">保存设置</button>
+            <button type="button" disabled={busy} onClick={() => void run("regen", () => liteCutClient.regenerateProxyCache())} className="rounded-md border border-cs2-accent/40 bg-cs2-accent-soft px-2.5 py-1.5 text-[11px] font-semibold text-cs2-accent disabled:opacity-50">{busy === "regen" ? "正在加入队列…" : "重新生成全部代理"}</button>
+            <button type="button" disabled={busy || !(cache?.orphan_files > 0)} onClick={() => void run("cleanup", () => liteCutClient.cleanupProxyCache())} className="rounded-md border border-cs2-border px-2.5 py-1.5 text-[11px] font-semibold text-cs2-text-secondary hover:bg-white/5 disabled:opacity-50"><Trash2 className="mr-1 inline h-3.5 w-3.5" />清理无用代理</button>
           </div>
         </section>
         <section className="mt-4 rounded-xl border border-cs2-border bg-cs2-surface-1/50 p-4">
