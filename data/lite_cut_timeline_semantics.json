@@ -1,0 +1,50 @@
+{
+  "fixture_schema_version": 1,
+  "precision": 0.000001,
+  "clip_time_cases": [
+    {
+      "name": "constant-speed-with-freeze-and-reverse-flags",
+      "clip": {
+        "id": "constant",
+        "trim_in": 2,
+        "trim_out": 10,
+        "speed": 2,
+        "freeze_frame_sec": 1,
+        "reverse": true,
+        "preserve_pitch": false,
+        "canvas_fit": "cover"
+      },
+      "expected_segments": [[2, 10, 2]],
+      "source_to_timeline": [[2, 0], [4, 1], [8, 3], [10, 4]],
+      "timeline_to_source": [[0, 2], [1, 4], [3, 8], [4, 10]],
+      "media_timeline_duration": 4,
+      "timeline_duration": 5,
+      "reverse": true,
+      "preserve_pitch": false,
+      "canvas_fit": "cover"
+    },
+    {
+      "name": "piecewise-speed-ramp",
+      "clip": {
+        "id": "ramp",
+        "trim_in": 0,
+        "trim_out": 6,
+        "speed": 1,
+        "speed_keyframes": [
+          { "source_sec": 0, "speed": 1 },
+          { "source_sec": 2, "speed": 2 },
+          { "source_sec": 6, "speed": 0.5 }
+        ],
+        "freeze_frame_sec": 0.5
+      },
+      "expected_segments": [[0, 2, 1], [2, 6, 2]],
+      "source_to_timeline": [[0, 0], [1, 1], [2, 2], [4, 3], [6, 4]],
+      "timeline_to_source": [[0, 0], [1, 1], [2, 2], [3, 4], [4, 6]],
+      "media_timeline_duration": 4,
+      "timeline_duration": 4.5,
+      "reverse": false,
+      "preserve_pitch": true,
+      "canvas_fit": "contain"
+    }
+  ]
+}

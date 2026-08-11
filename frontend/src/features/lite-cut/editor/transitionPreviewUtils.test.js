@@ -1,14 +1,14 @@
 /** @vitest-environment node */
 import { describe, expect, it } from "vitest";
-import { textTransitionPreviewVisual, transitionPreviewVisual } from "./transitionPreviewUtils.js";
+import { boundaryTransitionPreviewVisual, textTransitionPreviewVisual, transitionPreviewVisual } from "./transitionPreviewUtils.js";
 
 describe("transitionPreviewVisual", () => {
   it("reveals directional wipes over the frozen outgoing frame", () => {
     expect(transitionPreviewVisual("wipe_l", 0.25)).toMatchObject({
       mainOpacity: 1,
-      mainClipPath: "inset(0 75.00% 0 0)",
+      mainClipPath: "inset(0 0 0 75.00%)",
     });
-    expect(transitionPreviewVisual("wipe_r", 0.25).mainClipPath).toBe("inset(0 0 0 75.00%)");
+    expect(transitionPreviewVisual("wipe_r", 0.25).mainClipPath).toBe("inset(0 75.00% 0 0)");
   });
 
   it("moves slide transitions in from their named edge", () => {
@@ -24,6 +24,33 @@ describe("transitionPreviewVisual", () => {
     expect(transitionPreviewVisual("dip", 0.5)).toMatchObject({ mainOpacity: 1, blackOpacity: 1 });
     expect(transitionPreviewVisual("dip", 0.75)).toMatchObject({ mainOpacity: 1, blackOpacity: 0.5 });
     expect(transitionPreviewVisual("dip", 0)).toMatchObject({ mainOpacity: 0, blackOpacity: 0 });
+  });
+
+  it("matches FFmpeg zoomin's outgoing sample and second-half blend", () => {
+    expect(boundaryTransitionPreviewVisual("zoom", 0.25)).toMatchObject({
+      mainOpacity: 0,
+      outgoingTransform: "scale(2.0000)",
+    });
+    expect(boundaryTransitionPreviewVisual("zoom", 0.5)).toMatchObject({
+      mainOpacity: 0,
+      outgoingTransform: "scale(10000.0000)",
+      outgoingTransformOrigin: "calc(50% + 0.5px) calc(50% + 0.5px)",
+    });
+    expect(boundaryTransitionPreviewVisual("zoom", 0.75)).toMatchObject({
+      mainOpacity: 0.5,
+      outgoingTransform: "scale(10000.0000)",
+    });
+  });
+
+  it("moves both boundary layers for FFmpeg slide transitions", () => {
+    expect(boundaryTransitionPreviewVisual("slide_up", 0.25)).toMatchObject({
+      mainTransform: "translateY(75.00%)",
+      outgoingTransform: "translateY(-25.00%)",
+    });
+    expect(boundaryTransitionPreviewVisual("slide_right", 0.25)).toMatchObject({
+      mainTransform: "translateX(-75.00%)",
+      outgoingTransform: "translateX(25.00%)",
+    });
   });
 
   it("uses export-compatible text motion and fades", () => {

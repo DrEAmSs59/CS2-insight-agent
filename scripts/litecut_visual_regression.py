@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import base64
 import json
+import math
 import os
 import shutil
 import subprocess
@@ -34,6 +35,7 @@ from app.features.lite_cut.composer import (  # noqa: E402
     _map_transition_type,
 )
 from app.features.lite_cut.assets import ensure_alpha_mov_preview_proxy  # noqa: E402
+from app.features.lite_cut.render_pipeline import _compose_lite_cut_montage_once  # noqa: E402
 from app.video_composer import ffprobe_streams, probe_video_audio_summary, resolve_ffprobe_binary  # noqa: E402
 
 
@@ -63,7 +65,12 @@ def stream_has_alpha(path: Path, ffprobe: Path) -> bool:
     return False
 
 
-def resolve_ffmpeg() -> Path:
+def resolve_ffmpeg(explicit: Path | None = None) -> Path:
+    if explicit is not None:
+        candidate = explicit.expanduser().resolve()
+        if candidate.is_file():
+            return candidate
+        raise FileNotFoundError(f"Requested FFmpeg does not exist: {candidate}")
     configured = ""
     config_path = ROOT / "data" / "cs2-insight.config.json"
     if config_path.is_file():
@@ -93,6 +100,84 @@ def run(command: list[str], *, cwd: Path | None = None, timeout: int = 300) -> s
         detail = (result.stderr or result.stdout or "").strip()[-1800:]
         raise RuntimeError(f"Command failed ({result.returncode}): {' '.join(command[:5])}\n{detail}")
     return result
+
+
+def generate_acceptance_video(ffmpeg: Path, output: Path, *, variant: str) -> None:
+    """Generate a deterministic real media input when the private baseline is absent."""
+
+    output.parent.mkdir(parents=True, exist_ok=True)
+    video_source = (
+        "testsrc2=size=640x360:rate=30"
+        if variant == "primary"
+        else "smptebars=size=640x360:rate=30"
+    )
+    tone_hz = "440" if variant == "primary" else "660"
+    run(
+        [
+            str(ffmpeg),
+            "-y",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-f",
+            "lavfi",
+            "-i",
+            video_source,
+            "-f",
+            "lavfi",
+            "-i",
+            f"sine=frequency={tone_hz}:sample_rate=48000",
+            "-t",
+            "4",
+            "-c:v",
+            "libx264",
+            "-preset",
+            "ultrafast",
+            "-crf",
+            "18",
+            "-pix_fmt",
+            "yuv420p",
+            "-c:a",
+            "aac",
+            "-b:a",
+            "128k",
+            "-movflags",
+            "+faststart",
+            str(output),
+        ]
+    )
+
+
+def generate_acceptance_alpha_mov(ffmpeg: Path, output: Path) -> None:
+    """Generate a deterministic transparent MOV for the browser proxy gate."""
+
+    output.parent.mkdir(parents=True, exist_ok=True)
+    run(
+        [
+            str(ffmpeg),
+            "-y",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-f",
+            "lavfi",
+            "-i",
+            "color=color=black@0.0:size=320x180:rate=30:duration=2,format=rgba",
+            "-f",
+            "lavfi",
+            "-i",
+            "color=color=red@0.85:size=80x80:rate=30:duration=2,format=rgba",
+            "-filter_complex",
+            "[0:v][1:v]overlay=x='20+40*t':y=50:format=auto",
+            "-t",
+            "2",
+            "-c:v",
+            "qtrle",
+            "-pix_fmt",
+            "argb",
+            str(output),
+        ]
+    )
 
 
 def wait_for_url(url: str, timeout: float = 30.0) -> None:
@@ -215,21 +300,41 @@ def change_energy(base_path: Path, target_path: Path) -> float:
 
 
 class VisualRegressionRunner:
-    def __init__(self, *, scope: str, report_dir: Path) -> None:
+    def __init__(self, *, scope: str, report_dir: Path, ffmpeg_path: Path | None = None) -> None:
         self.scope = scope
         self.report_dir = report_dir.resolve()
         self.matrix = load_json(MATRIX_PATH)
         self.contract = load_json(EFFECT_CONTRACT_PATH)
-        self.ffmpeg = resolve_ffmpeg()
+        self.ffmpeg = resolve_ffmpeg(ffmpeg_path)
         self.ffprobe = resolve_ffprobe_binary(self.ffmpeg)
         self.edge = resolve_edge()
-        self.primary = first_existing(ROOT, self.matrix["source_candidates"]["primary"])
-        self.secondary = first_existing(ROOT, self.matrix["source_candidates"]["secondary"])
         self.vite: subprocess.Popen[str] | None = None
         self.results: list[dict[str, Any]] = []
         self.temp_root = Path(tempfile.mkdtemp(prefix="litecut_visual_"))
+        self.generated_source_groups: set[str] = set()
+        self.primary = self.resolve_video_source("primary")
+        self.secondary = self.resolve_video_source("secondary")
+        self.transparent_mov = self.resolve_transparent_mov()
         self.edge_profile = self.temp_root / "edge-profile"
         self.quality = ["-c:v", "libx264", "-preset", "ultrafast", "-crf", "18"]
+
+    def resolve_video_source(self, group: str) -> Path:
+        try:
+            return first_existing(ROOT, self.matrix["source_candidates"][group])
+        except FileNotFoundError:
+            generated = self.temp_root / f"generated-{group}.mp4"
+            generate_acceptance_video(self.ffmpeg, generated, variant=group)
+            self.generated_source_groups.add(group)
+            return generated
+
+    def resolve_transparent_mov(self) -> Path:
+        try:
+            return first_existing(ROOT, self.matrix["source_candidates"]["transparent_mov"])
+        except FileNotFoundError:
+            generated = self.temp_root / "generated-transparent.mov"
+            generate_acceptance_alpha_mov(self.ffmpeg, generated)
+            self.generated_source_groups.add("transparent_mov")
+            return generated
 
     def close(self) -> None:
         if self.vite is not None and self.vite.poll() is None:
@@ -266,20 +371,25 @@ class VisualRegressionRunner:
         width = int(case["width"])
         height = int(case["height"])
         url = f"http://127.0.0.1:{VITE_PORT}/test/litecut-visual-regression.html?case={case.get('caseId', 'case')}"
-        if case.get("kind") == "alpha-video":
-            self.cdp_screenshot(url=url, output=output, width=width, height=height, ready_expression="document.querySelector('[data-alpha-ready=\"true\"]') !== null")
-            return
-        run([
-            str(self.edge), "--headless=new", "--hide-scrollbars", "--no-first-run", "--autoplay-policy=no-user-gesture-required",
-            "--disable-features=msEdgeFirstRunExperience", f"--user-data-dir={self.edge_profile}",
-            "--force-device-scale-factor=1", f"--virtual-time-budget={4500 if case.get('kind') == 'alpha-video' else 1800}",
-            f"--window-size={width},{height}", f"--screenshot={output}", url,
-        ], timeout=40)
-        if not output.is_file():
-            raise RuntimeError(f"Browser did not create screenshot: {output}")
-        image = Image.open(output)
-        if image.size != (width, height):
-            image.crop((0, 0, min(width, image.width), min(height, image.height))).resize((width, height)).save(output)
+        ready_expression = (
+            "document.querySelector('[data-alpha-ready=\"true\"]') !== null"
+            if case.get("kind") == "alpha-video"
+            else (
+                "document.documentElement.dataset.visualReady === 'true' && "
+                + ("document.querySelector('[data-font-ready=\"true\"]') !== null && " if case.get("kind") == "text" else "")
+                + "Array.from(document.images).every((image) => image.complete && image.naturalWidth > 0)"
+            )
+        )
+        # Edge/Chrome clamp very narrow --window-size values. CDP device metrics
+        # keep 9:16 and square acceptance canvases pixel-exact instead of
+        # capturing a wider page and cropping its top-left corner.
+        self.cdp_screenshot(
+            url=url,
+            output=output,
+            width=width,
+            height=height,
+            ready_expression=ready_expression,
+        )
 
     def cdp_screenshot(self, *, url: str, output: Path, width: int, height: int, ready_expression: str) -> None:
         profile = self.temp_root / f"edge-cdp-{time.time_ns()}"
@@ -297,7 +407,14 @@ class VisualRegressionRunner:
                 time.sleep(0.05)
             if not active_port.is_file():
                 raise TimeoutError("Edge did not publish its DevTools port")
-            port = int(active_port.read_text(encoding="utf-8").splitlines()[0])
+            port: int | None = None
+            while time.time() < deadline and port is None:
+                try:
+                    port = int(active_port.read_text(encoding="utf-8").splitlines()[0])
+                except (OSError, IndexError, ValueError):
+                    time.sleep(0.05)
+            if port is None:
+                raise TimeoutError("Edge DevTools port did not become readable")
             page_ws = ""
             while time.time() < deadline and not page_ws:
                 try:
@@ -373,6 +490,11 @@ class VisualRegressionRunner:
 
     def validate_media_inputs(self) -> None:
         groups = self.matrix["source_candidates"]
+        resolved_fallbacks = {
+            "primary": self.primary,
+            "secondary": self.secondary,
+            "transparent_mov": self.transparent_mov,
+        }
         for group, candidates in groups.items():
             found = []
             for candidate in candidates:
@@ -386,12 +508,18 @@ class VisualRegressionRunner:
                     found.append({"path": str(path), "width": info.get("width"), "height": info.get("height"), "duration": info.get("duration"), "pixel_format": info.get("pixel_format"), "has_alpha": info.get("has_alpha")})
                 except Exception as exc:
                     found.append({"path": str(path), "error": str(exc)})
+            if not found and group in resolved_fallbacks:
+                path = resolved_fallbacks[group]
+                try:
+                    info = probe_video_audio_summary(path, self.ffprobe)
+                    found.append({"path": str(path), "width": info.get("width"), "height": info.get("height"), "duration": info.get("duration"), "pixel_format": info.get("pixel_format"), "has_alpha": info.get("has_alpha"), "generated": True})
+                except Exception as exc:
+                    found.append({"path": str(path), "error": str(exc), "generated": True})
             self.add_result(category="media", case_id=group, passed=bool(found) and not any("error" in item for item in found), metrics={"assets": found})
 
     def run_alpha_mov_case(self) -> None:
-        source = first_existing(ROOT, self.matrix["source_candidates"]["transparent_mov"])
         copied_source = self.temp_root / "alpha-source.mov"
-        shutil.copy2(source, copied_source)
+        shutil.copy2(self.transparent_mov, copied_source)
         proxy = ensure_alpha_mov_preview_proxy(copied_source, ffmpeg_bin=self.ffmpeg, duration_sec=2.0)
         if proxy is None or not proxy.is_file():
             self.add_result(category="alpha-mov", case_id="transparent-mov-preview", passed=False, detail="alpha preview proxy was not generated")
@@ -436,6 +564,92 @@ class VisualRegressionRunner:
         proxy_has_alpha = stream_has_alpha(proxy, self.ffprobe)
         passed = bool(source_info.get("has_alpha")) and proxy_has_alpha and preview_energy > 0.003 and export_energy > 0.003 and metrics["mae"] <= 0.20
         self.add_result(category="alpha-mov", case_id="transparent-mov-preview", passed=passed, metrics={**metrics, "preview_energy": round(preview_energy, 6), "export_energy": round(export_energy, 6), "source_pixel_format": source_info.get("pixel_format"), "proxy_pixel_format": proxy_info.get("pixel_format"), "proxy_has_alpha": proxy_has_alpha}, detail="real MOV browser proxy vs FFmpeg alpha composite")
+
+    def run_framemeld_export_case(self) -> None:
+        outputs: dict[bool, Path] = {
+            False: self.temp_root / "framemeld-disabled.mp4",
+            True: self.temp_root / "framemeld-enabled.mp4",
+        }
+        infos: dict[bool, dict[str, Any]] = {}
+        frames: dict[bool, Path] = {}
+        for enabled, output in outputs.items():
+            project_body = {
+                "schema_version": 2,
+                "output": {
+                    "width": 320,
+                    "height": 180,
+                    "fps": 30,
+                    "encoder": "libx264",
+                    "encoder_tier": "compatibility",
+                    "framemeld_enabled": enabled,
+                    "canvas_fit": "contain",
+                    "background_color": "#000000",
+                    "blur_amount": 24,
+                    "range_mode": "full",
+                    "range_start_sec": 0,
+                    "range_end_sec": None,
+                },
+                "tracks": [
+                    {
+                        "id": "v1",
+                        "type": "video",
+                        "label": "V1",
+                        "clips": [
+                            {
+                                "id": "acceptance-clip",
+                                "source_type": "file",
+                                "file_path": str(self.primary),
+                                "timeline_start": 0,
+                                "trim_in": 0,
+                                "trim_out": 2,
+                            }
+                        ],
+                    },
+                    {"id": "a1", "type": "audio", "label": "A1", "clips": []},
+                ],
+                "overlays": [],
+                "overlay_tracks": [],
+                "markers": [],
+                "audio": {"bgm": None, "master_volume": 1},
+            }
+            _compose_lite_cut_montage_once(
+                ffmpeg_bin=self.ffmpeg,
+                project_body=project_body,
+                clip_path_by_id={},
+                output_path=output,
+                montage_encoder="libx264",
+            )
+            infos[enabled] = probe_video_audio_summary(output, self.ffprobe)
+            frame = self.report_dir / "framemeld" / ("enabled.png" if enabled else "disabled.png")
+            extract_frame(self.ffmpeg, output, 1.0, frame)
+            frames[enabled] = frame
+
+        plain = infos[False]
+        blended = infos[True]
+        metrics = image_metrics(frames[False], frames[True])
+        plain_duration = float(plain.get("duration") or 0)
+        blended_duration = float(blended.get("duration") or 0)
+        plain_fps = float(plain.get("fps") or 0)
+        blended_fps = float(blended.get("fps") or 0)
+        passed = (
+            plain_fps >= 29
+            and blended_fps >= 59
+            and abs(plain_duration - blended_duration) <= 0.15
+            and bool(plain.get("has_audio")) == bool(blended.get("has_audio"))
+            and metrics["mae"] <= 0.18
+        )
+        self.add_result(
+            category="framemeld",
+            case_id="real-disabled-vs-enabled",
+            passed=passed,
+            metrics={
+                **metrics,
+                "plain": plain,
+                "framemeld": blended,
+                "duration_delta": round(abs(plain_duration - blended_duration), 6),
+            },
+            detail="real 30 FPS export vs one final FrameMeld 60 FPS pass",
+        )
 
     def prepare_raw_source(self, *, second: float = 1.5, name: str = "source_a.png", source: Path | None = None) -> Path:
         destination = PUBLIC_TMP / name
@@ -524,10 +738,11 @@ class VisualRegressionRunner:
                     preview_frame = case_dir / "preview.png"
                     extract_frame(self.ffmpeg, transition_file, previous_duration + progress, export_frame)
                     extract_frame(self.ffmpeg, incoming, progress, PUBLIC_TMP / "transition_incoming.png")
+                    frame_progress = max(0.0, min(1.0, math.ceil((previous_duration + progress) * 30 - 1e-6) / 30 - previous_duration))
                     self.browser_screenshot({
                         "kind": "transition", "caseId": case_id,
                         "width": canvas["width"], "height": canvas["height"],
-                        "transition": transition, "progress": progress,
+                        "transition": transition, "progress": frame_progress,
                     }, preview_frame)
                     metrics = image_metrics(preview_frame, export_frame)
                     threshold = 0.32 if transition in {"blur", "glitch", "spin"} else 0.26
@@ -725,6 +940,7 @@ class VisualRegressionRunner:
             "edge": str(self.edge),
             "primary_source": str(self.primary),
             "secondary_source": str(self.secondary),
+            "generated_source_groups": sorted(self.generated_source_groups),
             "summary": summary,
             "results": self.results,
         }
@@ -749,6 +965,7 @@ class VisualRegressionRunner:
         self.start_vite()
         self.validate_media_inputs()
         self.run_alpha_mov_case()
+        self.run_framemeld_export_case()
         self.run_filter_transform_matrix()
         self.run_transition_matrix()
         self.run_font_matrix()
@@ -761,8 +978,9 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Render and compare LiteCut browser preview frames with FFmpeg export frames.")
     parser.add_argument("--scope", choices=("smoke", "full"), default="full")
     parser.add_argument("--report-dir", type=Path, default=DEFAULT_REPORT_DIR)
+    parser.add_argument("--ffmpeg", type=Path, default=None, help="Explicit FFmpeg/FrameMeld runtime to validate.")
     args = parser.parse_args()
-    runner = VisualRegressionRunner(scope=args.scope, report_dir=args.report_dir)
+    runner = VisualRegressionRunner(scope=args.scope, report_dir=args.report_dir, ffmpeg_path=args.ffmpeg)
     try:
         report = runner.run_all()
         failed = sum(1 for item in runner.results if not item["passed"])

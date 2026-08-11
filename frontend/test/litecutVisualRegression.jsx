@@ -1,9 +1,9 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
 import "../src/index.css";
-import { TEXT_STYLE_CARDS } from "../src/components/liteCut/editor/editorPresets.js";
-import { normalizePreviewLayerTransform } from "../src/components/liteCut/editor/previewFrameUtils.js";
-import { transitionPreviewVisual, textTransitionPreviewVisual } from "../src/components/liteCut/editor/transitionPreviewUtils.js";
+import { TEXT_STYLE_CARDS } from "../src/features/lite-cut/editor/editorPresets.js";
+import { normalizePreviewLayerTransform } from "../src/features/lite-cut/editor/previewFrameUtils.js";
+import { boundaryTransitionPreviewVisual, transitionPreviewVisual, textTransitionPreviewVisual } from "../src/features/lite-cut/editor/transitionPreviewUtils.js";
 
 function assetUrl(name) {
   return `/__litecut_visual_tmp/${name}`;
@@ -34,10 +34,10 @@ function FilterTransformCase({ data }) {
 }
 
 function TransitionCase({ data }) {
-  const visual = transitionPreviewVisual(data.transition, data.progress);
+  const visual = boundaryTransitionPreviewVisual(data.transition, data.progress);
   return (
     <Canvas width={data.width} height={data.height}>
-      <FullFrame src={assetUrl("transition_outgoing.png")} />
+      <FullFrame src={assetUrl("transition_outgoing.png")} style={{ transform: visual.outgoingTransform || undefined, transformOrigin: visual.outgoingTransformOrigin || undefined }} />
       <FullFrame src={assetUrl("transition_incoming.png")} style={{ opacity: visual.mainOpacity, clipPath: visual.mainClipPath || undefined, transform: visual.mainTransform || undefined, filter: visual.mainFilter || undefined }} />
       {visual.flashOpacity > 0 ? <div style={{ position: "absolute", inset: 0, background: "white", opacity: visual.flashOpacity }} /> : null}
       {visual.blackOpacity > 0 ? <div style={{ position: "absolute", inset: 0, background: "black", opacity: visual.blackOpacity }} /> : null}
@@ -98,6 +98,7 @@ function TextCase({ data }) {
   }, [data.fontFamily, data.fontSize, data.text]);
   if (!fontReady) return <Canvas width={data.width} height={data.height} />;
   return (
+    <div data-font-ready="true" style={{ display: "contents" }}>
     <Canvas width={data.width} height={data.height}>
       <FullFrame src={assetUrl("source_a.png")} />
       <div style={{ position: "absolute", left: `${((data.x + textVisual.offsetX) * 100).toFixed(2)}%`, top: `${((data.y + textVisual.offsetY) * 100).toFixed(2)}%`, width: `${(data.boxWidth * 100).toFixed(2)}%`, height: `${(data.boxHeight * 100).toFixed(2)}%`, opacity: textVisual.opacity, transform: `translate(-50%, -50%) scale(${data.scale})` }}>
@@ -106,6 +107,7 @@ function TextCase({ data }) {
         </div>
       </div>
     </Canvas>
+    </div>
   );
 }
 

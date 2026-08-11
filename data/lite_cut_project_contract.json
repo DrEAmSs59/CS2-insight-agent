@@ -1,0 +1,82 @@
+{
+  "contract_schema_version": 1,
+  "project_schema_version": 2,
+  "output": {
+    "defaults": {
+      "dir": "",
+      "filename": "lite_cut_export.mp4",
+      "width": 1920,
+      "height": 1080,
+      "fps": 60,
+      "encoder": "auto",
+      "encoder_tier": "quality",
+      "framemeld_enabled": false,
+      "range_mode": "full",
+      "range_start_sec": 0,
+      "range_end_sec": null
+    },
+    "encoders": ["auto", "h264_nvenc", "h264_qsv", "h264_amf", "libx264"],
+    "encoder_tiers": ["quality", "fast"],
+    "range_modes": ["full", "custom"]
+  },
+  "range_owners": {
+    "frontend_editor_repair": {
+      "width": { "integer_min": 1, "fallback": 1920 },
+      "height": { "integer_min": 1, "fallback": 1080 },
+      "fps": { "integer_min": 1, "integer_max": 1000, "fallback": 60 },
+      "master_volume": { "min": 0, "max": 2, "fallback": 1 }
+    },
+    "backend_schema_validation": {
+      "width": { "min": 16, "max": 7680 },
+      "height": { "min": 16, "max": 4320 },
+      "fps": { "min": 1, "max": 1000 },
+      "master_volume": { "min": 0, "max": 5 },
+      "blur_amount": { "min": 0, "max": 100 },
+      "crop_axis": { "min": 0, "max": 1 },
+      "text_font_size": { "owner": "backend_schema", "current_constraint": "integer_only" }
+    },
+    "backend_export_projection": {
+      "width": { "min": 320, "max": 7680 },
+      "height": { "min": 180, "max": 4320 },
+      "fps": { "min": 1, "max": 1000 }
+    }
+  },
+  "diagnostic_cases": [
+    {
+      "name": "reports-open-reference-problems-without-rejecting-the-project",
+      "body": {
+        "schema_version": 2,
+        "tracks": [
+          {
+            "id": "v1",
+            "type": "video",
+            "label": "V1",
+            "clips": [
+              { "id": "clip-a", "source_type": "recorded_clip", "source_id": 42 },
+              { "id": "clip-a", "source_type": "file", "file_path": "" }
+            ]
+          },
+          { "id": "v1", "type": "audio", "label": "A1", "clips": [] }
+        ],
+        "overlays": [
+          { "id": "overlay-a", "type": "webm", "asset_path": "" },
+          { "id": "overlay-a", "type": "text", "text": { "content": "ok" } }
+        ],
+        "markers": [
+          { "id": "marker-a", "time_sec": 1 },
+          { "id": "marker-a", "time_sec": 2 }
+        ]
+      },
+      "available_asset_ids": [7],
+      "expected_codes": [
+        "duplicate_clip_id",
+        "duplicate_marker_id",
+        "duplicate_overlay_id",
+        "duplicate_track_id",
+        "missing_file_path",
+        "missing_overlay_asset_path",
+        "unresolved_source_id"
+      ]
+    }
+  ]
+}

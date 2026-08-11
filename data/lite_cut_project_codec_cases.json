@@ -1,0 +1,141 @@
+{
+  "schema_version": 1,
+  "cases": [
+    {
+      "name": "preserve-supported-schema-v2-data",
+      "changed": false,
+      "input": {
+        "schema_version": 2,
+        "output": {
+          "width": 2560,
+          "height": 1440,
+          "fps": 120,
+          "encoder": "h264_amf",
+          "encoder_tier": "fast",
+          "framemeld_enabled": true,
+          "range_mode": "custom",
+          "range_start_sec": 1.25,
+          "range_end_sec": 8.5
+        },
+        "tracks": [
+          {
+            "id": "video-main",
+            "type": "video",
+            "label": "V1",
+            "solo": true,
+            "clips": [
+              {
+                "id": "clip-1",
+                "timeline_start": 1.25,
+                "trim_in": 2,
+                "trim_out": 9.25,
+                "speed": 0.75,
+                "reverse": true,
+                "freeze_frame_sec": 0.5,
+                "meta": { "fixture_tag": "codec-preservation" }
+              }
+            ]
+          },
+          {
+            "id": "audio-main",
+            "type": "audio",
+            "label": "A1",
+            "solo": false,
+            "clips": []
+          }
+        ],
+        "overlays": [
+          {
+            "id": "title-1",
+            "type": "text",
+            "timeline_start": 2,
+            "duration": 3,
+            "text": { "content": "ACE", "font_family": "Inter", "font_file": null }
+          }
+        ],
+        "overlay_tracks": [
+          { "id": "overlay-track-2", "order": 2, "meta": { "open": true } }
+        ],
+        "markers": [
+          { "id": "marker-1", "time_sec": 4.5, "label": "clutch", "color": "#22d3ee" }
+        ],
+        "audio": {
+          "master_volume": 1.25,
+          "bgm": { "path": "C:/music/theme.mp3", "volume": 0.4, "ducking_enabled": true }
+        }
+      }
+    },
+    {
+      "name": "repair-legacy-editor-data",
+      "changed": true,
+      "input": {
+        "schema_version": 2,
+        "output": {
+          "width": 0,
+          "height": "invalid",
+          "fps": 1001,
+          "encoder": "h264_av1",
+          "framemeld_enabled": "yes",
+          "frame_blend_enabled": true,
+          "frame_blend_frames": 7,
+          "high_frame_downsample_enabled": true,
+          "delivery_fps": 60,
+          "range_mode": "selection",
+          "range_start_sec": -3
+        },
+        "tracks": [
+          { "id": "video-renamed", "type": "video", "label": "V1", "clips": [] }
+        ],
+        "overlays": [
+          {
+            "id": "legacy-title",
+            "type": "text",
+            "text": { "content": "Legacy", "font_family": "Rajdhani Bold", "font_file": "Rajdhani.ttf" }
+          }
+        ],
+        "markers": [
+          { "id": "marker-2", "time_sec": 2, "label": "two", "color": "invalid" },
+          { "id": "marker-1", "time_sec": -4, "color": "#ABCDEF" }
+        ],
+        "audio": { "master_volume": 9 }
+      },
+      "expected": {
+        "schema_version": 2,
+        "output": {
+          "width": 1920,
+          "height": 1080,
+          "fps": 60,
+          "encoder": "auto",
+          "framemeld_enabled": false,
+          "range_mode": "full",
+          "range_start_sec": 0
+        },
+        "tracks": [
+          { "id": "video-renamed", "type": "video", "label": "V1", "clips": [], "solo": false },
+          {
+            "id": "a1",
+            "type": "audio",
+            "label": "A1",
+            "locked": false,
+            "hidden": false,
+            "muted": false,
+            "solo": false,
+            "clips": []
+          }
+        ],
+        "overlays": [
+          {
+            "id": "legacy-title",
+            "type": "text",
+            "text": { "content": "Legacy", "font_family": "微软雅黑", "font_file": null }
+          }
+        ],
+        "markers": [
+          { "id": "marker-1", "time_sec": 0, "label": "", "color": "#ABCDEF" },
+          { "id": "marker-2", "time_sec": 2, "label": "two", "color": "#f59e0b" }
+        ],
+        "audio": { "master_volume": 2 }
+      }
+    }
+  ]
+}

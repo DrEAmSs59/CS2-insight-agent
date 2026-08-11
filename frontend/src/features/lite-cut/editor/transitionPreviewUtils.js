@@ -6,6 +6,11 @@ function percent(value) {
   return `${(clampUnit(value) * 100).toFixed(2)}%`;
 }
 
+function smoothStep(edge0, edge1, value) {
+  const t = clampUnit((Number(value) - edge0) / (edge1 - edge0));
+  return t * t * (3 - 2 * t);
+}
+
 /**
  * Returns the incoming-layer treatment for a cut-boundary transition preview.
  * The outgoing frame is rendered beneath this layer by the editor shell.
@@ -25,9 +30,10 @@ export function transitionPreviewVisual(type, progress) {
   };
 
   if (transitionType === "wipe_l") {
-    visual.mainClipPath = `inset(0 ${percent(remaining)} 0 0)`;
-  } else if (transitionType === "wipe_r") {
+    // FFmpeg xfade's wipeleft reveals the incoming frame from right to left.
     visual.mainClipPath = `inset(0 0 0 ${percent(remaining)})`;
+  } else if (transitionType === "wipe_r") {
+    visual.mainClipPath = `inset(0 ${percent(remaining)} 0 0)`;
   } else if (transitionType === "slide_left") {
     visual.mainTransform = `translateX(${percent(remaining)})`;
   } else if (transitionType === "slide_right") {
@@ -57,6 +63,46 @@ export function transitionPreviewVisual(type, progress) {
     visual.mainOpacity = p < 0.5 ? 0 : 1;
     visual.blackOpacity = midpoint;
   }
+  return visual;
+}
+
+/**
+ * Returns the two-layer treatment used by FFmpeg's boundary xfade filters.
+ * Overlay transitions intentionally keep using transitionPreviewVisual:
+ * their exporter animates one overlay rather than mixing two canvas frames.
+ */
+export function boundaryTransitionPreviewVisual(type, progress) {
+  const transitionType = String(type || "none").toLowerCase();
+  const p = clampUnit(progress);
+  const visual = {
+    ...transitionPreviewVisual(transitionType, p),
+    outgoingTransform: "",
+    outgoingTransformOrigin: "",
+  };
+  if (transitionType === "slide_left") {
+    visual.outgoingTransform = `translateX(-${percent(p)})`;
+  } else if (transitionType === "slide_right") {
+    visual.outgoingTransform = `translateX(${percent(p)})`;
+  } else if (transitionType === "slide_up") {
+    visual.outgoingTransform = `translateY(-${percent(p)})`;
+  } else if (transitionType === "slide_down") {
+    visual.outgoingTransform = `translateY(${percent(p)})`;
+  }
+  if (transitionType !== "zoom") return visual;
+
+  // FFmpeg xfade=zoomin passes an inverse progress value into the filter.
+  // During the first half it stretches a shrinking center sample of the
+  // outgoing frame; during the second half it blends that sample to incoming.
+  const ffmpegProgress = 1 - p;
+  const sampleScale = smoothStep(0.5, 1, ffmpegProgress);
+  const outgoingScale = 1 / Math.max(sampleScale, 0.0001);
+  const outgoingMix = smoothStep(0, 0.5, ffmpegProgress);
+  visual.mainOpacity = 1 - outgoingMix;
+  visual.mainTransform = "";
+  visual.outgoingTransform = `scale(${outgoingScale.toFixed(4)})`;
+  // FFmpeg samples ceil(0.5 * (dimension - 1)), which is the pixel just
+  // below/right of the geometric midpoint for even-sized canvases.
+  visual.outgoingTransformOrigin = "calc(50% + 0.5px) calc(50% + 0.5px)";
   return visual;
 }
 

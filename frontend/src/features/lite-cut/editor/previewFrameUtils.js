@@ -1,4 +1,4 @@
-import { transitionPreviewVisual } from "./transitionPreviewUtils.js";
+import { boundaryTransitionPreviewVisual } from "./transitionPreviewUtils.js";
 import { normalizeVideoLayerTransform } from "./effectContract.js";
 
 export function normalizePreviewLayerTransform(transform = {}, defaults = {}) {
@@ -20,13 +20,13 @@ export function previewFrameTimes(anchor, mediaTime) {
 export function transitionVisualAtLocalTime(spec, localTime) {
   if (!spec?.type) return null;
   const duration = Math.max(0, Number(spec.duration) || 0);
-  if (duration < 0.001) return transitionPreviewVisual("none", 1);
+  if (duration < 0.001) return boundaryTransitionPreviewVisual("none", 1);
   const local = Math.max(0, Number(localTime) || 0);
   const start = Math.max(0, Number(spec.startLocalTime) || 0);
   const progress = spec.phase === "out"
     ? 1 - ((local - start) / duration)
     : (local - start) / duration;
-  return transitionPreviewVisual(spec.type, progress);
+  return boundaryTransitionPreviewVisual(spec.type, progress);
 }
 
 export function promotedUnderlayForMain(previousUnderlays, previewClipId, streamUrl) {
