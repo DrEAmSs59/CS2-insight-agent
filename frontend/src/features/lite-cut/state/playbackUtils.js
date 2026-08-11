@@ -1,19 +1,21 @@
 import {
   clipLabel,
-  clipFreezeFrameSec,
-  clipMediaTimelineDuration,
-  clipReversePlayback,
-  clipSpeedAtTimeline,
-  clipSourceTimeForTimeline,
-  clipSourceDuration,
-  clipTrimmedSourceDuration,
-  clipTimelineEnd,
   audioTracks,
   getTrack,
   sortClips,
   trackMainVideoClips,
   videoTracks,
 } from "./timelineUtils.js";
+import {
+  clipFreezeFrameSec,
+  clipMediaTimelineDuration,
+  clipReversePlayback,
+  clipSpeedAtTimeline,
+  clipSourceDuration,
+  clipSourceTimeForTimeline,
+  clipTimelineEnd,
+  clipTrimmedSourceDuration,
+} from "../domain/timelineMath.js";
 import { clipVolumeAtLocal } from "./audioKeyframeUtils.js";
 
 function hitClipAtTime(clip, timelineSec) {

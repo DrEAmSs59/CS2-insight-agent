@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from ...video_composer import MontageComposerError, _is_hard_cut, _parse_transition_for_edge
+from .timeline_selectors import has_solo_audio_tracks, project_tracks, track_by_id, track_clips
 
 _TRANSITION_MAP = {
     "cut": "cut",
@@ -322,8 +323,7 @@ def _track_main_video_clips(track: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def _has_solo_audio_tracks(body: dict[str, Any]) -> bool:
-    tracks = body.get("tracks") if isinstance(body.get("tracks"), list) else []
-    return any(isinstance(track, dict) and track.get("type") == "audio" and track.get("solo") for track in tracks)
+    return has_solo_audio_tracks(body)
 
 
 def _track_volume(track: dict[str, Any]) -> float:
@@ -590,11 +590,10 @@ def _is_recorded_timeline_clip(clip: dict[str, Any]) -> bool:
 
 
 def _v1_clips_sorted(body: dict[str, Any]) -> list[dict[str, Any]]:
-    tracks = body.get("tracks") if isinstance(body.get("tracks"), list) else []
-    v1 = next((t for t in tracks if isinstance(t, dict) and t.get("id") == "v1"), None)
+    v1 = track_by_id(body, "v1")
     if isinstance(v1, dict) and v1.get("hidden"):
         return []
-    clips = list(v1.get("clips") or []) if isinstance(v1, dict) else []
+    clips = track_clips(v1)
     if isinstance(v1, dict):
         clips = [
             _clip_with_track_audio_gain(c, v1, force_muted=bool(v1.get("muted") or _has_solo_audio_tracks(body)))
@@ -785,3 +784,27 @@ def _has_soft_positional_transition(clips: list[dict[str, Any]], transitions: di
         if not _is_hard_cut(t_type, duration, fps):
             return True
     return False
+
+
+# Compatibility facade: active time semantics live in timeline_math while
+# legacy imports from timeline.py remain valid during the staged migration.
+from .timeline_math import (  # noqa: E402
+    clip_canvas_fit as _clip_canvas_fit,
+    clip_duration_sec as _clip_duration_sec,
+    clip_freeze_frame_sec as _clip_freeze_frame_sec,
+    clip_has_speed_ramp as _clip_has_speed_ramp,
+    clip_preserve_pitch as _clip_preserve_pitch,
+    clip_reverse as _clip_reverse,
+    clip_speed as _clip_speed,
+    clip_speed_keyframes as _clip_speed_keyframes,
+    clip_speed_segments as _clip_speed_segments,
+    clip_timeline_duration_sec as _clip_timeline_duration_sec,
+)
+from .export_projection import (  # noqa: E402
+    ffmpeg_color as _ffmpeg_color,
+    project_canvas_settings as _project_canvas_settings,
+    project_encoder_tier as _project_encoder_tier,
+    project_export_range as _project_export_range,
+    project_master_volume as _project_master_volume,
+    project_output_settings as _project_output_settings,
+)

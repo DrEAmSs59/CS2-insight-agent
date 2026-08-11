@@ -13,7 +13,7 @@ import {
   clipReversePlayback,
   clipTimelineTimeForSource,
   clipTrimmedSourceDuration,
-} from "./timelineUtils.js";
+} from "../domain/timelineMath.js";
 
 export const KILL_AXIS_TONES = {
   kill: { fill: "#f97316", ring: "rgba(249,115,22,0.45)" },

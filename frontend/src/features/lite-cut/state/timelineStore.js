@@ -1,14 +1,12 @@
 import { create } from "zustand";
 import { useLiteCutEditorStore } from "./editorStore.js";
 import { useLiteCutHistoryStore } from "./historyStore.js";
-import { keyframeNearPlayhead, normalizedOverlayKeyframes, normalizedOverlayTransform, overlayTransformAt, VIDEO_LAYER_TRANSFORM_DEFAULTS } from "./overlayKeyframeUtils.js";
-import { audioKeyframeNearPlayhead, clipVolumeAt, normalizedAudioKeyframes } from "./audioKeyframeUtils.js";
+import { VIDEO_LAYER_TRANSFORM_DEFAULTS } from "./overlayKeyframeUtils.js";
 import { clampTimelineZoom } from "./timelineZoomUtils.js";
 import {
   buildAssetClip,
   buildDetachedAudioClip,
   buildRecordedClip,
-  buildSubtitleOverlays,
   canDetachClipAudio,
   canPlaceOnTrack,
   canSplitOverlaysAtPlayhead,
@@ -16,32 +14,18 @@ import {
   canTrimClipEndToPlayhead,
   canTrimClipStartToPlayhead,
   canTrimOverlayToPlayhead,
-  clipMaxTimelineEnd,
-  clipMaxTimelineStartForLeftTrim,
-  clipSourceTimeForTimeline,
-  cloneOverlayForPaste,
-  cloneTimelineClipForPaste,
-  clipSourceDuration,
-  clipTimelineEnd,
   compactTrackGaps,
   findClipById,
   getTrack,
   isAssetMediaItem,
   markerNearTime,
   insertAudioTrack,
-  insertClipIntoTrackWithRipple,
-  insertOverlayWithRipple,
   newClipId,
-  newMarkerId,
   newOverlayId,
   nextMarker,
   nextEditPoint,
   nextAppendStart,
   linkedTimelineClipIds,
-  nudgeClipInTrack,
-  slipClipInTrack,
-  nudgeOverlayInList,
-  ensureClipSourceDuration,
   overlayTimelineEnd,
   overlaysActiveAt,
   resizeOverlayDraft,
@@ -64,11 +48,8 @@ import {
   previousMarker,
   previousEditPoint,
   projectFrameStepSec,
-  snapTimelineSec,
   sortClips,
-  splitClipAt,
   splitOverlaysAtPlayhead,
-  splitOverlayAt,
   splitTrackClipsAtPlayhead,
   timelineTotalSec,
   audioTracks,
@@ -76,6 +57,47 @@ import {
   editableVideoTracks,
   videoTracks,
 } from "./timelineUtils.js";
+import {
+  clipMaxTimelineEnd,
+  clipSourceDuration,
+  clipSourceTimeForTimeline,
+  clipTimelineEnd,
+  ensureClipSourceDuration,
+} from "../domain/timelineMath.js";
+import {
+  addTimelineMarker,
+  activeTimelineSelectionIds,
+  applyTimelineMotionPreset,
+  buildSubtitleTimelineItems,
+  canLinkTimelineClips,
+  canMoveTimelineSelection,
+  deleteTimelineMarker,
+  groupTimelineItems,
+  linkTimelineClips,
+  moveTimelineSelection,
+  moveTimelineAudioKeyframe,
+  moveTimelineTransformKeyframe,
+  nudgeTimelineItem,
+  pasteTimelineClipboard,
+  removeTimelineAudioKeyframe,
+  removeTimelineTransformKeyframe,
+  rippleDeleteOverlaySelection as rippleDeleteOverlaySelectionCommand,
+  rippleDeleteTrackSelection as rippleDeleteTrackSelectionCommand,
+  selectedTrimTargets as selectedTrimTargetsCommand,
+  slipTimelineClip,
+  splitTimelineSelection,
+  snapTimelinePosition,
+  timelineSelectionEntries as timelineSelectionEntriesCommand,
+  trimTimelineSelection,
+  ungroupTimelineItems,
+  uniqueTimelineIds,
+  unlinkTimelineClips,
+  updateTimelineTransformAtTime,
+  updateTimelineMarker,
+  updateTimelineVolumeAtTime,
+  upsertTimelineAudioKeyframe,
+  upsertTimelineTransformKeyframe,
+} from "../domain/timelineCommands.js";
 
 function normalizedTransitionStyle(type, durationSec = 0.4) {
   const transitionType = String(type || "fade");
@@ -125,11 +147,11 @@ function videoStyleTargets(body, sourceTrackId, scope = "track") {
 }
 
 function uniqueIds(ids = []) {
-  return [...new Set((ids || []).filter(Boolean).map(String))];
+  return uniqueTimelineIds(ids);
 }
 
 function activeSelectionIds(state) {
-  return uniqueIds(state.selectedClipIds?.length ? state.selectedClipIds : state.selectedClipId ? [state.selectedClipId] : []);
+  return activeTimelineSelectionIds(state);
 }
 
 function clipPatchForTrack(patch, track) {
@@ -144,40 +166,7 @@ function clipPatchForTrack(patch, track) {
 }
 
 function timelineSelectionEntries(body, ids = []) {
-  const wanted = new Set(uniqueIds(ids));
-  if (!wanted.size) return [];
-  const entries = [];
-  for (const ov of body?.overlays || []) {
-    if (wanted.has(String(ov.id))) {
-      entries.push({
-        id: ov.id,
-        kind: "overlay",
-        trackId: "overlay",
-        item: ov,
-        start: Number(ov.timeline_start) || 0,
-        end: overlayTimelineEnd(ov),
-      });
-    }
-  }
-  for (const track of body?.tracks || []) {
-    for (const clip of track.clips || []) {
-      if (wanted.has(String(clip.id))) {
-        const start = Number(clip.timeline_start) || 0;
-        entries.push({
-          id: clip.id,
-          kind: "clip",
-          trackId: track.id,
-          trackType: track.type === "audio" ? "audio" : "video",
-          item: clip,
-          start,
-          end: start + clipSourceDuration(clip),
-          locked: Boolean(track.locked),
-          hidden: Boolean(track.hidden),
-        });
-      }
-    }
-  }
-  return entries.sort((a, b) => a.start - b.start || String(a.id).localeCompare(String(b.id)));
+  return timelineSelectionEntriesCommand(body, ids);
 }
 
 function linkedClipPairs(body) {
@@ -235,52 +224,6 @@ function relatedTimelineItemIds(body, itemId) {
     }
   }
   return [...resolved];
-}
-
-function motionPresetKeyframes(transform, duration, preset, defaults) {
-  const base = normalizedOverlayTransform(transform, defaults);
-  const start = { ...base };
-  const end = { ...base };
-  if (preset === "pan_left") {
-    start.x = Math.min(1, base.x + 0.22);
-    end.x = Math.max(0, base.x - 0.22);
-  } else if (preset === "pan_right") {
-    start.x = Math.max(0, base.x - 0.22);
-    end.x = Math.min(1, base.x + 0.22);
-  } else if (preset === "zoom_in") {
-    end.scale = Math.min(5, base.scale * 1.25);
-  } else if (preset === "zoom_out") {
-    start.scale = Math.min(5, base.scale * 1.25);
-  } else {
-    return null;
-  }
-  const dur = Math.max(0.1, Number(duration) || 0.1);
-  return [{ time_sec: 0, transform: start }, { time_sec: dur, transform: end }];
-}
-
-function clipCanSplitAt(body, clipId, playheadSec) {
-  const { clip, trackId } = findClipById(body, clipId);
-  const track = getTrack(body, trackId);
-  if (!clip || !track || track.locked || track.hidden) return false;
-  const local = playheadSec - (Number(clip.timeline_start) || 0);
-  const duration = clipSourceDuration(clip);
-  return local > 0.05 && local < duration - 0.05;
-}
-
-function linkedSplitSelection(body, selectedIds, playheadSec) {
-  const selected = new Set(uniqueIds(selectedIds));
-  for (const { videoId, audioId } of linkedClipPairs(body)) {
-    if (!selected.has(videoId) && !selected.has(audioId)) continue;
-    // A linked pair is only cut together when both sides can receive the same edit.
-    if (clipCanSplitAt(body, videoId, playheadSec) && clipCanSplitAt(body, audioId, playheadSec)) {
-      selected.add(videoId);
-      selected.add(audioId);
-    } else {
-      selected.delete(videoId);
-      selected.delete(audioId);
-    }
-  }
-  return uniqueIds([...selected]);
 }
 
 function setLinkedClipPair(video, audio) {
@@ -348,77 +291,16 @@ function selectableTimelineEntries(body, predicate = null) {
   return entries;
 }
 
-function canShiftTrackSelection(track, selectedIds, deltaSec) {
-  if (!track || track.locked) return false;
-  const ids = new Set(uniqueIds(selectedIds));
-  const clips = track.clips || [];
-  const selected = clips.filter((clip) => ids.has(String(clip.id)));
-  if (!selected.length) return true;
-  const shifted = selected.map((clip) => ({
-    ...clip,
-    timeline_start: (Number(clip.timeline_start) || 0) + deltaSec,
-  }));
-  if (shifted.some((clip) => (Number(clip.timeline_start) || 0) < 0)) return false;
-  const unselected = clips.filter((clip) => !ids.has(String(clip.id)));
-  return shifted.every((clip) => canPlaceOnTrack(unselected, Number(clip.timeline_start) || 0, clipSourceDuration(clip)));
-}
-
 function selectedTrimTargets(body, selectedIds, side, playheadSec) {
-  return timelineSelectionEntries(body, selectedIds).filter((entry) => {
-    if (entry.kind === "overlay") return canTrimOverlayToPlayhead(entry.item, side, playheadSec);
-    if (entry.locked || entry.hidden) return false;
-    if (side === "start") return canTrimClipStartToPlayhead(entry.item, entry.trackType, playheadSec);
-    if (side === "end") return canTrimClipEndToPlayhead(entry.item, entry.trackType, playheadSec);
-    return false;
-  });
+  return selectedTrimTargetsCommand(body, selectedIds, side, playheadSec);
 }
 
 function rippleDeleteTrackSelection(track, selectedIds) {
-  if (!track || track.locked || track.hidden) return { deleted: false, clips: track?.clips || [] };
-  const ids = new Set(uniqueIds(selectedIds));
-  const clips = track.clips || [];
-  const removed = sortClips(clips.filter((clip) => ids.has(String(clip.id)))).map((clip) => ({
-    id: clip.id,
-    start: Number(clip.timeline_start) || 0,
-    end: clipTimelineEnd(clip),
-    duration: clipSourceDuration(clip),
-  }));
-  if (!removed.length) return { deleted: false, clips };
-  const kept = clips
-    .filter((clip) => !ids.has(String(clip.id)))
-    .map((clip) => {
-      const start = Number(clip.timeline_start) || 0;
-      const shift = removed
-        .filter((span) => start >= span.end - 1e-6)
-        .reduce((sum, span) => sum + span.duration, 0);
-      return shift > 0 ? { ...clip, timeline_start: Math.max(0, start - shift) } : clip;
-    });
-  return { deleted: true, clips: sortClips(kept) };
+  return rippleDeleteTrackSelectionCommand(track, selectedIds);
 }
 
 function rippleDeleteOverlaySelection(overlays, selectedIds) {
-  const ids = new Set(uniqueIds(selectedIds));
-  const removed = (overlays || [])
-    .filter((ov) => ids.has(String(ov.id)))
-    .map((ov) => ({
-      id: ov.id,
-      start: Number(ov.timeline_start) || 0,
-      end: overlayTimelineEnd(ov),
-      duration: Math.max(0.1, Number(ov.duration) || 0),
-    }))
-    .sort((a, b) => a.start - b.start);
-  if (!removed.length) return { deleted: false, overlays: overlays || [] };
-  const kept = (overlays || [])
-    .filter((ov) => !ids.has(String(ov.id)))
-    .map((ov) => {
-      const start = Number(ov.timeline_start) || 0;
-      const shift = removed
-        .filter((span) => start >= span.end - 1e-6)
-        .reduce((sum, span) => sum + span.duration, 0);
-      return shift > 0 ? { ...ov, timeline_start: Math.max(0, start - shift) } : ov;
-    })
-    .sort((a, b) => (a.timeline_start || 0) - (b.timeline_start || 0));
-  return { deleted: true, overlays: kept };
+  return rippleDeleteOverlaySelectionCommand(overlays, selectedIds);
 }
 
 export const useLiteCutTimelineStore = create((set, get) => ({
@@ -489,51 +371,23 @@ export const useLiteCutTimelineStore = create((set, get) => ({
   },
 
   addMarkerAtPlayhead: () => {
-    const { playheadSec } = get();
-    let newId = null;
-    get().mutateProject((body) => {
-      const marker = {
-        id: newMarkerId(),
-        time_sec: Math.max(0, Number(playheadSec) || 0),
-        label: "",
-        color: "#f59e0b",
-      };
-      body.markers = [...(body.markers || []), marker].sort((a, b) => (a.time_sec || 0) - (b.time_sec || 0));
-      newId = marker.id;
-      return body;
-    });
-    return newId;
+    const command = addTimelineMarker(useLiteCutEditorStore.getState().body, get().playheadSec);
+    if (!command.changed) return null;
+    get().mutateProject(() => command.body);
+    return command.markerId;
   },
 
   updateMarker: (markerId, patch) => {
-    if (!markerId || !patch || typeof patch !== "object") return false;
-    const current = (useLiteCutEditorStore.getState().body?.markers || []).find((marker) => marker?.id === markerId);
-    if (!current) return false;
-    const nextLabel = patch.label == null ? String(current.label || "") : String(patch.label).slice(0, 80);
-    const candidateColor = patch.color == null ? String(current.color || "#f59e0b") : String(patch.color);
-    const nextColor = /^#[0-9a-f]{6}$/i.test(candidateColor) ? candidateColor : "#f59e0b";
-    const nextTime = patch.time_sec == null ? Math.max(0, Number(current.time_sec) || 0) : Math.max(0, Number(patch.time_sec) || 0);
-    if (nextLabel === String(current.label || "") && nextColor === String(current.color || "#f59e0b") && Math.abs(nextTime - (Number(current.time_sec) || 0)) < 0.0001) return false;
-    get().mutateProject((body) => {
-      const marker = (body.markers || []).find((item) => item?.id === markerId);
-      if (!marker) return body;
-      marker.label = nextLabel;
-      marker.color = nextColor;
-      marker.time_sec = nextTime;
-      body.markers.sort((a, b) => (Number(a.time_sec) || 0) - (Number(b.time_sec) || 0));
-      return body;
-    });
+    const command = updateTimelineMarker(useLiteCutEditorStore.getState().body, markerId, patch);
+    if (!command.changed) return false;
+    get().mutateProject(() => command.body);
     return true;
   },
 
   deleteMarker: (markerId) => {
-    if (!markerId) return false;
-    const body = useLiteCutEditorStore.getState().body;
-    if (!(body?.markers || []).some((marker) => marker?.id === markerId)) return false;
-    get().mutateProject((nextBody) => {
-      nextBody.markers = (nextBody.markers || []).filter((marker) => marker?.id !== markerId);
-      return nextBody;
-    });
+    const command = deleteTimelineMarker(useLiteCutEditorStore.getState().body, markerId);
+    if (!command.changed) return false;
+    get().mutateProject(() => command.body);
     return true;
   },
 
@@ -541,14 +395,7 @@ export const useLiteCutTimelineStore = create((set, get) => ({
     const body = useLiteCutEditorStore.getState().body;
     const marker = markerNearTime(body, get().playheadSec);
     if (!marker?.id) return false;
-    let deleted = false;
-    get().mutateProject((nextBody) => {
-      const before = nextBody.markers || [];
-      nextBody.markers = before.filter((m) => m.id !== marker.id);
-      deleted = nextBody.markers.length !== before.length;
-      return nextBody;
-    });
-    return deleted;
+    return get().deleteMarker(marker.id);
   },
 
   jumpToPreviousMarker: () => {
@@ -576,31 +423,10 @@ export const useLiteCutTimelineStore = create((set, get) => ({
       return get().moveSelectionBy(deltaSec);
     }
     const currentBody = useLiteCutEditorStore.getState().body;
-    if (selectedTrackId === "overlay") {
-      if (!nudgeOverlayInList(currentBody?.overlays || [], selectedClipId, deltaSec).moved) return false;
-    } else {
-      const { trackId } = findClipById(currentBody, selectedClipId);
-      const track = getTrack(currentBody, trackId);
-      if (!nudgeClipInTrack(track, selectedClipId, deltaSec).moved) return false;
-    }
-    let moved = false;
-    get().mutateProject((body) => {
-      if (selectedTrackId === "overlay") {
-        const result = nudgeOverlayInList(body.overlays || [], selectedClipId, deltaSec);
-        if (!result.moved) return body;
-        body.overlays = result.overlays;
-        moved = true;
-        return body;
-      }
-      const { trackId } = findClipById(body, selectedClipId);
-      const track = getTrack(body, trackId);
-      const result = nudgeClipInTrack(track, selectedClipId, deltaSec);
-      if (!result.moved) return body;
-      track.clips = result.clips;
-      moved = true;
-      return body;
-    });
-    return moved;
+    const command = nudgeTimelineItem(currentBody, selectedClipId, selectedTrackId, deltaSec);
+    if (!command.changed) return false;
+    get().mutateProject(() => command.body);
+    return true;
   },
 
   nudgeSelectedFrame: (direction, large = false) => {
@@ -613,24 +439,16 @@ export const useLiteCutTimelineStore = create((set, get) => ({
     const state = get();
     if (state.selectedTrackId === "overlay" || activeSelectionIds(state).length !== 1 || !state.selectedClipId) return false;
     const body = useLiteCutEditorStore.getState().body;
-    const { trackId } = findClipById(body, state.selectedClipId);
-    return slipClipInTrack(getTrack(body, trackId), state.selectedClipId, deltaSec).moved;
+    return slipTimelineClip(body, state.selectedClipId, deltaSec).changed;
   },
 
   slipSelectedBy: (deltaSec) => {
     if (!get().canSlipSelectedBy(deltaSec)) return false;
     const selectedClipId = get().selectedClipId;
-    let slipped = false;
-    get().mutateProject((body) => {
-      const { trackId } = findClipById(body, selectedClipId);
-      const track = getTrack(body, trackId);
-      const result = slipClipInTrack(track, selectedClipId, deltaSec);
-      if (!result.moved) return body;
-      track.clips = result.clips;
-      slipped = true;
-      return body;
-    });
-    return slipped;
+    const command = slipTimelineClip(useLiteCutEditorStore.getState().body, selectedClipId, deltaSec);
+    if (!command.changed) return false;
+    get().mutateProject(() => command.body);
+    return true;
   },
 
   canSlipSelectedFrame: (direction, large = false) => {
@@ -647,46 +465,19 @@ export const useLiteCutTimelineStore = create((set, get) => ({
 
   canMoveSelectionBy: (deltaSec) => {
     const selectedIds = activeSelectionIds(get());
-    if (selectedIds.length <= 1) return false;
     const body = useLiteCutEditorStore.getState().body;
-    const entries = timelineSelectionEntries(body, selectedIds);
-    if (!entries.length) return false;
-    if (entries.some((entry) => entry.locked || entry.hidden)) return false;
-    const delta = Number(deltaSec) || 0;
-    if (Math.abs(delta) <= 1e-6) return false;
-    const minStart = Math.min(...entries.map((entry) => entry.start));
-    if (minStart + delta < -1e-6) return false;
-    const byTrack = new Map();
-    for (const entry of entries.filter((entry) => entry.kind === "clip")) {
-      if (!byTrack.has(entry.trackId)) byTrack.set(entry.trackId, []);
-      byTrack.get(entry.trackId).push(entry.id);
-    }
-    for (const [trackId, ids] of byTrack.entries()) {
-      if (!canShiftTrackSelection(getTrack(body, trackId), ids, delta)) return false;
-    }
-    return true;
+    return canMoveTimelineSelection(body, selectedIds, deltaSec).allowed;
   },
 
   moveSelectionBy: (deltaSec, { recordHistory = true } = {}) => {
     const selectedIds = activeSelectionIds(get());
-    if (selectedIds.length <= 1 || !get().canMoveSelectionBy(deltaSec)) return false;
-    const delta = Number(deltaSec) || 0;
+    const currentBody = useLiteCutEditorStore.getState().body;
+    const command = moveTimelineSelection(currentBody, selectedIds, deltaSec);
+    if (!command.changed) return false;
     let moved = false;
-    get().mutateProject((body) => {
-      const idSet = new Set(selectedIds.map(String));
-      body.overlays = (body.overlays || []).map((ov) =>
-        idSet.has(String(ov.id)) ? { ...ov, timeline_start: (Number(ov.timeline_start) || 0) + delta } : ov,
-      );
-      for (const track of body.tracks || []) {
-        if (track.locked) continue;
-        track.clips = sortClips(
-          (track.clips || []).map((clip) =>
-            idSet.has(String(clip.id)) ? { ...clip, timeline_start: (Number(clip.timeline_start) || 0) + delta } : clip,
-          ),
-        );
-      }
+    get().mutateProject(() => {
       moved = true;
-      return body;
+      return command.body;
     }, { recordHistory });
     return moved;
   },
@@ -701,20 +492,11 @@ export const useLiteCutTimelineStore = create((set, get) => ({
   groupSelectedItems: () => {
     const ids = activeSelectionIds(get());
     if (ids.length < 2) return false;
-    const idSet = new Set(ids.map(String));
     const groupId = `grp-${crypto.randomUUID().slice(0, 12)}`;
-    get().mutateProject((body) => {
-      body.overlays = (body.overlays || []).map((overlay) =>
-        idSet.has(String(overlay.id)) ? { ...overlay, meta: { ...(overlay.meta || {}), group_id: groupId } } : overlay,
-      );
-      for (const track of body.tracks || []) {
-        track.clips = (track.clips || []).map((clip) =>
-          idSet.has(String(clip.id)) ? { ...clip, meta: { ...(clip.meta || {}), group_id: groupId } } : clip,
-        );
-      }
-      return body;
-    });
-    return true;
+    const command = groupTimelineItems(useLiteCutEditorStore.getState().body, ids, groupId);
+    if (!command.changed) return false;
+    get().mutateProject(() => command.body);
+    return command.changed;
   },
 
   canUngroupSelectedItems: () => {
@@ -724,24 +506,10 @@ export const useLiteCutTimelineStore = create((set, get) => ({
 
   ungroupSelectedItems: () => {
     const body = useLiteCutEditorStore.getState().body;
-    const groupIds = new Set();
-    for (const id of activeSelectionIds(get())) {
-      const target = (body?.overlays || []).find((item) => String(item.id) === String(id)) || findClipById(body, id).clip;
-      const groupId = timelineItemGroupId(target);
-      if (groupId) groupIds.add(groupId);
-    }
-    if (!groupIds.size) return false;
-    get().mutateProject((nextBody) => {
-      const clearGroup = (item) => {
-        if (!groupIds.has(timelineItemGroupId(item))) return item;
-        const { group_id, ...meta } = item.meta || {};
-        return { ...item, meta };
-      };
-      nextBody.overlays = (nextBody.overlays || []).map(clearGroup);
-      for (const track of nextBody.tracks || []) track.clips = (track.clips || []).map(clearGroup);
-      return nextBody;
-    });
-    return true;
+    const command = ungroupTimelineItems(body, activeSelectionIds(get()));
+    if (!command.changed) return false;
+    get().mutateProject(() => command.body);
+    return command.changed;
   },
 
   canSelectLinkedClips: () => {
@@ -762,36 +530,18 @@ export const useLiteCutTimelineStore = create((set, get) => ({
   canLinkSelectedClips: () => {
     const state = get();
     const ids = activeSelectionIds(state);
-    if (ids.length !== 2 || state.selectedTrackId === "overlay") return false;
+    if (state.selectedTrackId === "overlay") return false;
     const body = useLiteCutEditorStore.getState().body;
-    const entries = ids.map((id) => {
-      const found = findClipById(body, id);
-      return { ...found, track: getTrack(body, found.trackId) };
-    });
-    const video = entries.find((entry) => entry.track?.type === "video");
-    const audio = entries.find((entry) => entry.track?.type === "audio");
-    if (!video?.clip || !audio?.clip || video.track.locked || audio.track.locked) return false;
-    return linkedTimelineClipIds(body, video.clip.id).length <= 1 && linkedTimelineClipIds(body, audio.clip.id).length <= 1;
+    return canLinkTimelineClips(body, ids).allowed;
   },
 
   linkSelectedClips: () => {
     if (!get().canLinkSelectedClips()) return false;
     const ids = activeSelectionIds(get());
-    let linked = false;
-    get().mutateProject((body) => {
-      const entries = ids.map((id) => {
-        const found = findClipById(body, id);
-        return { ...found, track: getTrack(body, found.trackId) };
-      });
-      const video = entries.find((entry) => entry.track?.type === "video");
-      const audio = entries.find((entry) => entry.track?.type === "audio");
-      if (!video?.clip || !audio?.clip) return body;
-      video.clip.meta = { ...(video.clip.meta || {}), linked_audio_clip_id: audio.clip.id };
-      audio.clip.meta = { ...(audio.clip.meta || {}), source_clip_id: video.clip.id, detached_from_video: true };
-      linked = true;
-      return body;
-    });
-    return linked;
+    const command = linkTimelineClips(useLiteCutEditorStore.getState().body, ids);
+    if (!command.changed) return false;
+    get().mutateProject(() => command.body);
+    return command.changed;
   },
 
   canUnlinkSelectedClips: () => get().canSelectLinkedClips(),
@@ -799,30 +549,10 @@ export const useLiteCutTimelineStore = create((set, get) => ({
   unlinkSelectedClips: () => {
     const { selectedClipId, selectedTrackId } = get();
     if (!selectedClipId || selectedTrackId === "overlay") return false;
-    const body = useLiteCutEditorStore.getState().body;
-    const { clip } = findClipById(body, selectedClipId);
-    const sourceId = String(clip?.meta?.source_clip_id || clip?.id || "");
-    const linkedIds = linkedTimelineClipIds(body, selectedClipId);
-    if (!sourceId || linkedIds.length <= 1) return false;
-    let changed = false;
-    get().mutateProject((nextBody) => {
-      for (const track of nextBody.tracks || []) {
-        for (const candidate of track.clips || []) {
-          if (String(candidate.id) === sourceId && candidate.meta?.linked_audio_clip_id) {
-            const { linked_audio_clip_id, ...meta } = candidate.meta;
-            candidate.meta = meta;
-            changed = true;
-          }
-          if (String(candidate.meta?.source_clip_id || "") === sourceId) {
-            const { source_clip_id, detached_from_video, ...meta } = candidate.meta || {};
-            candidate.meta = meta;
-            changed = true;
-          }
-        }
-      }
-      return nextBody;
-    });
-    return changed;
+    const command = unlinkTimelineClips(useLiteCutEditorStore.getState().body, selectedClipId);
+    if (!command.changed) return false;
+    get().mutateProject(() => command.body);
+    return command.changed;
   },
 
   selectTrack: (trackId) => {
@@ -1090,7 +820,7 @@ export const useLiteCutTimelineStore = create((set, get) => ({
     const { playheadSec, snapEnabled } = get();
     const editor = useLiteCutEditorStore.getState();
     let start = Math.max(0, Number(atTime ?? playheadSec) || 0);
-    start = snapTimelineSec(start, editor.body, { enabled: snapEnabled });
+    start = snapTimelinePosition(start, editor.body, { enabled: snapEnabled });
     let newId = null;
     let placedTrackId = trackId;
     get().mutateProject((body) => {
@@ -1140,7 +870,7 @@ export const useLiteCutTimelineStore = create((set, get) => ({
     const { playheadSec, snapEnabled } = get();
     const editor = useLiteCutEditorStore.getState();
     let start = Math.max(0, Number(atTime ?? playheadSec) || 0);
-    start = snapTimelineSec(start, editor.body, { enabled: snapEnabled });
+    start = snapTimelinePosition(start, editor.body, { enabled: snapEnabled });
     const dur =
       Number(assetItem.duration_sec) > 0
         ? Number(assetItem.duration_sec)
@@ -1194,7 +924,7 @@ export const useLiteCutTimelineStore = create((set, get) => ({
     const { playheadSec, snapEnabled } = get();
     const editor = useLiteCutEditorStore.getState();
     let start = Math.max(0, Number(atTime ?? playheadSec) || 0);
-    start = snapTimelineSec(start, editor.body, { enabled: snapEnabled });
+    start = snapTimelinePosition(start, editor.body, { enabled: snapEnabled });
     let newId = null;
     const content = String(text || "Text").slice(0, 160);
     get().mutateProject((body) => {
@@ -1226,7 +956,7 @@ export const useLiteCutTimelineStore = create((set, get) => ({
   },
 
   addSubtitleOverlays: (rawText, options = {}) => {
-    const overlays = buildSubtitleOverlays(rawText, options);
+    const overlays = buildSubtitleTimelineItems(rawText, options);
     if (!overlays.length) return 0;
     get().mutateProject((body) => {
       body.overlays = [...(body.overlays || []), ...overlays];
@@ -1637,148 +1367,41 @@ export const useLiteCutTimelineStore = create((set, get) => ({
   pasteClipboard: () => {
     const { clipboard, playheadSec, selectedTrackId } = get();
     if (!clipboard) return false;
-    let newId = null;
-    let newTrackId = null;
-    let newIds = [];
-    get().mutateProject((body) => {
-      if (clipboard.type === "multi") {
-        const targetByTrack = new Map();
-        for (const entry of clipboard.items || []) {
-          const start = Math.max(0, playheadSec + (Number(entry.offset) || 0));
-          if (entry.type === "overlay") {
-            const ov = cloneOverlayForPaste(entry.item, start);
-            if (!ov) continue;
-            body.overlays = [...(body.overlays || []), ov];
-            newIds.push(ov.id);
-            newId = ov.id;
-            newTrackId = "overlay";
-            continue;
-          }
-
-          const trackType = entry.trackType === "audio" ? "audio" : "video";
-          const clip = cloneTimelineClipForPaste(entry.item, start);
-          if (!clip) continue;
-          const duration = clipSourceDuration(clip);
-          let target = targetByTrack.get(entry.trackId) || null;
-          if (!target) {
-            const original = getTrack(body, entry.trackId);
-            if (original?.type === trackType && !original.locked && !original.hidden) target = original;
-          }
-          if (!target) target = trackType === "audio" ? editableAudioTracks(body)[0] : editableVideoTracks(body)[0];
-          if (!target) {
-            const id = trackType === "audio" ? insertAudioTrack(body) : insertVideoTrack(body);
-            target = getTrack(body, id);
-          }
-          if (!target) continue;
-          if (!canPlaceOnTrack(target.clips, clip.timeline_start, duration)) {
-            const id = trackType === "audio" ? insertAudioTrack(body, target.id) : insertVideoTrack(body, target.id);
-            target = getTrack(body, id);
-          }
-          if (!target || target.locked || !canPlaceOnTrack(target.clips, clip.timeline_start, duration)) continue;
-          target.clips = sortClips([...(target.clips || []), clip]);
-          targetByTrack.set(entry.trackId, target);
-          newIds.push(clip.id);
-          newId = clip.id;
-          newTrackId = target.id;
-        }
-        return body;
-      }
-
-      if (clipboard.type === "overlay") {
-        const ov = cloneOverlayForPaste(clipboard.item, playheadSec);
-        if (!ov) return body;
-        body.overlays = [...(body.overlays || []), ov];
-        newId = ov.id;
-        newTrackId = "overlay";
-        return body;
-      }
-
-      const trackType = clipboard.trackType === "audio" ? "audio" : "video";
-      const clip = cloneTimelineClipForPaste(clipboard.item, playheadSec);
-      if (!clip) return body;
-      const duration = clipSourceDuration(clip);
-      let target = null;
-      const selectedTrack = selectedTrackId !== "overlay" ? getTrack(body, selectedTrackId) : null;
-      if (selectedTrack?.type === trackType && !selectedTrack.locked && !selectedTrack.hidden) {
-        target = selectedTrack;
-      }
-      if (!target) {
-        target = trackType === "audio" ? editableAudioTracks(body)[0] : editableVideoTracks(body)[0];
-      }
-      if (!target) {
-        const id = trackType === "audio" ? insertAudioTrack(body) : insertVideoTrack(body);
-        target = getTrack(body, id);
-      }
-      if (!target) return body;
-      if (!canPlaceOnTrack(target.clips, clip.timeline_start, duration)) {
-        const id = trackType === "audio" ? insertAudioTrack(body, target.id) : insertVideoTrack(body, target.id);
-        target = getTrack(body, id);
-      }
-      if (!target || target.locked || !canPlaceOnTrack(target.clips, clip.timeline_start, duration)) return body;
-      target.clips = sortClips([...(target.clips || []), clip]);
-      newId = clip.id;
-      newTrackId = target.id;
-      return body;
+    const command = pasteTimelineClipboard(
+      useLiteCutEditorStore.getState().body,
+      clipboard,
+      playheadSec,
+      selectedTrackId,
+    );
+    if (!command.changed) return false;
+    get().mutateProject(() => command.body);
+    set({
+      selectedClipId: command.selectedClipId,
+      selectedClipIds: command.selectedIds,
+      selectedTrackId: command.selectedTrackId,
     });
-    if (newId && newTrackId) {
-      set({ selectedClipId: newId, selectedClipIds: uniqueIds(newIds.length ? newIds : [newId]), selectedTrackId: newTrackId });
-      return true;
-    }
-    return false;
+    return true;
   },
 
   insertPasteClipboard: () => {
     const { clipboard, playheadSec, selectedTrackId } = get();
     if (!clipboard) return false;
     if (clipboard.type === "multi") return get().pasteClipboard();
-    let newId = null;
-    let newTrackId = null;
-    get().mutateProject((body) => {
-      if (clipboard.type === "overlay") {
-        const ov = cloneOverlayForPaste(clipboard.item, playheadSec);
-        if (!ov) return body;
-        const result = insertOverlayWithRipple(body.overlays || [], ov);
-        if (!result.inserted) return body;
-        body.overlays = result.overlays;
-        newId = ov.id;
-        newTrackId = "overlay";
-        return body;
-      }
-
-      const trackType = clipboard.trackType === "audio" ? "audio" : "video";
-      const clip = cloneTimelineClipForPaste(clipboard.item, playheadSec);
-      if (!clip) return body;
-      let target = null;
-      const selectedTrack = selectedTrackId !== "overlay" ? getTrack(body, selectedTrackId) : null;
-      if (selectedTrack?.type === trackType && !selectedTrack.locked && !selectedTrack.hidden) {
-        target = selectedTrack;
-      }
-      if (!target) {
-        target = trackType === "audio" ? editableAudioTracks(body)[0] : editableVideoTracks(body)[0];
-      }
-      if (!target) {
-        const id = trackType === "audio" ? insertAudioTrack(body) : insertVideoTrack(body);
-        target = getTrack(body, id);
-      }
-      if (!target) return body;
-
-      let result = insertClipIntoTrackWithRipple(target, clip);
-      if (!result.inserted) {
-        const id = trackType === "audio" ? insertAudioTrack(body, target.id) : insertVideoTrack(body, target.id);
-        target = getTrack(body, id);
-        result = insertClipIntoTrackWithRipple(target, clip);
-      }
-      if (!target || target.locked || !result.inserted) return body;
-      target.clips = result.clips;
-      newId = clip.id;
-      newTrackId = target.id;
-      return body;
+    const command = pasteTimelineClipboard(
+      useLiteCutEditorStore.getState().body,
+      clipboard,
+      playheadSec,
+      selectedTrackId,
+      { ripple: true },
+    );
+    if (!command.changed) return false;
+    get().mutateProject(() => command.body);
+    set({
+      selectedClipId: command.selectedClipId,
+      selectedClipIds: command.selectedIds,
+      selectedTrackId: command.selectedTrackId,
     });
-    if (newId && newTrackId) {
-      set({ selectedClipId: newId, selectedClipIds: [newId], selectedTrackId: newTrackId });
-      return true;
-    }
-    return false;
+    return true;
   },
 
   duplicateSelected: () => {
@@ -1831,111 +1454,21 @@ export const useLiteCutTimelineStore = create((set, get) => ({
 
   splitAtPlayhead: () => {
     const state = get();
-    const initialSelectedIds = activeSelectionIds(state);
     const { selectedClipId, selectedTrackId, playheadSec } = state;
     if (!selectedClipId) return;
-    const currentBody = useLiteCutEditorStore.getState().body;
-    const selectedIds = linkedSplitSelection(currentBody, initialSelectedIds, playheadSec);
-    if (!selectedIds.length) return false;
-    if (selectedIds.length > 1) {
-      const splitTargets = timelineSelectionEntries(currentBody, selectedIds).filter((entry) => {
-        if (entry.locked || entry.hidden) return false;
-        const local = playheadSec - entry.start;
-        const duration = entry.end - entry.start;
-        return local > 0.05 && local < duration - 0.05;
-      });
-      if (!splitTargets.length) return false;
-      let newIds = [];
-      let primaryTrackId = null;
-      const selected = new Set(selectedIds.map(String));
-      const pairs = linkedClipPairs(currentBody);
-      const rightIds = new Map();
-      get().mutateProject((body) => {
-        for (const track of body.tracks || []) {
-          if (track.locked || track.hidden) continue;
-          const next = [];
-          for (const clip of sortClips(track.clips || [])) {
-            if (!selected.has(String(clip.id))) {
-              next.push(clip);
-              continue;
-            }
-            const local = playheadSec - (Number(clip.timeline_start) || 0);
-            if (local <= 0.05 || local >= clipSourceDuration(clip) - 0.05) {
-              next.push(clip);
-              continue;
-            }
-            const [left, right] = splitClipAt(clip, local);
-            next.push(left, right);
-            newIds.push(right.id);
-            rightIds.set(String(clip.id), String(right.id));
-            primaryTrackId = primaryTrackId || track.id;
-          }
-          track.clips = sortClips(next);
-        }
-
-        const overlays = [];
-        for (const ov of body.overlays || []) {
-          if (!selected.has(String(ov.id))) {
-            overlays.push(ov);
-            continue;
-          }
-          const local = playheadSec - (Number(ov.timeline_start) || 0);
-          const dur = Number(ov.duration) || 0;
-          if (local <= 0.05 || local >= dur - 0.05) {
-            overlays.push(ov);
-            continue;
-          }
-          const [left, right] = splitOverlayAt(ov, local);
-          overlays.push(left, right);
-          newIds.push(right.id);
-          primaryTrackId = primaryTrackId || "overlay";
-        }
-        body.overlays = overlays.sort((a, b) => (a.timeline_start || 0) - (b.timeline_start || 0));
-        restoreLinksAfterSplit(body, pairs, rightIds);
-        return body;
-      });
-      if (newIds.length) {
-        set({ selectedClipId: newIds[0], selectedClipIds: uniqueIds(newIds), selectedTrackId: primaryTrackId || selectedTrackId });
-        return true;
-      }
-      return false;
-    }
-    let newId = null;
-    let trackId = null;
-    const pairs = linkedClipPairs(currentBody);
-    const rightIds = new Map();
-    get().mutateProject((body) => {
-      if (selectedTrackId === "overlay") {
-        const ov = (body.overlays || []).find((o) => o.id === selectedClipId);
-        if (!ov) return body;
-        const local = playheadSec - (Number(ov.timeline_start) || 0);
-        const dur = Number(ov.duration) || 0;
-        if (local <= 0.05 || local >= dur - 0.05) return body;
-        const [left, right] = splitOverlayAt(ov, local);
-        body.overlays = (body.overlays || []).filter((o) => o.id !== selectedClipId).concat([left, right]);
-        newId = right.id;
-        trackId = "overlay";
-        return body;
-      }
-      const found = findClipById(body, selectedClipId);
-      const clip = found.clip;
-      trackId = found.trackId;
-      if (!clip || !trackId) return body;
-      const track = getTrack(body, trackId);
-      if (track?.locked) return body;
-      const local = playheadSec - (Number(clip.timeline_start) || 0);
-      const dur = clipSourceDuration(clip);
-      if (local <= 0.05 || local >= dur - 0.05) return body;
-      const [left, right] = splitClipAt(clip, local);
-      track.clips = sortClips(
-        (track.clips || []).filter((c) => c.id !== selectedClipId).concat([left, right]),
-      );
-      rightIds.set(String(clip.id), String(right.id));
-      restoreLinksAfterSplit(body, pairs, rightIds);
-      newId = right.id;
-      return body;
+    const command = splitTimelineSelection(
+      useLiteCutEditorStore.getState().body,
+      activeSelectionIds(state),
+      playheadSec,
+    );
+    if (!command.changed) return false;
+    get().mutateProject(() => command.body);
+    set({
+      selectedClipId: command.selectedClipId,
+      selectedClipIds: command.selectedIds,
+      selectedTrackId: command.selectedTrackId || selectedTrackId,
     });
-    if (newId) set({ selectedClipId: newId, selectedClipIds: [newId], selectedTrackId: trackId });
+    return true;
   },
 
   canSplitAllAtPlayhead: () => {
@@ -2018,51 +1551,11 @@ export const useLiteCutTimelineStore = create((set, get) => ({
     if (!get().canTrimSelectedStartToPlayhead()) return false;
     const state = get();
     const selectedIds = activeSelectionIds(state);
-    const { selectedClipId, selectedTrackId, playheadSec } = state;
+    const { playheadSec } = state;
     const body = useLiteCutEditorStore.getState().body;
-    if (selectedIds.length > 1) {
-      const targets = selectedTrimTargets(body, selectedIds, "start", playheadSec);
-      if (!targets.length) return false;
-      const targetIds = new Set(targets.map((target) => String(target.id)));
-      get().mutateProject((nextBody) => {
-        nextBody.overlays = (nextBody.overlays || []).map((ov) => {
-          if (!targetIds.has(String(ov.id))) return ov;
-          return resizeOverlayDraft(ov, {
-            start: playheadSec,
-            duration: overlayTimelineEnd(ov) - playheadSec,
-          });
-        });
-        for (const track of nextBody.tracks || []) {
-          if (track.locked) continue;
-          track.clips = sortClips((track.clips || []).map((clip) => {
-            if (!targetIds.has(String(clip.id))) return clip;
-            const oldStart = Number(clip.timeline_start) || 0;
-            const maxStart = clipMaxTimelineStartForLeftTrim(clip);
-            const start = Math.max(oldStart, Math.min(playheadSec, maxStart));
-            const delta = start - oldStart;
-            if (delta <= 0) return clip;
-            return rebaseTimelineClipKeyframes(clip, {
-              ...clip,
-              timeline_start: start,
-              trim_in: clipSourceTimeForTimeline(clip, delta),
-            });
-          }));
-        }
-        return nextBody;
-      });
-      return true;
-    }
-    if (selectedTrackId === "overlay") {
-      const ov = (body?.overlays || []).find((o) => o.id === selectedClipId);
-      if (!ov) return false;
-      get().resizeOverlay(selectedClipId, {
-        start: playheadSec,
-        duration: overlayTimelineEnd(ov) - playheadSec,
-      });
-      return true;
-    }
-    const { trackId } = findClipById(body, selectedClipId);
-    get().trimClipLeft(selectedClipId, trackId, playheadSec);
+    const command = trimTimelineSelection(body, selectedIds, "start", playheadSec);
+    if (!command.changed) return false;
+    get().mutateProject(() => command.body);
     return true;
   },
 
@@ -2070,44 +1563,11 @@ export const useLiteCutTimelineStore = create((set, get) => ({
     if (!get().canTrimSelectedEndToPlayhead()) return false;
     const state = get();
     const selectedIds = activeSelectionIds(state);
-    const { selectedClipId, selectedTrackId, playheadSec } = state;
+    const { playheadSec } = state;
     const body = useLiteCutEditorStore.getState().body;
-    if (selectedIds.length > 1) {
-      const targets = selectedTrimTargets(body, selectedIds, "end", playheadSec);
-      if (!targets.length) return false;
-      const targetIds = new Set(targets.map((target) => String(target.id)));
-      get().mutateProject((nextBody) => {
-        nextBody.overlays = (nextBody.overlays || []).map((ov) => {
-          if (!targetIds.has(String(ov.id))) return ov;
-          return resizeOverlayDraft(ov, {
-            duration: playheadSec - (Number(ov.timeline_start) || 0),
-          });
-        });
-        for (const track of nextBody.tracks || []) {
-          if (track.locked) continue;
-          track.clips = sortClips((track.clips || []).map((clip) => {
-            if (!targetIds.has(String(clip.id))) return clip;
-            ensureClipSourceDuration(clip);
-            const start = Number(clip.timeline_start) || 0;
-            const maxEnd = clipMaxTimelineEnd(clip);
-            const end = Math.max(start + 0.1, Math.min(playheadSec, maxEnd));
-            return rebaseTimelineClipKeyframes(clip, trimClipEndDraft(clip, end));
-          }));
-        }
-        return nextBody;
-      });
-      return true;
-    }
-    if (selectedTrackId === "overlay") {
-      const ov = (body?.overlays || []).find((o) => o.id === selectedClipId);
-      if (!ov) return false;
-      get().resizeOverlay(selectedClipId, {
-        duration: playheadSec - (Number(ov.timeline_start) || 0),
-      });
-      return true;
-    }
-    const { trackId } = findClipById(body, selectedClipId);
-    get().trimClipRight(selectedClipId, trackId, playheadSec);
+    const command = trimTimelineSelection(body, selectedIds, "end", playheadSec);
+    if (!command.changed) return false;
+    get().mutateProject(() => command.body);
     return true;
   },
 
@@ -2207,71 +1667,35 @@ export const useLiteCutTimelineStore = create((set, get) => ({
   },
 
   upsertClipAudioKeyframe: (clipId, trackId, playheadSec) => {
-    get().mutateProject((body) => {
-      const track = getTrack(body, trackId);
-      const clip = (track?.clips || []).find((item) => String(item.id) === String(clipId));
-      if (!clip || track?.locked) return body;
-      const duration = clipSourceDuration(clip);
-      const local = Math.max(0, Math.min(duration, (Number(playheadSec) || 0) - (Number(clip.timeline_start) || 0)));
-      clip.audio_keyframes = [
-        ...normalizedAudioKeyframes(clip, duration).filter((keyframe) => Math.abs(keyframe.time_sec - local) > 0.04),
-        { time_sec: local, volume: clipVolumeAt(clip, playheadSec, duration) },
-      ].sort((a, b) => a.time_sec - b.time_sec);
-      return body;
-    });
+    const command = upsertTimelineAudioKeyframe(useLiteCutEditorStore.getState().body, { clipId, trackId, playheadSec });
+    if (command.changed) get().mutateProject(() => command.body);
   },
 
   removeClipAudioKeyframe: (clipId, trackId, playheadSec) => {
-    get().mutateProject((body) => {
-      const track = getTrack(body, trackId);
-      const clip = (track?.clips || []).find((item) => String(item.id) === String(clipId));
-      if (!clip || track?.locked) return body;
-      const local = (Number(playheadSec) || 0) - (Number(clip.timeline_start) || 0);
-      clip.audio_keyframes = normalizedAudioKeyframes(clip, clipSourceDuration(clip)).filter((keyframe) => Math.abs(keyframe.time_sec - local) > 0.04);
-      return body;
-    });
+    const command = removeTimelineAudioKeyframe(useLiteCutEditorStore.getState().body, { clipId, trackId, playheadSec });
+    if (command.changed) get().mutateProject(() => command.body);
   },
 
   moveClipAudioKeyframe: (clipId, trackId, fromPlayheadSec, toPlayheadSec, { recordHistory = true } = {}) => {
-    let changed = false;
-    get().mutateProject((body) => {
-      const track = getTrack(body, trackId);
-      const clip = (track?.clips || []).find((item) => String(item.id) === String(clipId));
-      if (!clip || track?.locked) return body;
-      const duration = clipSourceDuration(clip);
-      const start = Number(clip.timeline_start) || 0;
-      const fromLocal = (Number(fromPlayheadSec) || 0) - start;
-      const frame = projectFrameStepSec(body);
-      const targetLocal = Math.max(0, Math.min(duration, Math.round(((Number(toPlayheadSec) || 0) - start) / frame) * frame));
-      const keyframes = normalizedAudioKeyframes(clip, duration);
-      const moving = keyframes.find((point) => Math.abs(point.time_sec - fromLocal) <= Math.max(0.04, frame));
-      if (!moving || Math.abs(moving.time_sec - targetLocal) < 0.000001) return body;
-      clip.audio_keyframes = [
-        ...keyframes.filter((point) => point !== moving && Math.abs(point.time_sec - targetLocal) > Math.max(0.04, frame / 2)),
-        { ...moving, time_sec: targetLocal },
-      ].sort((a, b) => a.time_sec - b.time_sec);
-      changed = true;
-      return body;
-    }, { recordHistory });
-    return changed;
+    const command = moveTimelineAudioKeyframe(useLiteCutEditorStore.getState().body, {
+      clipId,
+      trackId,
+      fromPlayheadSec,
+      toPlayheadSec,
+    });
+    if (!command.changed) return false;
+    get().mutateProject(() => command.body, { recordHistory });
+    return true;
   },
 
   updateClipVolumeAtTime: (clipId, trackId, playheadSec, volume) => {
-    get().mutateProject((body) => {
-      const track = getTrack(body, trackId);
-      const clip = (track?.clips || []).find((item) => String(item.id) === String(clipId));
-      if (!clip || track?.locked) return body;
-      const duration = clipSourceDuration(clip);
-      const existing = audioKeyframeNearPlayhead(clip, playheadSec, 0.04, duration);
-      if (!existing) {
-        clip.volume = Math.max(0, Math.min(5, Number(volume) || 0));
-        return body;
-      }
-      clip.audio_keyframes = normalizedAudioKeyframes(clip, duration).map((keyframe) =>
-        Math.abs(keyframe.time_sec - existing.time_sec) <= 0.04 ? { ...keyframe, volume: Math.max(0, Math.min(5, Number(volume) || 0)) } : keyframe,
-      );
-      return body;
-    }, { recordHistory: false });
+    const command = updateTimelineVolumeAtTime(useLiteCutEditorStore.getState().body, {
+      clipId,
+      trackId,
+      playheadSec,
+      volume,
+    });
+    if (command.changed) get().mutateProject(() => command.body, { recordHistory: false });
   },
 
   updateSelectedTransition: (type, durationSec = 0.4) => {
@@ -2422,7 +1846,7 @@ export const useLiteCutTimelineStore = create((set, get) => ({
       const dur = clipSourceDuration(clip);
       let start = Math.max(0, newStart);
       if (snap) {
-        start = snapTimelineSec(start, body, {
+        start = snapTimelinePosition(start, body, {
           enabled: get().snapEnabled,
           playheadSec,
         });
@@ -2452,7 +1876,7 @@ export const useLiteCutTimelineStore = create((set, get) => ({
         const dur = clipSourceDuration(clip);
         let start = Math.max(0, newStart);
         if (snap) {
-          start = snapTimelineSec(start, body, { enabled: get().snapEnabled, playheadSec });
+          start = snapTimelinePosition(start, body, { enabled: get().snapEnabled, playheadSec });
         }
         if (!canPlaceOnTrack(track.clips, start, dur, clipId)) return body;
         clip.timeline_start = start;
@@ -2468,7 +1892,7 @@ export const useLiteCutTimelineStore = create((set, get) => ({
       const dur = clipSourceDuration(clip);
       let start = Math.max(0, newStart);
       if (snap) {
-        start = snapTimelineSec(start, body, { enabled: get().snapEnabled, playheadSec });
+        start = snapTimelinePosition(start, body, { enabled: get().snapEnabled, playheadSec });
       }
       if (!canPlaceOnTrack(toTrack.clips, start, dur)) return body;
       fromTrack.clips = (fromTrack.clips || []).filter((c) => c.id !== clipId);
@@ -2487,7 +1911,7 @@ export const useLiteCutTimelineStore = create((set, get) => ({
       if (!ov) return body;
       let start = Math.max(0, newStart);
       if (snap) {
-        start = snapTimelineSec(start, body, {
+        start = snapTimelinePosition(start, body, {
           enabled: get().snapEnabled,
           playheadSec,
         });
@@ -2614,161 +2038,81 @@ export const useLiteCutTimelineStore = create((set, get) => ({
   },
 
   upsertOverlayKeyframe: (overlayId, playheadSec) => {
-    get().mutateProject((body) => {
-      const ov = (body.overlays || []).find((o) => o.id === overlayId);
-      if (!ov) return body;
-      const local = Math.max(0, Math.min(Number(ov.duration) || 0, (Number(playheadSec) || 0) - (Number(ov.timeline_start) || 0)));
-      const keyframes = normalizedOverlayKeyframes(ov);
-      const existing = keyframeNearPlayhead(ov, playheadSec);
-      const next = { time_sec: local, transform: overlayTransformAt(ov, playheadSec) };
-      ov.keyframes = [...keyframes.filter((keyframe) => keyframe !== existing && Math.abs(keyframe.time_sec - local) > 0.04), next].sort((a, b) => a.time_sec - b.time_sec);
-      return body;
+    const command = upsertTimelineTransformKeyframe(useLiteCutEditorStore.getState().body, {
+      kind: "overlay", itemId: overlayId, playheadSec,
     });
+    if (command.changed) get().mutateProject(() => command.body);
   },
 
   removeOverlayKeyframe: (overlayId, playheadSec) => {
-    get().mutateProject((body) => {
-      const ov = (body.overlays || []).find((o) => o.id === overlayId);
-      if (!ov) return body;
-      const local = (Number(playheadSec) || 0) - (Number(ov.timeline_start) || 0);
-      ov.keyframes = normalizedOverlayKeyframes(ov).filter((keyframe) => Math.abs(keyframe.time_sec - local) > 0.04);
-      return body;
+    const command = removeTimelineTransformKeyframe(useLiteCutEditorStore.getState().body, {
+      kind: "overlay", itemId: overlayId, playheadSec,
     });
+    if (command.changed) get().mutateProject(() => command.body);
   },
 
   moveOverlayKeyframe: (overlayId, fromPlayheadSec, toPlayheadSec, { recordHistory = true } = {}) => {
-    let changed = false;
-    get().mutateProject((body) => {
-      const overlay = (body.overlays || []).find((item) => item.id === overlayId);
-      if (!overlay) return body;
-      const start = Number(overlay.timeline_start) || 0;
-      const duration = Math.max(0, Number(overlay.duration) || 0);
-      const frame = projectFrameStepSec(body);
-      const fromLocal = (Number(fromPlayheadSec) || 0) - start;
-      const targetLocal = Math.max(0, Math.min(duration, Math.round(((Number(toPlayheadSec) || 0) - start) / frame) * frame));
-      const keyframes = normalizedOverlayKeyframes(overlay);
-      const moving = keyframes.find((point) => Math.abs(point.time_sec - fromLocal) <= Math.max(0.04, frame));
-      if (!moving || Math.abs(moving.time_sec - targetLocal) < 0.000001) return body;
-      overlay.keyframes = [
-        ...keyframes.filter((point) => point !== moving && Math.abs(point.time_sec - targetLocal) > Math.max(0.04, frame / 2)),
-        { ...moving, time_sec: targetLocal },
-      ].sort((a, b) => a.time_sec - b.time_sec);
-      changed = true;
-      return body;
-    }, { recordHistory });
-    return changed;
+    const command = moveTimelineTransformKeyframe(useLiteCutEditorStore.getState().body, {
+      kind: "overlay", itemId: overlayId, fromPlayheadSec, toPlayheadSec,
+    });
+    if (!command.changed) return false;
+    get().mutateProject(() => command.body, { recordHistory });
+    return true;
   },
 
   updateOverlayTransformAtTime: (overlayId, playheadSec, patch) => {
-    get().mutateProject((body) => {
-      const ov = (body.overlays || []).find((o) => o.id === overlayId);
-      if (!ov) return body;
-      const existing = keyframeNearPlayhead(ov, playheadSec);
-      if (!existing) {
-        ov.transform = { ...(ov.transform || {}), ...patch };
-        return body;
-      }
-      ov.keyframes = normalizedOverlayKeyframes(ov).map((keyframe) =>
-        Math.abs(keyframe.time_sec - existing.time_sec) <= 0.04 ? { ...keyframe, transform: { ...keyframe.transform, ...patch } } : keyframe,
-      );
-      return body;
-    }, { recordHistory: false });
+    const command = updateTimelineTransformAtTime(useLiteCutEditorStore.getState().body, {
+      kind: "overlay", itemId: overlayId, playheadSec, patch,
+    });
+    if (command.changed) get().mutateProject(() => command.body, { recordHistory: false });
   },
 
   applyOverlayMotionPreset: (overlayId, preset) => {
-    let changed = false;
-    get().mutateProject((body) => {
-      const overlay = (body.overlays || []).find((item) => item.id === overlayId);
-      if (!overlay) return body;
-      const keyframes = motionPresetKeyframes(overlay.transform, overlay.duration, preset, undefined);
-      if (!keyframes) return body;
-      overlay.keyframes = keyframes;
-      changed = true;
-      return body;
+    const command = applyTimelineMotionPreset(useLiteCutEditorStore.getState().body, {
+      kind: "overlay", itemId: overlayId, preset,
     });
-    return changed;
+    if (!command.changed) return false;
+    get().mutateProject(() => command.body);
+    return true;
   },
 
   upsertClipKeyframe: (clipId, trackId, playheadSec) => {
-    get().mutateProject((body) => {
-      const clip = (getTrack(body, trackId)?.clips || []).find((item) => item.id === clipId);
-      if (!clip) return body;
-      const keyframeClip = { ...clip, duration: clipSourceDuration(clip) };
-      const local = Math.max(0, Math.min(keyframeClip.duration, (Number(playheadSec) || 0) - (Number(clip.timeline_start) || 0)));
-      const keyframes = normalizedOverlayKeyframes(keyframeClip, VIDEO_LAYER_TRANSFORM_DEFAULTS);
-      clip.keyframes = [
-        ...keyframes.filter((keyframe) => Math.abs(keyframe.time_sec - local) > 0.04),
-        { time_sec: local, transform: overlayTransformAt(keyframeClip, playheadSec, VIDEO_LAYER_TRANSFORM_DEFAULTS) },
-      ].sort((a, b) => a.time_sec - b.time_sec);
-      return body;
+    const command = upsertTimelineTransformKeyframe(useLiteCutEditorStore.getState().body, {
+      kind: "clip", itemId: clipId, trackId, playheadSec,
     });
+    if (command.changed) get().mutateProject(() => command.body);
   },
 
   removeClipKeyframe: (clipId, trackId, playheadSec) => {
-    get().mutateProject((body) => {
-      const clip = (getTrack(body, trackId)?.clips || []).find((item) => item.id === clipId);
-      if (!clip) return body;
-      const keyframeClip = { ...clip, duration: clipSourceDuration(clip) };
-      const local = (Number(playheadSec) || 0) - (Number(clip.timeline_start) || 0);
-      clip.keyframes = normalizedOverlayKeyframes(keyframeClip, VIDEO_LAYER_TRANSFORM_DEFAULTS).filter((keyframe) => Math.abs(keyframe.time_sec - local) > 0.04);
-      return body;
+    const command = removeTimelineTransformKeyframe(useLiteCutEditorStore.getState().body, {
+      kind: "clip", itemId: clipId, trackId, playheadSec,
     });
+    if (command.changed) get().mutateProject(() => command.body);
   },
 
   moveClipKeyframe: (clipId, trackId, fromPlayheadSec, toPlayheadSec, { recordHistory = true } = {}) => {
-    let changed = false;
-    get().mutateProject((body) => {
-      const track = getTrack(body, trackId);
-      const clip = (track?.clips || []).find((item) => item.id === clipId);
-      if (!clip || track?.locked) return body;
-      const duration = clipSourceDuration(clip);
-      const start = Number(clip.timeline_start) || 0;
-      const frame = projectFrameStepSec(body);
-      const fromLocal = (Number(fromPlayheadSec) || 0) - start;
-      const targetLocal = Math.max(0, Math.min(duration, Math.round(((Number(toPlayheadSec) || 0) - start) / frame) * frame));
-      const keyframeClip = { ...clip, duration };
-      const keyframes = normalizedOverlayKeyframes(keyframeClip, VIDEO_LAYER_TRANSFORM_DEFAULTS);
-      const moving = keyframes.find((point) => Math.abs(point.time_sec - fromLocal) <= Math.max(0.04, frame));
-      if (!moving || Math.abs(moving.time_sec - targetLocal) < 0.000001) return body;
-      clip.keyframes = [
-        ...keyframes.filter((point) => point !== moving && Math.abs(point.time_sec - targetLocal) > Math.max(0.04, frame / 2)),
-        { ...moving, time_sec: targetLocal },
-      ].sort((a, b) => a.time_sec - b.time_sec);
-      changed = true;
-      return body;
-    }, { recordHistory });
-    return changed;
+    const command = moveTimelineTransformKeyframe(useLiteCutEditorStore.getState().body, {
+      kind: "clip", itemId: clipId, trackId, fromPlayheadSec, toPlayheadSec,
+    });
+    if (!command.changed) return false;
+    get().mutateProject(() => command.body, { recordHistory });
+    return true;
   },
 
   updateClipTransformAtTime: (clipId, trackId, playheadSec, patch) => {
-    get().mutateProject((body) => {
-      const clip = (getTrack(body, trackId)?.clips || []).find((item) => item.id === clipId);
-      if (!clip) return body;
-      const keyframeClip = { ...clip, duration: clipSourceDuration(clip) };
-      const existing = keyframeNearPlayhead(keyframeClip, playheadSec, 0.04, VIDEO_LAYER_TRANSFORM_DEFAULTS);
-      if (!existing) {
-        clip.transform = { ...VIDEO_LAYER_TRANSFORM_DEFAULTS, ...(clip.transform || {}), ...patch };
-        return body;
-      }
-      clip.keyframes = normalizedOverlayKeyframes(keyframeClip, VIDEO_LAYER_TRANSFORM_DEFAULTS).map((keyframe) =>
-        Math.abs(keyframe.time_sec - existing.time_sec) <= 0.04 ? { ...keyframe, transform: { ...keyframe.transform, ...patch } } : keyframe,
-      );
-      return body;
-    }, { recordHistory: false });
+    const command = updateTimelineTransformAtTime(useLiteCutEditorStore.getState().body, {
+      kind: "clip", itemId: clipId, trackId, playheadSec, patch,
+    });
+    if (command.changed) get().mutateProject(() => command.body, { recordHistory: false });
   },
 
   applyClipMotionPreset: (clipId, trackId, preset) => {
-    let changed = false;
-    get().mutateProject((body) => {
-      const clip = (getTrack(body, trackId)?.clips || []).find((item) => item.id === clipId);
-      if (!clip) return body;
-      const keyframes = motionPresetKeyframes(clip.transform, clipSourceDuration(clip), preset, VIDEO_LAYER_TRANSFORM_DEFAULTS);
-      if (!keyframes) return body;
-      clip.keyframes = keyframes;
-      changed = true;
-      return body;
+    const command = applyTimelineMotionPreset(useLiteCutEditorStore.getState().body, {
+      kind: "clip", itemId: clipId, trackId, preset,
     });
-    return changed;
+    if (!command.changed) return false;
+    get().mutateProject(() => command.body);
+    return true;
   },
 
   updateOverlay: (overlayId, patch) => {
