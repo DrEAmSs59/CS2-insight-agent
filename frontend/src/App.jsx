@@ -1429,9 +1429,9 @@ export default function App() {
                     <h2 className="text-xl font-bold tracking-tight text-dynamic-white">{t("app.backendConnecting")}</h2>
                     <p className="text-sm text-dynamic-zinc-400">{t("app.backendStarting")}</p>
                   </div>
-                  <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-black/40 border border-white/5">
-                    <div className="w-1.5 h-1.5 rounded-full bg-cs2-orange animate-pulse" />
-                    <span className="text-[10px] font-mono text-zinc-500 uppercase tracking-widest">
+                  <div className="flex items-center gap-2 rounded-full border border-cs2-border bg-cs2-bg-input px-3 py-1.5">
+                    <div className="h-1.5 w-1.5 animate-pulse rounded-full bg-cs2-accent" />
+                    <span className="font-mono text-[10px] uppercase tracking-widest text-cs2-text-secondary">
                       Attempting to connect: {BACKEND_CONNECT_LABEL}
                     </span>
                   </div>

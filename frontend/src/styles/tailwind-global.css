@@ -90,17 +90,43 @@ html {
 
 /* ===== 滚动条 ===== */
 ::-webkit-scrollbar {
-  width: 6px;
+  width: 7px;
+  height: 7px;
 }
 ::-webkit-scrollbar-track {
   background: var(--cs2-scrollbar-track);
+  border-radius: 999px;
+}
+::-webkit-scrollbar-track:vertical {
+  margin-block: 5px;
+}
+::-webkit-scrollbar-track:horizontal {
+  margin-inline: 5px;
 }
 ::-webkit-scrollbar-thumb {
   background: var(--cs2-scrollbar-thumb);
-  border-radius: 3px;
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:vertical {
+  min-height: 30px;
+  border-block-width: 5px;
+}
+::-webkit-scrollbar-thumb:horizontal {
+  min-width: 30px;
+  border-inline-width: 5px;
 }
 ::-webkit-scrollbar-thumb:hover {
   background: var(--cs2-scrollbar-thumb-hover);
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:active {
+  background: var(--cs2-scrollbar-thumb-active);
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-corner {
+  background: transparent;
 }
 
 .scrollbar-hover::-webkit-scrollbar-thumb {
@@ -108,9 +134,11 @@ html {
 }
 .scrollbar-hover:hover::-webkit-scrollbar-thumb {
   background: var(--cs2-scrollbar-thumb);
+  background-clip: padding-box;
 }
 .scrollbar-hover:hover::-webkit-scrollbar-thumb:hover {
   background: var(--cs2-scrollbar-thumb-hover);
+  background-clip: padding-box;
 }
 
 /* LiteCut 时间轴：主区域仅纵向滚动，横向由底部横条驱动 */
