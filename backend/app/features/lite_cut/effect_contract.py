@@ -4,12 +4,15 @@ from __future__ import annotations
 
 import json
 from functools import lru_cache
-from pathlib import Path
 from typing import Any
 
+from importlib.resources.abc import Traversable
 
-def effect_contract_path() -> Path:
-    return Path(__file__).resolve().parents[4] / "data" / "lite_cut_effect_contract.json"
+from .contracts import contract_resource
+
+
+def effect_contract_path() -> Traversable:
+    return contract_resource("lite_cut_effect_contract.json")
 
 
 @lru_cache(maxsize=1)

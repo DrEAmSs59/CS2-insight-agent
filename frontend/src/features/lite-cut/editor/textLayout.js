@@ -1,4 +1,4 @@
-import effectContract from "../../../../../data/lite_cut_effect_contract.json";
+import effectContract from "../../../../../backend/app/features/lite_cut/contracts/lite_cut_effect_contract.json";
 
 export const TEXT_LAYOUT_CONTRACT = effectContract.text_layout;
 export const TEXT_STYLE_PRESETS = effectContract.text_style_presets;

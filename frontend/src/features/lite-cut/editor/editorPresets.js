@@ -1,6 +1,6 @@
 /** LiteCut editor presets. */
 
-import effectContract from "../../../../../data/lite_cut_effect_contract.json";
+import effectContract from "../../../../../backend/app/features/lite_cut/contracts/lite_cut_effect_contract.json";
 import { textPresetCardStyle } from "./textLayout.js";
 
 const FILTER_THUMBNAIL_BACKGROUNDS = {

@@ -1,4 +1,4 @@
-import effectContract from "../../../../../data/lite_cut_effect_contract.json";
+import effectContract from "../../../../../backend/app/features/lite_cut/contracts/lite_cut_effect_contract.json";
 import { normalizeVisualCrop } from "../domain/visualMaterial.js";
 import { LITE_CUT_OUTPUT_DEFAULTS } from "./projectContract.js";
 

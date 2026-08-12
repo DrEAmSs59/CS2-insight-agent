@@ -80,10 +80,8 @@ cs2-insight.db-shm
 data/**
 !data/cs2-insight.config.example.json
 !data/basic.ini
-!data/lite_cut_effect_contract.json
 !data/lite_cut_visual_acceptance.json
 !data/lite_cut_project_codec_cases.json
-!data/lite_cut_project_contract.json
 !data/lite_cut_scene_transform_cases.json
 !data/lite_cut_timeline_semantics.json
 

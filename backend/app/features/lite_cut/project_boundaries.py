@@ -5,15 +5,15 @@ from __future__ import annotations
 from copy import deepcopy
 import json
 from functools import lru_cache
-from pathlib import Path
 from typing import Any
 
+from .contracts import contract_resource
 from .effect_contract import load_effect_contract
 
 
 @lru_cache(maxsize=1)
 def _project_contract() -> dict[str, Any]:
-    path = Path(__file__).resolve().parents[4] / "data" / "lite_cut_project_contract.json"
+    path = contract_resource("lite_cut_project_contract.json")
     return json.loads(path.read_text(encoding="utf-8"))
 
 

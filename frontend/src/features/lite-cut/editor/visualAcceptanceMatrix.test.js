@@ -1,7 +1,7 @@
 /** @vitest-environment node */
 import { describe, expect, it } from "vitest";
 import acceptance from "../../../../../data/lite_cut_visual_acceptance.json";
-import effectContract from "../../../../../data/lite_cut_effect_contract.json";
+import effectContract from "../../../../../backend/app/features/lite_cut/contracts/lite_cut_effect_contract.json";
 import tauriConfig from "../../../../src-tauri/tauri.conf.json";
 import { FILTER_PRESETS, FONT_OPTIONS, TRANSITION_OPTIONS } from "./editorPresets.js";
 

@@ -1,4 +1,4 @@
-import effectContract from "../../../../../data/lite_cut_effect_contract.json";
+import effectContract from "../../../../../backend/app/features/lite_cut/contracts/lite_cut_effect_contract.json";
 
 const materialContract = effectContract.visual_material || {};
 const capabilityMap = materialContract.capabilities || {};

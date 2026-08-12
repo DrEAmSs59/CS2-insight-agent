@@ -49,6 +49,14 @@ copyFiltered("backend", (rel) => {
   if (/\.db(?:-wal|-shm)?$/i.test(path) || path.endsWith(".exe")) return false;
   return !/^debug_.*\.py$/i.test(path);
 });
+const requiredBackendResources = [
+  "app/features/lite_cut/contracts/lite_cut_effect_contract.json",
+  "app/features/lite_cut/contracts/lite_cut_project_contract.json",
+];
+for (const rel of requiredBackendResources) {
+  const resource = join(destination, "backend", ...rel.split("/"));
+  if (!existsSync(resource)) throw new Error(`Missing staged backend resource: ${resource}`);
+}
 const catalogJson = join(
   destination,
   "backend",
@@ -67,8 +75,6 @@ copyFiltered("pov", () => true);
 const bundledDataFiles = new Set([
   "basic.ini",
   "cs2-insight.config.example.json",
-  "lite_cut_effect_contract.json",
-  "lite_cut_visual_acceptance.json",
 ]);
 copyFiltered("data", (rel) => bundledDataFiles.has(rel.toLowerCase()));
 

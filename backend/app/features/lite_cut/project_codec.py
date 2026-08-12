@@ -5,9 +5,11 @@ from __future__ import annotations
 import json
 from dataclasses import asdict, dataclass
 from functools import lru_cache
-from pathlib import Path
 from typing import Any, Iterable
 
+from importlib.resources.abc import Traversable
+
+from .contracts import contract_resource
 from .models import SCHEMA_VERSION, LiteCutProjectBody, empty_project
 from .project_boundaries import normalized_project_boundaries
 from .transition_events import normalized_transition_project
@@ -76,8 +78,8 @@ def _assert_current_project_contract(raw: dict[str, Any]) -> None:
         )
 
 
-def project_contract_path() -> Path:
-    return Path(__file__).resolve().parents[4] / "data" / "lite_cut_project_contract.json"
+def project_contract_path() -> Traversable:
+    return contract_resource("lite_cut_project_contract.json")
 
 
 @lru_cache(maxsize=1)

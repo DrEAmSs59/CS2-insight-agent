@@ -1,5 +1,5 @@
-import projectContract from "../../../../../data/lite_cut_project_contract.json";
-import effectContract from "../../../../../data/lite_cut_effect_contract.json";
+import projectContract from "../../../../../backend/app/features/lite_cut/contracts/lite_cut_project_contract.json";
+import effectContract from "../../../../../backend/app/features/lite_cut/contracts/lite_cut_effect_contract.json";
 
 export { projectContract };
 
