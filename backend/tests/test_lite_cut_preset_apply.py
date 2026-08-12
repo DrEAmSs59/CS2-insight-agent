@@ -52,7 +52,7 @@ def _project_with_v1_clips():
 def test_parse_project_body_preserves_timeline_markers():
     out = parse_project_body(
         {
-            "schema_version": 2,
+            "schema_version": 3,
             "tracks": [],
             "overlays": [],
             "markers": [{"id": "m1", "time_sec": 4.25, "label": "beat", "color": "#f59e0b"}],
@@ -66,7 +66,7 @@ def test_parse_project_body_preserves_timeline_markers():
 def test_parse_project_body_preserves_clip_speed_flags():
     out = parse_project_body(
         {
-            "schema_version": 2,
+            "schema_version": 3,
             "tracks": [
                 {
                     "id": "v1",
@@ -80,7 +80,7 @@ def test_parse_project_body_preserves_clip_speed_flags():
                             "timeline_start": 0,
                             "trim_in": 0,
                             "trim_out": 4,
-                            "canvas_fit": "cover",
+                            "content_fit": "cover",
                             "preserve_pitch": False,
                             "reverse": True,
                         }
@@ -91,7 +91,7 @@ def test_parse_project_body_preserves_clip_speed_flags():
         }
     )
     main = next(t for t in out.tracks if t.id == "v1")
-    assert main.clips[0].canvas_fit == "cover"
+    assert main.clips[0].content_fit == "cover"
     assert main.clips[0].preserve_pitch is False
     assert main.clips[0].reverse is True
 
@@ -131,13 +131,33 @@ def test_apply_transition_rhythm_flash_every_n():
         default_type="fade",
         default_duration_sec=0.4,
         flash_every_n=2,
-        flash_type="flashwhite",
+        flash_type="flash",
     )
     out = apply_transition_rhythm(project, preset)
-    main_out = next(t for t in out.tracks if t.id == "v1")
-    clips = sorted(main_out.clips, key=lambda c: c.timeline_start)
-    assert clips[0].transition_out and clips[0].transition_out.type == "fade"
-    assert clips[1].transition_out and clips[1].transition_out.type == "flashwhite"
+    by_from = {event.from_.id: event for event in out.transitions if event.from_}
+    assert by_from["c1"].type == "fade"
+    assert by_from["c1"].to is None
+    assert by_from["c2"].type == "flash"
+    assert by_from["c2"].to is None
+
+
+def test_apply_transition_rhythm_pairs_contiguous_materials_at_one_edit_point():
+    project = _project_with_v1_clips()
+    main = next(t for t in project.tracks if t.id == "v1")
+    main.clips[1].timeline_start = 10.0
+    out = apply_transition_rhythm(project, TransitionRhythmPresetBody(default_type="wipe_l", default_duration_sec=0.8))
+    assert len(out.transitions) == 1
+    assert out.transitions[0].from_ and out.transitions[0].from_.id == "c1"
+    assert out.transitions[0].to and out.transitions[0].to.id == "c2"
+    assert out.transitions[0].type == "wipe_l"
+
+
+def test_cut_transition_preset_uses_zero_duration_and_creates_no_event():
+    project = _project_with_v1_clips()
+    preset = TransitionRhythmPresetBody(default_type="cut", default_duration_sec=0)
+    assert preset.default_duration_sec == 0
+    out = apply_transition_rhythm(project, preset)
+    assert out.transitions == []
 
 
 def test_apply_overlay_recipe_each_clip_start():
@@ -181,12 +201,14 @@ def test_apply_packaging_bundle_dispatch():
     project = _project_with_v1_clips()
     bundle = PackagingBundleBody(
         color_grade=ColorGradePresetBody(saturation=20),
-        transition_rhythm=TransitionRhythmPresetBody(default_type="dissolve"),
+        transition_rhythm=TransitionRhythmPresetBody(default_type="zoom"),
     )
     out = apply_packaging_bundle(project, bundle)
     main = next(t for t in out.tracks if t.id == "v1")
     assert main.clips[0].color and main.clips[0].color.saturation == 20
-    assert main.clips[0].transition_out and main.clips[0].transition_out.type == "dissolve"
+    assert out.transitions[0].from_ and out.transitions[0].from_.id == "c1"
+    assert out.transitions[0].to is None
+    assert out.transitions[0].type == "zoom"
 
 
 def test_apply_packaging_bundle_copies_bgm_configuration():

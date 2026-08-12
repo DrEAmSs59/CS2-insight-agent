@@ -95,7 +95,7 @@ function MediaVideoSlotCard({
               const v = parseFloat(e.target.value);
               if (Number.isFinite(v) && v >= 1) onImageDurationChange?.(v);
             }}
-            className="w-16 rounded-lg border border-cs2-border-subtle bg-cs2-bg-input px-2 py-1 font-mono text-xs text-cs2-text-primary outline-none focus:border-violet-400"
+            className="w-16 rounded-lg border border-cs2-border-subtle bg-cs2-bg-input px-2 py-1 font-mono text-xs text-cs2-text-primary outline-none focus:border-cs2-accent"
           />
           <span className="text-xs text-cs2-text-muted">{t("montage.consoleMediaSlotSec")}</span>
         </div>
@@ -381,7 +381,7 @@ export function MontageStyleConsole({
                     const v = parseFloat(e.target.value);
                     onBgmStartSecChange?.(Number.isFinite(v) && v >= 0 ? v : 0);
                   }}
-                  className="w-16 rounded-lg border border-cs2-border-subtle bg-cs2-bg-input px-2.5 py-1 font-mono text-xs text-cs2-text-primary outline-none focus:border-violet-400 transition-all"
+                  className="w-16 rounded-lg border border-cs2-border-subtle bg-cs2-bg-input px-2.5 py-1 font-mono text-xs text-cs2-text-primary outline-none focus:border-cs2-accent transition-all"
                 />
                 <span className="text-xs text-cs2-text-muted">{t("montage.consoleBgmSec")}</span>
               </div>
@@ -390,7 +390,7 @@ export function MontageStyleConsole({
                   value={bgmPath}
                   onChange={(e) => onBgmPathChange(e.target.value)}
                   placeholder={t("montage.consoleBgmPlaceholder")}
-                  className="min-w-0 flex-1 rounded-lg border border-cs2-border-subtle bg-cs2-bg-input px-2.5 py-1.5 font-mono text-xs text-cs2-text-primary outline-none focus:border-cs2-accent transition-all"
+                  className="min-w-0 flex-1 rounded-lg border border-cs2-border-subtle bg-cs2-bg-input px-2.5 py-1.5 font-mono text-xs text-cs2-text-primary placeholder:text-cs2-text-muted outline-none focus:border-cs2-accent transition-all"
                 />
                 {onFilePick ? (
                   <button

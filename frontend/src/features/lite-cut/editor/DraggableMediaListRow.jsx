@@ -12,6 +12,7 @@ export default function DraggableMediaListRow({
   active = false,
   children,
   dragPreview,
+  draggable = true,
 }) {
   const t = useT();
   const [isDragging, setIsDragging] = useState(false);
@@ -25,6 +26,10 @@ export default function DraggableMediaListRow({
   }, [isDragging]);
 
   const handleDragStart = (e) => {
+    if (!draggable) {
+      e.preventDefault();
+      return;
+    }
     hideNativeDragImage(e.dataTransfer);
     liteCutMediaDragSource.begin(mediaPayload);
     e.dataTransfer.setData("application/x-litecut-media", JSON.stringify(mediaPayload));
@@ -41,7 +46,7 @@ export default function DraggableMediaListRow({
   return (
     <>
       <div
-        draggable
+        draggable={draggable}
         onDragStart={handleDragStart}
         onDragEnd={handleDragEnd}
         className={`group relative overflow-hidden rounded-lg border bg-cs2-bg-card shadow-sm transition-all hover:-translate-y-px hover:border-cs2-accent/35 hover:shadow-md ${
@@ -49,7 +54,7 @@ export default function DraggableMediaListRow({
         } ${isDragging ? "opacity-40" : ""}`}
       >
         {children}
-        {!isDragging ? (
+        {!isDragging && draggable ? (
           <button
             type="button"
             title={t("liteCut.media.addAtPlayhead")}

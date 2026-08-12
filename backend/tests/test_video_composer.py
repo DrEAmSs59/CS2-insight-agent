@@ -208,6 +208,23 @@ class TestProbeVideoSummary(unittest.TestCase):
         self.assertEqual(info["pixel_format"], "yuva444p12le")
         self.assertEqual(info["audio_codec_name"], "aac")
 
+    def test_probe_detects_webm_alpha_mode_tag_even_when_pix_fmt_is_yuv420p(self):
+        payload = {
+            "format": {"duration": "2.0"},
+            "streams": [{
+                "codec_type": "video",
+                "codec_name": "vp9",
+                "pix_fmt": "yuv420p",
+                "width": 640,
+                "height": 360,
+                "r_frame_rate": "30/1",
+                "tags": {"ALPHA_MODE": "1"},
+            }],
+        }
+        with patch("app.video_composer.ffprobe_streams", return_value=payload):
+            info = probe_video_audio_summary(Path("alpha.webm"), Path("ffprobe.exe"))
+        self.assertTrue(info["has_alpha"])
+
 
 class TestFfmpegCapture(unittest.TestCase):
     def test_amf_failure_is_retried_once_after_partial_output_cleanup(self):

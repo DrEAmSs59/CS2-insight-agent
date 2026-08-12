@@ -15,4 +15,12 @@ describe("waveformUrlForMediaStream", () => {
     expect(waveformUrlForMediaStream("http://127.0.0.1:19871/api/recorded-clips/9/stream", { bars: 48 }))
       .toBe("http://127.0.0.1:19871/api/recorded-clips/9/waveform?buckets=48&start_sec=0");
   });
+
+  it("caps an individual canvas tile while preserving stable rounded ranges", () => {
+    expect(waveformUrlForMediaStream("/api/lite-cut/assets/12/stream", {
+      bars: 5_000,
+      startSec: 17.454545454,
+      endSec: 34.909090909,
+    })).toBe("/api/lite-cut/assets/12/waveform?buckets=512&start_sec=17.454545&end_sec=34.909091");
+  });
 });

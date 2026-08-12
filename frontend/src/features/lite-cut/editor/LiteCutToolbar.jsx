@@ -29,8 +29,6 @@ export default function LiteCutToolbar({
   onProjectSettingsChange,
   onOpenExport,
   onRestoreSnapshot,
-  onImportPortable,
-  onStartPortableExport,
   onUpdateMarker,
   onDeleteMarker,
   onSeekMarker,
@@ -124,7 +122,7 @@ export default function LiteCutToolbar({
         onRequestNewProject={() => setNewProjectOpen(true)}
       />
       <LiteCutNewProjectDialog open={newProjectOpen} onClose={() => setNewProjectOpen(false)} onCreate={onNewProject} />
-      <LiteCutManagementCenter open={managementOpen} onClose={() => setManagementOpen(false)} projectId={projectId} onRestoreSnapshot={onRestoreSnapshot} onImportPortable={onImportPortable} onStartPortableExport={onStartPortableExport} />
+      <LiteCutManagementCenter open={managementOpen} onClose={() => setManagementOpen(false)} projectId={projectId} onRestoreSnapshot={onRestoreSnapshot} onImportProject={onImportProject} onExportProject={onExportProject} />
       <LiteCutMarkerManager open={markersOpen} onClose={() => setMarkersOpen(false)} markers={body?.markers || []} onUpdate={onUpdateMarker} onDelete={onDeleteMarker} onSeek={onSeekMarker} />
     </header>
   );

@@ -12,12 +12,13 @@ import threading
 import time
 import uuid
 from pathlib import Path
-from typing import Callable
+from typing import Any, Callable
 
 from fastapi import HTTPException, UploadFile
 
 from ...env_utils import get_data_dir, load_config
 from ...ffmpeg_process import decode_process_output
+from .effect_contract import load_effect_contract
 from .media_policy import (
     alpha_preview_proxy_command as build_alpha_preview_proxy_command,
     asset_exceeds_direct_preview_limits as exceeds_direct_preview_limits,
@@ -32,29 +33,11 @@ _ASSET_MAX_BYTES = 20 * 1024 * 1024 * 1024
 _ASSET_UPLOAD_CHUNK_BYTES = 1024 * 1024
 logger = logging.getLogger(__name__)
 
-_ALLOWED_EXT = frozenset({
-    ".webm",
-    ".png",
-    ".gif",
-    ".jpg",
-    ".jpeg",
-    ".webp",
-    ".mp4",
-    ".mov",
-    ".m4v",
-    ".mkv",
-    ".avi",
-    ".mp3",
-    ".wav",
-    ".m4a",
-    ".aac",
-    ".ogg",
-    ".flac",
-    ".woff",
-    ".woff2",
-    ".ttf",
-    ".otf",
-})
+_ALLOWED_EXT = frozenset(
+    f".{str(extension).strip().lower().lstrip('.')}"
+    for extension in load_effect_contract().get("import_extensions", [])
+    if str(extension).strip()
+)
 
 _PROXY_LOCKS = tuple(threading.Lock() for _ in range(64))
 
@@ -69,6 +52,12 @@ def lite_cut_assets_dir() -> Path:
     d = Path(configured).expanduser().resolve() if configured else get_data_dir() / "lite_cut_assets"
     d.mkdir(parents=True, exist_ok=True)
     return d
+
+
+def lite_cut_derived_cache_dir() -> Path:
+    directory = lite_cut_assets_dir() / ".derived"
+    directory.mkdir(parents=True, exist_ok=True)
+    return directory
 
 
 _WINDOWS_RESERVED_DIR_NAMES = {
@@ -118,6 +107,79 @@ def stable_project_asset_directory(project_id: int, project_name: str, existing_
 
 def asset_kind_for_path(path: Path) -> str:
     return classify_asset_path(path)
+
+
+def validate_linked_asset_path(raw_path: str) -> Path:
+    """Validate one user-selected external source without broadening stream access."""
+    if not raw_path or not str(raw_path).strip():
+        raise HTTPException(400, "asset path empty")
+    candidate = Path(str(raw_path)).expanduser()
+    if not candidate.is_absolute():
+        raise HTTPException(400, "linked asset path must be absolute")
+    try:
+        path = candidate.resolve(strict=True)
+    except (OSError, RuntimeError) as exc:
+        raise HTTPException(404, "asset file not found") from exc
+    if not path.is_file():
+        raise HTTPException(404, "asset file not found")
+    if path.suffix.lower() not in _ALLOWED_EXT:
+        raise HTTPException(400, f"unsupported file type: {path.suffix.lower() or '(none)'}")
+    return path
+
+
+def asset_source_path(row: dict[str, Any]) -> Path:
+    """Resolve the source recorded for an asset row using its storage policy."""
+    mode = str(row.get("storage_mode") or "managed").strip().lower()
+    raw_path = row.get("original_path") if mode == "link" else row.get("managed_path")
+    raw_path = str(raw_path or row.get("file_path") or "")
+    return validate_linked_asset_path(raw_path) if mode == "link" else validate_stored_asset_path(raw_path)
+
+
+def asset_source_status(row: dict[str, Any]) -> str:
+    # Imported linked-project assets intentionally keep their original path as
+    # a locator hint even when it is unavailable or failed identity checks.
+    # They stay offline until the explicit, validated relink operation updates
+    # the persisted state to available.
+    if str(row.get("source_status") or "").strip().lower() == "missing":
+        return "missing"
+    mode = str(row.get("storage_mode") or "managed").strip().lower()
+    raw_path = row.get("original_path") if mode == "link" else row.get("managed_path")
+    path = Path(str(raw_path or row.get("file_path") or "")).expanduser()
+    try:
+        stat = path.stat()
+    except OSError:
+        return "missing"
+    if not path.is_file():
+        return "missing"
+    expected_size = row.get("size_bytes")
+    expected_mtime = row.get("mtime_ns")
+    if expected_size is not None and int(expected_size) != int(stat.st_size):
+        return "changed"
+    if expected_mtime is not None and int(expected_mtime) != int(stat.st_mtime_ns):
+        return "changed"
+    return "available"
+
+
+def _derived_asset_directory(row: dict[str, Any]) -> Path:
+    asset_id = max(0, int(row.get("id") or 0))
+    fingerprint = re.sub(r"[^a-zA-Z0-9_-]+", "", str(row.get("fingerprint") or ""))[:20] or "source"
+    return lite_cut_derived_cache_dir() / f"asset-{asset_id}-{fingerprint}"
+
+
+def asset_preview_paths(row: dict[str, Any]) -> tuple[Path, Path]:
+    source = Path(str(row.get("file_path") or ""))
+    if str(row.get("storage_mode") or "managed").lower() != "link":
+        return preview_proxy_path_for_asset(source), alpha_preview_proxy_path_for_asset(source)
+    directory = _derived_asset_directory(row)
+    return directory / "preview60-v3.mp4", directory / "preview-alpha-v3.webm"
+
+
+def asset_waveform_cache_path(row: dict[str, Any]) -> Path:
+    if str(row.get("storage_mode") or "managed").lower() != "link":
+        from .waveform import waveform_cache_path
+
+        return waveform_cache_path(Path(str(row.get("file_path") or "")))
+    return _derived_asset_directory(row) / "waveform-v1.json"
 
 
 def probe_image_dimensions(path: Path) -> tuple[int, int] | None:
@@ -214,6 +276,52 @@ def asset_file_bundle_paths(raw_path: str | Path) -> list[Path]:
     return [candidate for candidate in [*asset_companion_paths(path), path] if candidate.is_file()]
 
 
+def asset_row_bundle_paths(row: dict[str, Any]) -> list[Path]:
+    """Return deletable files for an asset while protecting linked originals."""
+    is_link = str(row.get("storage_mode") or "managed").lower() == "link"
+    if is_link:
+        normal_proxy, alpha_proxy = asset_preview_paths(row)
+        waveform = asset_waveform_cache_path(row)
+        files = [candidate for candidate in (normal_proxy, alpha_proxy, waveform) if candidate.is_file()]
+    else:
+        files = asset_file_bundle_paths(str(row.get("managed_path") or row.get("file_path") or ""))
+    root = lite_cut_assets_dir().resolve()
+    asset_id = max(0, int(row.get("id") or 0))
+    for directory in root.glob(f"*/.preview/asset-{asset_id}-*"):
+        try:
+            directory.resolve().relative_to(root)
+        except (OSError, ValueError):
+            continue
+        files.extend(candidate for candidate in directory.rglob("*") if candidate.is_file())
+    return list(dict.fromkeys(files))
+
+
+def delete_asset_row_bundle(row: dict[str, Any]) -> None:
+    candidates = asset_row_bundle_paths(row)
+    for candidate in candidates:
+        _unlink_with_retry(candidate)
+    from .proxy_executor import remove_segment_preview_files
+
+    remove_segment_preview_files(row)
+    if str(row.get("storage_mode") or "managed").lower() == "link":
+        try:
+            _derived_asset_directory(row).rmdir()
+        except OSError:
+            pass
+        root = lite_cut_assets_dir().resolve()
+        for candidate in candidates:
+            parent = candidate.parent
+            while parent != root:
+                try:
+                    parent.relative_to(root)
+                    parent.rmdir()
+                except (OSError, ValueError):
+                    break
+                parent = parent.parent
+    else:
+        remove_empty_asset_directory(str(row.get("managed_path") or row.get("file_path") or ""))
+
+
 def remove_empty_asset_directory(raw_path: str | Path) -> None:
     root = lite_cut_assets_dir().resolve()
     path = Path(raw_path).expanduser().resolve()
@@ -263,23 +371,13 @@ def asset_stream_path(
     duration_sec: float | None = None,
     fps: float | None = None,
 ) -> Path:
-    # A current-version proxy is proof that this asset was deliberately
-    # classified and converted. Prefer it even when this request only has the
-    # database row and therefore lacks the transient ffprobe FPS/codec facts.
-    alpha_proxy = alpha_preview_proxy_path_for_asset(path)
-    if alpha_proxy.is_file():
-        return alpha_proxy
-    proxy = preview_proxy_path_for_asset(path)
-    if proxy.is_file():
-        return proxy
-    if not asset_needs_browser_proxy(
-        path,
-        video_codec=video_codec,
-        duration_sec=duration_sec,
-        fps=fps,
-    ):
-        return path
+    # Direct-source preview policy: legacy proxy files are never selected.
+    _ = (video_codec, duration_sec, fps)
     return path
+
+
+def asset_stream_path_for_row(row: dict[str, Any]) -> Path:
+    return asset_source_path(row)
 
 
 def _mp4_container_mentions_hevc(path: Path) -> bool:
@@ -345,6 +443,7 @@ def _run_proxy_process(
     command: list[str],
     *,
     cancel_event: threading.Event | None = None,
+    idle_priority: bool = False,
     timeout_sec: float = 3600,
 ) -> subprocess.CompletedProcess[str]:
     """Run FFmpeg while allowing asset/project deletion to stop it cleanly."""
@@ -352,8 +451,13 @@ def _run_proxy_process(
         return subprocess.CompletedProcess(command, 130, "", "cancelled")
     creation_flags = 0
     if os.name == "nt":
+        priority_class = (
+            getattr(subprocess, "IDLE_PRIORITY_CLASS", 0)
+            if idle_priority
+            else getattr(subprocess, "BELOW_NORMAL_PRIORITY_CLASS", 0)
+        )
         creation_flags = (
-            getattr(subprocess, "BELOW_NORMAL_PRIORITY_CLASS", 0)
+            priority_class
             | getattr(subprocess, "CREATE_NO_WINDOW", 0)
         )
     process = subprocess.Popen(
@@ -398,6 +502,7 @@ def create_browser_preview_proxy(
     *,
     ffmpeg_bin: Path,
     video_encode_quality: list[str] | Callable[[], list[str]],
+    output_path: Path | None = None,
     duration_sec: float | None = None,
     cancel_event: threading.Event | None = None,
     max_edge: int = 1280,
@@ -409,7 +514,8 @@ def create_browser_preview_proxy(
     """Create an MP4 preview for containers that ordinary browser video cannot decode."""
     if not force and not asset_needs_browser_proxy(source):
         return None
-    output = preview_proxy_path_for_asset(source)
+    output = output_path or preview_proxy_path_for_asset(source)
+    output.parent.mkdir(parents=True, exist_ok=True)
     with _proxy_lock_for(output):
         if output.is_file():
             return output
@@ -481,12 +587,14 @@ def create_alpha_browser_preview_proxy(
     source: Path,
     *,
     ffmpeg_bin: Path,
+    output_path: Path | None = None,
     duration_sec: float | None = None,
     cancel_event: threading.Event | None = None,
     max_edge: int = 1280,
 ) -> Path | None:
     """Create a browser-decodable VP9 WebM proxy while preserving MOV alpha."""
-    output = alpha_preview_proxy_path_for_asset(source)
+    output = output_path or alpha_preview_proxy_path_for_asset(source)
+    output.parent.mkdir(parents=True, exist_ok=True)
     with _proxy_lock_for(output):
         if output.is_file():
             return output
@@ -520,11 +628,12 @@ def ensure_alpha_mov_preview_proxy(
     cancel_event: threading.Event | None = None,
     max_edge: int = 1280,
     has_alpha: bool | None = None,
+    output_path: Path | None = None,
 ) -> Path | None:
     """Return an alpha-preserving browser proxy when ``source`` is an alpha MOV."""
     if source.suffix.lower() != ".mov":
         return None
-    existing = alpha_preview_proxy_path_for_asset(source)
+    existing = output_path or alpha_preview_proxy_path_for_asset(source)
     if existing.is_file():
         return existing
     if has_alpha is False:
@@ -542,6 +651,7 @@ def ensure_alpha_mov_preview_proxy(
         return create_alpha_browser_preview_proxy(
             source,
             ffmpeg_bin=ffmpeg_bin,
+            output_path=existing,
             duration_sec=duration_sec or info.get("duration"),
             cancel_event=cancel_event,
             max_edge=max_edge,

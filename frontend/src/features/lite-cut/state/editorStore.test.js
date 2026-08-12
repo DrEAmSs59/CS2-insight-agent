@@ -25,8 +25,9 @@ describe("normalizeLiteCutBody", () => {
     vi.restoreAllMocks();
   });
 
-  it("keeps portable project data while restoring required editor defaults", () => {
+  it("keeps project data while restoring required editor defaults", () => {
     const { body, changed } = normalizeLiteCutBody({
+      schema_version: 3,
       tracks: [
         {
           id: "v1",
@@ -50,8 +51,9 @@ describe("normalizeLiteCutBody", () => {
     expect(body.output.framemeld_enabled).toBe(false);
   });
 
-  it("preserves the FrameMeld switch and removes retired frame-blend settings", () => {
+  it("preserves the FrameMeld switch and rejects retired frame-blend settings", () => {
     const valid = normalizeLiteCutBody({
+      schema_version: 3,
       tracks: [{ id: "v1", type: "video", clips: [] }],
       output: {
         width: 1920,
@@ -59,10 +61,6 @@ describe("normalizeLiteCutBody", () => {
         fps: 120,
         encoder: "auto",
         framemeld_enabled: true,
-        frame_blend_enabled: true,
-        frame_blend_frames: 7,
-        high_frame_downsample_enabled: true,
-        delivery_fps: 60,
       },
     });
     expect(valid.body.output).toMatchObject({
@@ -70,6 +68,7 @@ describe("normalizeLiteCutBody", () => {
     });
 
     const repaired = normalizeLiteCutBody({
+      schema_version: 3,
       tracks: [{ id: "v1", type: "video", clips: [] }],
       output: {
         width: 1920,
@@ -82,14 +81,16 @@ describe("normalizeLiteCutBody", () => {
     expect(repaired.body.output).toMatchObject({
       framemeld_enabled: false,
     });
-    for (const legacyKey of ["frame_blend_enabled", "frame_blend_frames", "high_frame_downsample_enabled", "delivery_fps"]) {
-      expect(legacyKey in valid.body.output).toBe(false);
-    }
+    expect(() => normalizeLiteCutBody({
+      schema_version: 3,
+      output: { frame_blend_enabled: true },
+    })).toThrowError(expect.objectContaining({ code: "LITECUT_LEGACY_PROJECT_FIELDS_UNSUPPORTED" }));
     expect(repaired.changed).toBe(true);
   });
 
   it("keeps a supported per-project export encoder", () => {
     const { body, changed } = normalizeLiteCutBody({
+      schema_version: 3,
       tracks: [{ id: "v1", type: "video", clips: [] }],
       output: { width: 1920, height: 1080, fps: 60, encoder: "h264_nvenc" },
     });
@@ -100,6 +101,7 @@ describe("normalizeLiteCutBody", () => {
 
   it("does not inject a duplicate video track when v1 was renamed away", () => {
     const { body } = normalizeLiteCutBody({
+      schema_version: 3,
       tracks: [
         { id: "v-abc123", type: "video", label: "V1", clips: [{ id: "clip-a" }] },
         { id: "a1", type: "audio", label: "A1", clips: [] },
@@ -112,8 +114,9 @@ describe("normalizeLiteCutBody", () => {
     expect(videoTracks[0]).toMatchObject({ id: "v-abc123", label: "V1" });
   });
 
-  it("dedupes duplicate video track labels left by older builds", () => {
+  it("dedupes malformed duplicate video track labels", () => {
     const { body, changed } = normalizeLiteCutBody({
+      schema_version: 3,
       tracks: [
         { id: "v1", type: "video", label: "V1", clips: [] },
         { id: "v-abc123", type: "video", label: "V1", clips: [{ id: "clip-a" }] },
@@ -128,6 +131,7 @@ describe("normalizeLiteCutBody", () => {
 
   it("still injects a v1 track when the project has no video tracks", () => {
     const { body } = normalizeLiteCutBody({
+      schema_version: 3,
       tracks: [{ id: "a1", type: "audio", label: "A1", clips: [] }],
       output: { width: 1920, height: 1080, fps: 60 },
     });

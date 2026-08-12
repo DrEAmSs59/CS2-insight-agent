@@ -410,7 +410,7 @@ describe("DemoAnalysisPage Insight Agent flow", () => {
     expect(screen.getByText("$2,450")).toBeTruthy();
     const weaponDisplay = screen.getByLabelText(/ZywOo 当前武器/);
     expect(weaponDisplay.textContent).toBe("");
-    expect(weaponDisplay.querySelector('img[src$="/ak47.svg"]')?.className).toContain("h-5");
+    expect(weaponDisplay.querySelector('img[src$="/ak47.svg"]')?.className).toContain("h-[18px]");
     expect(screen.getByLabelText(/ZywOo 头盔和防弹衣/)).toBeTruthy();
     expect(screen.queryByText("100 头甲")).toBeNull();
     expect(view.container.querySelector('img[src$="/ak47.svg"]')).toBeTruthy();
@@ -424,7 +424,23 @@ describe("DemoAnalysisPage Insight Agent flow", () => {
     const ctRosterSlot = view.container.querySelector('[data-replay-roster-slot="ZywOo"]');
     expect(ctRosterSlot?.getAttribute("data-side")).toBe("CT");
     expect(ctRosterSlot?.className).toContain("border-sky-300");
+    expect(ctRosterSlot?.className).toContain("bg-[#07182a]");
     expect(ctRosterSlot?.querySelector("[data-health-fill]")?.className).toContain("replay-roster-health-fill--ct");
+    expect(ctRosterSlot?.querySelector('[data-roster-region="identity"]')?.textContent).toContain("ZywOo");
+    expect(ctRosterSlot?.querySelector('[data-roster-region="number"] span.rounded-full')?.textContent).toBe("0");
+    expect(ctRosterSlot?.querySelector('[data-roster-region="number"] span.rounded-full')?.className).toContain("h-[18px]");
+    expect(ctRosterSlot?.querySelector('[data-roster-region="economy"]')?.textContent).toContain("$2,450");
+    expect(ctRosterSlot?.querySelector('[data-roster-region="kd"]')).toBeTruthy();
+    expect(ctRosterSlot?.querySelector('[data-roster-region="weapon"] img[src$="/ak47.svg"]')).toBeTruthy();
+    expect(ctRosterSlot?.querySelector('[data-roster-region="utility"] img[src$="/smokegrenade.svg"]')).toBeTruthy();
+    expect(ctRosterSlot?.querySelector('[data-roster-region="objective"] img[src$="/defuser.svg"]')).toBeTruthy();
+    expect(ctRosterSlot?.querySelector('[data-roster-region="utility"] img[src$="/defuser.svg"]')).toBeNull();
+    expect(ctRosterSlot?.querySelector('[data-roster-region="objective"] img[src$="/c4.svg"]')).toBeTruthy();
+    expect(ctRosterSlot?.querySelector('[data-roster-region="weapon"] img[src$="/c4.svg"]')).toBeNull();
+    expect(ctRosterSlot?.querySelector('[data-roster-region="number"]')?.className).toContain("row-start-3");
+    expect(ctRosterSlot?.querySelector('[data-roster-region="objective"]')?.className).toContain("items-end");
+    expect(ctRosterSlot?.querySelector('[data-roster-region="health"]')?.textContent).toContain("100HP");
+    expect(ctRosterSlot?.querySelector('[data-roster-region="armor"] img[src$="/armor_helmet.svg"]')).toBeTruthy();
     expect(ctRosterSlot?.closest(".replay-roster-surface")).toBeTruthy();
     expect(ctRosterSlot?.closest(".replay-roster")?.className).toContain("h-fit");
     expect(view.container.querySelector(".replay-radar-surface")).toBeTruthy();
@@ -436,6 +452,8 @@ describe("DemoAnalysisPage Insight Agent flow", () => {
     const tRosterSlot = view.container.querySelector('[data-replay-roster-slot="b1t"]');
     expect(tRosterSlot?.getAttribute("data-side")).toBe("T");
     expect(tRosterSlot?.className).toContain("border-amber-200");
+    expect(tRosterSlot?.className).toContain("bg-[#1b1707]");
+    expect(tRosterSlot?.querySelector('[data-roster-region="objective"]')?.className).toContain("items-start");
     expect(tRosterSlot?.querySelector("[data-health-fill]")?.className).toContain("replay-roster-health-fill--t");
     expect(tRosterSlot?.className).toContain("replay-observer-slot");
     expect(screen.getByLabelText("ZywOo 携带 C4").querySelector('img[src$="/c4.svg"]')).toBeTruthy();
@@ -563,8 +581,11 @@ describe("DemoAnalysisPage Insight Agent flow", () => {
     expect(within(sideSelector).getByRole("button", { name: "全部" }).getAttribute("aria-pressed")).toBe("true");
     expect(screen.queryByRole("group", { name: "热力图玩家列表" })).toBeNull();
     expect(screen.getByTestId("heatmap-focused-player").textContent).toBe("ZywOo");
-    expect(screen.getByTestId("heatmap-map-surface").className).toContain("heatmap-map-surface");
-    const zoomGroup = screen.getByTestId("heatmap-map-surface").querySelector('[role="group"]');
+    const mapSurface = screen.getByTestId("heatmap-map-surface");
+    expect(mapSurface.className).toContain("heatmap-map-surface");
+    expect(mapSurface.className).toContain("aspect-[3/2]");
+    expect(screen.getByTestId("heatmap-map-plane").className).toContain("aspect-square");
+    const zoomGroup = mapSurface.querySelector('[role="group"]');
     const zoomButtons = within(zoomGroup).getAllByRole("button");
     fireEvent.click(zoomButtons[1]);
     expect(screen.getByTestId("heatmap-map-surface").getAttribute("data-zoom")).toBe("1.20");
@@ -594,7 +615,6 @@ describe("DemoAnalysisPage Insight Agent flow", () => {
     });
     fireEvent(screen.getByTestId("heatmap-map-surface"), wheelOutEvent);
     expect(wheelOutEvent.defaultPrevented).toBe(true);
-    const mapSurface = screen.getByTestId("heatmap-map-surface");
     expect(mapSurface.getAttribute("data-zoom")).toBe("0.83");
     vi.spyOn(mapSurface, "getBoundingClientRect").mockReturnValue({
       width: 600,

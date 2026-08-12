@@ -1,32 +1,77 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { AlertTriangle, FileSearch, FileVideo2, Film, ImageIcon, Layers, Loader2, Music, RefreshCw, Search, Trash2, Type, X } from "lucide-react";
+import { AlertTriangle, FileSearch, FileVideo2, Film, ImageIcon, Layers, Link2, Loader2, Music, RefreshCw, Search, Trash2, Type, Upload, X } from "lucide-react";
 import { useRef } from "react";
 
+import { desktopBridge } from "../../../desktop/desktopBridge.js";
 import {
   getLiteCutAssetStreamUrl,
   getRecordedClipStreamUrl,
   liteCutClient,
 } from "../api/liteCutClient.js";
-import { mapAssetRow } from "../state/assetUtils.js";
+import { canPlaceAssetOnTimeline, mapAssetRow } from "../state/assetUtils.js";
 import { mapRecordedClipRow, reconcileRecordedClipDuration } from "../state/mediaUtils.js";
-import { replacementAcceptForWarning, replacementMatchesWarning } from "../state/relinkUtils.js";
+import { replacementMatchesWarning } from "../state/relinkUtils.js";
 import { useT } from "../../../i18n/useT.js";
 
 import DraggableMediaCard from "./DraggableMediaCard.jsx";
 import DraggableMediaListRow from "./DraggableMediaListRow.jsx";
-import UploadDropZone from "./UploadDropZone.jsx";
 import VoiceoverRecorder from "./VoiceoverRecorder.jsx";
+
+const LITE_CUT_ASSET_EXTENSIONS = [
+  "webm", "png", "gif", "jpg", "jpeg", "webp", "mp4", "mov", "m4v", "mkv", "avi",
+  "mp3", "wav", "m4a", "aac", "ogg", "flac", "woff", "woff2", "ttf", "otf",
+];
+
+function normalizeLinkedPaths(entries) {
+  return Array.from(new Set(Array.from(entries || [])
+    .map((value) => String(value || "").trim())
+    .filter(Boolean)));
+}
+
+function localPathFromDropValue(value) {
+  const raw = String(value || "").trim();
+  if (!raw || raw.startsWith("#")) return "";
+  if (/^(?:[a-zA-Z]:[\\/]|\\\\|\/)/.test(raw)) return raw;
+  if (!raw.toLowerCase().startsWith("file://")) return "";
+  try {
+    const url = new URL(raw);
+    const pathname = decodeURIComponent(url.pathname || "");
+    if (url.hostname && url.hostname.toLowerCase() !== "localhost") {
+      return `\\\\${url.hostname}${pathname.replace(/\//g, "\\")}`;
+    }
+    return pathname.replace(/^\/([a-zA-Z]:)/, "$1").replace(/\//g, "\\");
+  } catch {
+    return "";
+  }
+}
+
+/** Extract real local paths only; browser File objects are never uploaded as a fallback. */
+export function extractDroppedAssetPaths(dataTransfer) {
+  const candidates = [];
+  for (const file of Array.from(dataTransfer?.files || [])) {
+    if (typeof file?.path === "string") candidates.push(file.path);
+  }
+  for (const type of ["text/uri-list", "text/plain"]) {
+    try {
+      const raw = dataTransfer?.getData?.(type);
+      if (raw) candidates.push(...String(raw).split(/\r?\n/).map(localPathFromDropValue));
+    } catch {
+      // Some WebViews reject reads for data types they do not expose.
+    }
+  }
+  return normalizeLinkedPaths(candidates);
+}
 
 function formatDuration(sec) {
   const n = Number(sec);
   return Number.isFinite(n) && n > 0 ? `${n.toFixed(1)}s` : "--";
 }
 
-const PROBEABLE_UPLOAD_TYPES = /^(video|audio)\//;
+const PROBEABLE_GENERATED_TYPES = /^audio\//;
 
 /** Browser-side duration probe; backend ffprobe may be unavailable in some installs. */
-function probeLocalMediaDurationSec(file) {
-  if (!PROBEABLE_UPLOAD_TYPES.test(String(file?.type || ""))) return Promise.resolve(null);
+function probeGeneratedMediaDurationSec(file) {
+  if (!PROBEABLE_GENERATED_TYPES.test(String(file?.type || ""))) return Promise.resolve(null);
   return new Promise((resolve) => {
     const url = URL.createObjectURL(file);
     const element = document.createElement(file.type.startsWith("audio/") ? "audio" : "video");
@@ -62,7 +107,30 @@ function assetKindIcon(kind) {
   return ImageIcon;
 }
 
-function RecordedClipListRow({ item, active, onAddToTimeline, onReplace, onDurationChange }) {
+function insightAssetToRecordedItem(asset) {
+  const origin = asset?.origin_metadata || {};
+  const recordingId = Number(asset?.origin_ref);
+  const semantic = mapRecordedClipRow({
+    ...origin,
+    id: Number.isFinite(recordingId) && recordingId > 0 ? recordingId : Number(asset?.id),
+    output_path: asset?.file_path,
+    duration_sec: asset?.duration_sec,
+    fps: asset?.fps,
+  });
+  if (!semantic) return null;
+  return {
+    ...semantic,
+    ...asset,
+    id: asset.id,
+    mediaKind: "asset",
+    recordingId: Number.isFinite(recordingId) && recordingId > 0 ? recordingId : null,
+    title: semantic.title || asset.name,
+    duration: Number(asset.duration_sec) || semantic.duration || 0,
+    _raw: { ...origin, id: recordingId, output_path: asset.file_path },
+  };
+}
+
+function RecordedClipListRow({ item, active, onAddToTimeline, onReplace, onDurationChange, onRelinkAsset }) {
   const t = useT();
   const categoryClasses = {
     highlight: "bg-emerald-500/20 text-emerald-300",
@@ -77,12 +145,21 @@ function RecordedClipListRow({ item, active, onAddToTimeline, onReplace, onDurat
       ? t(`liteCut.media.category.${item.category}`)
       : item.category,
   };
-  const thumbUrl = getRecordedClipStreamUrl(item.id);
+  const sourceMissing = item.source_status === "missing" || item.source_available === false;
+  const isLinkedAsset = item.mediaKind === "asset";
+  const thumbUrl = isLinkedAsset
+    ? getLiteCutAssetStreamUrl(item.id, item.preview_proxy_version)
+    : getRecordedClipStreamUrl(item.id);
   const metaLine = [item.map?.replace(/^de_/, ""), item.round != null ? `R${item.round}` : null, item.player]
     .filter(Boolean)
     .join(" 路 ");
 
-  const thumb = (
+  const thumb = sourceMissing ? (
+    <div className="flex h-full w-full flex-col items-center justify-center gap-1 bg-black/80 text-amber-200">
+      <AlertTriangle className="h-5 w-5" />
+      <span className="text-[8px] font-semibold">{t("liteCut.media.sourceMissing")}</span>
+    </div>
+  ) : (
     <video
       src={thumbUrl}
       className="h-full w-full object-cover"
@@ -92,7 +169,7 @@ function RecordedClipListRow({ item, active, onAddToTimeline, onReplace, onDurat
       onLoadedMetadata={(event) => {
         const duration = Number(event.currentTarget?.duration);
         if (Number.isFinite(duration) && duration > 0.05 && Math.abs(duration - (Number(item.duration) || 0)) > 0.05) {
-          onDurationChange?.(item.id, duration);
+          if (!isLinkedAsset) onDurationChange?.(item.id, duration);
         }
       }}
     />
@@ -102,7 +179,8 @@ function RecordedClipListRow({ item, active, onAddToTimeline, onReplace, onDurat
     <DraggableMediaListRow
       mediaPayload={item}
       active={active}
-      onAddToTimeline={() => onAddToTimeline?.(item)}
+      draggable={!sourceMissing}
+      onAddToTimeline={sourceMissing ? undefined : () => onAddToTimeline?.(item)}
       dragPreview={thumb}
     >
       <div className="flex gap-2.5 p-2 pr-9">
@@ -133,9 +211,10 @@ function RecordedClipListRow({ item, active, onAddToTimeline, onReplace, onDurat
           {item.ai ? (
             <p className="mt-0.5 line-clamp-1 text-[9px] leading-relaxed text-cs2-text-secondary/80">{item.ai}</p>
           ) : null}
+          {sourceMissing ? <button type="button" onClick={(event) => { event.preventDefault(); event.stopPropagation(); onRelinkAsset?.(item); }} className="mt-1.5 inline-flex items-center gap-1 rounded border border-amber-300/40 px-2 py-1 text-[9px] font-semibold text-amber-200 hover:bg-amber-300 hover:text-black"><Link2 className="h-3 w-3" />{t("liteCut.media.relink")}</button> : null}
         </div>
       </div>
-      {onReplace ? (
+      {onReplace && !sourceMissing ? (
         <button
           type="button"
           title={t("liteCut.media.replaceSelected")}
@@ -150,15 +229,14 @@ function RecordedClipListRow({ item, active, onAddToTimeline, onReplace, onDurat
   );
 }
 
-function LocalAssetCard({
+export function LocalAssetCard({
   item,
   onAddToTimeline,
   onUseFontAsset,
   onDeleteAsset,
   onReplace,
-  onRetryProxy,
+  onRelinkAsset,
   deleting = false,
-  retrying = false,
   inUse = false,
 }) {
   const t = useT();
@@ -166,9 +244,8 @@ function LocalAssetCard({
   const isAudio = item.kind === "audio";
   const isFont = item.kind === "font";
   const Icon = assetKindIcon(item.kind);
-  const proxyBusy = item.preview_proxy_required && ["queued", "running"].includes(item.preview_proxy_status);
-  const proxyFailed = item.preview_proxy_required && ["failed", "missing"].includes(item.preview_proxy_status);
-  const proxyUsable = !item.preview_proxy_required || item.preview_proxy_status === "ready";
+  const sourceMissing = item.source_status === "missing" || item.source_available === false;
+  const canPlace = canPlaceAssetOnTimeline(item);
   const streamUrl = getLiteCutAssetStreamUrl(item.id, item.preview_proxy_version);
 
   return (
@@ -176,12 +253,12 @@ function LocalAssetCard({
       name={item.name}
       aspectClass={isVideo ? "aspect-video" : "aspect-square"}
       mediaPayload={item}
-      draggable={!isFont && proxyUsable}
+      draggable={!isFont && canPlace}
       actionTitle={isFont ? t("liteCut.media.useFont") : t("liteCut.media.addToTimeline")}
-      onAddToTimeline={proxyUsable ? () => (isFont ? onUseFontAsset?.(item) : onAddToTimeline?.(item)) : undefined}
+      onAddToTimeline={canPlace ? () => (isFont ? onUseFontAsset?.(item) : onAddToTimeline?.(item)) : undefined}
       preview={
         <div className="relative flex h-full w-full items-center justify-center bg-gradient-to-br from-zinc-900 via-neutral-900 to-black">
-          {isVideo && proxyUsable ? (
+          {isVideo && !sourceMissing ? (
             <video src={streamUrl} className="h-full w-full object-cover opacity-90" muted playsInline preload="metadata" />
           ) : isVideo ? (
             <FileVideo2 className="h-8 w-8 text-cs2-text-muted" />
@@ -220,30 +297,21 @@ function LocalAssetCard({
               {item.fps != null ? `${Math.round(Number(item.fps) * 100) / 100} FPS` : "FPS ?"}
             </span>
           ) : null}
-          {proxyBusy ? (
-            <div className="absolute inset-0 flex flex-col items-center justify-center gap-1.5 bg-black/70 text-[9px] font-semibold text-cs2-text-secondary">
-              <Loader2 className="h-5 w-5 animate-spin text-cs2-accent" />
-              {t(item.preview_proxy_mode === "remux"
-                ? "liteCut.media.proxyRemuxing"
-                : "liteCut.media.proxyGenerating")}
-            </div>
-          ) : null}
-          {proxyFailed ? (
-            <div className="absolute inset-0 flex flex-col items-center justify-center gap-1.5 bg-black/75 px-2 text-center text-[9px] font-semibold text-rose-300">
+          {sourceMissing ? (
+            <div className="absolute inset-0 flex flex-col items-center justify-center gap-1.5 bg-black/80 px-2 text-center text-[9px] font-semibold text-amber-200">
               <AlertTriangle className="h-5 w-5" />
-              <span>{t("liteCut.media.proxyFailed")}</span>
+              <span>{t("liteCut.media.sourceMissing")}</span>
               <button
                 type="button"
-                disabled={retrying}
                 onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
-                onClick={(e) => { e.preventDefault(); e.stopPropagation(); onRetryProxy?.(item); }}
-                className="rounded-md border border-cs2-accent/50 bg-cs2-bg-card px-2 py-1 text-cs2-accent hover:bg-cs2-accent hover:text-cs2-text-on-accent disabled:opacity-50"
+                onClick={(e) => { e.preventDefault(); e.stopPropagation(); onRelinkAsset?.(item); }}
+                className="rounded-md border border-amber-300/50 bg-cs2-bg-card px-2 py-1 text-amber-200 hover:bg-amber-300 hover:text-black"
               >
-                {retrying ? t("liteCut.media.proxyRetrying") : t("liteCut.media.proxyRetry")}
+                {t("liteCut.media.relink")}
               </button>
             </div>
           ) : null}
-          {onReplace && proxyUsable ? (
+          {onReplace && canPlace ? (
             <button
               type="button"
               title={t("liteCut.media.replaceSelected")}
@@ -299,16 +367,17 @@ export default function LiteCutMediaBin({
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(null);
   const [uploadError, setUploadError] = useState(null);
+  const [picking, setPicking] = useState(false);
+  const [linking, setLinking] = useState(false);
+  const [linkDragOver, setLinkDragOver] = useState(false);
   const [deletingAssetId, setDeletingAssetId] = useState(null);
-  const [retryingAssetId, setRetryingAssetId] = useState(null);
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState(null);
   const [assetWarnings, setAssetWarnings] = useState([]);
   const [assetWarningsLoading, setAssetWarningsLoading] = useState(false);
-  const [relinkingWarning, setRelinkingWarning] = useState(null);
   const uploadAbortRef = useRef(null);
-  const relinkInputRef = useRef(null);
+  const linkDropZoneRef = useRef(null);
   const durationPatchRef = useRef(new Set());
 
   const handleRecordedDurationChange = useCallback((clipId, durationSec) => {
@@ -377,11 +446,6 @@ export default function LiteCutMediaBin({
     setLoading(true);
     setLoadError(null);
     try {
-      try {
-        await liteCutClient.purgeMissingRecordedClips();
-      } catch {
-        // non-fatal
-      }
       const data = await liteCutClient.listRecordedClips({ limit: 500, offset: 0 });
       const mapped = (data.items || []).map(mapRecordedClipRow).filter(Boolean);
       setItems(mapped);
@@ -402,21 +466,13 @@ export default function LiteCutMediaBin({
     if (tab === "recorded") void loadClips();
   }, [tab, loadClips]);
 
-  useEffect(() => {
-    if (tab === "local") void loadAssets();
-  }, [tab, loadAssets]);
-
-  useEffect(() => {
-    if (tab !== "local" || !localAssets.some((asset) => ["queued", "running"].includes(asset.preview_proxy_status))) return undefined;
-    const timer = window.setInterval(() => void loadAssets(), 1000);
-    return () => window.clearInterval(timer);
-  }, [tab, localAssets, loadAssets]);
+  useEffect(() => { void loadAssets(); }, [loadAssets]);
 
   useEffect(() => {
     void loadAssetWarnings();
   }, [loadAssetWarnings]);
 
-  const uploadLocalFiles = async (files) => {
+  const saveGeneratedAssets = async (files) => {
     const queue = Array.from(files || []).filter(Boolean);
     if (!queue.length) return;
     const controller = new AbortController();
@@ -427,8 +483,8 @@ export default function LiteCutMediaBin({
     try {
       for (const [index, file] of queue.entries()) {
         setUploadProgress({ current: index, total: queue.length, percent: 0, name: file.name || "" });
-        const probedDuration = await probeLocalMediaDurationSec(file);
-        await liteCutClient.uploadAsset({
+        const probedDuration = await probeGeneratedMediaDurationSec(file);
+        await liteCutClient.uploadGeneratedAsset({
           file,
           projectId: projectId || null,
           clientDurationSec: probedDuration != null ? probedDuration.toFixed(3) : null,
@@ -453,45 +509,147 @@ export default function LiteCutMediaBin({
 
   const cancelUpload = () => uploadAbortRef.current?.abort();
 
-  const chooseReplacement = (warning) => {
-    setRelinkingWarning(warning);
-    if (relinkInputRef.current) {
-      relinkInputRef.current.accept = replacementAcceptForWarning(warning);
-      relinkInputRef.current.value = "";
-      relinkInputRef.current.click();
+  const registerLinkedAssets = useCallback(async (entries) => {
+    const paths = normalizeLinkedPaths(entries);
+    if (!paths.length) return;
+    setLinking(true);
+    setUploadError(null);
+    try {
+      await liteCutClient.linkAssets({ paths, projectId: projectId || null });
+      await loadAssets();
+      setTab(existingAsset?.origin_type === "insight_recording" ? "recorded" : "local");
+    } catch {
+      setUploadError(t("liteCut.media.linkFailed"));
+    } finally {
+      setLinking(false);
     }
-  };
+  }, [loadAssets, projectId, t]);
 
-  const relinkMissingAsset = async (file) => {
-    const warning = relinkingWarning;
-    if (!file || !warning || !projectId) return;
+  const pickLocalAssetPaths = useCallback(async (multiple = true) => {
+    if (desktopBridge?.showOpenDialog) {
+      const result = await desktopBridge.showOpenDialog({
+        title: t("liteCut.media.chooseFiles"),
+        filters: [{ name: t("liteCut.media.linkTitle"), extensions: LITE_CUT_ASSET_EXTENSIONS }],
+        properties: multiple ? ["openFile", "multiSelections"] : ["openFile"],
+      });
+      return result?.filePaths || [];
+    }
+    const result = await liteCutClient.pickFiles({ fileType: "lite_cut_asset", multiple });
+    return result?.paths || (result?.path ? [result.path] : []);
+  }, [t]);
+
+  const chooseAndLinkAssets = useCallback(async () => {
+    if (picking || linking) return;
+    setPicking(true);
+    setUploadError(null);
+    let paths = [];
+    try {
+      paths = await pickLocalAssetPaths(true);
+    } catch {
+      setUploadError(t("liteCut.media.pickerFailed"));
+    } finally {
+      setPicking(false);
+    }
+    if (paths.length) await registerLinkedAssets(paths);
+  }, [linking, pickLocalAssetPaths, picking, registerLinkedAssets, t]);
+
+  const handleBrowserAssetDrop = useCallback((event) => {
+    event.preventDefault();
+    setLinkDragOver(false);
+    if (picking || linking) return;
+    const paths = extractDroppedAssetPaths(event.dataTransfer);
+    if (paths.length) {
+      void registerLinkedAssets(paths);
+      return;
+    }
+    if (event.dataTransfer?.files?.length || event.dataTransfer?.types?.includes?.("Files")) {
+      setUploadError(t("liteCut.media.dropPathUnavailable"));
+    }
+  }, [linking, picking, registerLinkedAssets, t]);
+
+  useEffect(() => {
+    if (tab !== "local" || !desktopBridge?.onFileDragDrop) return undefined;
+    return desktopBridge.onFileDragDrop((payload) => {
+      if (payload?.type === "leave") {
+        setLinkDragOver(false);
+        return;
+      }
+      const zone = linkDropZoneRef.current;
+      const position = payload?.position;
+      if (!zone || !position) return;
+      const rect = zone.getBoundingClientRect();
+      const inside = position.x >= rect.left && position.x <= rect.right
+        && position.y >= rect.top && position.y <= rect.bottom;
+      if (payload.type === "enter" || payload.type === "over") {
+        setLinkDragOver(inside && !picking && !linking);
+        return;
+      }
+      if (payload.type === "drop") {
+        setLinkDragOver(false);
+        if (inside && !picking && !linking) void registerLinkedAssets(payload.paths);
+      }
+    });
+  }, [linking, picking, registerLinkedAssets, tab]);
+
+  const relinkMissingAssetPath = async (warning, replacementPath, existingAsset = null) => {
+    if (!replacementPath || !warning || !projectId) return;
     setAssetWarningsLoading(true);
     setUploadError(null);
     try {
-      const duration = await probeLocalMediaDurationSec(file);
-      const data = await liteCutClient.uploadAsset({
-        file,
-        projectId,
-        clientDurationSec: duration != null ? duration.toFixed(3) : null,
-      });
+      const data = existingAsset
+        ? await liteCutClient.relinkAsset(existingAsset.id, replacementPath)
+        : (await liteCutClient.linkAssets({ paths: [replacementPath], projectId })).items?.[0];
       const asset = mapAssetRow(data);
       if (!replacementMatchesWarning(warning, asset)) {
-        await liteCutClient.deleteAsset(Number(asset.id)).catch(() => {});
+        if (!existingAsset) await liteCutClient.deleteAsset(Number(asset.id)).catch(() => {});
         throw new Error("incompatible_replacement");
       }
       const changed = await onRelinkMissingAsset?.(warning, asset);
-      if (changed === false) throw new Error("reference_not_found");
+      if (changed === false && !existingAsset) throw new Error("reference_not_found");
       await loadAssets();
       await loadAssetWarnings();
       setTab("local");
     } catch (error) {
-      setUploadError(error?.message === "incompatible_replacement"
-        ? t("liteCut.media.relinkTypeMismatch")
-        : t("liteCut.media.relinkFailed"));
+      const code = error?.response?.data?.detail?.code;
+      setUploadError(code === "LITECUT_ASSET_IDENTITY_MISMATCH"
+        ? t("liteCut.media.relinkIdentityMismatch")
+        : error?.message === "incompatible_replacement" || code === "LITECUT_ASSET_TYPE_MISMATCH"
+          ? t("liteCut.media.relinkTypeMismatch")
+          : t("liteCut.media.relinkFailed"));
     } finally {
       setAssetWarningsLoading(false);
-      setRelinkingWarning(null);
     }
+  };
+
+  const pickReplacementForWarning = async (warning, existingAsset = null) => {
+    if (picking || linking || assetWarningsLoading) return;
+    setPicking(true);
+    setUploadError(null);
+    let replacementPath = "";
+    try {
+      replacementPath = (await pickLocalAssetPaths(false))[0] || "";
+    } catch {
+      setUploadError(t("liteCut.media.pickerFailed"));
+    } finally {
+      setPicking(false);
+    }
+    if (replacementPath) await relinkMissingAssetPath(warning, replacementPath, existingAsset);
+  };
+
+  const chooseReplacement = async (warning) => {
+    const normalizedWarningPath = String(warning?.path || "").replace(/\\/g, "/").toLowerCase();
+    const existing = localAssets.find((asset) => (
+      String(asset?.path || "").replace(/\\/g, "/").toLowerCase() === normalizedWarningPath
+    ));
+    await pickReplacementForWarning(warning, existing || null);
+  };
+
+  const relinkAssetSource = (asset) => {
+    void pickReplacementForWarning({
+      kind: asset?.kind || "file",
+      name: asset?.name,
+      path: asset?.path,
+    }, asset);
   };
 
   const deleteAsset = async (asset) => {
@@ -508,23 +666,22 @@ export default function LiteCutMediaBin({
     }
   };
 
-  const retryAssetProxy = async (asset) => {
-    const id = Number(asset?.id);
-    if (!Number.isFinite(id) || id <= 0) return;
-    setRetryingAssetId(id);
-    try {
-      await liteCutClient.retryAssetProxy(id);
-      await loadAssets();
-    } finally {
-      setRetryingAssetId(null);
-    }
-  };
-
   const query = q.trim().toLowerCase();
+
+  const recordedLibraryItems = useMemo(() => {
+    const insightAssets = localAssets
+      .filter((asset) => asset?.origin_type === "insight_recording")
+      .map(insightAssetToRecordedItem)
+      .filter(Boolean);
+    const linkedRecordingIds = new Set(
+      insightAssets.map((asset) => Number(asset.recordingId)).filter(Number.isFinite),
+    );
+    return [...insightAssets, ...items.filter((item) => !linkedRecordingIds.has(Number(item.id)))];
+  }, [items, localAssets]);
 
   const filteredRecorded = useMemo(
     () =>
-      items.filter((m) => {
+      recordedLibraryItems.filter((m) => {
         if (filter !== "all" && m.category !== filter) return false;
         if (!query) return true;
         const tagHay = (m.tags || []).join(" ").toLowerCase();
@@ -535,12 +692,13 @@ export default function LiteCutMediaBin({
           tagHay.includes(query)
         );
       }),
-    [items, filter, query],
+    [recordedLibraryItems, filter, query],
   );
 
   const filteredAssets = useMemo(
     () =>
       localAssets.filter((a) => {
+        if (a?.origin_type === "insight_recording") return false;
         if (filter !== "all" && a.kind !== filter) return false;
         if (!query) return true;
         return `${a.name || ""} ${a.kind || ""}`.toLowerCase().includes(query);
@@ -621,12 +779,6 @@ export default function LiteCutMediaBin({
           ))}
         </div>
 
-        <input
-          ref={relinkInputRef}
-          type="file"
-          className="hidden"
-          onChange={(event) => void relinkMissingAsset(event.target.files?.[0])}
-        />
         {assetWarnings.length ? (
           <div className="mt-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-2 py-1.5">
             <div className="flex items-center gap-1.5 text-[10px] font-semibold text-amber-200">
@@ -650,10 +802,10 @@ export default function LiteCutMediaBin({
                   <button
                     type="button"
                     disabled={assetWarningsLoading}
-                    onClick={() => chooseReplacement(warning)}
+                    onClick={() => void chooseReplacement(warning)}
                     className="inline-flex h-5 shrink-0 items-center gap-1 rounded border border-amber-400/25 px-1.5 text-[8px] font-semibold text-amber-100 hover:bg-amber-400/15 disabled:opacity-40"
                   >
-                    {assetWarningsLoading && relinkingWarning === warning ? <Loader2 className="h-3 w-3 animate-spin" /> : <FileSearch className="h-3 w-3" />}
+                    {assetWarningsLoading ? <Loader2 className="h-3 w-3 animate-spin" /> : <FileSearch className="h-3 w-3" />}
                     {t("liteCut.media.relink")}
                   </button>
                 </div>
@@ -672,12 +824,52 @@ export default function LiteCutMediaBin({
       {tab === "local" ? (
         <div className="min-h-0 flex-1 overflow-y-auto p-3">
           <div className="flex flex-col gap-2">
-            <UploadDropZone
-              acceptHint={t("liteCut.media.dropHint")}
-              formats="MP4 · MOV · MKV · M4V · AVI · WebM · MP3 · WAV · M4A · PNG · GIF · WebP · TTF/OTF"
-              onFiles={(files) => void uploadLocalFiles(files)}
-            />
-            <VoiceoverRecorder disabled={uploading} onRecorded={(file) => uploadLocalFiles([file])} />
+            <button
+              ref={linkDropZoneRef}
+              data-lite-cut-link-dropzone
+              type="button"
+              disabled={picking || linking}
+              onClick={() => void chooseAndLinkAssets()}
+              onDragEnter={(event) => {
+                event.preventDefault();
+                if (!picking && !linking) setLinkDragOver(true);
+              }}
+              onDragOver={(event) => {
+                event.preventDefault();
+                event.dataTransfer.dropEffect = "link";
+                if (!picking && !linking) setLinkDragOver(true);
+              }}
+              onDragLeave={(event) => {
+                const next = event.relatedTarget;
+                if (next instanceof Node && event.currentTarget.contains(next)) return;
+                setLinkDragOver(false);
+              }}
+              onDrop={handleBrowserAssetDrop}
+              className={`flex min-h-28 w-full flex-col items-center justify-center rounded-lg border-2 border-dashed px-3 py-4 text-center transition-colors disabled:cursor-wait ${
+                linkDragOver
+                  ? "border-cs2-accent bg-cs2-accent/10"
+                  : "border-cs2-border bg-cs2-bg-card hover:border-cs2-accent/50 hover:bg-cs2-bg-hover"
+              }`}
+            >
+              <span className={`mb-2 inline-flex h-9 w-9 items-center justify-center rounded-lg ${linkDragOver ? "bg-cs2-accent/20" : "bg-cs2-bg-input"}`}>
+                {picking || linking
+                  ? <Loader2 className="h-5 w-5 animate-spin text-cs2-accent" />
+                  : linkDragOver
+                    ? <Link2 className="h-5 w-5 text-cs2-accent" />
+                    : <Upload className="h-5 w-5 text-cs2-text-secondary" />}
+              </span>
+              <span className={`text-[11px] font-bold ${linkDragOver ? "text-cs2-accent" : "text-cs2-text-primary"}`}>
+                {linkDragOver
+                  ? t("liteCut.media.dropRelease")
+                  : picking
+                    ? t("liteCut.media.choosingFiles")
+                    : linking
+                      ? t("liteCut.media.linking")
+                      : t("liteCut.media.selectOrDrop")}
+              </span>
+              <span className="mt-1 text-[9px] text-cs2-text-muted">{t("liteCut.media.linkNoCopyHint")}</span>
+            </button>
+            <VoiceoverRecorder disabled={uploading} onRecorded={(file) => saveGeneratedAssets([file])} />
             {uploading ? (
               <div className="px-1 py-1.5 text-[10px] text-cs2-text-muted">
                 <div className="flex min-w-0 items-center gap-2">
@@ -710,10 +902,9 @@ export default function LiteCutMediaBin({
                       onAddToTimeline={onAddToTimeline}
                       onUseFontAsset={onUseFontAsset}
                       onDeleteAsset={(asset) => void deleteAsset(asset)}
-                      onRetryProxy={(asset) => void retryAssetProxy(asset)}
+                      onRelinkAsset={relinkAssetSource}
                       onReplace={canReplaceAsset(a) ? onReplaceSelectedClip : null}
                       deleting={Number(deletingAssetId) === Number(a.id)}
-                      retrying={Number(retryingAssetId) === Number(a.id)}
                       inUse={usedAssetIds?.has?.(Number(a.id))}
                     />
                   </li>
@@ -736,13 +927,14 @@ export default function LiteCutMediaBin({
           ) : (
             <ul className="flex flex-col gap-2">
               {filteredRecorded.map((m) => (
-                <li key={m.id}>
+                <li key={`${m.mediaKind}-${m.id}`}>
                   <RecordedClipListRow
                     item={m}
                     active={selectedMediaId === m.id}
                     onAddToTimeline={onAddToTimeline}
                     onReplace={replaceRecorded}
                     onDurationChange={handleRecordedDurationChange}
+                    onRelinkAsset={m.mediaKind === "asset" ? relinkAssetSource : null}
                   />
                 </li>
               ))}

@@ -14,6 +14,16 @@ export function releaseMediaElement(element) {
   }
 }
 
+/** Capture the last decodable frame before clearing either media element. */
+export function captureThenReleaseMediaElements({ main, background, capture, release = releaseMediaElement }) {
+  try {
+    capture?.(main);
+  } finally {
+    release(main);
+    if (background && background !== main) release(background);
+  }
+}
+
 /**
  * Keep callback refs stable for a keyed collection of media elements.
  *

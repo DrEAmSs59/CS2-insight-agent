@@ -12,7 +12,6 @@ export function partitionLiteCutAssets(assets = []) {
     assetPreviewVersions: Object.fromEntries(
       assets.map((asset) => [Number(asset.id), asset.preview_proxy_version || "source"]),
     ),
-    assetProxyBusy: assets.some((asset) => ["queued", "running"].includes(asset.preview_proxy_status)),
   };
 }
 
@@ -28,7 +27,6 @@ export function useLiteCutMediaController({
   const [audioAssets, setAudioAssets] = useState([]);
   const [mediaAssets, setMediaAssets] = useState([]);
   const [assetPreviewVersions, setAssetPreviewVersions] = useState({});
-  const [assetProxyBusy, setAssetProxyBusy] = useState(false);
 
   const applyAssets = useCallback((assets) => {
     const allAssets = assets || [];
@@ -37,7 +35,6 @@ export function useLiteCutMediaController({
     setFontAssets(partition.fontAssets);
     setAudioAssets(partition.audioAssets);
     setAssetPreviewVersions(partition.assetPreviewVersions);
-    setAssetProxyBusy(partition.assetProxyBusy);
   }, []);
 
   const loadAssets = useCallback(async () => {
@@ -52,12 +49,6 @@ export function useLiteCutMediaController({
   useEffect(() => {
     void loadAssets();
   }, [loadAssets]);
-
-  useEffect(() => {
-    if (!assetProxyBusy) return undefined;
-    const timer = window.setInterval(() => void loadAssets(), 1000);
-    return () => window.clearInterval(timer);
-  }, [assetProxyBusy, loadAssets]);
 
   const handleAssetsLoaded = useCallback((assets) => {
     const allAssets = assets || [];
@@ -91,14 +82,25 @@ export function useLiteCutMediaController({
     return true;
   }, []);
 
+  const ensureProjectMediaAsset = useCallback(async (mediaItem) => {
+    if (!mediaItem || mediaItem.mediaKind !== "recorded") return mediaItem;
+    const recordingId = Number(mediaItem.id);
+    if (!projectId || !Number.isFinite(recordingId) || recordingId <= 0) return null;
+    const row = await liteCutClient.linkRecordedAsset({ projectId, recordingId });
+    const asset = mapAssetRow(row);
+    if (!asset) return null;
+    await loadAssets();
+    return asset;
+  }, [loadAssets, projectId]);
+
   return {
     fontAssets,
     audioAssets,
     mediaAssets,
     assetPreviewVersions,
-    assetProxyBusy,
     loadAssets,
     handleAssetsLoaded,
     handleRelinkMissingAsset,
+    ensureProjectMediaAsset,
   };
 }

@@ -2,8 +2,6 @@ import {
   Volume2,
   FolderOpen,
   RotateCcw,
-  FlipHorizontal,
-  FlipVertical,
   AlignLeft,
   AlignCenter,
   AlignRight,
@@ -27,15 +25,60 @@ import { messageFromApiCode } from "../../../utils/apiErrorMessages.js";
 import { liteCutClient } from "../api/liteCutClient.js";
 import { desktopBridge } from "../../../desktop/desktopBridge.js";
 import { summarizeFrameMeldSources } from "../../../utils/framemeld.js";
+import {
+  LITE_CUT_CANVAS_FIT_VALUES,
+  LITE_CUT_OUTPUT_DEFAULTS,
+  LITE_CUT_OUTPUT_LIMITS,
+  LITE_CUT_RESOLUTION_PRESETS,
+  LITE_CUT_TIMELINE_LIMITS,
+} from "../state/projectContract.js";
+import {
+  AUDIO_BGM_GAIN,
+  AUDIO_CLIP_GAIN,
+  AUDIO_DUCKING_GAIN,
+  AUDIO_FADE_DURATION,
+  AUDIO_MASTER_GAIN,
+  AUDIO_TRACK_GAIN,
+  clampAudioGain,
+} from "../domain/audioContract.js";
+import {
+  VISUAL_CROP_DEFAULTS,
+  VISUAL_CROP_POSITION_MAX,
+  VISUAL_CROP_POSITION_MIN,
+  VISUAL_CROP_SIZE_MAX,
+  VISUAL_CROP_SIZE_MIN,
+  normalizeVisualCrop,
+} from "../domain/visualMaterial.js";
 import AudioWaveformBars from "./AudioWaveformBars.jsx";
-import { NumericPairCard, PaneSection, ProSlider, ScopeActionButton, snapRotation, Toggle, useTransformControls } from "./PropertyControls.jsx";
+import { NumericPairCard, PaneSection, ProSlider, SceneTransformControls, ScopeActionButton, Toggle } from "./PropertyControls.jsx";
 import {
   TEXT_STYLE_CARDS,
   FONT_OPTIONS,
-  TEXT_ANIMATION_OPTIONS,
+  CANVAS_PRESETS,
+  TRANSITION_DURATION_DEFAULT,
+  TRANSITION_DURATION_MAX,
+  TRANSITION_DURATION_MIN,
   TRANSITION_OPTIONS,
 } from "./editorPresets.js";
+import {
+  TEXT_FONT_SIZE_DEFAULT,
+  TEXT_FONT_SIZE_MAX,
+  TEXT_FONT_SIZE_MIN,
+  TEXT_FONT_WEIGHT_DEFAULT,
+  TEXT_FONT_WEIGHT_MAX,
+  TEXT_FONT_WEIGHT_MIN,
+  TEXT_LINE_HEIGHT_DEFAULT,
+  TEXT_LINE_HEIGHT_MAX,
+  TEXT_LINE_HEIGHT_MIN,
+  normalizeTextFontSize,
+} from "./textLayout.js";
 const SOURCE_METADATA_CACHE = new Map();
+const OUTPUT_WIDTH = LITE_CUT_OUTPUT_LIMITS.width;
+const OUTPUT_HEIGHT = LITE_CUT_OUTPUT_LIMITS.height;
+const OUTPUT_FPS = LITE_CUT_OUTPUT_LIMITS.fps;
+const OUTPUT_BLUR = LITE_CUT_OUTPUT_LIMITS.blurAmount;
+const TIMELINE_TIME = LITE_CUT_TIMELINE_LIMITS.time;
+const TIMELINE_DURATION = LITE_CUT_TIMELINE_LIMITS.duration;
 
 function formatSourceDuration(value) {
   const total = Math.max(0, Number(value) || 0);
@@ -108,7 +151,7 @@ export function ClipPane({
   previewSourceTime = 0,
   previewKey = null,
   previewPlaying = false,
-  transitionType = "fade",
+  transitionType = "cut",
   transitionDuration = 0.4,
   transitionInDuration = 0.25,
   transitionOutDuration = 0.25,
@@ -120,8 +163,6 @@ export function ClipPane({
   canApplyTransitionTrack = false,
   canApplyTransitionAll = false,
   overlayTransform = null,
-  overlayFadeInSec = 0,
-  overlayFadeOutSec = 0,
   overlayTransitionType = "cut",
   overlayTransitionInSec = 0,
   overlayTransitionOutSec = 0,
@@ -150,20 +191,17 @@ export function ClipPane({
   onRemoveClipAudioKeyframe,
   clipCrop = null,
   onClipCropChange,
+  supportsCrop = false,
+  supportsContentFit = false,
   isVideoLayer = false,
   isAudioClip = false,
   isOverlay = false,
   clipVolume = 1,
   onClipVolumeChange,
-  outputWidth = 1920,
-  outputHeight = 1080,
+  outputWidth = LITE_CUT_OUTPUT_DEFAULTS.width,
+  outputHeight = LITE_CUT_OUTPUT_DEFAULTS.height,
 }) {
   const [sourceMetadata, setSourceMetadata] = useState(null);
-  const transformControls = useTransformControls(
-    isOverlay ? overlayTransform : clipTransform,
-    isOverlay ? onOverlayTransformChange : onClipTransformChange,
-    isOverlay ? 0.33 : 1,
-  );
   const builtin = TRANSITION_OPTIONS.filter((t) => t.builtin !== false);
   const directDuration = Number(media?.duration_sec ?? media?.duration) || 0;
   const thumbUrl = media?.assetStreamUrl || streamUrl;
@@ -225,43 +263,11 @@ export function ClipPane({
     else element.addEventListener("loadedmetadata", seekToPreviewFrame, { once: true });
     return () => element.removeEventListener("loadedmetadata", seekToPreviewFrame);
   }, [imagePreview, media?.id, previewKey, previewPlaying, previewSourceTime, thumbUrl]);
-  const overlayMaxFade = Math.max(
-    1,
-    Math.min(10, Math.ceil(Math.max(Number(media?.duration) || 0, Number(overlayFadeInSec) || 0, Number(overlayFadeOutSec) || 0, 1))),
-  );
-  const clipMaxFade = Math.max(
-    1,
-    Math.min(10, Math.ceil(Math.max(Number(clipDuration) || 0, Number(clipFadeInSec) || 0, Number(clipFadeOutSec) || 0, 1))),
-  );
-  const activeCanvasFit = ["contain", "cover", "blur"].includes(clipCanvasFit) ? clipCanvasFit : "inherit";
-  const overlayScale = Math.max(0.01, Number(overlayTransform?.scale) || 1);
-  const overlayWidthPx = Math.max(1, (Number(overlayTransform?.width) || 0.33) * outputWidth * overlayScale);
-  const overlayHeightPx = Math.max(1, (Number(overlayTransform?.height) || 0.33) * outputHeight * overlayScale);
-  const setOverlayWidthPx = (value) => {
-    const nextWidthPx = Math.max(1, Number(value) || 1);
-    const width = nextWidthPx / (outputWidth * overlayScale);
-    const nextHeightPx = overlayHeightPx * nextWidthPx / overlayWidthPx;
-    onOverlayTransformChange?.(transformControls.sizeLinked
-      ? { width, height: nextHeightPx / (outputHeight * overlayScale) }
-      : { width });
-  };
-  const setOverlayHeightPx = (value) => {
-    const nextHeightPx = Math.max(1, Number(value) || 1);
-    const height = nextHeightPx / (outputHeight * overlayScale);
-    const nextWidthPx = overlayWidthPx * nextHeightPx / overlayHeightPx;
-    onOverlayTransformChange?.(transformControls.sizeLinked
-      ? { height, width: nextWidthPx / (outputWidth * overlayScale) }
-      : { height });
-  };
-  const normalizedCrop = {
-    x: Math.max(0, Math.min(1, Number(clipCrop?.x) || 0)),
-    y: Math.max(0, Math.min(1, Number(clipCrop?.y) || 0)),
-    width: Math.max(0.05, Math.min(1, Number(clipCrop?.width) || 1)),
-    height: Math.max(0.05, Math.min(1, Number(clipCrop?.height) || 1)),
-  };
-  normalizedCrop.x = Math.min(normalizedCrop.x, 1 - normalizedCrop.width);
-  normalizedCrop.y = Math.min(normalizedCrop.y, 1 - normalizedCrop.height);
+  const overlayMaxTransition = TRANSITION_DURATION_MAX;
+  const activeCanvasFit = ["fill", ...LITE_CUT_CANVAS_FIT_VALUES].includes(clipCanvasFit) ? clipCanvasFit : "inherit";
+  const normalizedCrop = normalizeVisualCrop(clipCrop);
   const canvasFitOptions = [
+    { id: "fill", label: "拉伸" },
     { id: "inherit", label: `继承 ${projectCanvasFit === "cover" ? "填满" : projectCanvasFit === "blur" ? "模糊" : "适应"}` },
     { id: "contain", label: "适应" },
     { id: "cover", label: "填满" },
@@ -325,37 +331,15 @@ export function ClipPane({
             onRemove={onRemoveClipKeyframe}
             hint="把播放头移到目标时间，先添加关键帧，再修改位置、大小、缩放、旋转或透明度；前后关键帧之间会自动生成动画。"
           />
-          <div className="grid grid-cols-1 gap-1">
-            <NumericPairCard title="位置" firstLabel="X" firstValue={Math.round((clipTransform.x ?? 0.5) * 100)} onFirstChange={(v) => onClipTransformChange?.({ x: v / 100 })} secondLabel="Y" secondValue={Math.round((clipTransform.y ?? 0.5) * 100)} onSecondChange={(v) => onClipTransformChange?.({ y: v / 100 })} />
-            <NumericPairCard title="大小" firstLabel="W" firstValue={Math.round((clipTransform.width ?? 1) * 100)} onFirstChange={transformControls.setWidthPercent} secondLabel="H" secondValue={Math.round((clipTransform.height ?? 1) * 100)} onSecondChange={transformControls.setHeightPercent} min={8} max={300} linked={transformControls.sizeLinked} onToggleLinked={transformControls.toggleSizeLinked} />
-          </div>
-          <ProSlider
-            label="缩放"
-            value={Math.round((clipTransform.scale ?? 1) * 100)}
-            onChange={(v) => onClipTransformChange?.({ scale: v / 100 })}
-            min={10}
-            max={500}
-            resetValue={100}
-          />
-          <ProSlider
-            label="旋转 °"
-            value={Math.round(clipTransform.rotation ?? 0)}
-            onChange={transformControls.setRotation}
-            min={-180}
-            max={180}
-            resetValue={0}
-          />
-          <div className="grid grid-cols-2 gap-1.5">
-            <button type="button" onClick={() => onClipPatch?.({ flip_horizontal: !clipFlipHorizontal })} className={`inline-flex h-8 items-center justify-center gap-1.5 rounded-md border text-[10px] font-semibold ${clipFlipHorizontal ? "border-cs2-accent/70 bg-cs2-accent-soft text-cs2-accent" : "border-cs2-border/60 text-cs2-text-muted"}`}><FlipHorizontal className="h-4 w-4" />左右镜像</button>
-            <button type="button" onClick={() => onClipPatch?.({ flip_vertical: !clipFlipVertical })} className={`inline-flex h-8 items-center justify-center gap-1.5 rounded-md border text-[10px] font-semibold ${clipFlipVertical ? "border-cs2-accent/70 bg-cs2-accent-soft text-cs2-accent" : "border-cs2-border/60 text-cs2-text-muted"}`}><FlipVertical className="h-4 w-4" />上下镜像</button>
-          </div>
-          <ProSlider
-            label="透明度 %"
-            value={Math.round((clipTransform.opacity ?? 1) * 100)}
-            onChange={(v) => onClipTransformChange?.({ opacity: Math.max(0, Math.min(100, Number(v) || 0)) / 100 })}
-            min={10}
-            max={100}
-            resetValue={100}
+          <SceneTransformControls
+            transform={clipTransform}
+            onChange={onClipTransformChange}
+            outputWidth={outputWidth}
+            outputHeight={outputHeight}
+            flipHorizontal={clipFlipHorizontal}
+            flipVertical={clipFlipVertical}
+            onFlipHorizontal={(value) => onClipPatch?.({ flip_horizontal: value })}
+            onFlipVertical={(value) => onClipPatch?.({ flip_vertical: value })}
           />
         </PaneSection>
       ) : null}
@@ -367,103 +351,90 @@ export function ClipPane({
           onRemove={onRemoveClipAudioKeyframe}
           hint="把播放头移到需要改变音量的位置，先添加关键帧，再调整下面的音量；关键帧之间会自动平滑变化。"
         />
-        <ProSlider label="当前片段原声音量 (%)" value={Math.round(Math.max(0, Math.min(5, Number(clipVolume) || 0)) * 100)} onChange={(value) => onClipVolumeChange?.(value / 100)} min={0} max={500} resetValue={100} />
+        <ProSlider label="当前片段原声音量 (%)" value={Math.round(clampAudioGain(clipVolume, AUDIO_CLIP_GAIN, 0) * 100)} onChange={(value) => onClipVolumeChange?.(value / 100)} min={AUDIO_CLIP_GAIN.min * 100} max={AUDIO_CLIP_GAIN.max * 100} resetValue={AUDIO_CLIP_GAIN.default * 100} />
         <p className="text-[10px] leading-relaxed text-cs2-text-muted">仅作用于当前视频片段；所在视频轨的整体原声增益请在“音频”页调整。</p>
       </PaneSection> : null}
-      {!isAudioClip && !isOverlay && !isVideoLayer && clipCrop ? (
+      {supportsContentFit ? (
+        <PaneSection title="素材适配">
+          <div className="grid grid-cols-2 gap-2">
+            {canvasFitOptions.map((option) => (
+              <button
+                key={option.id}
+                type="button"
+                onClick={() => onClipCanvasFitChange?.(option.id)}
+                className={`rounded-lg border px-2 py-2 text-[10px] font-semibold transition-colors ${activeCanvasFit === option.id ? "border-cs2-accent/60 bg-cs2-accent-soft text-cs2-accent" : "border-cs2-border/60 text-cs2-text-muted hover:border-cs2-border-focus"}`}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
+        </PaneSection>
+      ) : null}
+      {supportsCrop && clipCrop ? (
         <PaneSection title="取景裁切">
           <ProSlider
             label="宽度 %"
             value={Math.round(normalizedCrop.width * 100)}
             onChange={(v) => {
-              const width = Math.max(0.05, Math.min(1, Number(v) / 100));
-              onClipCropChange?.({ width, x: Math.min(normalizedCrop.x, 1 - width) });
+              const width = Math.max(VISUAL_CROP_SIZE_MIN, Math.min(VISUAL_CROP_SIZE_MAX, Number(v) / 100));
+              onClipCropChange?.({ width, x: Math.min(normalizedCrop.x, VISUAL_CROP_SIZE_MAX - width) });
             }}
-            min={5}
-            max={100}
-            resetValue={100}
+            min={VISUAL_CROP_SIZE_MIN * 100}
+            max={VISUAL_CROP_SIZE_MAX * 100}
+            resetValue={VISUAL_CROP_SIZE_MAX * 100}
           />
           <ProSlider
             label="高度 %"
             value={Math.round(normalizedCrop.height * 100)}
             onChange={(v) => {
-              const height = Math.max(0.05, Math.min(1, Number(v) / 100));
-              onClipCropChange?.({ height, y: Math.min(normalizedCrop.y, 1 - height) });
+              const height = Math.max(VISUAL_CROP_SIZE_MIN, Math.min(VISUAL_CROP_SIZE_MAX, Number(v) / 100));
+              onClipCropChange?.({ height, y: Math.min(normalizedCrop.y, VISUAL_CROP_SIZE_MAX - height) });
             }}
-            min={5}
-            max={100}
-            resetValue={100}
+            min={VISUAL_CROP_SIZE_MIN * 100}
+            max={VISUAL_CROP_SIZE_MAX * 100}
+            resetValue={VISUAL_CROP_SIZE_MAX * 100}
           />
           <ProSlider
             label="横向位置 %"
             value={Math.round(normalizedCrop.x * 100)}
-            onChange={(v) => onClipCropChange?.({ x: Math.max(0, Math.min(1 - normalizedCrop.width, Number(v) / 100)) })}
-            min={0}
-            max={Math.max(0, Math.round((1 - normalizedCrop.width) * 100))}
-            resetValue={0}
+            onChange={(v) => onClipCropChange?.({ x: Math.max(VISUAL_CROP_POSITION_MIN, Math.min(VISUAL_CROP_POSITION_MAX - normalizedCrop.width, Number(v) / 100)) })}
+            min={VISUAL_CROP_POSITION_MIN * 100}
+            max={Math.max(VISUAL_CROP_POSITION_MIN * 100, Math.round((VISUAL_CROP_POSITION_MAX - normalizedCrop.width) * 100))}
+            resetValue={VISUAL_CROP_DEFAULTS.x * 100}
           />
           <ProSlider
             label="纵向位置 %"
             value={Math.round(normalizedCrop.y * 100)}
-            onChange={(v) => onClipCropChange?.({ y: Math.max(0, Math.min(1 - normalizedCrop.height, Number(v) / 100))})}
-            min={0}
-            max={Math.max(0, Math.round((1 - normalizedCrop.height) * 100))}
-            resetValue={0}
+            onChange={(v) => onClipCropChange?.({ y: Math.max(VISUAL_CROP_POSITION_MIN, Math.min(VISUAL_CROP_POSITION_MAX - normalizedCrop.height, Number(v) / 100))})}
+            min={VISUAL_CROP_POSITION_MIN * 100}
+            max={Math.max(VISUAL_CROP_POSITION_MIN * 100, Math.round((VISUAL_CROP_POSITION_MAX - normalizedCrop.height) * 100))}
+            resetValue={VISUAL_CROP_DEFAULTS.y * 100}
           />
         </PaneSection>
       ) : null}
       {isOverlay && overlayTransform ? (
         <>
         <PaneSection title="变换" defaultOpen={false}>
-          <div className="grid grid-cols-1 gap-1">
-            <NumericPairCard title="位置" firstLabel="X" firstValue={Math.round((overlayTransform.x ?? 0.5) * 100)} onFirstChange={(v) => onOverlayTransformChange?.({ x: v / 100 })} secondLabel="Y" secondValue={Math.round((overlayTransform.y ?? 0.5) * 100)} onSecondChange={(v) => onOverlayTransformChange?.({ y: v / 100 })} />
-            <NumericPairCard title="大小 (px)" firstLabel="W" firstValue={Math.round(overlayWidthPx)} onFirstChange={setOverlayWidthPx} secondLabel="H" secondValue={Math.round(overlayHeightPx)} onSecondChange={setOverlayHeightPx} min={1} max={50000} linked={transformControls.sizeLinked} onToggleLinked={transformControls.toggleSizeLinked} />
-          </div>
-          <ProSlider
-            label="整体缩放 %"
-            value={Math.round((overlayTransform.scale ?? 0.38) * 100)}
-            onChange={(v) => onOverlayTransformChange?.({ scale: v / 100 })}
-            min={1}
-            max={500}
-            resetValue={100}
+          <SceneTransformControls
+            transform={overlayTransform}
+            onChange={onOverlayTransformChange}
+            outputWidth={outputWidth}
+            outputHeight={outputHeight}
+            flipHorizontal={clipFlipHorizontal}
+            flipVertical={clipFlipVertical}
+            onFlipHorizontal={(value) => onOverlayPatch?.({ flip_horizontal: value })}
+            onFlipVertical={(value) => onOverlayPatch?.({ flip_vertical: value })}
           />
-          <ProSlider
-            label="旋转 °"
-            value={Math.round(overlayTransform.rotation ?? 0)}
-            onChange={transformControls.setRotation}
-            min={-180}
-            max={180}
-            resetValue={0}
-          />
-          <ProSlider
-            label="透明度 %"
-            value={Math.round((overlayTransform.opacity ?? 1) * 100)}
-            onChange={(v) => onOverlayTransformChange?.({ opacity: Math.max(0, Math.min(100, Number(v) || 0)) / 100 })}
-            min={0}
-            max={100}
-            resetValue={100}
-          />
-          <div className="grid grid-cols-2 gap-1.5">
-            <button type="button" title="左右镜像" aria-label="左右镜像" onClick={() => onOverlayPatch?.({ flip_horizontal: !clipFlipHorizontal })} className={`inline-flex h-8 items-center justify-center gap-1.5 rounded-md border text-[10px] font-semibold ${clipFlipHorizontal ? "border-cs2-accent/70 bg-cs2-accent-soft text-cs2-accent" : "border-cs2-border/60 text-cs2-text-muted"}`}><FlipHorizontal className="h-4 w-4" />左右镜像</button>
-            <button type="button" title="上下镜像" aria-label="上下镜像" onClick={() => onOverlayPatch?.({ flip_vertical: !clipFlipVertical })} className={`inline-flex h-8 items-center justify-center gap-1.5 rounded-md border text-[10px] font-semibold ${clipFlipVertical ? "border-cs2-accent/70 bg-cs2-accent-soft text-cs2-accent" : "border-cs2-border/60 text-cs2-text-muted"}`}><FlipVertical className="h-4 w-4" />上下镜像</button>
-          </div>
         </PaneSection>
         <PaneSection title="素材过渡" defaultOpen={false}>
           <div className="grid grid-cols-3 gap-1.5">
             {builtin.slice(0, 9).map((tr) => {
               const selected = overlayTransitionType === tr.id;
-              return <button key={tr.id} type="button" onClick={() => {
-                onOverlayPatch?.({
-                  transition_in: { type: tr.id, duration_sec: tr.id === "cut" ? 0 : Math.max(0.05, Number(overlayTransitionInSec) || 0.25) },
-                  transition_out: { type: tr.id, duration_sec: tr.id === "cut" ? 0 : Math.max(0.05, Number(overlayTransitionOutSec) || 0.25) },
-                  fade_in_sec: 0,
-                  fade_out_sec: 0,
-                });
-              }} className={`flex flex-col items-center gap-1 rounded-lg border py-2 transition-all ${selected ? "border-cs2-accent/60 bg-cs2-accent-soft text-cs2-accent" : "border-cs2-border/60 bg-cs2-surface-1/50 text-cs2-text-muted hover:border-cs2-border-focus"}`}><span className="text-base leading-none">{tr.icon}</span><span className="text-[9px] font-semibold">{tr.label}</span></button>;
+              return <button key={tr.id} type="button" onClick={() => onTransitionChange?.(tr.id)} className={`flex flex-col items-center gap-1 rounded-lg border py-2 transition-all ${selected ? "border-cs2-accent/60 bg-cs2-accent-soft text-cs2-accent" : "border-cs2-border/60 bg-cs2-surface-1/50 text-cs2-text-muted hover:border-cs2-border-focus"}`}><span className="text-base leading-none">{tr.icon}</span><span className="text-[9px] font-semibold">{tr.label}</span></button>;
             })}
           </div>
-          <ProSlider label="素材前（过渡时长）s" value={Math.max(0, Math.min(overlayMaxFade, Number(overlayTransitionInSec) || 0))} onChange={(v) => onOverlayPatch?.({ transition_in: { type: overlayTransitionType === "cut" ? "fade" : overlayTransitionType, duration_sec: Math.max(0, Number(v) || 0) } })} min={0} max={overlayMaxFade} resetValue={0.25} step={0.05} />
-          <ProSlider label="素材后（过渡时长）s" value={Math.max(0, Math.min(overlayMaxFade, Number(overlayTransitionOutSec) || 0))} onChange={(v) => onOverlayPatch?.({ transition_out: { type: overlayTransitionType === "cut" ? "fade" : overlayTransitionType, duration_sec: Math.max(0, Number(v) || 0) } })} min={0} max={overlayMaxFade} resetValue={0.25} step={0.05} />
+          <ProSlider label="进入过渡（总时长 s）" value={Math.max(TRANSITION_DURATION_MIN, Math.min(overlayMaxTransition, Number(overlayTransitionInSec) || TRANSITION_DURATION_DEFAULT))} onChange={onTransitionInDurationChange} min={TRANSITION_DURATION_MIN} max={overlayMaxTransition} resetValue={TRANSITION_DURATION_DEFAULT} step={0.05} />
+          <ProSlider label="退出过渡（总时长 s）" value={Math.max(TRANSITION_DURATION_MIN, Math.min(overlayMaxTransition, Number(overlayTransitionOutSec) || TRANSITION_DURATION_DEFAULT))} onChange={onTransitionOutDurationChange} min={TRANSITION_DURATION_MIN} max={overlayMaxTransition} resetValue={TRANSITION_DURATION_DEFAULT} step={0.05} />
         </PaneSection>
         </>
       ) : (
@@ -486,8 +457,8 @@ export function ClipPane({
             </button>
           ))}
         </div>
-        <ProSlider label="素材前（过渡时长）s" value={transitionType === "cut" ? 0 : Math.max(0.05, Number(transitionInDuration) || 0.25)} onChange={(v) => onTransitionInDurationChange?.(v)} min={0.05} max={1.5} resetValue={0.25} step={0.05} />
-        <ProSlider label="素材后（过渡时长）s" value={transitionType === "cut" ? 0 : Math.max(0.05, Number(transitionOutDuration) || 0.25)} onChange={(v) => onTransitionOutDurationChange?.(v)} min={0.05} max={1.5} resetValue={0.25} step={0.05} />
+        <ProSlider label="素材前（过渡时长）s" value={transitionType === "cut" ? 0 : Math.max(TRANSITION_DURATION_MIN, Number(transitionInDuration) || TRANSITION_DURATION_DEFAULT)} onChange={(v) => onTransitionInDurationChange?.(v)} min={TRANSITION_DURATION_MIN} max={TRANSITION_DURATION_MAX} resetValue={TRANSITION_DURATION_DEFAULT} step={0.05} />
+        <ProSlider label="素材后（过渡时长）s" value={transitionType === "cut" ? 0 : Math.max(TRANSITION_DURATION_MIN, Number(transitionOutDuration) || TRANSITION_DURATION_DEFAULT)} onChange={(v) => onTransitionOutDurationChange?.(v)} min={TRANSITION_DURATION_MIN} max={TRANSITION_DURATION_MAX} resetValue={TRANSITION_DURATION_DEFAULT} step={0.05} />
         <div className="grid grid-cols-2 gap-2">
           <ScopeActionButton
             icon={CopyCheck}
@@ -516,11 +487,10 @@ export function ClipPane({
   );
 }
 
-export const TEXT_FONT_SIZE_MIN = 12;
-export const TEXT_FONT_SIZE_MAX = 1000;
+export { TEXT_FONT_SIZE_MIN, TEXT_FONT_SIZE_MAX };
 
 export function clampTextFontSize(value, fallback = 48) {
-  return Math.max(TEXT_FONT_SIZE_MIN, Math.min(TEXT_FONT_SIZE_MAX, Number(value) || fallback));
+  return normalizeTextFontSize(Number(value) || fallback);
 }
 
 export function TextPane({
@@ -532,9 +502,16 @@ export function TextPane({
   fontFamily,
   fontFile,
   fontSize = 48,
+  fontWeight = 700,
+  lineHeight = 1.2,
   textAlign = "center",
-  animIn = "",
-  animOut = "",
+  fillColor = null,
+  transitionType = "cut",
+  transitionInDuration = 0,
+  transitionOutDuration = 0,
+  onTransitionChange,
+  onTransitionInDurationChange,
+  onTransitionOutDurationChange,
   fontAssets = [],
   onTextPatch,
   onImportSubtitles,
@@ -542,27 +519,26 @@ export function TextPane({
   onApplySubtitleStyle,
   overlayTransform = null,
   overlayDuration = 3,
-  maxTextDuration = 60,
-  overlayFadeInSec = 0,
-  overlayFadeOutSec = 0,
+  maxTextDuration = TIMELINE_TIME.uiMax,
   onOverlayTransformChange,
   onOverlayPatch,
   flipHorizontal = false,
   flipVertical = false,
+  outputWidth = LITE_CUT_OUTPUT_DEFAULTS.width,
+  outputHeight = LITE_CUT_OUTPUT_DEFAULTS.height,
 }) {
   const subtitleInputRef = useRef(null);
   const [subtitleError, setSubtitleError] = useState("");
   const [font, setFont] = useState(FONT_OPTIONS[0]);
-  const [draftFontSize, setDraftFontSize] = useState(48);
-  const [sizeLinked, setSizeLinked] = useState(true);
+  const [draftFontSize, setDraftFontSize] = useState(TEXT_FONT_SIZE_DEFAULT);
   const effectiveFont = fontFamily || font;
   const effectiveFontSize = clampTextFontSize(fontSize, draftFontSize);
   const effectiveTextAlign = ["left", "center", "right"].includes(textAlign) ? textAlign : "center";
-  const textDurationMax = Math.max(60, Number(maxTextDuration) || 60);
+  const textDurationMax = Math.max(TIMELINE_DURATION.uiMin, Math.min(TIMELINE_DURATION.max, Number(maxTextDuration) || TIMELINE_TIME.uiMax));
   const systemFontValue = FONT_OPTIONS.includes(effectiveFont) ? effectiveFont : "__project_font__";
   const handleFontChange = (value) => {
     setFont(value);
-    onTextPatch?.({ font_family: value, font_file: null });
+    onTextPatch?.({ font_family: value, font_file: null, font_weight: value === "思源黑体 Medium" ? 500 : 700 });
   };
   const handleFontSizeChange = (value) => {
     const next = clampTextFontSize(value);
@@ -628,7 +604,11 @@ export function TextPane({
             font_family: effectiveFont,
             font_file: fontFile || null,
             font_size: effectiveFontSize,
+            font_weight: fontWeight,
+            line_height: lineHeight,
+            letter_spacing: 0,
             align: effectiveTextAlign,
+            fill_color: /^#[0-9a-f]{6}$/i.test(String(fillColor || "")) ? String(fillColor).toLowerCase() : null,
           })}
           className="mt-2 inline-flex w-full items-center justify-center gap-1 rounded-lg border border-cs2-border/70 bg-cs2-surface-1 py-1.5 text-[10px] font-semibold text-cs2-text-primary hover:border-cs2-accent/50 disabled:cursor-not-allowed disabled:opacity-40"
         >
@@ -668,37 +648,39 @@ export function TextPane({
             ))}
           </div>
         </div>
-        <ProSlider label="素材显示时间 (s)" value={Number(Math.max(0.1, Math.min(textDurationMax, overlayDuration)).toFixed(2))} onChange={(value) => onOverlayPatch?.({ duration: Math.max(0.1, Math.min(textDurationMax, value)) })} min={0.1} max={textDurationMax} resetValue={3} step={0.1} />
+        <ProSlider label="素材显示时间 (s)" value={Number(Math.max(TIMELINE_DURATION.uiMin, Math.min(textDurationMax, overlayDuration)).toFixed(2))} onChange={(value) => onOverlayPatch?.({ duration: Math.max(TIMELINE_DURATION.uiMin, Math.min(textDurationMax, value)) })} min={TIMELINE_DURATION.uiMin} max={textDurationMax} resetValue={TIMELINE_DURATION.default} step={0.1} />
         <select value={systemFontValue} onChange={(e) => handleFontChange(e.target.value)} className="w-full rounded-lg border border-cs2-border/60 bg-cs2-bg-input/80 px-2 py-2 text-xs">
           {systemFontValue === "__project_font__" ? <option value="__project_font__" disabled>使用项目字体</option> : null}
           {FONT_OPTIONS.map((item) => <option key={item}>{item}</option>)}
         </select>
-        <ProSlider label="字号" value={effectiveFontSize} onChange={handleFontSizeChange} min={TEXT_FONT_SIZE_MIN} max={TEXT_FONT_SIZE_MAX} resetValue={48} />
+        <ProSlider label="字号" value={effectiveFontSize} onChange={handleFontSizeChange} min={TEXT_FONT_SIZE_MIN} max={TEXT_FONT_SIZE_MAX} resetValue={TEXT_FONT_SIZE_DEFAULT} />
+        <ProSlider label="字重" value={fontWeight} onChange={(value) => onTextPatch?.({ font_weight: value })} min={TEXT_FONT_WEIGHT_MIN} max={TEXT_FONT_WEIGHT_MAX} resetValue={TEXT_FONT_WEIGHT_DEFAULT} step={100} />
+        <ProSlider label="行高" value={lineHeight} onChange={(value) => onTextPatch?.({ line_height: value })} min={TEXT_LINE_HEIGHT_MIN} max={TEXT_LINE_HEIGHT_MAX} resetValue={TEXT_LINE_HEIGHT_DEFAULT} step={0.05} />
+        <label className="flex items-center justify-between gap-3 text-[10px] font-semibold text-cs2-text-muted">
+          <span>填充颜色</span>
+          <input
+            type="color"
+            value={/^#[0-9a-f]{6}$/i.test(String(fillColor || "")) ? fillColor : "#ffffff"}
+            onChange={(event) => onTextPatch?.({ fill_color: event.target.value.toLowerCase() })}
+            className="h-8 w-16 cursor-pointer rounded border border-cs2-border bg-cs2-bg-input p-1"
+          />
+        </label>
         <p className="text-[10px] leading-relaxed text-cs2-text-muted">在左侧“本地上传”导入 TTF / OTF / WOFF2 后，可在下方项目字体中选择并参与导出。</p>
         {fontAssets.length ? <div className="grid grid-cols-1 gap-1">
           {fontAssets.map((asset) => <button key={asset.id} type="button" onClick={() => applyFontAsset(asset)} className={`whitespace-normal break-all rounded-lg border px-2 py-1.5 text-left text-[10px] font-semibold leading-snug ${selectedFontFile === asset.file_path ? "border-cs2-accent/60 bg-cs2-accent-soft text-cs2-accent" : "border-cs2-border/60 text-cs2-text-secondary"}`}>{asset.name}</button>)}
         </div> : null}
       </PaneSection>
       {overlayTransform ? <PaneSection title="变换" defaultOpen={false}>
-        <div className="grid grid-cols-1 gap-2 xl:grid-cols-2">
-          <NumericPairCard title="位置" firstLabel="X" firstValue={Math.round((overlayTransform.x ?? 0.5) * 100)} onFirstChange={(value) => onOverlayTransformChange?.({ x: value / 100 })} secondLabel="Y" secondValue={Math.round((overlayTransform.y ?? 0.5) * 100)} onSecondChange={(value) => onOverlayTransformChange?.({ y: value / 100 })} />
-          <NumericPairCard title="大小" firstLabel="W" firstValue={Math.round((overlayTransform.width ?? 0.65) * 100)} onFirstChange={(value) => {
-            const width = value / 100;
-            const currentWidth = Math.max(0.01, Number(overlayTransform.width) || 0.65);
-            onOverlayTransformChange?.(sizeLinked ? { width, height: (Number(overlayTransform.height) || 0.18) * width / currentWidth } : { width });
-          }} secondLabel="H" secondValue={Math.round((overlayTransform.height ?? 0.18) * 100)} onSecondChange={(value) => {
-            const height = value / 100;
-            const currentHeight = Math.max(0.01, Number(overlayTransform.height) || 0.18);
-            onOverlayTransformChange?.(sizeLinked ? { height, width: (Number(overlayTransform.width) || 0.65) * height / currentHeight } : { height });
-          }} min={5} max={300} linked={sizeLinked} onToggleLinked={() => setSizeLinked((value) => !value)} />
-        </div>
-        <ProSlider label="整体缩放 %" value={Math.round((overlayTransform.scale ?? 1) * 100)} onChange={(value) => onOverlayTransformChange?.({ scale: value / 100 })} min={10} max={500} resetValue={100} />
-        <ProSlider label="旋转 °" value={Math.round(overlayTransform.rotation ?? 0)} onChange={(value) => onOverlayTransformChange?.({ rotation: snapRotation(value) })} min={-180} max={180} resetValue={0} />
-        <div className="grid grid-cols-2 gap-1.5">
-          <button type="button" title="左右镜像" aria-label="左右镜像" onClick={() => onOverlayPatch?.({ flip_horizontal: !flipHorizontal })} className={`inline-flex h-8 items-center justify-center gap-1.5 rounded-md border text-[10px] font-semibold ${flipHorizontal ? "border-cs2-accent/70 bg-cs2-accent-soft text-cs2-accent" : "border-cs2-border/60 text-cs2-text-muted"}`}><FlipHorizontal className="h-4 w-4" />左右镜像</button>
-          <button type="button" title="上下镜像" aria-label="上下镜像" onClick={() => onOverlayPatch?.({ flip_vertical: !flipVertical })} className={`inline-flex h-8 items-center justify-center gap-1.5 rounded-md border text-[10px] font-semibold ${flipVertical ? "border-cs2-accent/70 bg-cs2-accent-soft text-cs2-accent" : "border-cs2-border/60 text-cs2-text-muted"}`}><FlipVertical className="h-4 w-4" />上下镜像</button>
-        </div>
-        <ProSlider label="透明度 %" value={Math.round((overlayTransform.opacity ?? 1) * 100)} onChange={(value) => onOverlayTransformChange?.({ opacity: value / 100 })} min={0} max={100} resetValue={100} />
+        <SceneTransformControls
+          transform={overlayTransform}
+          onChange={onOverlayTransformChange}
+          outputWidth={outputWidth}
+          outputHeight={outputHeight}
+          flipHorizontal={flipHorizontal}
+          flipVertical={flipVertical}
+          onFlipHorizontal={(value) => onOverlayPatch?.({ flip_horizontal: value })}
+          onFlipVertical={(value) => onOverlayPatch?.({ flip_vertical: value })}
+        />
       </PaneSection> : null}
       <div className="hidden">
         <select value={systemFontValue} onChange={(e) => handleFontChange(e.target.value)} className="w-full rounded-lg border border-cs2-border/60 bg-cs2-bg-input/80 px-2 py-2 text-xs">
@@ -707,7 +689,7 @@ export function TextPane({
             <option key={f}>{f}</option>
           ))}
         </select>
-        <ProSlider label="字号" value={effectiveFontSize} onChange={handleFontSizeChange} min={TEXT_FONT_SIZE_MIN} max={TEXT_FONT_SIZE_MAX} resetValue={48} />
+        <ProSlider label="字号" value={effectiveFontSize} onChange={handleFontSizeChange} min={TEXT_FONT_SIZE_MIN} max={TEXT_FONT_SIZE_MAX} resetValue={TEXT_FONT_SIZE_DEFAULT} />
         <div className="space-y-1.5">
           <div className="flex items-center justify-between">
             <span className="text-[10px] font-semibold uppercase tracking-wide text-cs2-text-muted">项目字体</span>
@@ -750,36 +732,21 @@ export function TextPane({
         </div>
       </div>
       <PaneSection title="素材过渡" defaultOpen={false}>
-        <div className="grid grid-cols-2 gap-2">
-          <label className="block space-y-1">
-            <span className="text-[10px] font-medium text-cs2-text-muted">入场</span>
-            <select
-              value={animIn || ""}
-              onChange={(e) => onTextPatch?.({ anim_in: e.target.value || null })}
-              className="w-full rounded-lg border border-cs2-border/60 bg-cs2-bg-input/80 px-2 py-2 text-xs"
-            >
-              {TEXT_ANIMATION_OPTIONS.map((opt) => (
-                <option key={opt.id || "none-in"} value={opt.id}>{opt.label}</option>
-              ))}
-            </select>
-          </label>
-          <label className="block space-y-1">
-            <span className="text-[10px] font-medium text-cs2-text-muted">出场</span>
-            <select
-              value={animOut || ""}
-              onChange={(e) => onTextPatch?.({ anim_out: e.target.value || null })}
-              className="w-full rounded-lg border border-cs2-border/60 bg-cs2-bg-input/80 px-2 py-2 text-xs"
-            >
-              {TEXT_ANIMATION_OPTIONS.map((opt) => (
-                <option key={opt.id || "none-out"} value={opt.id}>{opt.label}</option>
-              ))}
-            </select>
-          </label>
+        <div className="grid grid-cols-3 gap-1.5">
+          {TRANSITION_OPTIONS.map((item) => <button
+            key={item.id}
+            type="button"
+            onClick={() => onTransitionChange?.(item.id)}
+            className={`flex flex-col items-center gap-1 rounded-lg border py-2 transition-all ${transitionType === item.id ? "border-cs2-accent/60 bg-cs2-accent-soft text-cs2-accent" : "border-cs2-border/60 bg-cs2-surface-1/50 text-cs2-text-muted hover:border-cs2-border-focus"}`}
+          >
+            <span className="text-base leading-none">{item.icon}</span>
+            <span className="text-[9px] font-semibold">{item.label}</span>
+          </button>)}
         </div>
-        <ProSlider label="素材前（时长）" value={Number(Math.max(0, overlayFadeInSec).toFixed(2))} onChange={(value) => onOverlayPatch?.({ fade_in_sec: Math.max(0, value) })} min={0} max={Math.max(1, overlayDuration)} resetValue={0} step={0.05} />
-        <ProSlider label="素材后（时长）" value={Number(Math.max(0, overlayFadeOutSec).toFixed(2))} onChange={(value) => onOverlayPatch?.({ fade_out_sec: Math.max(0, value) })} min={0} max={Math.max(1, overlayDuration)} resetValue={0} step={0.05} />
+        <ProSlider label="进入过渡（总时长 s）" value={Math.max(TRANSITION_DURATION_MIN, Number(transitionInDuration) || TRANSITION_DURATION_DEFAULT)} onChange={onTransitionInDurationChange} min={TRANSITION_DURATION_MIN} max={Math.max(TRANSITION_DURATION_MIN, Math.min(TRANSITION_DURATION_MAX, overlayDuration * 2))} resetValue={TRANSITION_DURATION_DEFAULT} step={0.05} />
+        <ProSlider label="退出过渡（总时长 s）" value={Math.max(TRANSITION_DURATION_MIN, Number(transitionOutDuration) || TRANSITION_DURATION_DEFAULT)} onChange={onTransitionOutDurationChange} min={TRANSITION_DURATION_MIN} max={Math.max(TRANSITION_DURATION_MIN, Math.min(TRANSITION_DURATION_MAX, overlayDuration * 2))} resetValue={TRANSITION_DURATION_DEFAULT} step={0.05} />
         <p className="text-[10px] leading-relaxed text-cs2-text-muted">
-          动画仅作用于文字层；导出时会转成 FFmpeg drawtext 表达式。
+          与视频、图片共用同一过渡事件；连接相邻素材时，总时长以剪辑点为中心左右各占一半。
         </p>
       </PaneSection>
       <PaneSection title="风格预设" defaultOpen={false}>
@@ -790,7 +757,7 @@ export function TextPane({
             onClick={() => onTextStyleChange?.(card.id)}
             className={`overflow-hidden rounded-xl border text-left transition-all ${textStyleId === card.id ? "border-cs2-accent ring-2 ring-cs2-accent/30" : "border-cs2-border/50"}`}
           >
-            <div className={`flex h-[4.5rem] items-center justify-center px-2 ${card.cardClass}`}><span className={card.className}>{card.preview}</span></div>
+            <div className={`flex h-[4.5rem] items-center justify-center px-2 ${card.cardClass}`} style={card.cardStyle}><span className={card.className} style={card.previewStyle}>{card.preview}</span></div>
             <p className="border-t border-white/5 bg-cs2-surface-1/80 px-2 py-1 text-[10px] text-cs2-text-muted">{card.label}</p>
           </button>)}
         </div>
@@ -800,50 +767,60 @@ export function TextPane({
 }
 
 export function AudioPane({
-  volume = 1,
+  volume = AUDIO_CLIP_GAIN.default,
   onVolumeChange,
   clipLabel = "Selected clip",
   isAudioClip = false,
   muted = false,
-  fadeInSec = 0,
-  fadeOutSec = 0,
-  masterVolume = 1,
+  fadeInSec = AUDIO_FADE_DURATION.default,
+  fadeOutSec = AUDIO_FADE_DURATION.default,
+  masterVolume = AUDIO_MASTER_GAIN.default,
   onMasterVolumeChange,
   bgm = null,
   audioAssets = [],
   onBgmChange,
+  timelineTotalSec = 0,
   clipDuration = 0,
   trimIn = 0,
   onAudioPatch,
   sourceUrl = null,
-  trackVolume = 1,
+  trackVolume = AUDIO_TRACK_GAIN.default,
   trackLabel = "当前轨道",
   onTrackVolumeChange,
   clipHasAudioKeyframe = false,
   onAddClipAudioKeyframe,
   onRemoveClipAudioKeyframe,
 }) {
-  const maxClipVolume = isAudioClip ? 2 : 5;
-  const safeVolume = Math.max(0, Math.min(maxClipVolume, Number.isFinite(Number(volume)) ? Number(volume) : 1));
+  const safeVolume = clampAudioGain(volume, AUDIO_CLIP_GAIN);
   const volumePct = Math.round(safeVolume * 100);
-  const safeMasterVolume = Math.max(0, Math.min(2, Number.isFinite(Number(masterVolume)) ? Number(masterVolume) : 1));
+  const safeMasterVolume = clampAudioGain(masterVolume, AUDIO_MASTER_GAIN);
   const masterVolumePct = Math.round(safeMasterVolume * 100);
-  const bgmVolume = Math.max(0, Math.min(2, Number.isFinite(Number(bgm?.volume)) ? Number(bgm.volume) : 1));
+  const bgmVolume = clampAudioGain(bgm?.volume, AUDIO_BGM_GAIN);
   const bgmVolumePct = Math.round(bgmVolume * 100);
-  const bgmFadeIn = Math.max(0, Number(bgm?.fade_in_sec) || 0);
-  const bgmFadeOut = Math.max(0, Number(bgm?.fade_out_sec) || 0);
-  const bgmStart = Math.max(0, Number(bgm?.start_sec) || 0);
-  const bgmDuckingEnabled = Boolean(bgm?.ducking_enabled);
-  const bgmDuckingVolume = Math.max(5, Math.min(100, Math.round((Number(bgm?.ducking_volume) || 0.35) * 100)));
-  const maxFade = Math.max(
-    1,
-    Math.min(10, Math.ceil(Math.max(Number(clipDuration) || 0, Number(fadeInSec) || 0, Number(fadeOutSec) || 0, 1))),
+  const bgmFadeIn = Math.max(AUDIO_FADE_DURATION.min, Math.min(AUDIO_FADE_DURATION.uiMax, Number(bgm?.fade_in_sec) || AUDIO_FADE_DURATION.default));
+  const bgmFadeOut = Math.max(AUDIO_FADE_DURATION.min, Math.min(AUDIO_FADE_DURATION.uiMax, Number(bgm?.fade_out_sec) || AUDIO_FADE_DURATION.default));
+  const rawBgmStart = Number(bgm?.start_sec);
+  const bgmStart = Math.max(
+    TIMELINE_TIME.min,
+    Math.min(TIMELINE_TIME.max, Number.isFinite(rawBgmStart) ? rawBgmStart : TIMELINE_TIME.default),
   );
-  const safeFadeIn = Math.max(0, Math.min(maxFade, Number(fadeInSec) || 0));
-  const safeFadeOut = Math.max(0, Math.min(maxFade, Number(fadeOutSec) || 0));
+  const bgmStartMax = Math.max(
+    TIMELINE_TIME.uiMax,
+    Math.min(TIMELINE_TIME.max, Number(timelineTotalSec) || TIMELINE_TIME.default),
+    bgmStart,
+  );
+  const bgmDuckingEnabled = Boolean(bgm?.ducking_enabled);
+  const rawBgmDuckingVolume = Number(bgm?.ducking_volume);
+  const bgmDuckingVolume = Math.round(clampAudioGain(rawBgmDuckingVolume, AUDIO_DUCKING_GAIN) * 100);
+  const maxFade = Math.max(
+    TIMELINE_DURATION.uiMin,
+    Math.min(AUDIO_FADE_DURATION.uiMax, Math.ceil(Math.max(Number(clipDuration) || 0, Number(fadeInSec) || 0, Number(fadeOutSec) || 0, TIMELINE_DURATION.uiMin))),
+  );
+  const safeFadeIn = Math.max(AUDIO_FADE_DURATION.min, Math.min(maxFade, Number(fadeInSec) || AUDIO_FADE_DURATION.default));
+  const safeFadeOut = Math.max(AUDIO_FADE_DURATION.min, Math.min(maxFade, Number(fadeOutSec) || AUDIO_FADE_DURATION.default));
   const soundEnabled = !muted && volumePct > 0;
   const rawTrackVolume = Number(trackVolume);
-  const trackVolumePct = Math.round(Math.max(0, Math.min(2, Number.isFinite(rawTrackVolume) ? rawTrackVolume : 1)) * 100);
+  const trackVolumePct = Math.round(clampAudioGain(rawTrackVolume, AUDIO_TRACK_GAIN) * 100);
 
   const commit = (patch) => {
     if (onAudioPatch) {
@@ -863,7 +840,7 @@ export function AudioPane({
   };
 
   const handleVolumeChange = (pct) => {
-    const next = Math.max(0, Math.min(maxClipVolume * 100, Number(pct) || 0)) / 100;
+    const next = clampAudioGain(Number(pct) / 100, AUDIO_CLIP_GAIN, 0);
     // The shell resolves this callback at the current playhead, so an active
     // audio keyframe is updated instead of silently changing the base volume.
     onVolumeChange?.(next);
@@ -900,10 +877,10 @@ export function AudioPane({
       <ProSlider
         label="项目音量 (%)"
         value={masterVolumePct}
-        onChange={(pct) => onMasterVolumeChange?.(Math.max(0, Math.min(200, Number(pct) || 0)) / 100)}
-        min={0}
-        max={200}
-        resetValue={100}
+        onChange={(pct) => onMasterVolumeChange?.(clampAudioGain(Number(pct) / 100, AUDIO_MASTER_GAIN, 0))}
+        min={AUDIO_MASTER_GAIN.min * 100}
+        max={AUDIO_MASTER_GAIN.max * 100}
+        resetValue={AUDIO_MASTER_GAIN.default * 100}
       />
       <p className="text-[10px] leading-relaxed text-cs2-text-muted">
         导出时作用于整条成片：V 轨原声与音频轨(A轨)混音都会经过这一级音量。
@@ -916,10 +893,10 @@ export function AudioPane({
       <ProSlider
         label={`${trackLabel} 整轨音量 (%)`}
         value={trackVolumePct}
-        onChange={(pct) => onTrackVolumeChange(Math.max(0, Math.min(200, Number(pct) || 0)) / 100)}
-        min={0}
-        max={200}
-        resetValue={100}
+        onChange={(pct) => onTrackVolumeChange(clampAudioGain(Number(pct) / 100, AUDIO_TRACK_GAIN, 0))}
+        min={AUDIO_TRACK_GAIN.min * 100}
+        max={AUDIO_TRACK_GAIN.max * 100}
+        resetValue={AUDIO_TRACK_GAIN.default * 100}
       />
       <p className="text-[10px] leading-relaxed text-cs2-text-muted">
         {isAudioClip
@@ -962,37 +939,37 @@ export function AudioPane({
           <ProSlider
             label="BGM 音量 (%)"
             value={bgmVolumePct}
-            onChange={(pct) => updateBgm({ volume: Math.max(0, Math.min(200, Number(pct) || 0)) / 100 })}
-            min={0}
-            max={200}
-            resetValue={100}
+            onChange={(pct) => updateBgm({ volume: clampAudioGain(Number(pct) / 100, AUDIO_BGM_GAIN, 0) })}
+            min={AUDIO_BGM_GAIN.min * 100}
+            max={AUDIO_BGM_GAIN.max * 100}
+            resetValue={AUDIO_BGM_GAIN.default * 100}
           />
           <ProSlider
             label="开始时间 (s)"
             value={bgmStart}
-            onChange={(v) => updateBgm({ start_sec: Math.max(0, Number(v) || 0) })}
-            min={0}
-            max={60}
-            resetValue={0}
+            onChange={(v) => updateBgm({ start_sec: Math.max(TIMELINE_TIME.min, Math.min(bgmStartMax, Number(v) || TIMELINE_TIME.default)) })}
+            min={TIMELINE_TIME.min}
+            max={bgmStartMax}
+            resetValue={TIMELINE_TIME.default}
             step={0.5}
           />
           <div className="grid grid-cols-2 gap-2">
             <ProSlider
               label="淡入 (s)"
               value={bgmFadeIn}
-              onChange={(v) => updateBgm({ fade_in_sec: Math.max(0, Number(v) || 0) })}
-              min={0}
-              max={10}
-              resetValue={0}
+              onChange={(v) => updateBgm({ fade_in_sec: Math.max(AUDIO_FADE_DURATION.min, Number(v) || AUDIO_FADE_DURATION.default) })}
+              min={AUDIO_FADE_DURATION.min}
+              max={AUDIO_FADE_DURATION.uiMax}
+              resetValue={AUDIO_FADE_DURATION.default}
               step={0.1}
             />
             <ProSlider
               label="淡出 (s)"
               value={bgmFadeOut}
-              onChange={(v) => updateBgm({ fade_out_sec: Math.max(0, Number(v) || 0) })}
-              min={0}
-              max={10}
-              resetValue={0}
+              onChange={(v) => updateBgm({ fade_out_sec: Math.max(AUDIO_FADE_DURATION.min, Number(v) || AUDIO_FADE_DURATION.default) })}
+              min={AUDIO_FADE_DURATION.min}
+              max={AUDIO_FADE_DURATION.uiMax}
+              resetValue={AUDIO_FADE_DURATION.default}
               step={0.1}
             />
           </div>
@@ -1004,10 +981,10 @@ export function AudioPane({
             <ProSlider
               label="压低后 BGM (%)"
               value={bgmDuckingVolume}
-              onChange={(pct) => updateBgm({ ducking_volume: Math.max(5, Math.min(100, Number(pct) || 0)) / 100 })}
-              min={5}
-              max={100}
-              resetValue={35}
+              onChange={(pct) => updateBgm({ ducking_volume: clampAudioGain(Number(pct) / 100, AUDIO_DUCKING_GAIN, 0) })}
+              min={AUDIO_DUCKING_GAIN.min * 100}
+              max={AUDIO_DUCKING_GAIN.max * 100}
+              resetValue={AUDIO_DUCKING_GAIN.default * 100}
             />
           ) : null}
           <p className="truncate font-mono text-[10px] text-cs2-text-muted" title={bgm.path}>
@@ -1052,7 +1029,7 @@ export function AudioPane({
             <span className="text-[11px] text-cs2-text-secondary">启用声音</span>
             <Toggle checked={soundEnabled} onChange={handleEnabledChange} />
           </div>
-          <ProSlider label="片段音量 (%)" value={volumePct} onChange={handleVolumeChange} min={0} max={200} resetValue={100} />
+          <ProSlider label="片段音量 (%)" value={volumePct} onChange={handleVolumeChange} min={AUDIO_CLIP_GAIN.min * 100} max={AUDIO_CLIP_GAIN.max * 100} resetValue={AUDIO_CLIP_GAIN.default * 100} />
           {keyframeControls}
           <AudioWaveformBars sourceUrl={sourceUrl} startSec={trimIn} endSec={Number(trimIn) + Number(clipDuration || 0)} className="h-10 rounded-md" />
           <p className="text-[10px] text-cs2-text-muted">作用于当前音频轨(A轨)片段 · {clipLabel}</p>
@@ -1062,19 +1039,19 @@ export function AudioPane({
           <ProSlider
             label="淡入 (s)"
             value={safeFadeIn}
-            onChange={(v) => commit({ fade_in_sec: Math.max(0, Number(v) || 0) })}
-            min={0}
+            onChange={(v) => commit({ fade_in_sec: Math.max(AUDIO_FADE_DURATION.min, Number(v) || AUDIO_FADE_DURATION.default) })}
+            min={AUDIO_FADE_DURATION.min}
             max={maxFade}
-            resetValue={0}
+            resetValue={AUDIO_FADE_DURATION.default}
             step={0.1}
           />
           <ProSlider
             label="淡出 (s)"
             value={safeFadeOut}
-            onChange={(v) => commit({ fade_out_sec: Math.max(0, Number(v) || 0) })}
-            min={0}
+            onChange={(v) => commit({ fade_out_sec: Math.max(AUDIO_FADE_DURATION.min, Number(v) || AUDIO_FADE_DURATION.default) })}
+            min={AUDIO_FADE_DURATION.min}
             max={maxFade}
-            resetValue={0}
+            resetValue={AUDIO_FADE_DURATION.default}
             step={0.1}
           />
           <p className="text-[10px] leading-relaxed text-cs2-text-muted">
@@ -1095,9 +1072,9 @@ export function AudioPane({
           label="当前片段原声音量 (%)"
           value={volumePct}
           onChange={handleVolumeChange}
-          min={0}
-          max={500}
-          resetValue={100}
+          min={AUDIO_CLIP_GAIN.min * 100}
+          max={AUDIO_CLIP_GAIN.max * 100}
+          resetValue={AUDIO_CLIP_GAIN.default * 100}
         />
         {keyframeControls}
         <p className="text-[10px] leading-relaxed text-cs2-text-muted">
@@ -1157,40 +1134,36 @@ function canvasRatioLabel(width, height) {
 }
 
 export function CanvasPane({
-  width = 1920,
-  height = 1080,
-  canvasFit = "contain",
-  backgroundColor = "#000000",
-  blurAmount = 24,
+  width = LITE_CUT_OUTPUT_DEFAULTS.width,
+  height = LITE_CUT_OUTPUT_DEFAULTS.height,
+  canvasFit = LITE_CUT_OUTPUT_DEFAULTS.canvas_fit,
+  backgroundColor = LITE_CUT_OUTPUT_DEFAULTS.background_color,
+  blurAmount = OUTPUT_BLUR.default,
   onOutputSettingsChange,
 }) {
   const commitCanvas = (patch) => onOutputSettingsChange?.(patch);
-  const sizePresets = [
-    { id: "16:9", width: 1920, height: 1080 },
-    { id: "9:16", width: 1080, height: 1920 },
-    { id: "1:1", width: 1080, height: 1080 },
-    { id: "4:3", width: 1440, height: 1080 },
-  ];
+  const sizePresets = CANVAS_PRESETS;
   const currentRatio = canvasRatioLabel(width, height);
   const hasPresetRatio = sizePresets.some((preset) => preset.id === currentRatio);
-  const fitOptions = [
-    { id: "contain", label: "适应", desc: "保留完整画面" },
-    { id: "cover", label: "填满", desc: "裁切画面边缘" },
-    { id: "blur", label: "模糊底", desc: "竖屏与窄屏素材" },
-  ];
-  const normalizedColor = /^#[0-9a-f]{6}$/i.test(backgroundColor) ? backgroundColor : "#000000";
-  const normalizedBlur = Math.max(4, Math.min(80, Number(blurAmount) || 24));
+  const fitLabels = {
+    contain: { label: "适应", desc: "保留完整画面" },
+    cover: { label: "填满", desc: "裁切画面边缘" },
+    blur: { label: "模糊底", desc: "竖屏与窄屏素材" },
+  };
+  const fitOptions = LITE_CUT_CANVAS_FIT_VALUES.map((id) => ({ id, ...fitLabels[id] })).filter((item) => item.label);
+  const normalizedColor = /^#[0-9a-f]{6}$/i.test(backgroundColor) ? backgroundColor : LITE_CUT_OUTPUT_DEFAULTS.background_color;
+  const normalizedBlur = Math.max(OUTPUT_BLUR.min, Math.min(OUTPUT_BLUR.max, Number(blurAmount) || OUTPUT_BLUR.default));
   const [widthDraft, setWidthDraft] = useState(String(width));
   const [heightDraft, setHeightDraft] = useState(String(height));
   useEffect(() => setWidthDraft(String(width)), [width]);
   useEffect(() => setHeightDraft(String(height)), [height]);
   const commitWidth = () => {
-    const nextWidth = Math.max(320, Math.min(7680, Number(widthDraft) || Number(width) || 1920));
+    const nextWidth = Math.max(OUTPUT_WIDTH.min, Math.min(OUTPUT_WIDTH.max, Number(widthDraft) || Number(width) || LITE_CUT_OUTPUT_DEFAULTS.width));
     setWidthDraft(String(nextWidth));
     if (nextWidth !== Number(width)) commitCanvas({ width: nextWidth });
   };
   const commitHeight = () => {
-    const nextHeight = Math.max(180, Math.min(4320, Number(heightDraft) || Number(height) || 1080));
+    const nextHeight = Math.max(OUTPUT_HEIGHT.min, Math.min(OUTPUT_HEIGHT.max, Number(heightDraft) || Number(height) || LITE_CUT_OUTPUT_DEFAULTS.height));
     setHeightDraft(String(nextHeight));
     if (nextHeight !== Number(height)) commitCanvas({ height: nextHeight });
   };
@@ -1238,8 +1211,8 @@ export function CanvasPane({
           <input
             type="number"
             aria-label="画布宽度"
-            min={320}
-            max={7680}
+            min={OUTPUT_WIDTH.min}
+            max={OUTPUT_WIDTH.max}
             value={widthDraft}
             onChange={(event) => setWidthDraft(event.target.value)}
             onBlur={commitWidth}
@@ -1252,8 +1225,8 @@ export function CanvasPane({
           <input
             type="number"
             aria-label="画布高度"
-            min={180}
-            max={4320}
+            min={OUTPUT_HEIGHT.min}
+            max={OUTPUT_HEIGHT.max}
             value={heightDraft}
             onChange={(event) => setHeightDraft(event.target.value)}
             onBlur={commitHeight}
@@ -1307,13 +1280,13 @@ export function CanvasPane({
           <input
             type="range"
             aria-label="画布模糊强度"
-            min={4}
-            max={80}
+            min={OUTPUT_BLUR.min}
+            max={OUTPUT_BLUR.max}
             step={1}
             value={normalizedBlur}
             disabled={canvasFit !== "blur"}
-            onChange={(event) => commitCanvas({ blur_amount: Math.max(4, Math.min(80, Number(event.target.value) || 24)) })}
-            style={{ "--cs2-range-progress": `${((normalizedBlur - 4) / 76) * 100}%` }}
+            onChange={(event) => commitCanvas({ blur_amount: Math.max(OUTPUT_BLUR.min, Math.min(OUTPUT_BLUR.max, Number(event.target.value) || OUTPUT_BLUR.default)) })}
+            style={{ "--cs2-range-progress": `${((normalizedBlur - OUTPUT_BLUR.min) / Math.max(1, OUTPUT_BLUR.max - OUTPUT_BLUR.min)) * 100}%` }}
             className="cs2-data-slider w-full disabled:cursor-not-allowed disabled:opacity-40"
           />
           {canvasFit !== "blur" ? <p className="text-[9px] text-cs2-text-muted">选择“模糊底”后可调节。</p> : null}
@@ -1327,17 +1300,17 @@ export function ExportPane({
   outputDir,
   outputDirHint,
   filename,
-  width = 1920,
-  height = 1080,
-  fps = 60,
+  width = LITE_CUT_OUTPUT_DEFAULTS.width,
+  height = LITE_CUT_OUTPUT_DEFAULTS.height,
+  fps = LITE_CUT_OUTPUT_DEFAULTS.fps,
   framemeldEnabled = false,
   framemeldRuntimeAvailable = false,
   framemeldSourceItems = [],
-  encoder = "auto",
-  encoderTier = "quality",
-  rangeMode = "full",
-  rangeStartSec = 0,
-  rangeEndSec = 1,
+  encoder = LITE_CUT_OUTPUT_DEFAULTS.encoder,
+  encoderTier = LITE_CUT_OUTPUT_DEFAULTS.encoder_tier,
+  rangeMode = LITE_CUT_OUTPUT_DEFAULTS.range_mode,
+  rangeStartSec = LITE_CUT_OUTPUT_DEFAULTS.range_start_sec,
+  rangeEndSec = TIMELINE_DURATION.uiMin,
   rangeValid = true,
   selectedExportRange = null,
   timelineTotalSec = 0,
@@ -1369,17 +1342,17 @@ export function ExportPane({
         ? t("liteCut.frameMeldBlockedMixedFps")
         : "";
   const commitWorkingFps = (value) => {
-    const nextFps = Math.max(1, Math.min(1000, Math.round(Number(value) || 60)));
+    const nextFps = Math.max(OUTPUT_FPS.min, Math.min(OUTPUT_FPS.max, Math.round(Number(value) || LITE_CUT_OUTPUT_DEFAULTS.fps)));
     commitSize({ fps: nextFps });
   };
   const toggleFrameMeld = () => {
     if (!framemeldAvailable) return;
     commitSize({ framemeld_enabled: !framemeldActive });
   };
-  const maxRangeEnd = Math.max(0.1, Number(timelineTotalSec) || 0.1);
-  const clampRangeStart = (value) => Math.max(0, Math.min(maxRangeEnd - 0.1, Number(value) || 0));
+  const maxRangeEnd = Math.max(TIMELINE_DURATION.uiMin, Math.min(TIMELINE_TIME.max, Number(timelineTotalSec) || TIMELINE_DURATION.uiMin));
+  const clampRangeStart = (value) => Math.max(TIMELINE_TIME.min, Math.min(maxRangeEnd - TIMELINE_DURATION.uiMin, Number(value) || TIMELINE_TIME.default));
   const clampRangeEnd = (value, start = rangeStartSec) =>
-    Math.max(clampRangeStart(start) + 0.1, Math.min(maxRangeEnd, Number(value) || maxRangeEnd));
+    Math.max(clampRangeStart(start) + TIMELINE_DURATION.uiMin, Math.min(maxRangeEnd, Number(value) || maxRangeEnd));
   const commitRangeStart = (value) => {
     const start = clampRangeStart(value);
     commitSize({ range_mode: "custom", range_start_sec: start, range_end_sec: clampRangeEnd(rangeEndSec, start) });
@@ -1438,12 +1411,7 @@ export function ExportPane({
     <div className="space-y-2">
       <PaneSection title="导出规格">
         <div className="grid grid-cols-2 gap-1.5">
-          {[
-            [1280, 720, "720p"],
-            [1920, 1080, "1080p"],
-            [2560, 1440, "1440p"],
-            [3840, 2160, "4K"],
-          ].map(([w, h, label]) => (
+          {LITE_CUT_RESOLUTION_PRESETS.map(({ width: w, height: h, id: label }) => (
             <button
               key={label}
               type="button"
@@ -1463,10 +1431,10 @@ export function ExportPane({
             <span className="text-[10px] font-medium text-cs2-text-muted">宽</span>
             <input
               type="number"
-              min="320"
-              max="7680"
+              min={OUTPUT_WIDTH.min}
+              max={OUTPUT_WIDTH.max}
               value={width}
-              onChange={(e) => commitSize({ width: Math.max(320, Math.min(7680, Number(e.target.value) || 1920)) })}
+              onChange={(e) => commitSize({ width: Math.max(OUTPUT_WIDTH.min, Math.min(OUTPUT_WIDTH.max, Number(e.target.value) || LITE_CUT_OUTPUT_DEFAULTS.width)) })}
               className="litecut-property-number w-full"
             />
           </label>
@@ -1474,10 +1442,10 @@ export function ExportPane({
             <span className="text-[10px] font-medium text-cs2-text-muted">高</span>
             <input
               type="number"
-              min="180"
-              max="4320"
+              min={OUTPUT_HEIGHT.min}
+              max={OUTPUT_HEIGHT.max}
               value={height}
-              onChange={(e) => commitSize({ height: Math.max(180, Math.min(4320, Number(e.target.value) || 1080)) })}
+              onChange={(e) => commitSize({ height: Math.max(OUTPUT_HEIGHT.min, Math.min(OUTPUT_HEIGHT.max, Number(e.target.value) || LITE_CUT_OUTPUT_DEFAULTS.height)) })}
               className="litecut-property-number w-full"
             />
           </label>
@@ -1485,8 +1453,8 @@ export function ExportPane({
             <span className="text-[10px] font-medium text-cs2-text-muted">工程帧率 (FPS)</span>
             <input
               type="number"
-              min="1"
-              max="1000"
+              min={OUTPUT_FPS.min}
+              max={OUTPUT_FPS.max}
               step="1"
               value={fps}
               onChange={(e) => commitWorkingFps(e.target.value)}
@@ -1600,7 +1568,7 @@ export function ExportPane({
                 <span className="text-[10px] font-medium text-cs2-text-muted">开始时间</span>
                 <input
                   type="number"
-                  min={0}
+                  min={TIMELINE_TIME.min}
                   max={maxRangeEnd}
                   step={0.1}
                   value={Number(rangeStartSec).toFixed(1)}
@@ -1612,7 +1580,7 @@ export function ExportPane({
                 <span className="text-[10px] font-medium text-cs2-text-muted">结束时间</span>
                 <input
                   type="number"
-                  min={0.1}
+                  min={TIMELINE_DURATION.uiMin}
                   max={maxRangeEnd}
                   step={0.1}
                   value={Number(rangeEndSec).toFixed(1)}

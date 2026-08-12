@@ -3,30 +3,20 @@ import {
   HANDOFF_MAX_WAIT_MS,
   HANDOFF_SEEK_RETRY_MS,
   handoffFrameAction,
-  normalizePreviewLayerTransform,
+  isHandoffFrameReady,
   previewMediaIdentity,
+  previewUnderlayOpacity,
+  previewUnderlayPlaybackStateKey,
+  previewUnderlaySyncKey,
   previewFrameTimes,
   promotedUnderlayForMain,
   shouldApplyPreviewSeek,
+  shouldPrewarmNextClip,
   shouldPublishPreviewClock,
   shouldPublishVideoTimeUpdate,
   shouldUseMediaPreviewClock,
   transitionVisualAtLocalTime,
 } from "./previewFrameUtils.js";
-
-describe("normalizePreviewLayerTransform", () => {
-  it("uses the same 300% transform bounds as FFmpeg export", () => {
-    expect(normalizePreviewLayerTransform({ x: -1, y: 2, width: 2.4, height: 1.8, scale: 4, rotation: 220, opacity: -1 })).toEqual({
-      x: 0,
-      y: 1,
-      width: 2.4,
-      height: 1.8,
-      scale: 3,
-      rotation: 180,
-      opacity: 0,
-    });
-  });
-});
 
 describe("previewMediaIdentity", () => {
   it.each(["mp4", "m4v", "mov", "mkv", "avi", "gif", "webm"])(
@@ -36,6 +26,37 @@ describe("previewMediaIdentity", () => {
       expect(previewMediaIdentity("clip-a", streamUrl)).not.toBe(previewMediaIdentity("clip-b", streamUrl));
     },
   );
+});
+
+describe("preview underlay playback state", () => {
+  const layer = {
+    id: "clip-b",
+    streamUrl: "/b.mp4",
+    playbackRate: 1,
+    sourceTime: 4,
+    mediaTimeOffset: 0,
+  };
+
+  it("restarts media control when a companion leaves prewarm or freeze state", () => {
+    expect(previewUnderlayPlaybackStateKey({ ...layer, prewarm: true }))
+      .not.toBe(previewUnderlayPlaybackStateKey({ ...layer, freezePlayback: true }));
+    expect(previewUnderlayPlaybackStateKey({ ...layer, freezePlayback: true }))
+      .not.toBe(previewUnderlayPlaybackStateKey(layer));
+  });
+
+  it("does not reschedule seeks for every forward-playing scene frame", () => {
+    expect(previewUnderlaySyncKey(layer, true))
+      .toBe(previewUnderlaySyncKey({ ...layer, sourceTime: 4.4 }, true));
+  });
+
+  it("keeps paused, frozen, and reverse layers synchronized to explicit time", () => {
+    expect(previewUnderlaySyncKey(layer, false))
+      .not.toBe(previewUnderlaySyncKey({ ...layer, sourceTime: 4.4 }, false));
+    expect(previewUnderlaySyncKey({ ...layer, freezePlayback: true }, true))
+      .not.toBe(previewUnderlaySyncKey({ ...layer, freezePlayback: true, sourceTime: 4.4 }, true));
+    expect(previewUnderlaySyncKey({ ...layer, reversePlayback: true }, true))
+      .not.toBe(previewUnderlaySyncKey({ ...layer, reversePlayback: true, sourceTime: 4.4 }, true));
+  });
 });
 
 describe("previewFrameTimes", () => {
@@ -125,6 +146,62 @@ describe("handoffFrameAction", () => {
     const action = handoffFrameAction({ ...base, mediaTime: 5, expectedMediaTime: 6, seeking: true });
     expect(action).toEqual({ type: "wait", startedAt: 1000 });
   });
+
+  it("does not reveal a segmented handoff while its frame is behind", () => {
+    const action = handoffFrameAction({
+      ...base,
+      hasPromotedLayer: false,
+      mediaTime: 4.04,
+      expectedMediaTime: 4.1,
+      preventBackwardPresentation: true,
+      toleranceSec: 1 / 30,
+    });
+    expect(action).toEqual({ type: "seek", target: 4.1, startedAt: 1000 });
+  });
+
+  it("never falls through the deadline to a backward segmented frame", () => {
+    const action = handoffFrameAction({
+      ...base,
+      hasPromotedLayer: false,
+      mediaTime: 4,
+      expectedMediaTime: 4.2,
+      handoffStartedAt: 1000 - HANDOFF_MAX_WAIT_MS - 1,
+      lastCorrectiveSeekAt: 1000,
+      preventBackwardPresentation: true,
+      toleranceSec: 1 / 30,
+    });
+    expect(action).toEqual({ type: "wait", startedAt: 299 });
+  });
+});
+
+describe("shouldPrewarmNextClip", () => {
+  it("opens a bounded prewarm window before a contiguous cut", () => {
+    expect(shouldPrewarmNextClip({
+      currentClipEnd: 20,
+      nextClipStart: 20,
+      playheadSec: 14,
+      isPlaying: true,
+    })).toBe(true);
+    expect(shouldPrewarmNextClip({
+      currentClipEnd: 20,
+      nextClipStart: 20,
+      playheadSec: 13.9,
+      isPlaying: true,
+    })).toBe(false);
+  });
+
+  it("does not prewarm while paused or across an intentional gap", () => {
+    expect(shouldPrewarmNextClip({ currentClipEnd: 20, nextClipStart: 20, playheadSec: 18, isPlaying: false })).toBe(false);
+    expect(shouldPrewarmNextClip({ currentClipEnd: 20, nextClipStart: 22, playheadSec: 18, isPlaying: true })).toBe(false);
+  });
+});
+
+describe("isHandoffFrameReady", () => {
+  it("accepts an on-time or forward segmented frame but rejects a visible rewind", () => {
+    expect(isHandoffFrameReady({ mediaTime: 4.2, expectedMediaTime: 4.1, toleranceSec: 1 / 30, preventBackwardPresentation: true })).toBe(true);
+    expect(isHandoffFrameReady({ mediaTime: 4.08, expectedMediaTime: 4.1, toleranceSec: 1 / 30, preventBackwardPresentation: true })).toBe(true);
+    expect(isHandoffFrameReady({ mediaTime: 4.04, expectedMediaTime: 4.1, toleranceSec: 1 / 30, preventBackwardPresentation: true })).toBe(false);
+  });
 });
 
 describe("promotedUnderlayForMain", () => {
@@ -135,6 +212,18 @@ describe("promotedUnderlayForMain", () => {
 
   it("does not retain an unrelated lower layer", () => {
     expect(promotedUnderlayForMain([{ id: "other", streamUrl: "/media/other.mp4" }], "clip-v2", "/media/base.mp4")).toBeNull();
+  });
+
+  it("retains the same clip's direct underlay while its segmented main URL is pending", () => {
+    const lower = { id: "clip-v2", streamUrl: "/media/original.mp4", sourceTime: 3 };
+    expect(promotedUnderlayForMain([lower], "clip-v2", null)).toBe(lower);
+    expect(promotedUnderlayForMain([lower], "clip-v2", "/preview/segment-0.mp4")).toBe(lower);
+  });
+
+  it("keeps a prewarm invisible before the cut and reveals it only after promotion", () => {
+    const prewarm = { id: "clip-v2", prewarm: true, opacity: 0 };
+    expect(previewUnderlayOpacity(prewarm)).toBe(0);
+    expect(previewUnderlayOpacity(prewarm, "clip-v2")).toBe(1);
   });
 });
 

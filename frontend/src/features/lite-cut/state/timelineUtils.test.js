@@ -3,10 +3,11 @@ import { describe, expect, it } from "vitest";
 import {
   clipMaxTimelineEnd,
   clipCanvasFit,
-  buildDetachedAudioClip,
+  buildLinkedAudioClip,
+  buildStandaloneAudioClip,
   buildAssetClip,
   buildRecordedClip,
-  canDetachClipAudio,
+  canBuildLinkedAudioClip,
   canRemoveTrack,
   canSplitOverlaysAtPlayhead,
   canSplitTrackClipsAtPlayhead,
@@ -27,7 +28,9 @@ import {
   clipTrimmedSourceDuration,
   clipTimelineEnd,
   compactTrackGaps,
+  ensurePairedMediaTrack,
   insertAudioTrack,
+  insertPairedMediaTracks,
   insertClipIntoTrackWithRipple,
   insertOverlayWithRipple,
   insertVideoTrack,
@@ -36,14 +39,17 @@ import {
   resolveAudioEditingTarget,
   mainVideoClips,
   markerNearTime,
+  mediaItemHasAudio,
   nextEditPoint,
   nextMarker,
+  normalizeTimelineTrackOrder,
   nudgeClipInTrack,
   slipClipInTrack,
   nudgeOverlayInList,
   overlayTimelineEnd,
   parseSubtitleText,
   parseSubtitleTimecode,
+  pairedMediaTrackId,
   previousEditPoint,
   previousMarker,
   projectFrameStepSec,
@@ -151,13 +157,13 @@ describe("timelineUtils", () => {
     const recorded = buildRecordedClip({ id: 1, duration: 10, _raw: { duration_sec: 10 } }, 0);
     const audio = buildAssetClip({ id: 2, kind: "audio", name: "beat.mp3", path: "C:/x/beat.mp3", duration_sec: 12 }, 1);
     expect(recorded.volume).toBe(1);
-    expect(recorded.muted).toBe(false);
-    expect(recorded.canvas_fit).toBe(null);
+    expect(recorded.muted).toBe(true);
+    expect(recorded.content_fit).toBe(null);
     expect(recorded.preserve_pitch).toBe(true);
     expect(recorded.reverse).toBe(false);
     expect(audio.volume).toBe(1);
     expect(audio.muted).toBe(false);
-    expect(audio.canvas_fit).toBe(null);
+    expect(audio.content_fit).toBe(null);
     expect(audio.preserve_pitch).toBe(true);
     expect(audio.reverse).toBe(false);
     expect(audio.fade_in_sec).toBe(0);
@@ -181,13 +187,13 @@ describe("timelineUtils", () => {
   });
 
   it("resolves clip canvas fit from override or project fallback", () => {
-    expect(clipCanvasFit({ canvas_fit: "cover" }, "contain")).toBe("cover");
-    expect(clipCanvasFit({ canvas_fit: "blur" }, "cover")).toBe("blur");
-    expect(clipCanvasFit({ canvas_fit: null }, "cover")).toBe("cover");
-    expect(clipCanvasFit({ canvas_fit: "bad" }, "bad")).toBe("contain");
+    expect(clipCanvasFit({ content_fit: "cover" }, "contain")).toBe("cover");
+    expect(clipCanvasFit({ content_fit: "blur" }, "cover")).toBe("blur");
+    expect(clipCanvasFit({ content_fit: null }, "cover")).toBe("cover");
+    expect(clipCanvasFit({ content_fit: "bad" }, "bad")).toBe("contain");
   });
 
-  it("detaches uploaded video audio as an editable audio clip", () => {
+  it("builds an editable A-track clip from uploaded video audio", () => {
     const video = buildAssetClip({ id: 2, kind: "video", name: "angle.mp4", path: "C:/x/angle.mp4", duration_sec: 12 }, 4);
     video.trim_in = 2;
     video.trim_out = 10;
@@ -195,8 +201,8 @@ describe("timelineUtils", () => {
     video.preserve_pitch = false;
     video.reverse = true;
     video.volume = 0.75;
-    expect(canDetachClipAudio(video, "video")).toBe(true);
-    const audio = buildDetachedAudioClip(video);
+    expect(canBuildLinkedAudioClip(video, "video")).toBe(true);
+    const audio = buildLinkedAudioClip(video);
     expect(audio).toMatchObject({
       source_type: "file",
       file_path: "C:/x/angle.mp4",
@@ -208,39 +214,59 @@ describe("timelineUtils", () => {
       reverse: true,
       volume: 0.75,
       muted: false,
-      meta: { kind: "audio", source_clip_id: video.id, detached_from_video: true },
+      meta: { kind: "audio", source_clip_id: video.id, linked_from_video: true },
     });
     expect(clipSourceDuration(audio)).toBe(4);
   });
 
-  it("allows detaching recorded clip audio when the recording path is known", () => {
+  it("builds a standalone A-track clip when video is dropped directly on an audio track", () => {
+    const video = buildAssetClip({ id: 3, kind: "video", name: "match.mp4", path: "C:/match.mp4", duration_sec: 12 }, 4);
+    const audio = buildStandaloneAudioClip(video);
+    expect(audio).toMatchObject({
+      file_path: "C:/match.mp4",
+      timeline_start: 4,
+      muted: false,
+      meta: { asset_id: 3, kind: "audio" },
+    });
+    expect(audio.meta.source_clip_id).toBeUndefined();
+    expect(audio.meta.linked_from_video).toBeUndefined();
+  });
+
+  it("builds recorded audio linkage when the recording path is known", () => {
     const recorded = buildRecordedClip(
       { id: 1, duration: 8, _raw: { duration_sec: 8, output_path: "C:/recordings/ace.mp4", player_name: "me" } },
       1,
     );
-    expect(canDetachClipAudio(recorded, "video")).toBe(true);
-    const detached = buildDetachedAudioClip(recorded);
-    expect(detached?.file_path).toBe("C:/recordings/ace.mp4");
-    expect(detached?.source_id).toBe(1);
-    expect(canDetachClipAudio({ ...recorded, meta: { duration_sec: 8 } }, "video")).toBe(false);
+    expect(canBuildLinkedAudioClip(recorded, "video")).toBe(true);
+    const linked = buildLinkedAudioClip(recorded);
+    expect(linked?.file_path).toBe("C:/recordings/ace.mp4");
+    expect(linked?.source_id).toBe(1);
+    expect(canBuildLinkedAudioClip({ ...recorded, meta: { duration_sec: 8 } }, "video")).toBe(false);
   });
 
-  it("finds a video clip and its detached audio counterpart", () => {
+  it("uses probed audio metadata to decide whether a local video gets an A-track clip", () => {
+    expect(mediaItemHasAudio({ mediaKind: "asset", kind: "video", audio_codec_name: "aac" })).toBe(true);
+    expect(mediaItemHasAudio({ mediaKind: "asset", kind: "video", audio_codec_name: null })).toBe(false);
+    expect(mediaItemHasAudio({ mediaKind: "asset", kind: "video", has_audio: true })).toBe(true);
+    expect(mediaItemHasAudio({ mediaKind: "asset", kind: "image", has_audio: true })).toBe(false);
+  });
+
+  it("finds both sides of a linked video and audio pair", () => {
     const body = {
       tracks: [
         { id: "v1", type: "video", clips: [{ id: "video", meta: {} }] },
-        { id: "a1", type: "audio", clips: [{ id: "audio", meta: { source_clip_id: "video", detached_from_video: true } }] },
+        { id: "a1", type: "audio", clips: [{ id: "audio", meta: { source_clip_id: "video", linked_from_video: true } }] },
       ],
     };
     expect(linkedTimelineClipIds(body, "video")).toEqual(["video", "audio"]);
     expect(linkedTimelineClipIds(body, "audio")).toEqual(["video", "audio"]);
   });
 
-  it("always resolves linked audio controls to the detached A-track clip", () => {
+  it("always resolves linked audio controls to the A-track clip", () => {
     const body = {
       tracks: [
         { id: "v1", type: "video", clips: [{ id: 101, muted: true, meta: { linked_audio_clip_id: 202 } }] },
-        { id: "a1", type: "audio", clips: [{ id: 202, muted: false, meta: { source_clip_id: 101, detached_from_video: true } }] },
+        { id: "a1", type: "audio", clips: [{ id: 202, muted: false, meta: { source_clip_id: 101, linked_from_video: true } }] },
       ],
     };
 
@@ -305,6 +331,10 @@ describe("timelineUtils", () => {
     const clips = [{ id: "a", timeline_start: 0, trim_in: 0, trim_out: 10 }];
     expect(canPlaceOnTrack(clips, 5, 5)).toBe(false);
     expect(canPlaceOnTrack(clips, 10, 5)).toBe(true);
+    expect(canPlaceOnTrack([
+      ...clips,
+      { id: "b", timeline_start: 12, trim_in: 0, trim_out: 4 },
+    ], 5, 5, ["a", "b"])).toBe(true);
   });
 
   it("compacts gaps on a track using timeline durations", () => {
@@ -340,12 +370,11 @@ describe("timelineUtils", () => {
       timeline_start: 0,
       trim_in: 0,
       trim_out: 10,
-      transition_out: { type: "fade", duration_sec: 0.4 },
     };
     const [left, right] = splitClipAt(clip, 4);
     expect(clipSourceDuration(left)).toBe(4);
     expect(right.timeline_start).toBe(4);
-    expect(right.transition_out?.type).toBe("fade");
+    expect(right.id).not.toBe(left.id);
   });
 
   it("keeps video layer keyframe continuity when splitting", () => {
@@ -393,7 +422,6 @@ describe("timelineUtils", () => {
       trim_in: 0,
       trim_out: 10,
       speed: 2,
-      transition_out: { type: "fade", duration_sec: 0.4 },
     };
     const [left, right] = splitClipAt(clip, 2);
     expect(left.trim_out).toBe(4);
@@ -798,7 +826,29 @@ describe("timelineUtils", () => {
     expect(audioId).toMatch(/^a-/);
     expect(body.tracks.filter((t) => t.type === "video").map((t) => t.label)).toEqual(["V1", "V2"]);
     expect(body.tracks.filter((t) => t.type === "audio").map((t) => t.label)).toEqual(["A1", "A2"]);
+    expect(body.tracks.map((t) => t.type)).toEqual(["video", "video", "audio", "audio"]);
     expect(visibleVideoTracks(body).map((t) => t.label)).toEqual(["V1", "V2"]);
+  });
+
+  it("normalizes interleaved tracks and maintains same-ordinal V/A counterparts", () => {
+    const body = {
+      tracks: [
+        { id: "v1", type: "video", label: "legacy-v1", clips: [] },
+        { id: "a1", type: "audio", label: "legacy-a1", clips: [] },
+        { id: "v2", type: "video", label: "legacy-v2", clips: [] },
+      ],
+    };
+
+    expect(normalizeTimelineTrackOrder(body)).toBe(true);
+    expect(body.tracks.map((track) => track.id)).toEqual(["v1", "v2", "a1"]);
+    expect(ensurePairedMediaTrack(body, "v2")).toMatch(/^a-/);
+    expect(pairedMediaTrackId(body, "v2")).toBe(body.tracks[3].id);
+    expect(body.tracks.map((track) => track.label)).toEqual(["V1", "V2", "A1", "A2"]);
+
+    const pair = insertPairedMediaTracks(body, "video", "v2");
+    expect(pair).toMatchObject({ primaryTrackId: pair.videoTrackId, counterpartTrackId: pair.audioTrackId });
+    expect(body.tracks.map((track) => track.type)).toEqual(["video", "video", "video", "audio", "audio", "audio"]);
+    expect(pairedMediaTrackId(body, pair.videoTrackId)).toBe(pair.audioTrackId);
   });
 
   it("removes only empty non-final media tracks", () => {

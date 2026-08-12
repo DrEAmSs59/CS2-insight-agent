@@ -32,15 +32,42 @@ from app.features.lite_cut.composer import (  # noqa: E402
     _composite_overlays_on_base,
     _lite_cut_boundary_transition_to_ts,
     _lite_cut_clip_to_ts,
-    _map_transition_type,
 )
 from app.features.lite_cut.assets import ensure_alpha_mov_preview_proxy  # noqa: E402
 from app.features.lite_cut.render_pipeline import _compose_lite_cut_montage_once  # noqa: E402
+from app.features.lite_cut.transition_events import normalize_transition_type, project_events_to_render_nodes  # noqa: E402
 from app.video_composer import ffprobe_streams, probe_video_audio_summary, resolve_ffprobe_binary  # noqa: E402
 
 
 def load_json(path: Path) -> dict[str, Any]:
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+def projected_overlay_transition(
+    overlay: dict[str, Any],
+    *,
+    phase: str,
+    transition_type: str,
+    duration_sec: float,
+) -> dict[str, Any]:
+    """Build low-level regression input through the canonical event projection."""
+
+    overlay_id = str(overlay.get("id") or f"visual-{phase}")
+    meta = overlay.get("meta") if isinstance(overlay.get("meta"), dict) else {}
+    overlay_ref = {"kind": "overlay", "track_id": str(meta.get("overlay_track_id") or "ot1"), "id": overlay_id}
+    event = {
+        "id": f"visual-{phase}-{transition_type}",
+        "type": transition_type,
+        "duration_sec": duration_sec,
+        "from": overlay_ref if phase == "out" else None,
+        "to": overlay_ref if phase == "in" else None,
+    }
+    projected = project_events_to_render_nodes({
+        "tracks": [],
+        "overlays": [{**overlay, "id": overlay_id, "meta": {**meta, "overlay_track_id": overlay_ref["track_id"]}}],
+        "transitions": [event],
+    })
+    return projected["overlays"][0]
 
 
 def first_existing(root: Path, candidates: list[str]) -> Path:
@@ -287,6 +314,62 @@ def bbox_metrics(
     }
 
 
+def changed_line_bboxes(base_path: Path, target_path: Path, *, threshold: int = 12) -> list[tuple[int, int, int, int]]:
+    base = Image.open(base_path).convert("RGB")
+    target = Image.open(target_path).convert("RGB")
+    if base.size != target.size:
+        width = min(base.width, target.width)
+        height = min(base.height, target.height)
+        base = base.crop((0, 0, width, height))
+        target = target.crop((0, 0, width, height))
+    mask = ImageChops.difference(base, target).convert("L").point(lambda value: 255 if value >= threshold else 0)
+    active_rows = [y for y in range(mask.height) if mask.crop((0, y, mask.width, y + 1)).getbbox()]
+    if not active_rows:
+        return []
+    groups: list[list[int]] = [[active_rows[0]]]
+    for row in active_rows[1:]:
+        if row == groups[-1][-1] + 1:
+            groups[-1].append(row)
+        else:
+            groups.append([row])
+    boxes: list[tuple[int, int, int, int]] = []
+    for rows in groups:
+        bbox = mask.crop((0, rows[0], mask.width, rows[-1] + 1)).getbbox()
+        if bbox:
+            boxes.append((bbox[0], rows[0] + bbox[1], bbox[2], rows[0] + bbox[3]))
+    return boxes
+
+
+def text_line_metrics(
+    preview_base: Path,
+    preview_target: Path,
+    export_base: Path,
+    export_target: Path,
+) -> dict[str, Any]:
+    preview_lines = changed_line_bboxes(preview_base, preview_target)
+    export_lines = changed_line_bboxes(export_base, export_target)
+    if len(preview_lines) != 2 or len(export_lines) != 2:
+        return {"preview_lines": preview_lines, "export_lines": export_lines, "line_detection_failed": True}
+    preview_size = Image.open(preview_target).size
+    export_size = Image.open(export_target).size
+
+    def normalized(box: tuple[int, int, int, int], size: tuple[int, int]) -> tuple[float, float, float, float]:
+        left, top, right, bottom = box
+        width, height = size
+        return (((left + right) / 2) / width, top / height, (right - left) / width, (bottom - top) / height)
+
+    preview_norm = [normalized(box, preview_size) for box in preview_lines]
+    export_norm = [normalized(box, export_size) for box in export_lines]
+    return {
+        "preview_lines": preview_lines,
+        "export_lines": export_lines,
+        "line_center_delta": round(max(abs(p[0] - e[0]) for p, e in zip(preview_norm, export_norm)), 6),
+        "line_width_delta": round(max(abs(p[2] - e[2]) for p, e in zip(preview_norm, export_norm)), 6),
+        "line_height_delta": round(max(abs(p[3] - e[3]) for p, e in zip(preview_norm, export_norm)), 6),
+        "line_pitch_delta": round(abs((preview_norm[1][1] - preview_norm[0][1]) - (export_norm[1][1] - export_norm[0][1])), 6),
+    }
+
+
 def change_energy(base_path: Path, target_path: Path) -> float:
     base = Image.open(base_path).convert("RGB")
     target = Image.open(target_path).convert("RGB")
@@ -348,12 +431,13 @@ class VisualRegressionRunner:
 
     def start_vite(self) -> None:
         PUBLIC_TMP.mkdir(parents=True, exist_ok=True)
-        pnpm = shutil.which("pnpm.cmd") or shutil.which("pnpm")
-        if not pnpm:
-            raise FileNotFoundError("pnpm is required for browser preview rendering")
+        node = shutil.which("node.exe") or shutil.which("node")
+        vite_cli = FRONTEND / "node_modules" / "vite" / "bin" / "vite.js"
+        if not node or not vite_cli.is_file():
+            raise FileNotFoundError("Node.js and the installed Vite CLI are required for browser preview rendering")
         creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
         self.vite = subprocess.Popen(
-            [pnpm, "exec", "vite", "--host", "127.0.0.1", "--port", str(VITE_PORT), "--strictPort"],
+            [node, str(vite_cli), "--host", "127.0.0.1", "--port", str(VITE_PORT), "--strictPort"],
             cwd=FRONTEND,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
@@ -427,6 +511,7 @@ class VisualRegressionRunner:
                 raise TimeoutError("Edge did not expose a debuggable page")
             socket = websocket.create_connection(page_ws, timeout=5, origin=f"http://127.0.0.1:{port}")
             request_id = 0
+            browser_errors: list[str] = []
 
             def call(method: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
                 nonlocal request_id
@@ -435,6 +520,13 @@ class VisualRegressionRunner:
                 socket.send(json.dumps({"id": target_id, "method": method, "params": params or {}}))
                 while True:
                     payload = json.loads(socket.recv())
+                    if payload.get("method") == "Runtime.exceptionThrown":
+                        details = (payload.get("params") or {}).get("exceptionDetails") or {}
+                        browser_errors.append(str(details.get("text") or details.get("exception") or details))
+                    elif payload.get("method") == "Log.entryAdded":
+                        entry = (payload.get("params") or {}).get("entry") or {}
+                        if entry.get("level") in {"error", "warning"}:
+                            browser_errors.append(str(entry.get("text") or entry))
                     if payload.get("id") == target_id:
                         if payload.get("error"):
                             raise RuntimeError(str(payload["error"]))
@@ -442,6 +534,7 @@ class VisualRegressionRunner:
 
             call("Page.enable")
             call("Runtime.enable")
+            call("Log.enable")
             call("Emulation.setDeviceMetricsOverride", {"width": width, "height": height, "deviceScaleFactor": 1, "mobile": False})
             ready_deadline = time.time() + 20
             ready = False
@@ -452,7 +545,15 @@ class VisualRegressionRunner:
                     break
                 time.sleep(0.1)
             if not ready:
-                raise TimeoutError("Browser video frame did not become ready")
+                diagnostics = call("Runtime.evaluate", {
+                    "expression": "JSON.stringify({readyState:document.readyState,visualReady:document.documentElement.dataset.visualReady||null,root:(document.getElementById('root')?.innerHTML||'').slice(0,500),images:Array.from(document.images).map(i=>({src:i.currentSrc||i.src,complete:i.complete,naturalWidth:i.naturalWidth,naturalHeight:i.naturalHeight}))})",
+                    "returnByValue": True,
+                })
+                diagnostic_value = ((diagnostics.get("result") or {}).get("value")) or "{}"
+                raise TimeoutError(
+                    "Browser visual frame did not become ready; "
+                    f"state={diagnostic_value}; errors={browser_errors[-5:]}"
+                )
             capture = call("Page.captureScreenshot", {"format": "png", "fromSurface": True, "clip": {"x": 0, "y": 0, "width": width, "height": height, "scale": 1}})
             output.write_bytes(base64.b64decode(capture["data"]))
         finally:
@@ -663,14 +764,20 @@ class VisualRegressionRunner:
         transform_cases = self.matrix["transform_cases"] if self.scope == "full" else self.matrix["transform_cases"][:2]
         self.prepare_raw_source(second=1.5)
 
-        jobs: list[tuple[str, dict[str, Any], str]] = []
+        jobs: list[tuple[str, dict[str, Any], str, str, dict[str, float] | None]] = []
         for canvas in canvases:
             for filter_id in filter_ids:
-                jobs.append((f"filter-{canvas['id']}-{filter_id}", self.matrix["transform_cases"][0], filter_id))
+                jobs.append((f"filter-{canvas['id']}-{filter_id}", self.matrix["transform_cases"][0], filter_id, "contain", None))
             for transform in transform_cases[1:]:
-                jobs.append((f"transform-{canvas['id']}-{transform['id']}", transform, "none"))
+                jobs.append((f"transform-{canvas['id']}-{transform['id']}", transform, "none", "contain", None))
+        smoke_canvas = canvases[0]
+        crop = {"x": 0.25, "y": 0.1, "width": 0.5, "height": 0.75}
+        jobs.extend([
+            (f"crop-{smoke_canvas['id']}-contain", self.matrix["transform_cases"][1], "none", "contain", crop),
+            (f"crop-{smoke_canvas['id']}-cover", self.matrix["transform_cases"][1], "none", "cover", crop),
+        ])
 
-        for case_id, transform, filter_id in jobs:
+        for case_id, transform, filter_id, content_fit, crop in jobs:
             canvas_id = case_id.split("-")[1]
             canvas = next(item for item in canvases if item["id"] == canvas_id)
             case_dir = self.report_dir / "filter-transform" / case_id.replace(":", "_")
@@ -680,6 +787,8 @@ class VisualRegressionRunner:
                 "trim_out": 2.0,
                 "timeline_start": 0,
                 "transform": transform,
+                "crop": crop,
+                "canvas_fit": content_fit,
                 "color": {"preset": filter_id, "brightness": 0, "contrast": 0, "saturation": 0},
             }
             rendered = self.temp_root / f"{case_id.replace(':', '_')}.ts"
@@ -690,7 +799,9 @@ class VisualRegressionRunner:
             self.browser_screenshot({
                 "kind": "filter-transform", "caseId": case_id,
                 "width": canvas["width"], "height": canvas["height"],
-                "transform": transform, "cssFilter": filter_map[filter_id]["css"],
+                "transform": transform, "crop": crop, "contentFit": content_fit,
+                "sourceWidth": 640, "sourceHeight": 360,
+                "cssFilter": filter_map[filter_id]["css"],
             }, preview_frame)
             metrics = image_metrics(preview_frame, export_frame)
             threshold = 0.08 if filter_id == "none" and transform["id"] == "identity" else 0.24
@@ -715,8 +826,6 @@ class VisualRegressionRunner:
             previous, incoming = self.normalized_pair(canvas)
             previous_info = probe_video_audio_summary(previous, self.ffprobe)
             previous_duration = float(previous_info.get("duration") or 2.0)
-            transition_outgoing = PUBLIC_TMP / "transition_outgoing.png"
-            extract_last_frame(self.ffmpeg, previous, transition_outgoing)
             for transition in transitions:
                 safe_id = canvas["id"].replace(":", "_")
                 transition_file = self.temp_root / f"transition-{safe_id}-{transition}.ts"
@@ -725,7 +834,7 @@ class VisualRegressionRunner:
                     ffprobe=self.ffprobe,
                     previous_ts=previous,
                     next_ts=incoming,
-                    transition_type=_map_transition_type(transition),
+                    transition_type=normalize_transition_type(transition),
                     transition_duration=1.0,
                     fps=30.0,
                     out_ts=transition_file,
@@ -736,9 +845,22 @@ class VisualRegressionRunner:
                     case_dir = self.report_dir / "transitions" / case_id.replace(":", "_")
                     export_frame = case_dir / "export.png"
                     preview_frame = case_dir / "preview.png"
-                    extract_frame(self.ffmpeg, transition_file, previous_duration + progress, export_frame)
-                    extract_frame(self.ffmpeg, incoming, progress, PUBLIC_TMP / "transition_incoming.png")
-                    frame_progress = max(0.0, min(1.0, math.ceil((previous_duration + progress) * 30 - 1e-6) / 30 - previous_duration))
+                    half_duration = 0.5
+                    transition_second = previous_duration - half_duration + progress
+                    extract_frame(self.ffmpeg, transition_file, transition_second, export_frame)
+                    extract_frame(
+                        self.ffmpeg,
+                        previous,
+                        min(previous_duration - 1 / 30, previous_duration - half_duration + progress),
+                        PUBLIC_TMP / "transition_outgoing.png",
+                    )
+                    extract_frame(
+                        self.ffmpeg,
+                        incoming,
+                        max(0.0, progress - half_duration),
+                        PUBLIC_TMP / "transition_incoming.png",
+                    )
+                    frame_progress = max(0.0, min(1.0, math.ceil(progress * 30 - 1e-6) / 30))
                     self.browser_screenshot({
                         "kind": "transition", "caseId": case_id,
                         "width": canvas["width"], "height": canvas["height"],
@@ -762,9 +884,8 @@ class VisualRegressionRunner:
     def browser_base(self, canvas: dict[str, Any], *, source_second: float, output: Path) -> None:
         self.prepare_raw_source(second=source_second)
         self.browser_screenshot({
-            "kind": "filter-transform", "caseId": f"base-{canvas['id']}-{source_second}",
+            "kind": "base", "caseId": f"base-{canvas['id']}-{source_second}",
             "width": canvas["width"], "height": canvas["height"],
-            "transform": self.matrix["transform_cases"][0], "cssFilter": "none",
         }, output)
 
     def run_font_matrix(self) -> None:
@@ -824,6 +945,71 @@ class VisualRegressionRunner:
                 passed = not metrics.get("bbox_missing") and metrics.get("center_delta", 1) <= 0.055 and metrics.get("width_delta", 1) <= 0.18 and metrics.get("height_delta", 1) <= 0.18
                 self.add_result(category="font", case_id=case_id, passed=passed, metrics=metrics, detail="bbox center<=0.055, size delta<=0.18")
 
+    def run_text_layout_matrix(self) -> None:
+        canvases = self.matrix["canvas_presets"] if self.scope == "full" else self.matrix["canvas_presets"][:1]
+        fonts = self.matrix["fonts"] if self.scope == "full" else self.matrix["fonts"][:2]
+        imported_dir = self.temp_root / "文字布局导入字体"
+        imported_dir.mkdir(parents=True, exist_ok=True)
+        for canvas in canvases:
+            previous, _incoming = self.normalized_pair(canvas)
+            base_mp4 = self.temp_root / f"text-layout-base-{canvas['id'].replace(':', '_')}.mp4"
+            copy_as_mp4(self.ffmpeg, previous, base_mp4)
+            export_base = self.report_dir / "text-layout" / f"base-{canvas['id'].replace(':', '_')}" / "export.png"
+            preview_base = self.report_dir / "text-layout" / f"base-{canvas['id'].replace(':', '_')}" / "preview.png"
+            extract_frame(self.ffmpeg, base_mp4, 1.0, export_base)
+            self.browser_base(canvas, source_second=2.0, output=preview_base)
+            for font in fonts:
+                source_font = self.font_source(font)
+                browser_font_name = f"layout-font-{font['id']}{source_font.suffix.lower()}"
+                shutil.copy2(source_font, PUBLIC_TMP / browser_font_name)
+                export_font_file = ""
+                if font["kind"] == "imported":
+                    imported_font = imported_dir / f"Imported Layout Font{source_font.suffix.lower()}"
+                    shutil.copy2(source_font, imported_font)
+                    export_font_file = str(imported_font)
+                for align in ("left", "center", "right"):
+                    case_id = f"text-layout-{canvas['id']}-{font['id']}-{align}"
+                    case_dir = self.report_dir / "text-layout" / case_id.replace(":", "_")
+                    output_mp4 = self.temp_root / f"{case_id.replace(':', '_')}.mp4"
+                    overlay = {
+                        "type": "text", "timeline_start": 0, "trim_in": 0, "trim_out": 2, "duration": 2,
+                        "transform": {"x": 0.5, "y": 0.5, "width": 0.72, "height": 0.64, "scale": 1.0, "rotation": 0, "opacity": 1},
+                        "text": {
+                            "content": "CLUTCH\nI", "font_family": font["family"], "font_file": export_font_file,
+                            "font_size": 36, "font_weight": 700, "line_height": 1.2, "letter_spacing": 0,
+                            "align": align, "preset_id": "clutch",
+                        },
+                    }
+                    _composite_overlays_on_base(
+                        ffmpeg_bin=self.ffmpeg, ffprobe=self.ffprobe, base_mp4=base_mp4,
+                        overlay_clips=[overlay], out_mp4=output_mp4,
+                        video_encode_quality=self.quality,
+                    )
+                    export_frame = case_dir / "export.png"
+                    preview_frame = case_dir / "preview.png"
+                    extract_frame(self.ffmpeg, output_mp4, 1.0, export_frame)
+                    self.browser_screenshot({
+                        "kind": "text", "caseId": case_id,
+                        "width": canvas["width"], "height": canvas["height"],
+                        "fontFamily": font["family"], "fontAsset": browser_font_name,
+                        "fontSize": 36, "fontWeight": 700, "lineHeight": 1.2,
+                        "text": "CLUTCH\nI", "align": align, "presetId": "clutch",
+                        "x": 0.5, "y": 0.5, "boxWidth": 0.72, "boxHeight": 0.64, "scale": 1,
+                        "transition": "cut", "progress": 1,
+                    }, preview_frame)
+                    metrics = text_line_metrics(preview_base, preview_frame, export_base, export_frame)
+                    passed = (
+                        not metrics.get("line_detection_failed")
+                        and metrics.get("line_center_delta", 1) <= 0.035
+                        and metrics.get("line_width_delta", 1) <= 0.08
+                        and metrics.get("line_height_delta", 1) <= 0.08
+                        and metrics.get("line_pitch_delta", 1) <= 0.035
+                    )
+                    self.add_result(
+                        category="text-layout", case_id=case_id, passed=passed, metrics=metrics,
+                        detail="per-line center<=0.035, size<=0.08, baseline pitch<=0.035",
+                    )
+
     def run_image_transition_matrix(self) -> None:
         canvases = self.matrix["canvas_presets"] if self.scope == "full" else self.matrix["canvas_presets"][:1]
         transitions = self.matrix["transitions"] if self.scope == "full" else ["fade", "flash", "dip", "wipe_l", "slide_up"]
@@ -841,12 +1027,12 @@ class VisualRegressionRunner:
                 case_id = f"image-transition-{canvas['id']}-{transition}"
                 case_dir = self.report_dir / "image-transitions" / case_id.replace(":", "_")
                 output_mp4 = self.temp_root / f"{case_id.replace(':', '_')}.mp4"
-                overlay = {
+                overlay = projected_overlay_transition({
+                    "id": f"image-{transition}",
                     "type": "file", "file_path": str(overlay_path),
                     "timeline_start": 0, "trim_in": 0, "trim_out": 2, "duration": 2,
                     "transform": {"x": 0.5, "y": 0.5, "width": 0.46, "height": 0.34, "scale": 1.0, "rotation": 0, "opacity": 1},
-                    "transition_in": {"type": transition, "duration_sec": 1.0},
-                }
+                }, phase="in", transition_type=transition, duration_sec=1.0)
                 _composite_overlays_on_base(
                     ffmpeg_bin=self.ffmpeg, ffprobe=self.ffprobe, base_mp4=base_mp4,
                     overlay_clips=[overlay], out_mp4=output_mp4,
@@ -897,12 +1083,12 @@ class VisualRegressionRunner:
                 extract_frame(self.ffmpeg, base_mp4, local_time, export_base)
                 self.browser_base(canvas, source_second=1.0 + local_time, output=preview_base)
                 output_mp4 = self.temp_root / f"{case_id}.mp4"
-                overlay = {
+                overlay = projected_overlay_transition({
+                    "id": f"text-{transition}-{phase}",
                     "type": "text", "timeline_start": 0, "trim_in": 0, "trim_out": 2, "duration": 2,
                     "transform": {"x": 0.58, "y": 0.38, "width": 0.72, "height": 0.26, "scale": 1.0, "rotation": 0, "opacity": 1},
                     "text": {"content": "CLUTCH", "font_family": font["family"], "font_file": str(imported_font), "font_size": 36, "preset_id": "clutch"},
-                    f"transition_{phase}": {"type": transition, "duration_sec": 1.0},
-                }
+                }, phase=phase, transition_type=transition, duration_sec=1.0)
                 _composite_overlays_on_base(
                     ffmpeg_bin=self.ffmpeg, ffprobe=self.ffprobe, base_mp4=base_mp4,
                     overlay_clips=[overlay], out_mp4=output_mp4,
@@ -969,6 +1155,7 @@ class VisualRegressionRunner:
         self.run_filter_transform_matrix()
         self.run_transition_matrix()
         self.run_font_matrix()
+        self.run_text_layout_matrix()
         self.run_image_transition_matrix()
         self.run_text_transition_matrix()
         return self.write_report()

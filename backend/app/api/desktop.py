@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import subprocess
 import sys
@@ -15,51 +16,69 @@ router = APIRouter(tags=["desktop"])
 
 
 class FilePickerBody(BaseModel):
-    file_type: str = Field(default="any", pattern=r"^(audio|video_or_image|exe|any)$")
+    file_type: str = Field(default="any", pattern=r"^(audio|video_or_image|lite_cut_asset|exe|any)$")
+    multiple: bool = False
 
 
 _FILE_PICKER_FILTERS: dict[str, str] = {
     "audio": "音频文件|*.mp3;*.ogg;*.wav;*.flac;*.aac;*.m4a|所有文件|*.*",
     "video_or_image": "视频与图片|*.mp4;*.mov;*.mkv;*.avi;*.png;*.jpg;*.jpeg;*.webp;*.bmp;*.gif|所有文件|*.*",
+    "lite_cut_asset": (
+        "LiteCut 素材|*.webm;*.png;*.gif;*.jpg;*.jpeg;*.webp;*.mp4;*.mov;*.m4v;*.mkv;*.avi;"
+        "*.mp3;*.wav;*.m4a;*.aac;*.ogg;*.flac;*.woff;*.woff2;*.ttf;*.otf|所有文件|*.*"
+    ),
     "exe": "可执行文件|*.exe|所有文件|*.*",
     "any": "所有文件|*.*",
 }
 
 
+def _run_windows_file_picker(file_filter: str, multiple: bool) -> list[str]:
+    escaped_filter = file_filter.replace("'", "''")
+    multiselect = "$true" if multiple else "$false"
+    script = (
+        "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8;"
+        "Add-Type -AssemblyName System.Windows.Forms;"
+        "$d = New-Object System.Windows.Forms.OpenFileDialog;"
+        f"$d.Filter = '{escaped_filter}';"
+        f"$d.Multiselect = {multiselect};"
+        "$d.RestoreDirectory = $true;"
+        "if ($d.ShowDialog() -eq 'OK') { "
+        "[Console]::Out.Write((ConvertTo-Json -Compress -InputObject @($d.FileNames))) }"
+    )
+    result = subprocess.run(
+        ["powershell", "-NoProfile", "-NonInteractive", "-STA", "-Command", script],
+        capture_output=True,
+        timeout=600,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+    if result.returncode != 0:
+        message = (result.stderr or b"").decode("utf-8", errors="replace").strip()
+        raise RuntimeError(message or f"PowerShell exited with code {result.returncode}")
+    output = (result.stdout or b"").decode("utf-8", errors="replace").strip()
+    if not output:
+        return []
+    decoded = json.loads(output)
+    values = decoded if isinstance(decoded, list) else [decoded]
+    return [str(value).strip() for value in values if str(value).strip()]
+
+
 @router.post("/api/file-picker")
 async def file_picker(body: FilePickerBody):
-    import sys
-    import subprocess as sp
-
     if sys.platform != "win32":
         raise HTTPException(400, "文件浏览对话框仅 Windows 可用")
 
     ft = body.file_type if body.file_type in _FILE_PICKER_FILTERS else "any"
-    filt = _FILE_PICKER_FILTERS[ft].replace("'", "''")
-
-    ps = (
-        "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8;"
-        "Add-Type -AssemblyName System.Windows.Forms;"
-        "$d = New-Object System.Windows.Forms.OpenFileDialog;"
-        f"$d.Filter = '{filt}';"
-        "$d.Multiselect = $false;"
-        "if ($d.ShowDialog() -eq 'OK') { Write-Output $d.FileName }"
-    )
-
-    def _run() -> str:
-        r = sp.run(
-            ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps],
-            capture_output=True,
-            timeout=120,
-        )
-        return (r.stdout or b"").decode("utf-8", errors="replace").strip()
 
     try:
-        path = await asyncio.to_thread(_run)
+        paths = await asyncio.to_thread(
+            _run_windows_file_picker,
+            _FILE_PICKER_FILTERS[ft],
+            body.multiple,
+        )
     except Exception as exc:
         raise HTTPException(500, f"文件选择器失败: {exc}") from exc
 
-    return {"path": path or None}
+    return {"path": paths[0] if paths else None, "paths": paths}
 
 
 @router.post("/api/directory-picker")

@@ -24,7 +24,7 @@ export function getRecordedClipStreamUrl(clipId) {
     : `/api/recorded-clips/${id}/stream`;
 }
 
-/** LiteCut uploaded overlay asset stream (WebM/PNG/GIF). */
+/** LiteCut linked/generated asset stream. */
 export function getLiteCutAssetStreamUrl(assetId, previewVersion = "") {
   const id = encodeURIComponent(String(assetId));
   const base = API_BASE_URL

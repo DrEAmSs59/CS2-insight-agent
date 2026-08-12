@@ -1,16 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { streamUrlForTimelineClip, timelineClipClass, timelineClipTone, waveformBarsForClipWidth } from "./TimelineClip.jsx";
+import { streamUrlForTimelineClip, timelineClipClass, timelineClipTone } from "./TimelineClip.jsx";
 
 describe("TimelineClip helpers", () => {
   it("keeps MOV clips on video tracks visually classified as video", () => {
     expect(timelineClipTone("video", { meta: { kind: "image", name: "alpha.mov" } })).toBe("video");
-  });
-
-  it("increases cached waveform density in stable steps as the timeline zooms", () => {
-    expect(waveformBarsForClipWidth(24)).toBe(16);
-    expect(waveformBarsForClipWidth(240)).toBe(80);
-    expect(waveformBarsForClipWidth(960)).toBe(320);
-    expect(waveformBarsForClipWidth(10000)).toBe(512);
   });
 
   it("resolves both imported and Insight-recorded media waveform routes", () => {

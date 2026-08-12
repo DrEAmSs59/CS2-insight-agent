@@ -175,6 +175,7 @@ export default function DemoHeatmapView({
   const [reloadEpoch, setReloadEpoch] = useState(0);
   const [mapCamera, setMapCamera] = useState({ zoom: 1, offsetX: 0, offsetY: 0 });
   const mapSurfaceRef = useRef(null);
+  const mapPlaneRef = useRef(null);
   const mapDragRef = useRef(null);
   const [loadState, setLoadState] = useState({
     status: "idle",
@@ -329,8 +330,14 @@ export default function DemoHeatmapView({
       return String(roundSide || "").toUpperCase() === selectedSide;
     }).length;
 
+  const getMapPlaneRect = () => {
+    const planeRect = mapPlaneRef.current?.getBoundingClientRect();
+    if (Number(planeRect?.width) > 0 && Number(planeRect?.height) > 0) return planeRect;
+    return mapSurfaceRef.current?.getBoundingClientRect();
+  };
+
   const clampOffset = (value, zoom, axis) => {
-    const rect = mapSurfaceRef.current?.getBoundingClientRect();
+    const rect = getMapPlaneRect();
     const size = axis === "x" ? Number(rect?.width || 0) : Number(rect?.height || 0);
     const limit = Math.max(0, size * Math.abs(zoom - 1) / 2);
     return Math.max(-limit, Math.min(limit, Number(value) || 0));
@@ -362,7 +369,7 @@ export default function DemoHeatmapView({
       event.preventDefault();
       event.stopPropagation();
       if (event.target instanceof Element && event.target.closest("button")) return;
-      const rect = surface.getBoundingClientRect();
+      const rect = getMapPlaneRect() || surface.getBoundingClientRect();
       const pointer = {
         x: event.clientX - rect.left - rect.width / 2,
         y: event.clientY - rect.top - rect.height / 2,
@@ -462,25 +469,31 @@ export default function DemoHeatmapView({
           onPointerMove={handleMapPointerMove}
           onPointerUp={finishMapDrag}
           onPointerCancel={finishMapDrag}
-          className={`heatmap-map-surface relative mx-auto aspect-square w-full max-w-[860px] overflow-hidden border border-cs2-border xl:h-full xl:max-h-full xl:max-w-full xl:w-auto ${
+          className={`heatmap-map-surface relative mx-auto aspect-[3/2] w-full max-w-[1290px] overflow-hidden border border-cs2-border xl:h-full xl:max-h-full xl:max-w-full xl:w-auto ${
             Math.abs(mapCamera.zoom - 1) >= 0.001 ? "cursor-grab active:cursor-grabbing" : ""
           }`}
           style={{ touchAction: "none" }}
         >
           <div
-            className="pointer-events-none absolute inset-0 will-change-transform"
-            style={{
-              transform: `translate3d(${mapCamera.offsetX}px, ${mapCamera.offsetY}px, 0) scale(${mapCamera.zoom})`,
-              transformOrigin: "50% 50%",
-            }}
+            ref={mapPlaneRef}
+            data-testid="heatmap-map-plane"
+            className="absolute left-1/2 top-1/2 aspect-square h-full max-w-full -translate-x-1/2 -translate-y-1/2"
           >
-            <img
-              src={getDemoRadarMapUrl(mapName, hasMapLayers ? mapLayer : "")}
-              alt={t("analysis.heatmap.imageAlt", { map: mapName, side: selectedSide === "all" ? "" : `${selectedSide} `, mode: t(activeMode.mapLabelKey) })}
-              draggable={false}
-              className="absolute inset-0 h-full w-full object-contain opacity-[0.72]"
-            />
-            {activeHeatmap && <ReplayHeatmapCanvas heatmap={activeHeatmap} mode={mode} />}
+            <div
+              className="pointer-events-none absolute inset-0 will-change-transform"
+              style={{
+                transform: `translate3d(${mapCamera.offsetX}px, ${mapCamera.offsetY}px, 0) scale(${mapCamera.zoom})`,
+                transformOrigin: "50% 50%",
+              }}
+            >
+              <img
+                src={getDemoRadarMapUrl(mapName, hasMapLayers ? mapLayer : "")}
+                alt={t("analysis.heatmap.imageAlt", { map: mapName, side: selectedSide === "all" ? "" : `${selectedSide} `, mode: t(activeMode.mapLabelKey) })}
+                draggable={false}
+                className="absolute inset-0 h-full w-full object-contain opacity-[0.72]"
+              />
+              {activeHeatmap && <ReplayHeatmapCanvas heatmap={activeHeatmap} mode={mode} />}
+            </div>
           </div>
           <ReplayCameraControls
             userZoom={mapCamera.zoom}

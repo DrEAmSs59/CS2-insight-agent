@@ -43,6 +43,8 @@ export default function LiteCutProjectDrawer({
   const [query, setQuery] = useState("");
   const [selectedProjectIds, setSelectedProjectIds] = useState(() => new Set());
   const [batchDeleting, setBatchDeleting] = useState(false);
+  const [importingProject, setImportingProject] = useState(false);
+  const [projectFileError, setProjectFileError] = useState("");
   const importInputRef = useRef(null);
   const selectAllRef = useRef(null);
   const stats = projectStats(body);
@@ -129,8 +131,15 @@ export default function LiteCutProjectDrawer({
     const file = event.target.files?.[0];
     event.target.value = "";
     if (!file) return;
-    await onImportProject?.(file);
-    onClose?.();
+    setImportingProject(true);
+    setProjectFileError("");
+    try {
+      const result = await onImportProject?.(file);
+      if (result?.ok !== false) onClose?.();
+      else setProjectFileError(t("liteCut.project.projectFileImportFailed"));
+    } finally {
+      setImportingProject(false);
+    }
   };
 
   if (!open) return null;
@@ -194,14 +203,15 @@ export default function LiteCutProjectDrawer({
             <button type="button" onClick={() => { onRequestNewProject?.(); onClose?.(); }} className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-cs2-border bg-cs2-surface-1 px-3 py-2 text-xs font-semibold text-cs2-text-secondary hover:border-cs2-accent/50 hover:text-cs2-text-primary">
               <FilePlus2 className="h-3.5 w-3.5" />{t("liteCut.project.newBlank")}
             </button>
-            <button type="button" onClick={() => importInputRef.current?.click()} className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-cs2-border bg-cs2-surface-1 px-3 py-2 text-xs font-semibold text-cs2-text-secondary hover:border-cs2-accent/50 hover:text-cs2-text-primary">
-              <Upload className="h-3.5 w-3.5" />{t("liteCut.project.import")}
+            <button type="button" disabled={importingProject} onClick={() => importInputRef.current?.click()} className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-cs2-border bg-cs2-surface-1 px-3 py-2 text-xs font-semibold text-cs2-text-secondary hover:border-cs2-accent/50 hover:text-cs2-text-primary disabled:opacity-50">
+              {importingProject ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" />}{t("liteCut.project.import")}
             </button>
             <button type="button" disabled={!onExportProject} onClick={() => onExportProject?.()} className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-cs2-border bg-cs2-surface-1 px-3 py-2 text-xs font-semibold text-cs2-text-secondary hover:border-cs2-accent/50 hover:text-cs2-text-primary disabled:opacity-40">
               <Download className="h-3.5 w-3.5" />{t("liteCut.project.exportProject")}
             </button>
-            <input ref={importInputRef} type="file" accept="application/json,.json" className="hidden" onChange={handleImport} />
+            <input ref={importInputRef} type="file" accept=".litecut,application/vnd.litecut.project+json" className="hidden" onChange={handleImport} />
           </div>
+          {projectFileError ? <p className="mt-2 rounded-lg border border-rose-400/25 bg-rose-500/10 px-3 py-2 text-[10px] text-rose-200">{projectFileError}</p> : null}
 
           <section className="mt-5">
             <div className="mb-2 flex items-center justify-between gap-2">

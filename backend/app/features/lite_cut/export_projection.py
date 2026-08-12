@@ -4,14 +4,33 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
+from .project_boundaries import (
+    AUDIO_MASTER_GAIN_DEFAULT,
+    AUDIO_MASTER_GAIN_MAX,
+    AUDIO_MASTER_GAIN_MIN,
+    CANVAS_BLUR_DEFAULT,
+    CANVAS_BLUR_MAX,
+    CANVAS_BLUR_MIN,
+    CANVAS_FIT_VALUES,
+    OUTPUT_FPS_DEFAULT,
+    OUTPUT_FPS_MAX,
+    OUTPUT_FPS_MIN,
+    OUTPUT_HEIGHT_DEFAULT,
+    OUTPUT_HEIGHT_MAX,
+    OUTPUT_HEIGHT_MIN,
+    OUTPUT_WIDTH_DEFAULT,
+    OUTPUT_WIDTH_MAX,
+    OUTPUT_WIDTH_MIN,
+)
+
 
 def project_master_volume(body: dict[str, Any]) -> float:
     audio = body.get("audio") if isinstance(body.get("audio"), dict) else {}
     try:
-        volume = float(audio.get("master_volume") if audio.get("master_volume") is not None else 1.0)
+        volume = float(audio.get("master_volume") if audio.get("master_volume") is not None else AUDIO_MASTER_GAIN_DEFAULT)
     except Exception:
-        volume = 1.0
-    return max(0.0, min(2.0, volume))
+        volume = AUDIO_MASTER_GAIN_DEFAULT
+    return max(AUDIO_MASTER_GAIN_MIN, min(AUDIO_MASTER_GAIN_MAX, volume))
 
 
 def project_output_settings(body: dict[str, Any], ref: dict[str, Any]) -> tuple[int, int, float]:
@@ -25,13 +44,13 @@ def project_output_settings(body: dict[str, Any], ref: dict[str, Any]) -> tuple[
         return max(low, min(high, value))
 
     try:
-        fps = float(output.get("fps") if output.get("fps") is not None else float(ref.get("fps") or 60))
+        fps = float(output.get("fps") if output.get("fps") is not None else float(ref.get("fps") or OUTPUT_FPS_DEFAULT))
     except (TypeError, ValueError):
-        fps = float(ref.get("fps") or 60)
+        fps = float(ref.get("fps") or OUTPUT_FPS_DEFAULT)
     return (
-        integer_setting("width", int(ref.get("width") or 1920), 320, 7680),
-        integer_setting("height", int(ref.get("height") or 1080), 180, 4320),
-        max(1.0, min(1000.0, fps)),
+        integer_setting("width", int(ref.get("width") or OUTPUT_WIDTH_DEFAULT), OUTPUT_WIDTH_MIN, OUTPUT_WIDTH_MAX),
+        integer_setting("height", int(ref.get("height") or OUTPUT_HEIGHT_DEFAULT), OUTPUT_HEIGHT_MIN, OUTPUT_HEIGHT_MAX),
+        max(OUTPUT_FPS_MIN, min(OUTPUT_FPS_MAX, fps)),
     )
 
 
@@ -54,13 +73,13 @@ def ffmpeg_color(value: Any) -> str:
 def project_canvas_settings(body: dict[str, Any]) -> tuple[str, str, int]:
     output = body.get("output") if isinstance(body.get("output"), dict) else {}
     fit = str(output.get("canvas_fit") or "contain").strip().lower()
-    if fit not in {"contain", "cover", "blur"}:
+    if fit not in CANVAS_FIT_VALUES:
         fit = "contain"
     try:
-        blur_amount = int(output.get("blur_amount") if output.get("blur_amount") is not None else 24)
+        blur_amount = int(output.get("blur_amount") if output.get("blur_amount") is not None else CANVAS_BLUR_DEFAULT)
     except (TypeError, ValueError):
-        blur_amount = 24
-    return fit, ffmpeg_color(output.get("background_color")), max(4, min(80, blur_amount))
+        blur_amount = CANVAS_BLUR_DEFAULT
+    return fit, ffmpeg_color(output.get("background_color")), max(CANVAS_BLUR_MIN, min(CANVAS_BLUR_MAX, blur_amount))
 
 
 def project_export_range(body: dict[str, Any]) -> tuple[float, Optional[float]]:

@@ -1,6 +1,23 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { createMediaElementRefRegistry } from "./previewMediaElementUtils.js";
+import { captureThenReleaseMediaElements, createMediaElementRefRegistry } from "./previewMediaElementUtils.js";
+
+describe("captureThenReleaseMediaElements", () => {
+  it("captures the outgoing frame before either video source is released", () => {
+    const events = [];
+    const main = { id: "main" };
+    const background = { id: "background" };
+
+    captureThenReleaseMediaElements({
+      main,
+      background,
+      capture: (element) => events.push(`capture:${element.id}`),
+      release: (element) => events.push(`release:${element.id}`),
+    });
+
+    expect(events).toEqual(["capture:main", "release:main", "release:background"]);
+  });
+});
 
 describe("createMediaElementRefRegistry", () => {
   it("keeps one stable callback per layer and releases only the detached element", () => {

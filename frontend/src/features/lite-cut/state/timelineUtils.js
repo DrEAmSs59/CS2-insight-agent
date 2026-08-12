@@ -1,178 +1,120 @@
-/** LiteCut timeline helpers — schema v2 aligned. */
+/** LiteCut timeline helpers — schema v3 aligned. */
 
-import { normalizedOverlayKeyframes, overlayTransformAt, VIDEO_LAYER_TRANSFORM_DEFAULTS } from "./overlayKeyframeUtils.js";
+import { normalizeSceneKeyframes, sceneTransformAt, VIDEO_SCENE_TRANSFORM_DEFAULTS } from "./sceneTransform.js";
 import { rebaseAudioKeyframes } from "./audioKeyframeUtils.js";
+import { AUDIO_CLIP_GAIN, AUDIO_FADE_DURATION, AUDIO_TRACK_GAIN } from "../domain/audioContract.js";
+import {
+  VISUAL_COLOR_DEFAULT,
+  VISUAL_FREEZE_DEFAULT_SEC,
+  VISUAL_SPEED_DEFAULT,
+} from "../domain/visualMaterial.js";
+import { LITE_CUT_TIMELINE_LIMITS, LITE_CUT_TRACK_TYPE_ORDER } from "./projectContract.js";
+import {
+  clipCanvasFit as canonicalClipCanvasFit,
+  clipFreezeFrameSec as canonicalClipFreezeFrameSec,
+  clipMaxTimelineEnd as canonicalClipMaxTimelineEnd,
+  clipMaxTimelineStartForLeftTrim as canonicalClipMaxTimelineStartForLeftTrim,
+  clipMediaTimelineDuration as canonicalClipMediaTimelineDuration,
+  clipPlaybackSpeed as canonicalClipPlaybackSpeed,
+  clipPreservePitch as canonicalClipPreservePitch,
+  clipReversePlayback as canonicalClipReversePlayback,
+  clipSourceDuration as canonicalClipSourceDuration,
+  clipSourceMediaDuration as canonicalClipSourceMediaDuration,
+  clipSourceTimeForTimeline as canonicalClipSourceTimeForTimeline,
+  clipSpeedAtTimeline as canonicalClipSpeedAtTimeline,
+  clipSpeedSegments as canonicalClipSpeedSegments,
+  clipTimelineDuration as canonicalClipTimelineDuration,
+  clipTimelineEnd as canonicalClipTimelineEnd,
+  clipTimelineTimeForSource as canonicalClipTimelineTimeForSource,
+  clipTrimmedSourceDuration as canonicalClipTrimmedSourceDuration,
+  ensureClipSourceDuration as canonicalEnsureClipSourceDuration,
+  normalizedClipSpeedKeyframes as canonicalNormalizedClipSpeedKeyframes,
+} from "../domain/timelineMath.js";
 
 export function newClipId() {
   return `clip-${crypto.randomUUID().slice(0, 12)}`;
 }
 
 export function clipSourceDuration(clip) {
-  return clipTimelineDuration(clip);
+  return canonicalClipSourceDuration(clip);
 }
 
 export function clipPlaybackSpeed(clip) {
-  const speed = Number(clip?.speed);
-  return Number.isFinite(speed) && speed > 0 ? Math.max(0.25, Math.min(4, speed)) : 1;
+  return canonicalClipPlaybackSpeed(clip);
 }
 
 export function normalizedClipSpeedKeyframes(clip) {
-  const trimIn = Math.max(0, Number(clip?.trim_in) || 0);
-  const trimOut = trimIn + clipTrimmedSourceDuration(clip);
-  const fallback = clipPlaybackSpeed(clip);
-  const points = [];
-  for (const raw of clip?.speed_keyframes || []) {
-    if (!raw || typeof raw !== "object") continue;
-    const sourceSec = Number(raw.source_sec);
-    const speed = Number(raw.speed);
-    if (!Number.isFinite(sourceSec) || !Number.isFinite(speed)) continue;
-    points.push({
-      source_sec: Math.max(trimIn, Math.min(trimOut, sourceSec)),
-      speed: Math.max(0.25, Math.min(4, speed)),
-    });
-  }
-  points.sort((a, b) => a.source_sec - b.source_sec);
-  const deduped = [];
-  for (const point of points) {
-    const index = deduped.findIndex((item) => Math.abs(item.source_sec - point.source_sec) < 0.0001);
-    if (index >= 0) deduped[index] = point;
-    else deduped.push(point);
-  }
-  if (deduped.length < 2) return [];
-  if (deduped[0].source_sec > trimIn + 0.0001) deduped.unshift({ source_sec: trimIn, speed: fallback });
-  if (deduped.at(-1).source_sec < trimOut - 0.0001) deduped.push({ source_sec: trimOut, speed: deduped.at(-1).speed });
-  return deduped;
+  return canonicalNormalizedClipSpeedKeyframes(clip);
 }
 
 export function clipSpeedSegments(clip) {
-  const trimIn = Math.max(0, Number(clip?.trim_in) || 0);
-  const trimOut = trimIn + clipTrimmedSourceDuration(clip);
-  const points = normalizedClipSpeedKeyframes(clip);
-  if (!points.length) return [{ sourceStart: trimIn, sourceEnd: trimOut, speed: clipPlaybackSpeed(clip) }];
-  return points.slice(0, -1).map((point, index) => ({
-    sourceStart: point.source_sec,
-    sourceEnd: points[index + 1].source_sec,
-    speed: point.speed,
-  })).filter((segment) => segment.sourceEnd - segment.sourceStart > 0.0001);
+  return canonicalClipSpeedSegments(clip);
 }
 
 export function clipTimelineTimeForSource(clip, sourceSec) {
-  const trimIn = Math.max(0, Number(clip?.trim_in) || 0);
-  const source = Math.max(trimIn, Math.min(trimIn + clipTrimmedSourceDuration(clip), Number(sourceSec) || trimIn));
-  let timeline = 0;
-  for (const segment of clipSpeedSegments(clip)) {
-    if (source <= segment.sourceStart) break;
-    timeline += (Math.min(source, segment.sourceEnd) - segment.sourceStart) / segment.speed;
-    if (source <= segment.sourceEnd) break;
-  }
-  return timeline;
+  return canonicalClipTimelineTimeForSource(clip, sourceSec);
 }
 
 export function clipSourceTimeForTimeline(clip, timelineSec) {
-  const target = Math.max(0, Math.min(clipMediaTimelineDuration(clip), Number(timelineSec) || 0));
-  let elapsed = 0;
-  for (const segment of clipSpeedSegments(clip)) {
-    const timelineLength = (segment.sourceEnd - segment.sourceStart) / segment.speed;
-    if (target <= elapsed + timelineLength + 0.000001) {
-      return segment.sourceStart + Math.max(0, target - elapsed) * segment.speed;
-    }
-    elapsed += timelineLength;
-  }
-  return Math.max(0, Number(clip?.trim_in) || 0) + clipTrimmedSourceDuration(clip);
+  return canonicalClipSourceTimeForTimeline(clip, timelineSec);
 }
 
 export function clipSpeedAtTimeline(clip, timelineSec) {
-  const source = clipSourceTimeForTimeline(clip, timelineSec);
-  const segment = clipSpeedSegments(clip).find((item) => source >= item.sourceStart - 0.0001 && source <= item.sourceEnd + 0.0001);
-  return segment?.speed ?? clipPlaybackSpeed(clip);
+  return canonicalClipSpeedAtTimeline(clip, timelineSec);
 }
 
 export function clipFreezeFrameSec(clip) {
-  const freeze = Number(clip?.freeze_frame_sec);
-  return Number.isFinite(freeze) ? Math.max(0, Math.min(30, freeze)) : 0;
+  return canonicalClipFreezeFrameSec(clip);
 }
 
 export function clipReversePlayback(clip) {
-  return Boolean(clip?.reverse);
+  return canonicalClipReversePlayback(clip);
 }
 
 export function clipPreservePitch(clip) {
-  return clip?.preserve_pitch !== false;
+  return canonicalClipPreservePitch(clip);
 }
 
 export function clipCanvasFit(clip, fallback = "contain") {
-  const raw = String(clip?.canvas_fit || "").toLowerCase();
-  if (["contain", "cover", "blur"].includes(raw)) return raw;
-  return ["contain", "cover", "blur"].includes(fallback) ? fallback : "contain";
+  return canonicalClipCanvasFit(clip, fallback);
 }
 
 export function clipTrimmedSourceDuration(clip) {
-  if (!clip) return 5;
-  const trimOut = clip.trim_out;
-  const trimIn = Number(clip.trim_in) || 0;
-  if (trimOut != null && Number.isFinite(Number(trimOut))) {
-    return Math.max(0.1, Number(trimOut) - trimIn);
-  }
-  const meta = clip.meta;
-  if (meta && Number.isFinite(Number(meta.duration_sec))) {
-    return Math.max(0.1, Number(meta.duration_sec) - trimIn);
-  }
-  return 5;
+  return canonicalClipTrimmedSourceDuration(clip);
 }
 
 export function clipMediaTimelineDuration(clip) {
-  return Math.max(MIN_CLIP_VISIBLE_SEC, clipTimelineTimeForSource(clip, (Number(clip?.trim_in) || 0) + clipTrimmedSourceDuration(clip)));
+  return canonicalClipMediaTimelineDuration(clip);
 }
 
 export function clipTimelineDuration(clip) {
-  return clipMediaTimelineDuration(clip) + clipFreezeFrameSec(clip);
+  return canonicalClipTimelineDuration(clip);
 }
 
 /** 确保 meta.duration_sec 存在（仅首次回填，之后 trim 不可改源时长） */
 export function ensureClipSourceDuration(clip) {
-  if (!clip) return 5;
-  if (!clip.meta || typeof clip.meta !== "object") clip.meta = {};
-  const existing = Number(clip.meta.duration_sec);
-  if (existing > 0) return existing;
-  const trimIn = Number(clip.trim_in) || 0;
-  const trimOut = Number(clip.trim_out);
-  const inferred = trimOut > trimIn ? trimOut : trimIn + clipTrimmedSourceDuration(clip);
-  clip.meta.duration_sec = Math.max(MIN_CLIP_VISIBLE_SEC, inferred);
-  return clip.meta.duration_sec;
+  return canonicalEnsureClipSourceDuration(clip);
 }
 
 /** 源素材总时长（trim 不可超出此值；绝不读取可变 trim_out） */
 export function clipSourceMediaDuration(clip) {
-  if (!clip) return 5;
-  const meta = clip.meta;
-  if (meta && Number.isFinite(Number(meta.duration_sec)) && Number(meta.duration_sec) > 0) {
-    return Number(meta.duration_sec);
-  }
-  return ensureClipSourceDuration(clip);
+  return canonicalClipSourceMediaDuration(clip);
 }
 
 const MIN_CLIP_VISIBLE_SEC = 0.1;
 
 /** 右缘裁剪：时间轴上允许的最晚结束时间 */
 export function clipMaxTimelineEnd(clip) {
-  const start = Number(clip.timeline_start) || 0;
-  const sourceDur = clipSourceMediaDuration(clip);
-  const extended = { ...clip, trim_out: sourceDur };
-  return start + Math.max(MIN_CLIP_VISIBLE_SEC, clipTimelineTimeForSource(extended, sourceDur)) + clipFreezeFrameSec(clip);
+  return canonicalClipMaxTimelineEnd(clip);
 }
 
 /** 左缘裁剪：时间轴上允许的最晚起始时间（裁掉片头） */
 export function clipMaxTimelineStartForLeftTrim(clip) {
-  const start = Number(clip.timeline_start) || 0;
-  const end = clipTimelineEnd(clip);
-  const sourceDur = clipSourceMediaDuration(clip);
-  const extended = { ...clip, trim_out: sourceDur };
-  const maxFromSource = start + Math.max(0, clipTimelineTimeForSource(extended, sourceDur - MIN_CLIP_VISIBLE_SEC));
-  return Math.min(end - MIN_CLIP_VISIBLE_SEC, maxFromSource);
+  return canonicalClipMaxTimelineStartForLeftTrim(clip);
 }
 
 export function clipTimelineEnd(clip) {
-  return (Number(clip.timeline_start) || 0) + clipSourceDuration(clip);
+  return canonicalClipTimelineEnd(clip);
 }
 
 /** 叠加层素材时长（视频/webm 用于裁剪上限） */
@@ -260,15 +202,15 @@ export function resizeOverlayDraft(overlay, { start, duration }) {
   if (Array.isArray(overlay?.keyframes) && overlay.keyframes.length) {
     const shift = (Number(ov.timeline_start) || 0) - oldStart;
     const nextDuration = Math.max(MIN_CLIP_VISIBLE_SEC, Number(ov.duration) || 0);
-    const keyframes = normalizedOverlayKeyframes(overlay)
+    const keyframes = normalizeSceneKeyframes(overlay)
       .map((keyframe) => ({ ...keyframe, time_sec: keyframe.time_sec - shift }))
       .filter((keyframe) => keyframe.time_sec >= -0.0001 && keyframe.time_sec <= nextDuration + 0.0001);
     if (shift > 0 && shift < oldDuration) {
-      keyframes.unshift({ time_sec: 0, transform: overlayTransformAt(overlay, oldStart + shift) });
+      keyframes.unshift({ time_sec: 0, transform: sceneTransformAt(overlay, oldStart + shift) });
     }
     const cutLocal = nextDuration + shift;
-    if (cutLocal < oldDuration && normalizedOverlayKeyframes(overlay).some((keyframe) => keyframe.time_sec > cutLocal + 0.0001)) {
-      keyframes.push({ time_sec: nextDuration, transform: overlayTransformAt(overlay, oldStart + cutLocal) });
+    if (cutLocal < oldDuration && normalizeSceneKeyframes(overlay).some((keyframe) => keyframe.time_sec > cutLocal + 0.0001)) {
+      keyframes.push({ time_sec: nextDuration, transform: sceneTransformAt(overlay, oldStart + cutLocal) });
     }
     ov.keyframes = normalizeOverlayKeyframesForDuration(keyframes, nextDuration);
   }
@@ -297,15 +239,15 @@ export function rebaseTimelineClipKeyframes(original, nextClip) {
   const nextDuration = clipTimelineDuration(nextClip);
   const shift = nextStart - oldStart;
   const source = { ...original, duration: oldDuration };
-  const keyframes = normalizedOverlayKeyframes(source, VIDEO_LAYER_TRANSFORM_DEFAULTS)
+  const keyframes = normalizeSceneKeyframes(source, VIDEO_SCENE_TRANSFORM_DEFAULTS)
     .map((keyframe) => ({ ...keyframe, time_sec: keyframe.time_sec - shift }))
     .filter((keyframe) => keyframe.time_sec >= -0.0001 && keyframe.time_sec <= nextDuration + 0.0001);
   if (shift > 0 && shift < oldDuration) {
-    keyframes.unshift({ time_sec: 0, transform: overlayTransformAt(source, oldStart + shift, VIDEO_LAYER_TRANSFORM_DEFAULTS) });
+    keyframes.unshift({ time_sec: 0, transform: sceneTransformAt(source, oldStart + shift, VIDEO_SCENE_TRANSFORM_DEFAULTS) });
   }
   const cutLocal = nextDuration + shift;
-  if (cutLocal < oldDuration && normalizedOverlayKeyframes(source, VIDEO_LAYER_TRANSFORM_DEFAULTS).some((keyframe) => keyframe.time_sec > cutLocal + 0.0001)) {
-    keyframes.push({ time_sec: nextDuration, transform: overlayTransformAt(source, oldStart + cutLocal, VIDEO_LAYER_TRANSFORM_DEFAULTS) });
+  if (cutLocal < oldDuration && normalizeSceneKeyframes(source, VIDEO_SCENE_TRANSFORM_DEFAULTS).some((keyframe) => keyframe.time_sec > cutLocal + 0.0001)) {
+    keyframes.push({ time_sec: nextDuration, transform: sceneTransformAt(source, oldStart + cutLocal, VIDEO_SCENE_TRANSFORM_DEFAULTS) });
   }
   result = { ...nextClip, keyframes: normalizeOverlayKeyframesForDuration(keyframes, nextDuration) };
   return rebaseAudioKeyframes(original, result);
@@ -327,8 +269,8 @@ export function splitOverlayAt(overlay, localSec) {
     right.trim_in = trimIn + split;
   }
   if (Array.isArray(ov.keyframes) && ov.keyframes.length) {
-    const keyframes = normalizedOverlayKeyframes(ov);
-    const splitTransform = overlayTransformAt(ov, (Number(ov.timeline_start) || 0) + split);
+    const keyframes = normalizeSceneKeyframes(ov);
+    const splitTransform = sceneTransformAt(ov, (Number(ov.timeline_start) || 0) + split);
     left.keyframes = normalizeOverlayKeyframesForDuration(
       [...keyframes.filter((keyframe) => keyframe.time_sec < split - 0.0001), { time_sec: split, transform: splitTransform }],
       split,
@@ -369,6 +311,41 @@ export function compactTrackGaps(track, { startAt = 0 } = {}) {
 
 export function getTrack(body, trackId) {
   return body?.tracks?.find((t) => t.id === trackId) || null;
+}
+
+export function orderedTimelineTracks(tracks = []) {
+  const source = Array.isArray(tracks) ? tracks : [];
+  const rank = new Map(LITE_CUT_TRACK_TYPE_ORDER.map((type, index) => [type, index]));
+  return source
+    .map((track, index) => ({ track, index, rank: rank.get(track?.type) ?? rank.size }))
+    .sort((a, b) => a.rank - b.rank || a.index - b.index)
+    .map(({ track }) => track);
+}
+
+export function normalizeTimelineTrackOrder(body) {
+  if (!body || !Array.isArray(body.tracks)) return false;
+  const ordered = orderedTimelineTracks(body.tracks);
+  const labelsBefore = ordered.map((track) => track?.label);
+  const orderChanged = ordered.some((track, index) => track !== body.tracks[index]);
+  if (orderChanged) body.tracks = ordered;
+  renumberVideoTrackLabels(body.tracks);
+  renumberAudioTrackLabels(body.tracks);
+  return orderChanged || body.tracks.some((track, index) => track?.label !== labelsBefore[index]);
+}
+
+function mediaTrackGroups(body) {
+  const tracks = orderedTimelineTracks(body?.tracks || []);
+  return {
+    video: tracks.filter((track) => track?.type === "video"),
+    audio: tracks.filter((track) => track?.type === "audio"),
+    other: tracks.filter((track) => track?.type !== "video" && track?.type !== "audio"),
+  };
+}
+
+function commitMediaTrackGroups(body, groups) {
+  body.tracks = [...groups.video, ...groups.audio, ...groups.other];
+  renumberVideoTrackLabels(body.tracks);
+  renumberAudioTrackLabels(body.tracks);
 }
 
 export function videoTracks(body) {
@@ -414,54 +391,83 @@ export function renumberVideoTrackLabels(tracks) {
   }
 }
 
-/** 在 afterTrackId 之后插入空视频轨，返回新轨 id */
-export function insertVideoTrack(body, afterTrackId = null) {
-  const tracks = [...(body.tracks || [])];
-  const newTrack = {
-    id: newVideoTrackId(),
-    type: "video",
-    label: "V?",
+function newMediaTrack(type) {
+  return {
+    id: type === "video" ? newVideoTrackId() : newAudioTrackId(),
+    type,
+    label: type === "video" ? "V?" : "A?",
     locked: false,
     hidden: false,
     muted: false,
     solo: false,
-    volume: 1,
     clips: [],
+    ...(type === "video" ? { volume: AUDIO_TRACK_GAIN.default } : {}),
   };
-  if (afterTrackId) {
-    const idx = tracks.findIndex((t) => t.id === afterTrackId);
-    tracks.splice(idx >= 0 ? idx + 1 : tracks.length, 0, newTrack);
-  } else {
-    let insertAt = 0;
-    for (let i = 0; i < tracks.length; i++) {
-      if (tracks[i].type === "video") insertAt = i + 1;
-    }
-    tracks.splice(insertAt, 0, newTrack);
-  }
-  renumberVideoTrackLabels(tracks);
-  body.tracks = tracks;
+}
+
+function insertMediaTrackAtOrdinal(body, type, ordinal) {
+  const groups = mediaTrackGroups(body);
+  const group = groups[type];
+  const insertAt = Math.max(0, Math.min(group.length, Number(ordinal) || 0));
+  const newTrack = newMediaTrack(type);
+  group.splice(insertAt, 0, newTrack);
+  commitMediaTrackGroups(body, groups);
   return newTrack.id;
+}
+
+export function pairedMediaTrackId(body, trackId) {
+  const groups = mediaTrackGroups(body);
+  const source = getTrack(body, trackId);
+  if (!source || (source.type !== "video" && source.type !== "audio")) return null;
+  const ordinal = groups[source.type].findIndex((track) => track.id === source.id);
+  const counterpartType = source.type === "video" ? "audio" : "video";
+  return ordinal >= 0 ? groups[counterpartType][ordinal]?.id || null : null;
+}
+
+export function ensurePairedMediaTrack(body, trackId) {
+  const source = getTrack(body, trackId);
+  if (!source || (source.type !== "video" && source.type !== "audio")) return null;
+  const groups = mediaTrackGroups(body);
+  const ordinal = groups[source.type].findIndex((track) => track.id === source.id);
+  if (ordinal < 0) return null;
+  const counterpartType = source.type === "video" ? "audio" : "video";
+  while (groups[counterpartType].length <= ordinal) groups[counterpartType].push(newMediaTrack(counterpartType));
+  commitMediaTrackGroups(body, groups);
+  return groups[counterpartType][ordinal].id;
+}
+
+export function insertPairedMediaTracks(body, primaryType, anchorTrackId = null, { before = false } = {}) {
+  if (primaryType !== "video" && primaryType !== "audio") return null;
+  const groups = mediaTrackGroups(body);
+  const counterpartType = primaryType === "video" ? "audio" : "video";
+  const anchorIndex = groups[primaryType].findIndex((track) => track.id === anchorTrackId);
+  const ordinal = anchorIndex >= 0 ? anchorIndex + (before ? 0 : 1) : groups[primaryType].length;
+  while (groups[counterpartType].length < ordinal) groups[counterpartType].push(newMediaTrack(counterpartType));
+  const primaryTrack = newMediaTrack(primaryType);
+  const counterpartTrack = newMediaTrack(counterpartType);
+  groups[primaryType].splice(ordinal, 0, primaryTrack);
+  groups[counterpartType].splice(ordinal, 0, counterpartTrack);
+  commitMediaTrackGroups(body, groups);
+  return {
+    primaryTrackId: primaryTrack.id,
+    counterpartTrackId: counterpartTrack.id,
+    videoTrackId: primaryType === "video" ? primaryTrack.id : counterpartTrack.id,
+    audioTrackId: primaryType === "audio" ? primaryTrack.id : counterpartTrack.id,
+  };
+}
+
+/** 在 afterTrackId 之后插入空视频轨，返回新轨 id */
+export function insertVideoTrack(body, afterTrackId = null) {
+  const groups = mediaTrackGroups(body);
+  const anchorIndex = groups.video.findIndex((track) => track.id === afterTrackId);
+  return insertMediaTrackAtOrdinal(body, "video", anchorIndex >= 0 ? anchorIndex + 1 : groups.video.length);
 }
 
 /** 在 beforeTrackId 之前插入空视频轨 */
 export function insertVideoTrackBefore(body, beforeTrackId) {
-  const tracks = [...(body.tracks || [])];
-  const newTrack = {
-    id: newVideoTrackId(),
-    type: "video",
-    label: "V?",
-    locked: false,
-    hidden: false,
-    muted: false,
-    solo: false,
-    volume: 1,
-    clips: [],
-  };
-  const idx = tracks.findIndex((t) => t.id === beforeTrackId);
-  tracks.splice(idx >= 0 ? idx : 0, 0, newTrack);
-  renumberVideoTrackLabels(tracks);
-  body.tracks = tracks;
-  return newTrack.id;
+  const groups = mediaTrackGroups(body);
+  const anchorIndex = groups.video.findIndex((track) => track.id === beforeTrackId);
+  return insertMediaTrackAtOrdinal(body, "video", anchorIndex >= 0 ? anchorIndex : 0);
 }
 
 /** 叠加素材：无明确落点时新建视频轨（OpenCut 风格） */
@@ -479,30 +485,9 @@ export function v1Clips(body) {
 }
 
 export function insertAudioTrack(body, afterTrackId = null) {
-  const tracks = [...(body.tracks || [])];
-  const newTrack = {
-    id: newAudioTrackId(),
-    type: "audio",
-    label: "A?",
-    locked: false,
-    hidden: false,
-    muted: false,
-    solo: false,
-    clips: [],
-  };
-  if (afterTrackId) {
-    const idx = tracks.findIndex((t) => t.id === afterTrackId);
-    tracks.splice(idx >= 0 ? idx + 1 : tracks.length, 0, newTrack);
-  } else {
-    let insertAt = tracks.length;
-    for (let i = 0; i < tracks.length; i++) {
-      if (tracks[i].type === "audio") insertAt = i + 1;
-    }
-    tracks.splice(insertAt, 0, newTrack);
-  }
-  renumberAudioTrackLabels(tracks);
-  body.tracks = tracks;
-  return newTrack.id;
+  const groups = mediaTrackGroups(body);
+  const anchorIndex = groups.audio.findIndex((track) => track.id === afterTrackId);
+  return insertMediaTrackAtOrdinal(body, "audio", anchorIndex >= 0 ? anchorIndex + 1 : groups.audio.length);
 }
 
 export function canRemoveTrack(body, trackId) {
@@ -517,33 +502,29 @@ export function canRemoveTrack(body, trackId) {
 export function removeTrackById(body, trackId) {
   if (!canRemoveTrack(body, trackId)) return false;
   body.tracks = (body.tracks || []).filter((t) => t.id !== trackId);
-  renumberVideoTrackLabels(body.tracks);
-  renumberAudioTrackLabels(body.tracks);
+  normalizeTimelineTrackOrder(body);
   return true;
 }
 
 export function canMoveTrackById(body, trackId, direction) {
-  const tracks = Array.isArray(body?.tracks) ? body.tracks : [];
-  const sourceIndex = tracks.findIndex((track) => track?.id === trackId);
-  const source = tracks[sourceIndex];
+  const source = getTrack(body, trackId);
   const step = direction === "up" ? -1 : direction === "down" ? 1 : 0;
   if (!source || !step || (source.type !== "video" && source.type !== "audio")) return false;
-  for (let index = sourceIndex + step; index >= 0 && index < tracks.length; index += step) {
-    if (tracks[index]?.type === source.type) return true;
-  }
-  return false;
+  const sameType = mediaTrackGroups(body)[source.type];
+  const sourceIndex = sameType.findIndex((track) => track.id === source.id);
+  return sourceIndex + step >= 0 && sourceIndex + step < sameType.length;
 }
 
 export function moveTrackById(body, trackId, direction) {
   if (!canMoveTrackById(body, trackId, direction)) return false;
-  const tracks = [...body.tracks];
-  const sourceIndex = tracks.findIndex((track) => track?.id === trackId);
-  const source = tracks[sourceIndex];
+  const groups = mediaTrackGroups(body);
+  const source = getTrack(body, trackId);
+  const sameType = groups[source.type];
+  const sourceIndex = sameType.findIndex((track) => track.id === source.id);
   const step = direction === "up" ? -1 : 1;
-  let targetIndex = sourceIndex + step;
-  while (tracks[targetIndex]?.type !== source.type) targetIndex += step;
-  [tracks[sourceIndex], tracks[targetIndex]] = [tracks[targetIndex], tracks[sourceIndex]];
-  body.tracks = tracks;
+  const targetIndex = sourceIndex + step;
+  [sameType[sourceIndex], sameType[targetIndex]] = [sameType[targetIndex], sameType[sourceIndex]];
+  commitMediaTrackGroups(body, groups);
   return true;
 }
 
@@ -565,20 +546,14 @@ export function canMoveTrackToId(body, trackId, targetTrackId, position = "befor
 
 export function moveTrackToId(body, trackId, targetTrackId, position = "before") {
   if (!canMoveTrackToId(body, trackId, targetTrackId, position)) return false;
-  const tracks = [...body.tracks];
-  const source = tracks.find((track) => track?.id === trackId);
-  const typeSlots = tracks
-    .map((track, index) => (track.type === source.type ? index : -1))
-    .filter((index) => index >= 0);
-  const sameType = typeSlots.map((index) => tracks[index]);
+  const groups = mediaTrackGroups(body);
+  const source = getTrack(body, trackId);
+  const sameType = groups[source.type];
   const sourceIndex = sameType.findIndex((track) => track.id === trackId);
   const [lifted] = sameType.splice(sourceIndex, 1);
   const targetIndex = sameType.findIndex((track) => track.id === targetTrackId);
   sameType.splice(targetIndex + (position === "after" ? 1 : 0), 0, lifted);
-  typeSlots.forEach((slot, index) => {
-    tracks[slot] = sameType[index];
-  });
-  body.tracks = tracks;
+  commitMediaTrackGroups(body, groups);
   return true;
 }
 
@@ -690,9 +665,14 @@ export function overlaps(startA, endA, startB, endB) {
 }
 
 export function canPlaceOnTrack(clips, start, duration, excludeId = null) {
+  const excludedIds = new Set(
+    (Array.isArray(excludeId) ? excludeId : [excludeId])
+      .filter((id) => id != null)
+      .map(String),
+  );
   const end = start + duration;
   for (const c of clips || []) {
-    if (excludeId && c.id === excludeId) continue;
+    if (excludedIds.has(String(c.id))) continue;
     const cStart = Number(c.timeline_start) || 0;
     const cEnd = clipTimelineEnd(c);
     if (overlaps(start, end, cStart, cEnd)) return false;
@@ -757,22 +737,23 @@ export function buildRecordedClip(mediaItem, timelineStart) {
     source_type: "recorded_clip",
     source_id: mediaItem.id,
     timeline_start: timelineStart,
-    trim_in: 0,
+    trim_in: LITE_CUT_TIMELINE_LIMITS.time.default,
     trim_out: dur,
-    transition_out: { type: "fade", duration_sec: 0.4 },
-    color: { brightness: 0, contrast: 0, saturation: 0, filter_preset: null },
-    canvas_fit: null,
+    color: { brightness: VISUAL_COLOR_DEFAULT, contrast: VISUAL_COLOR_DEFAULT, saturation: VISUAL_COLOR_DEFAULT, filter_preset: null },
+    content_fit: null,
     flip_horizontal: false,
     flip_vertical: false,
-    speed: 1,
+    speed: VISUAL_SPEED_DEFAULT,
     speed_keyframes: [],
     preserve_pitch: true,
     reverse: false,
-    freeze_frame_sec: 0,
-    volume: 1,
-    muted: false,
-    fade_in_sec: 0,
-    fade_out_sec: 0,
+    freeze_frame_sec: VISUAL_FREEZE_DEFAULT_SEC,
+    volume: AUDIO_CLIP_GAIN.default,
+    // Video tracks are visual-only. Source audio, when present, is represented
+    // by a linked A-track clip created at placement time.
+    muted: true,
+    fade_in_sec: AUDIO_FADE_DURATION.default,
+    fade_out_sec: AUDIO_FADE_DURATION.default,
     meta,
   };
 }
@@ -789,22 +770,21 @@ export function buildAssetClip(assetItem, timelineStart) {
     source_type: "file",
     file_path: assetItem.path || assetItem.file_path,
     timeline_start: timelineStart,
-    trim_in: 0,
+    trim_in: LITE_CUT_TIMELINE_LIMITS.time.default,
     trim_out: dur,
-    transition_out: null,
     color: null,
-    canvas_fit: null,
+    content_fit: null,
     flip_horizontal: false,
     flip_vertical: false,
-    speed: 1,
+    speed: VISUAL_SPEED_DEFAULT,
     speed_keyframes: [],
     preserve_pitch: true,
     reverse: false,
-    freeze_frame_sec: 0,
-    volume: 1,
-    muted: false,
-    fade_in_sec: 0,
-    fade_out_sec: 0,
+    freeze_frame_sec: VISUAL_FREEZE_DEFAULT_SEC,
+    volume: AUDIO_CLIP_GAIN.default,
+    muted: String(assetItem?.kind || "").toLowerCase() === "video",
+    fade_in_sec: AUDIO_FADE_DURATION.default,
+    fade_out_sec: AUDIO_FADE_DURATION.default,
     meta: {
       asset_id: assetItem.id,
       name: assetItem.name,
@@ -814,8 +794,13 @@ export function buildAssetClip(assetItem, timelineStart) {
       source_height: Number(assetItem.height) || null,
       source_fps: Number(assetItem.fps) || null,
       codec_name: assetItem.codec_name || null,
+      audio_codec_name: assetItem.audio_codec_name || null,
+      preview_proxy_required: Boolean(assetItem.preview_proxy_required),
+      preview_proxy_mode: assetItem.preview_proxy_mode || "direct",
+      preview_segment_step_sec: Number(assetItem.preview_segment_step_sec) || null,
       preview_proxy_version: assetItem.preview_proxy_version || null,
       has_alpha: Boolean(assetItem.has_alpha),
+      is_looping_animation: Boolean(assetItem.is_looping_animation),
     },
   };
 }
@@ -827,15 +812,33 @@ export function clipAudioSourcePath(clip) {
   return String(meta.output_path || meta.file_path || meta.video_path || meta.clip_path || meta.path || "").trim();
 }
 
-export function canDetachClipAudio(clip, trackType = "video") {
+export function canBuildLinkedAudioClip(clip, trackType = "video") {
   if (!clip || trackType !== "video") return false;
   const kind = String(clip.meta?.kind || "").toLowerCase();
   if (kind === "image" || kind === "font" || kind === "audio") return false;
   return Boolean(clipAudioSourcePath(clip));
 }
 
-export function buildDetachedAudioClip(clip, timelineStart = null) {
-  if (!canDetachClipAudio(clip, "video")) return null;
+export function mediaItemHasAudio(mediaItem) {
+  if (!mediaItem) return false;
+  if (isAssetMediaItem(mediaItem)) {
+    const kind = String(mediaItem.kind || "").toLowerCase();
+    if (kind === "audio") return true;
+    if (kind !== "video") return false;
+    return mediaItem.has_audio === true || Boolean(String(mediaItem.audio_codec_name || "").trim());
+  }
+  const raw = mediaItem._raw && typeof mediaItem._raw === "object" ? mediaItem._raw : {};
+  if (Object.prototype.hasOwnProperty.call(raw, "has_audio")) return raw.has_audio === true;
+  if (Object.prototype.hasOwnProperty.call(raw, "audio_codec_name")) {
+    return Boolean(String(raw.audio_codec_name || "").trim());
+  }
+  // Insight recordings historically omitted the audio fact from their list
+  // payload, but the recording pipeline produces a normal program audio mix.
+  return mediaItem.mediaKind === "recorded";
+}
+
+export function buildLinkedAudioClip(clip, timelineStart = null) {
+  if (!canBuildLinkedAudioClip(clip, "video")) return null;
   const path = clipAudioSourcePath(clip);
   const meta = clip.meta && typeof clip.meta === "object" ? clip.meta : {};
   const name = meta.name || meta.title || clipLabel(clip);
@@ -848,26 +851,33 @@ export function buildDetachedAudioClip(clip, timelineStart = null) {
     timeline_start: start,
     trim_in: Number(clip.trim_in) || 0,
     trim_out: clip.trim_out ?? meta.duration_sec ?? null,
-    transition_out: null,
     color: null,
     speed: clipPlaybackSpeed(clip),
     speed_keyframes: structuredClone(clip.speed_keyframes || []),
     preserve_pitch: clipPreservePitch(clip),
     reverse: clipReversePlayback(clip),
     freeze_frame_sec: clipFreezeFrameSec(clip),
-    volume: Number.isFinite(Number(clip.volume)) ? Number(clip.volume) : 1,
+    volume: Number.isFinite(Number(clip.volume)) ? Number(clip.volume) : AUDIO_CLIP_GAIN.default,
     muted: false,
-    fade_in_sec: Number(clip.fade_in_sec) || 0,
-    fade_out_sec: Number(clip.fade_out_sec) || 0,
+    fade_in_sec: Number(clip.fade_in_sec) || AUDIO_FADE_DURATION.default,
+    fade_out_sec: Number(clip.fade_out_sec) || AUDIO_FADE_DURATION.default,
     meta: {
       asset_id: meta.asset_id,
       source_clip_id: clip.id,
       name: `${name} Audio`,
       kind: "audio",
       duration_sec: meta.duration_sec,
-      detached_from_video: true,
+      linked_from_video: true,
     },
   };
+}
+
+export function buildStandaloneAudioClip(clip, timelineStart = null) {
+  const audio = buildLinkedAudioClip(clip, timelineStart);
+  if (!audio) return null;
+  const { source_clip_id, linked_from_video, ...meta } = audio.meta || {};
+  audio.meta = meta;
+  return audio;
 }
 
 /** 返回拆分原声与源视频组成的可一起编辑的关联片段。 */
@@ -1006,8 +1016,6 @@ export function buildSubtitleOverlays(rawText, {
     type: "text",
     timeline_start: cue.start,
     duration: cue.duration,
-    fade_in_sec: 0,
-    fade_out_sec: 0,
     transform: { x: 0.5, y, scale: 1, rotation: 0, width: 0.74, height: 0.16, opacity: 1 },
     text: {
       content: cue.text,
@@ -1016,8 +1024,6 @@ export function buildSubtitleOverlays(rawText, {
       font_size: Math.max(12, Math.min(1000, Number(fontSize) || 42)),
       align: "center",
       preset_id: presetId || "plain",
-      anim_in: null,
-      anim_out: null,
     },
     meta: {
       name: cue.text,
@@ -1147,7 +1153,6 @@ export function splitClipAt(clip, localSec) {
   const left = {
     ...structuredClone(clip),
     trim_out: sourceSplit,
-    transition_out: null,
     freeze_frame_sec: 0,
   };
   const right = {
@@ -1156,7 +1161,6 @@ export function splitClipAt(clip, localSec) {
     timeline_start: (Number(clip.timeline_start) || 0) + split,
     trim_in: sourceSplit,
     trim_out: clip.trim_out,
-    transition_out: clip.transition_out ? { ...clip.transition_out } : null,
   };
   return [rebaseTimelineClipKeyframes(clip, left), rebaseTimelineClipKeyframes(clip, right)];
 }
@@ -1248,6 +1252,7 @@ export function splitOverlaysAtPlayhead(overlays, playheadSec) {
   const t = Math.max(0, Number(playheadSec) || 0);
   let changed = false;
   const newIds = [];
+  const splitPairs = [];
   const next = [];
   for (const overlay of overlays || []) {
     if (!canSplitTimelineOverlayAt(overlay, t)) {
@@ -1258,12 +1263,14 @@ export function splitOverlaysAtPlayhead(overlays, playheadSec) {
     const [left, right] = splitOverlayAt(overlay, local);
     next.push(left, right);
     newIds.push(right.id);
+    splitPairs.push({ id: String(overlay.id), rightId: String(right.id) });
     changed = true;
   }
   return {
     changed,
     overlays: next.sort((a, b) => (a.timeline_start || 0) - (b.timeline_start || 0)),
     newIds,
+    splitPairs,
   };
 }
 

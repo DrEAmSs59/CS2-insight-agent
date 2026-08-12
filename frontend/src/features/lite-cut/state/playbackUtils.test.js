@@ -2,20 +2,19 @@
 import { describe, expect, it } from "vitest";
 import {
   nextTopVideoPlaybackAfter,
-  partitionMainVideoAudioPreview,
   previewAudioState,
   projectBgmPreviewClip,
   resolveAudioPreviewPreloadItems,
   resolveAudioPreviewItems,
   resolveBaseVideoTrackId,
   resolveTopVideoPlaybackAt,
+  resolveTransitionEndpointPlayback,
   resolveVideoUnderlayPlaybackAt,
   resolveVideoUnderlayPlaybacksAt,
-  resolveIncomingTransitionPlayback,
-  resolveOutgoingTransitionPreload,
   selectedClipPreviewSourceTime,
 } from "./playbackUtils.js";
 import { buildRecordedClip } from "./timelineUtils.js";
+import { activeTransitionEvents, clipTransitionRef } from "./transitionModel.js";
 
 describe("playbackUtils", () => {
   it("resolves second clip on same track at playhead", () => {
@@ -29,43 +28,41 @@ describe("playbackUtils", () => {
     expect(hit?.sourceTime).toBeCloseTo(0.58, 2);
   });
 
-  it("freezes the preceding clip behind an incoming soft transition", () => {
+  it("freezes a boundary endpoint for the half after its authored cut", () => {
     const first = buildRecordedClip({ id: 1, duration: 5, _raw: {} }, 0);
-    first.transition_out = { type: "fade", duration_sec: 0.5 };
     const second = buildRecordedClip({ id: 2, duration: 4, _raw: {} }, 5);
-    const body = { tracks: [{ id: "v1", type: "video", clips: [first, second] }] };
-    const current = resolveTopVideoPlaybackAt(body, 5.2);
-    const transition = resolveIncomingTransitionPlayback(body, current);
-    expect(transition).toMatchObject({
-      trackId: "v1",
-      transitionType: "fade",
-      freezePlayback: true,
-    });
-    expect(transition?.sourceTime).toBeCloseTo(4.95, 2);
-    expect(transition?.progress).toBeCloseTo(0.4, 2);
-    expect(resolveIncomingTransitionPlayback(body, resolveTopVideoPlaybackAt(body, 5.6))).toBeNull();
+    const body = {
+      tracks: [{ id: "v1", type: "video", clips: [first, second] }],
+      transitions: [{ id: "edge", type: "fade", duration_sec: 0.5, from: clipTransitionRef("v1", first.id), to: clipTransitionRef("v1", second.id) }],
+    };
+    const endpoint = resolveTransitionEndpointPlayback(body, clipTransitionRef("v1", first.id), 5.2);
+    expect(endpoint).toMatchObject({ trackId: "v1", freezePlayback: true });
+    expect(endpoint?.sourceTime).toBeCloseTo(4.95, 2);
+    expect(activeTransitionEvents(body, 5.2)[0]?.progress).toBeCloseTo(0.9, 2);
+    expect(activeTransitionEvents(body, 5.3)).toEqual([]);
   });
 
-  it("previews the incoming clip transition with the same precedence as export", () => {
+  it("uses the one canonical edit-point effect without per-clip precedence", () => {
     const first = buildRecordedClip({ id: 1, duration: 5, _raw: {} }, 0);
-    first.transition_out = { type: "fade", duration_sec: 0.5 };
     const second = buildRecordedClip({ id: 2, duration: 4, _raw: {} }, 5);
-    second.transition_in = { type: "wipe_l", duration_sec: 0.8 };
-    const body = { tracks: [{ id: "v1", type: "video", clips: [first, second] }] };
-
-    const transition = resolveIncomingTransitionPlayback(body, resolveTopVideoPlaybackAt(body, 5.2));
-    expect(transition).toMatchObject({ transitionType: "wipe_l", transitionDuration: 0.8 });
-    expect(transition?.progress).toBeCloseTo(0.25, 2);
+    const body = {
+      tracks: [{ id: "v1", type: "video", clips: [first, second] }],
+      transitions: [{ id: "edge", type: "wipe_l", duration_sec: 0.8, from: clipTransitionRef("v1", first.id), to: clipTransitionRef("v1", second.id) }],
+    };
+    const transition = activeTransitionEvents(body, 5.2)[0];
+    expect(transition).toMatchObject({ type: "wipe_l", duration_sec: 0.8, mode: "boundary" });
+    expect(transition?.progress).toBeCloseTo(0.75, 2);
   });
 
-  it("preloads the outgoing frame before a 1.5 second contiguous transition", () => {
+  it("activates a 1.5 second boundary event for 0.75 seconds on each side", () => {
     const first = buildRecordedClip({ id: 1, duration: 5, _raw: {} }, 0);
     const second = buildRecordedClip({ id: 2, duration: 4, _raw: {} }, 5);
-    second.transition_in = { type: "fade", duration_sec: 1.5 };
-    const body = { tracks: [{ id: "v1", type: "video", clips: [first, second] }] };
-    const preload = resolveOutgoingTransitionPreload(body, resolveTopVideoPlaybackAt(body, 3.1));
-    expect(preload).toMatchObject({ trackId: "v1", transitionDuration: 1.5, preloadOnly: true, freezePlayback: true });
-    expect(resolveOutgoingTransitionPreload(body, resolveTopVideoPlaybackAt(body, 2.9))).toBeNull();
+    const body = {
+      tracks: [{ id: "v1", type: "video", clips: [first, second] }],
+      transitions: [{ id: "edge", type: "fade", duration_sec: 1.5, from: clipTransitionRef("v1", first.id), to: clipTransitionRef("v1", second.id) }],
+    };
+    expect(activeTransitionEvents(body, 4.3)[0]).toMatchObject({ start_sec: 4.25, end_sec: 5.75 });
+    expect(activeTransitionEvents(body, 4.2)).toEqual([]);
   });
 
   it("maps sped-up timeline seconds to source seconds", () => {
@@ -281,7 +278,7 @@ describe("playbackUtils", () => {
     });
     expect(previewAudioState({ clip: { volume: 2 }, masterVolume: 2 })).toEqual({
       muted: false,
-      volume: 1,
+      volume: 4,
     });
     expect(previewAudioState({ clip: { volume: 1, muted: true }, masterVolume: 1 })).toEqual({
       muted: true,
@@ -367,7 +364,8 @@ describe("playbackUtils", () => {
       reverse: true,
       meta: { kind: "video", asset_id: 8, duration_sec: 10 },
     };
-    const items = resolveAudioPreviewItems({ tracks: [{ id: "v1", type: "video", clips: [reversed] }] }, 2);
+    reversed.meta.kind = "audio";
+    const items = resolveAudioPreviewItems({ tracks: [{ id: "a1", type: "audio", clips: [reversed] }] }, 2);
     expect(items[0]).toMatchObject({ id: "reverse-audio", reversePlayback: true, sourceTime: 8 });
   });
 
@@ -423,45 +421,24 @@ describe("playbackUtils", () => {
     expect(items[0].volume).toBeCloseTo(0.2);
   });
 
-  it("includes every visible video layer so preview matches exported source audio", () => {
+  it("ignores V-track source audio and previews only explicit A-track clips", () => {
     const base = buildRecordedClip({ id: 31, duration: 8, _raw: {} }, 0);
     const layer = buildRecordedClip({ id: 32, duration: 8, _raw: {} }, 1);
-    layer.volume = 0.5;
+    const audio = { ...base, id: "audio", muted: false, meta: { kind: "audio", source_clip_id: base.id } };
     const items = resolveAudioPreviewItems(
       {
         tracks: [
           { id: "v1", type: "video", volume: 0.8, clips: [base] },
           { id: "v2", type: "video", volume: 0.5, clips: [layer] },
+          { id: "a1", type: "audio", volume: 0.75, clips: [audio] },
         ],
       },
       2,
     );
 
-    expect(items).toEqual(expect.arrayContaining([
-      expect.objectContaining({ id: base.id, trackId: "v1", sourceTime: 2, volume: 0.8 }),
-      expect.objectContaining({ id: layer.id, trackId: "v2", sourceTime: 1, volume: 0.25 }),
-    ]));
-  });
-
-  it("reuses the main video element for its audio and keeps other layers dedicated", () => {
-    const items = [
-      { id: "main", trackId: "v1", volume: 0.8, muted: false, reversePlayback: false },
-      { id: "underlay", trackId: "v2", volume: 0.4, muted: false, reversePlayback: false },
-      { id: "next", trackId: "v1", volume: 1, preloadOnly: true },
-    ];
-
-    expect(partitionMainVideoAudioPreview(items, { clipId: "main", trackId: "v1" })).toEqual({
-      mainAudioItem: items[0],
-      audioItems: [items[1], items[2]],
-    });
-  });
-
-  it("keeps reverse or muted main audio out of the video element", () => {
-    const reversed = [{ id: "main", trackId: "v1", volume: 1, reversePlayback: true }];
-    const muted = [{ id: "main", trackId: "v1", volume: 1, muted: true }];
-
-    expect(partitionMainVideoAudioPreview(reversed, { clipId: "main", trackId: "v1" }).mainAudioItem).toBeNull();
-    expect(partitionMainVideoAudioPreview(muted, { clipId: "main", trackId: "v1" }).mainAudioItem).toBeNull();
+    expect(items).toEqual([
+      expect.objectContaining({ id: "audio", trackId: "a1", sourceTime: 2, volume: 0.75 }),
+    ]);
   });
 
   it("keeps consecutive clips from the same audio asset as separate preview items", () => {

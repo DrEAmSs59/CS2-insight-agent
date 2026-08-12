@@ -82,14 +82,32 @@ describe("LiteCut audio inspector", () => {
         selectedMedia={{ id: "video", kind: "video", title: "video.mp4" }}
         isAudioClip={false}
         audioTargetIsAudioClip
-        selectedClipLabel="detached-audio.wav"
+        selectedClipLabel="linked-audio.wav"
       />,
     );
 
     expect(screen.getByText("音频轨(A轨)片段")).toBeTruthy();
-    expect(screen.getByText("detached-audio.wav")).toBeTruthy();
+    expect(screen.getByText("linked-audio.wav")).toBeTruthy();
     const tabs = container.querySelector("[data-litecut-inspector-tabs]");
     expect(tabs.className).toContain("grid-cols-6");
     expect(tabs.querySelectorAll("button")).toHaveLength(6);
+  });
+
+  it("keeps BGM start positions beyond the old 60-second UI ceiling", () => {
+    const onBgmChange = vi.fn();
+    render(
+      <AudioPane
+        bgm={{ path: "C:/music/theme.mp3", start_sec: 120, volume: 1 }}
+        timelineTotalSec={180}
+        onBgmChange={onBgmChange}
+      />,
+    );
+
+    const startRow = screen.getByText("开始时间 (s)").closest(".litecut-property-control-row");
+    const input = startRow.querySelector("input");
+    expect(input.value).toBe("120");
+    expect(input.max).toBe("180");
+    fireEvent.change(input, { target: { value: "150" } });
+    expect(onBgmChange).toHaveBeenCalledWith(expect.objectContaining({ start_sec: 150 }));
   });
 });

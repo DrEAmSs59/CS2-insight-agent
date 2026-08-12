@@ -68,8 +68,8 @@
 
   /* 滚动条 */
   --cs2-scrollbar-track: color-mix(in srgb, var(--cs2-bg-input) 24%, transparent);
-  --cs2-scrollbar-thumb: color-mix(in srgb, var(--cs2-accent) 38%, var(--sand-8));
-  --cs2-scrollbar-thumb-hover: color-mix(in srgb, var(--cs2-accent) 68%, var(--sand-9));
+  --cs2-scrollbar-thumb: color-mix(in srgb, var(--cs2-accent) 68%, var(--sand-9));
+  --cs2-scrollbar-thumb-hover: var(--cs2-scrollbar-thumb);
   --cs2-scrollbar-thumb-active: var(--cs2-accent);
 
   /* 状态色 surface（badge/tag 背景） */

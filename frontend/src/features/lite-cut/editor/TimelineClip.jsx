@@ -3,11 +3,12 @@ import { useLiteCutTimelineStore } from "../state/timelineStore.js";
 import { liteCutClipStreamUrl } from "./clipStreamUrlUtils.js";
 import AudioWaveformBars from "./AudioWaveformBars.jsx";
 import { timelineSpeedRampSegments } from "./speedRampUiUtils.js";
+import { timelineWaveformTiles } from "./timelineWaveformUtils.js";
 import { useT } from "../../../i18n/useT.js";
 
 const TRANSITION_TYPES = new Set([
-  "cut", "fade", "flash", "dip", "dip_black", "zoom", "wipe_l", "wipe_r",
-  "slide_up", "slide_down", "slide_left", "slide_right", "blur", "glitch", "spin",
+  "cut", "fade", "flash", "dip", "zoom", "wipe_l", "wipe_r",
+  "slide_up", "slide_down",
 ]);
 
 // 工程里可能存着更新的、这个版本还不认识的转场类型，那就原样显示。
@@ -27,11 +28,6 @@ export function timelineClipClass(tone, selected, dragging, invalid) {
   return `litecut-timeline-clip litecut-timeline-clip--${tone} absolute inset-y-1 overflow-hidden rounded-md border ${selected ? "litecut-timeline-clip--selected ring-1 ring-cs2-accent/80" : ""} ${dragging ? "opacity-35" : ""} ${invalid ? "litecut-timeline-clip--invalid" : ""}`;
 }
 
-export function waveformBarsForClipWidth(pixelWidth) {
-  const raw = Math.max(16, Math.min(512, Math.round((Number(pixelWidth) || 0) / 3)));
-  return Math.max(16, Math.min(512, Math.round(raw / 16) * 16));
-}
-
 export function streamUrlForTimelineClip(source) {
   return liteCutClipStreamUrl(source);
 }
@@ -47,10 +43,10 @@ function TimelineClip({
   rowType,
   rowId,
   clip,
-  nextSourceClip = null,
   start,
   width,
   pixelsPerSecond,
+  visibleRange,
   playheadSec,
   selected,
   dragSource,
@@ -62,6 +58,7 @@ function TimelineClip({
   formatTime,
 }) {
   const t = useT();
+  const selectedTransitionId = useLiteCutTimelineStore((state) => state.selectedTransitionId);
   const source = clip._clip || clip._overlay || {};
   const tone = timelineClipTone(rowType, source);
   const speedSegments = useMemo(
@@ -71,7 +68,16 @@ function TimelineClip({
   const renderedClipWidth = Math.max(8, width * pixelsPerSecond);
   const keyframePoints = useMemo(() => keyframePointsForClip(source, width), [source, width]);
   const waveformUrl = rowType === "audio" ? streamUrlForTimelineClip(source) : null;
-  const waveformBars = waveformBarsForClipWidth(renderedClipWidth);
+  const waveformTiles = useMemo(
+    () => (rowType === "audio" ? timelineWaveformTiles({
+      clip: source,
+      clipStart: start,
+      clipDuration: width,
+      pixelsPerSecond,
+      visibleRange,
+    }) : []),
+    [pixelsPerSecond, rowType, source, start, visibleRange, width],
+  );
 
   const startKeyframeDrag = (event, keyframe, absoluteTime) => {
     if (event.button !== 0) return;
@@ -120,28 +126,17 @@ function TimelineClip({
     document.addEventListener("pointercancel", end);
   };
 
-  const fadeIn = Math.max(0, Number(source.fade_in_sec) || 0);
-  const fadeOut = Math.max(0, Number(source.fade_out_sec) || 0);
-  const transitionIn = Math.max(0, Number(source.transition_in?.duration_sec) || 0);
-  const transitionOut = Math.max(0, Number(source.transition_out?.duration_sec) || 0);
-  const transitionInType = String(source.transition_in?.type || "cut");
-  const transitionOutType = String(source.transition_out?.type || "cut");
-  const isOverlayMaterial = rowType === "overlay";
-  const storedTransitionIn = transitionIn > 0 && transitionInType !== "cut";
-  const storedTransitionOut = transitionOut > 0 && transitionOutType !== "cut";
-  const markerInDuration = storedTransitionIn ? transitionIn : isOverlayMaterial ? fadeIn : 0;
-  const markerOutDuration = storedTransitionOut ? transitionOut : isOverlayMaterial ? fadeOut : 0;
-  const markerInType = storedTransitionIn ? transitionInType : String(source.text?.anim_in || "fade");
-  const markerOutType = storedTransitionOut ? transitionOutType : String(source.text?.anim_out || "fade");
-  const hasTransitionIn = markerInDuration > 0 && markerInType !== "cut";
-  const nextStartsAtBoundary = nextSourceClip && Math.abs((Number(nextSourceClip.timeline_start) || 0) - (start + width)) <= 0.05;
-  const nextOwnsBoundary = !isOverlayMaterial
-    && nextStartsAtBoundary
-    && Number(nextSourceClip?.transition_in?.duration_sec) > 0
-    && String(nextSourceClip?.transition_in?.type || "cut") !== "cut";
-  const hasTransitionOut = markerOutDuration > 0 && markerOutType !== "cut" && !nextOwnsBoundary;
-  const transitionInLabel = t("liteCut.clip.transitionIn", { type: transitionLabel(markerInType, t), duration: markerInDuration.toFixed(2) });
-  const transitionOutLabel = t("liteCut.clip.transitionOut", { type: transitionLabel(markerOutType, t), duration: markerOutDuration.toFixed(2) });
+  const transitionMarkers = Array.isArray(clip._transitionMarkers) ? clip._transitionMarkers : [];
+  const markerIn = transitionMarkers.find((marker) => marker.edge === "in") || null;
+  const markerOut = transitionMarkers.find((marker) => marker.edge === "out") || null;
+  const markerInDuration = Math.max(0, Number(markerIn?.duration) || 0);
+  const markerOutDuration = Math.max(0, Number(markerOut?.duration) || 0);
+  const markerInType = String(markerIn?.type || "cut");
+  const markerOutType = String(markerOut?.type || "cut");
+  const hasTransitionIn = Boolean(markerIn && markerInDuration > 0);
+  const hasTransitionOut = Boolean(markerOut && markerOutDuration > 0);
+  const transitionInLabel = t("liteCut.clip.transitionIn", { type: transitionLabel(markerInType, t), duration: Number(markerIn?.totalDuration || markerInDuration).toFixed(2) });
+  const transitionOutLabel = t("liteCut.clip.transitionOut", { type: transitionLabel(markerOutType, t), duration: Number(markerOut?.totalDuration || markerOutDuration).toFixed(2) });
   const transitionStripBottom = speedSegments.length ? 12 : 0;
   const transitionInWidth = Math.min(renderedClipWidth, Math.max(3, Math.min(width, markerInDuration) * pixelsPerSecond));
   const transitionOutWidth = Math.min(renderedClipWidth, Math.max(3, Math.min(width, markerOutDuration) * pixelsPerSecond));
@@ -161,15 +156,18 @@ function TimelineClip({
       className={`${timelineClipClass(tone, selected, dragSource && !dragTarget, dragTarget && !dragValid)} cursor-grab active:cursor-grabbing`}
       style={{ left: start * pixelsPerSecond, width: renderedClipWidth }}
     >
-      {waveformUrl ? (
+      {waveformUrl ? waveformTiles.map((tile) => (
         <AudioWaveformBars
+          key={tile.key}
           sourceUrl={waveformUrl}
-          bars={waveformBars}
-          startSec={Math.max(0, Number(source.trim_in) || 0)}
-          endSec={Number(source.trim_out) > Number(source.trim_in) ? Number(source.trim_out) : null}
-          className="pointer-events-none absolute inset-x-0 bottom-0 top-3 z-[4] opacity-65"
+          bars={tile.bars}
+          startSec={tile.sourceStartSec}
+          endSec={tile.sourceEndSec}
+          sampleSourceTimes={tile.sourceTimes}
+          className="pointer-events-none absolute z-[4] opacity-65"
+          style={{ left: tile.leftPx, top: 12, width: tile.widthPx, height: "calc(100% - 12px)" }}
         />
-      ) : null}
+      )) : null}
       {speedSegments.length ? <div data-speed-ramp-overlay className="litecut-speed-ramp pointer-events-none absolute inset-x-0 bottom-0 z-[7] h-[12px] border-t">
         {speedSegments.map((segment) => {
           const segmentPixelWidth = renderedClipWidth * segment.width / 100;
@@ -214,10 +212,10 @@ function TimelineClip({
           style={{ left: `${Math.max(0, Math.min(100, (Number(keyframe.time_sec) / Math.max(0.001, width)) * 100))}%`, top: keyframe.kind === "audio" ? 22 : 8, backgroundColor: keyframe.color }}
         />;
       })}
-      {hasTransitionIn ? <div data-transition-marker="in" data-transition-annotation data-transition-duration-sec={markerInDuration} title={transitionInLabel} className={`litecut-transition-marker litecut-transition-marker--in ${compactTransitionLabels ? "litecut-transition-marker--compact" : ""} pointer-events-none absolute left-0 z-[9] flex h-[15px] min-w-0 items-center overflow-hidden border-r border-t px-1 font-mono text-[8px] font-semibold`} style={{ bottom: transitionStripBottom, width: transitionInWidth }}>
+      {hasTransitionIn ? <div data-transition-marker="in" data-transition-event-id={markerIn.eventId} data-transition-paired={markerIn.paired || undefined} data-transition-annotation data-transition-duration-sec={markerInDuration} title={transitionInLabel} onPointerDown={(event) => { event.preventDefault(); event.stopPropagation(); useLiteCutTimelineStore.getState().selectTransition(markerIn.eventId); }} className={`litecut-transition-marker litecut-transition-marker--in ${compactTransitionLabels ? "litecut-transition-marker--compact" : ""} ${String(selectedTransitionId) === String(markerIn.eventId) ? "ring-1 ring-white" : ""} absolute left-0 z-[21] flex h-[15px] min-w-0 cursor-pointer items-center overflow-hidden border-r border-t px-1 font-mono text-[8px] font-semibold`} style={{ bottom: transitionStripBottom, width: transitionInWidth }}>
         {transitionInWidth >= 36 ? <span className="truncate">{transitionInWidth >= 86 ? transitionInLabel : t("liteCut.clip.transitionInShort", { duration: markerInDuration.toFixed(2) })}</span> : null}
       </div> : null}
-      {hasTransitionOut ? <div data-transition-marker="out" data-transition-annotation data-transition-duration-sec={markerOutDuration} title={transitionOutLabel} className={`litecut-transition-marker litecut-transition-marker--out ${compactTransitionLabels ? "litecut-transition-marker--compact" : ""} pointer-events-none absolute right-0 z-[9] flex h-[15px] min-w-0 items-center justify-end overflow-hidden border-l border-t px-1 font-mono text-[8px] font-semibold`} style={{ bottom: transitionStripBottom, width: transitionOutWidth }}>
+      {hasTransitionOut ? <div data-transition-marker="out" data-transition-event-id={markerOut.eventId} data-transition-paired={markerOut.paired || undefined} data-transition-annotation data-transition-duration-sec={markerOutDuration} title={transitionOutLabel} onPointerDown={(event) => { event.preventDefault(); event.stopPropagation(); useLiteCutTimelineStore.getState().selectTransition(markerOut.eventId); }} className={`litecut-transition-marker litecut-transition-marker--out ${compactTransitionLabels ? "litecut-transition-marker--compact" : ""} ${String(selectedTransitionId) === String(markerOut.eventId) ? "ring-1 ring-white" : ""} absolute right-0 z-[21] flex h-[15px] min-w-0 cursor-pointer items-center justify-end overflow-hidden border-l border-t px-1 font-mono text-[8px] font-semibold`} style={{ bottom: transitionStripBottom, width: transitionOutWidth }}>
         {transitionOutWidth >= 36 ? <span className="truncate">{transitionOutWidth >= 86 ? transitionOutLabel : t("liteCut.clip.transitionOutShort", { duration: markerOutDuration.toFixed(2) })}</span> : null}
       </div> : null}
       {compactTransitionLabels ? <div data-transition-label-layout="compact" className="litecut-transition-label-layout pointer-events-none absolute inset-x-0 z-[11] grid h-[15px] min-w-0 grid-cols-2 items-center font-mono text-[8px] font-semibold" style={{ bottom: transitionStripBottom }}>

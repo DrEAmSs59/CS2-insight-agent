@@ -1,6 +1,6 @@
 /** @vitest-environment node */
 import { describe, expect, it } from "vitest";
-import { boundaryTransitionPreviewVisual, textTransitionPreviewVisual, transitionPreviewVisual } from "./transitionPreviewUtils.js";
+import { boundaryTransitionPreviewVisual, transitionPreviewVisual } from "./transitionPreviewUtils.js";
 
 describe("transitionPreviewVisual", () => {
   it("reveals directional wipes over the frozen outgoing frame", () => {
@@ -12,18 +12,17 @@ describe("transitionPreviewVisual", () => {
   });
 
   it("moves slide transitions in from their named edge", () => {
-    expect(transitionPreviewVisual("slide_left", 0.4).mainTransform).toBe("translateX(60.00%)");
+    expect(transitionPreviewVisual("slide_up", 0.4).mainTransform).toBe("translateY(60.00%)");
     expect(transitionPreviewVisual("slide_down", 0.4).mainTransform).toBe("translateY(-60.00%)");
   });
 
   it("puts flash and dip overlays at the middle of the transition", () => {
-    expect(transitionPreviewVisual("flash", 0.25)).toMatchObject({ mainOpacity: 0, flashOpacity: 0.5 });
-    expect(transitionPreviewVisual("flash", 0.5)).toMatchObject({ mainOpacity: 1, flashOpacity: 1 });
-    expect(transitionPreviewVisual("flash", 0.75)).toMatchObject({ mainOpacity: 1, flashOpacity: 0.5 });
-    expect(transitionPreviewVisual("dip", 0.25)).toMatchObject({ mainOpacity: 0, blackOpacity: 0.5 });
-    expect(transitionPreviewVisual("dip", 0.5)).toMatchObject({ mainOpacity: 1, blackOpacity: 1 });
-    expect(transitionPreviewVisual("dip", 0.75)).toMatchObject({ mainOpacity: 1, blackOpacity: 0.5 });
-    expect(transitionPreviewVisual("dip", 0)).toMatchObject({ mainOpacity: 0, blackOpacity: 0 });
+    expect(transitionPreviewVisual("flash", 0.25)).toMatchObject({ mainOpacity: 0.25, materialFilter: "brightness(1.4250)", flashOpacity: 0 });
+    expect(transitionPreviewVisual("flash", 0.5)).toMatchObject({ mainOpacity: 0.5, materialFilter: "brightness(1.8500)", flashOpacity: 0 });
+    expect(transitionPreviewVisual("dip", 0.25)).toMatchObject({ mainOpacity: 0.25, materialFilter: "brightness(0.5250)", blackOpacity: 0 });
+    expect(transitionPreviewVisual("dip", 0.5)).toMatchObject({ mainOpacity: 0.5, materialFilter: "brightness(0.0500)", blackOpacity: 0 });
+    expect(boundaryTransitionPreviewVisual("flash", 0.5)).toMatchObject({ mainOpacity: 1, flashOpacity: 1, materialFilter: "" });
+    expect(boundaryTransitionPreviewVisual("dip", 0.5)).toMatchObject({ mainOpacity: 1, blackOpacity: 1, materialFilter: "" });
   });
 
   it("matches FFmpeg zoomin's outgoing sample and second-half blend", () => {
@@ -47,15 +46,30 @@ describe("transitionPreviewVisual", () => {
       mainTransform: "translateY(75.00%)",
       outgoingTransform: "translateY(-25.00%)",
     });
-    expect(boundaryTransitionPreviewVisual("slide_right", 0.25)).toMatchObject({
-      mainTransform: "translateX(-75.00%)",
-      outgoingTransform: "translateX(25.00%)",
+    expect(boundaryTransitionPreviewVisual("slide_down", 0.25)).toMatchObject({
+      mainTransform: "translateY(-75.00%)",
+      outgoingTransform: "translateY(25.00%)",
     });
   });
 
-  it("uses export-compatible text motion and fades", () => {
-    expect(textTransitionPreviewVisual("slide_left", 0.25, "in")).toEqual({ opacity: 1, offsetX: 0.09, offsetY: 0 });
-    expect(textTransitionPreviewVisual("slide_left", 0.25, "out")).toEqual({ opacity: 1, offsetX: -0.09, offsetY: 0 });
-    expect(textTransitionPreviewVisual("wipe_l", 0.25, "in")).toEqual({ opacity: 0.25, offsetX: 0, offsetY: 0 });
+  it("can keep the outgoing endpoint as the stable primary layer", () => {
+    expect(boundaryTransitionPreviewVisual("fade", 0, { mainRole: "from" })).toMatchObject({
+      mainOpacity: 1,
+      companionOpacity: 1,
+    });
+    expect(boundaryTransitionPreviewVisual("fade", 0.75, { mainRole: "from" }).mainOpacity).toBe(0.25);
+    expect(boundaryTransitionPreviewVisual("wipe_l", 0.25, { mainRole: "from" }).mainClipPath).toBe("inset(0 25.00% 0 0)");
+    expect(boundaryTransitionPreviewVisual("slide_up", 0.25, { mainRole: "from" })).toMatchObject({
+      mainTransform: "translateY(-25.00%)",
+      companionTransform: "translateY(75.00%)",
+    });
+    expect(boundaryTransitionPreviewVisual("flash", 0.25, { mainRole: "from" })).toMatchObject({ mainOpacity: 1, flashOpacity: 0.5 });
+    expect(boundaryTransitionPreviewVisual("flash", 0.75, { mainRole: "from" })).toMatchObject({ mainOpacity: 0, flashOpacity: 0.5 });
+    expect(boundaryTransitionPreviewVisual("zoom", 0.25, { mainRole: "from" })).toMatchObject({
+      mainOpacity: 1,
+      mainTransform: "scale(2.0000)",
+      mainTransformOrigin: "calc(50% + 0.5px) calc(50% + 0.5px)",
+    });
   });
+
 });

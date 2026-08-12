@@ -10,7 +10,7 @@ vi.mock("../state/timelineStore.js", () => ({
   useLiteCutTimelineStore: (selector) => selector(historyMocks),
 }));
 
-import { NumericPairCard, PaneSection, ProSlider } from "./PropertyControls.jsx";
+import { NumericPairCard, PaneSection, ProSlider, SceneTransformControls } from "./PropertyControls.jsx";
 
 describe("PropertyControls", () => {
   beforeEach(() => {
@@ -71,5 +71,36 @@ describe("PropertyControls", () => {
 
     expect(onFirstChange).toHaveBeenCalledWith(120);
     expect(onSecondChange).toHaveBeenCalledWith(60);
+  });
+
+  it("shows final rendered pixels while preserving base scene dimensions", () => {
+    const onChange = vi.fn();
+    const { rerender } = render(
+      <SceneTransformControls
+        transform={{ x: 0.5, y: 0.5, width: 0.5, height: 0.25, scale: 2, rotation: 0, opacity: 1 }}
+        outputWidth={1920}
+        outputHeight={1080}
+        onChange={onChange}
+      />,
+    );
+
+    expect(screen.getByLabelText("W").value).toBe("1920");
+    expect(screen.getByLabelText("H").value).toBe("540");
+    const rotationSlider = screen.getByRole("slider", { name: "旋转 °" });
+    expect(rotationSlider.min).toBe("-3600");
+    expect(rotationSlider.max).toBe("3600");
+    fireEvent.change(screen.getByLabelText("W"), { target: { value: "960" } });
+    expect(onChange).toHaveBeenLastCalledWith({ width: 0.25, height: 0.125 });
+
+    rerender(
+      <SceneTransformControls
+        transform={{ x: 0.5, y: 0.5, width: 0.5, height: 0.25, scale: 0.5, rotation: 0, opacity: 1 }}
+        outputWidth={1920}
+        outputHeight={1080}
+        onChange={onChange}
+      />,
+    );
+    expect(screen.getByLabelText("W").value).toBe("480");
+    expect(screen.getByLabelText("H").value).toBe("135");
   });
 });

@@ -17,6 +17,7 @@ from .runtime import (
     export_jobs,
     get_lite_cut_db,
     preview_proxy_jobs,
+    segment_preview_jobs,
     storage_migration_jobs,
 )
 from . import storage_service as _storage_service
@@ -64,7 +65,7 @@ async def get_lite_cut_storage():
 async def migrate_lite_cut_storage(body: LiteCutStorageMoveBody):
     from .assets import lite_cut_assets_dir
 
-    if any(job.status in {"queued", "running"} for job in preview_proxy_jobs.values()):
+    if any(job.status in {"queued", "running", "partial"} for job in [*preview_proxy_jobs.values(), *segment_preview_jobs.values()]):
         raise HTTPException(409, "LiteCut 正在生成预览代理，请完成后再迁移素材目录")
     if any(job.status in {"queued", "running", "cancelling"} for job in export_jobs.values()):
         raise HTTPException(409, "LiteCut 正在导出，请等待导出结束后再迁移素材目录。")

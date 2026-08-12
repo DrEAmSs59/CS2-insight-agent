@@ -3,12 +3,27 @@
 from __future__ import annotations
 
 import json
+import uuid
 from pathlib import Path
 from typing import Any, Optional
 
 import aiosqlite
 
 from ...demo_db import utc_now_iso
+
+
+def _asset_dict(row: aiosqlite.Row | dict[str, Any]) -> dict[str, Any]:
+    item = dict(row)
+    raw_origin_metadata = item.pop("origin_metadata_json", None)
+    if raw_origin_metadata:
+        try:
+            decoded = json.loads(str(raw_origin_metadata))
+        except (TypeError, ValueError, json.JSONDecodeError):
+            decoded = {}
+        item["origin_metadata"] = decoded if isinstance(decoded, dict) else {}
+    else:
+        item["origin_metadata"] = {}
+    return item
 
 
 def _replace_storage_root(value: Any, old_root: Path, new_root: Path) -> Any:
@@ -94,27 +109,81 @@ class LiteCutDB:
             await conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS lite_cut_assets (
-                    id           INTEGER PRIMARY KEY AUTOINCREMENT,
-                    project_id   INTEGER,
-                    name         TEXT NOT NULL,
-                    kind         TEXT NOT NULL,
-                    mime_type    TEXT,
-                    file_path    TEXT NOT NULL,
-                    duration_sec REAL,
-                    width        INTEGER,
-                    height       INTEGER,
-                    created_at   TEXT NOT NULL,
+                    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                    project_id      INTEGER,
+                    asset_uid       TEXT NOT NULL,
+                    origin_type     TEXT NOT NULL DEFAULT 'local_file',
+                    origin_ref      TEXT,
+                    origin_metadata_json TEXT,
+                    name            TEXT NOT NULL,
+                    kind            TEXT NOT NULL,
+                    mime_type       TEXT,
+                    file_path       TEXT NOT NULL,
+                    storage_mode    TEXT NOT NULL DEFAULT 'managed',
+                    original_path   TEXT,
+                    managed_path    TEXT,
+                    size_bytes      INTEGER,
+                    mtime_ns        INTEGER,
+                    fingerprint     TEXT,
+                    source_status   TEXT NOT NULL DEFAULT 'available',
+                    metadata_status TEXT NOT NULL DEFAULT 'ready',
+                    duration_sec    REAL,
+                    width           INTEGER,
+                    height          INTEGER,
+                    fps             REAL,
+                    codec_name      TEXT,
+                    audio_codec_name TEXT,
+                    pixel_format    TEXT,
+                    has_alpha       INTEGER,
+                    is_looping_animation INTEGER NOT NULL DEFAULT 0,
+                    created_at      TEXT NOT NULL,
                     FOREIGN KEY(project_id) REFERENCES lite_cut_projects(id)
                 )
                 """,
             )
             columns = {row[1] for row in await (await conn.execute("PRAGMA table_info(lite_cut_assets)")).fetchall()}
-            if "width" not in columns:
-                await conn.execute("ALTER TABLE lite_cut_assets ADD COLUMN width INTEGER")
-            if "height" not in columns:
-                await conn.execute("ALTER TABLE lite_cut_assets ADD COLUMN height INTEGER")
+            asset_migrations = {
+                "asset_uid": "TEXT",
+                "origin_type": "TEXT NOT NULL DEFAULT 'local_file'",
+                "origin_ref": "TEXT",
+                "origin_metadata_json": "TEXT",
+                "width": "INTEGER",
+                "height": "INTEGER",
+                "storage_mode": "TEXT NOT NULL DEFAULT 'managed'",
+                "original_path": "TEXT",
+                "managed_path": "TEXT",
+                "size_bytes": "INTEGER",
+                "mtime_ns": "INTEGER",
+                "fingerprint": "TEXT",
+                "source_status": "TEXT NOT NULL DEFAULT 'available'",
+                "metadata_status": "TEXT NOT NULL DEFAULT 'ready'",
+                "fps": "REAL",
+                "codec_name": "TEXT",
+                "audio_codec_name": "TEXT",
+                "pixel_format": "TEXT",
+                "has_alpha": "INTEGER",
+                "is_looping_animation": "INTEGER NOT NULL DEFAULT 0",
+            }
+            for column, declaration in asset_migrations.items():
+                if column not in columns:
+                    await conn.execute(f"ALTER TABLE lite_cut_assets ADD COLUMN {column} {declaration}")
+            await conn.execute(
+                "UPDATE lite_cut_assets SET asset_uid = 'asset-' || lower(hex(randomblob(16))) "
+                "WHERE asset_uid IS NULL OR asset_uid = ''",
+            )
+            # Existing rows predate Link mode and therefore own their source
+            # files inside LiteCut storage.
+            await conn.execute(
+                "UPDATE lite_cut_assets SET managed_path = file_path "
+                "WHERE storage_mode = 'managed' AND (managed_path IS NULL OR managed_path = '')",
+            )
             await conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_lite_cut_assets_project ON lite_cut_assets(project_id)",
+            )
+            await conn.execute("DROP INDEX IF EXISTS idx_lite_cut_assets_uid")
+            await conn.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_lite_cut_assets_project_uid "
+                "ON lite_cut_assets(project_id, asset_uid)",
             )
             await conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_lite_cut_exports_project_updated ON lite_cut_exports(project_id, updated_at DESC)",
@@ -482,7 +551,13 @@ class LiteCutDB:
             conn.row_factory = aiosqlite.Row
             cur = await conn.execute(
                 f"""
-                SELECT id, project_id, name, kind, mime_type, file_path, duration_sec, width, height, created_at
+                SELECT id, project_id, asset_uid, origin_type, origin_ref, origin_metadata_json,
+                       name, kind, mime_type, file_path,
+                       storage_mode, original_path, managed_path, size_bytes, mtime_ns,
+                       fingerprint, source_status, metadata_status,
+                       duration_sec, width, height, fps, codec_name,
+                       audio_codec_name, pixel_format, has_alpha,
+                       is_looping_animation, created_at
                 FROM lite_cut_assets
                 {where}
                 ORDER BY created_at DESC
@@ -491,33 +566,45 @@ class LiteCutDB:
                 params,
             )
             rows = await cur.fetchall()
-        return [dict(r) for r in rows]
+        return [_asset_dict(r) for r in rows]
 
     async def list_project_assets(self, project_id: int) -> list[dict[str, Any]]:
         async with aiosqlite.connect(self.db_path) as conn:
             conn.row_factory = aiosqlite.Row
             cur = await conn.execute(
                 """
-                SELECT id, project_id, name, kind, mime_type, file_path, duration_sec, width, height, created_at
+                SELECT id, project_id, asset_uid, origin_type, origin_ref, origin_metadata_json,
+                       name, kind, mime_type, file_path,
+                       storage_mode, original_path, managed_path, size_bytes, mtime_ns,
+                       fingerprint, source_status, metadata_status,
+                       duration_sec, width, height, fps, codec_name,
+                       audio_codec_name, pixel_format, has_alpha,
+                       is_looping_animation, created_at
                 FROM lite_cut_assets WHERE project_id = ? ORDER BY created_at DESC
                 """,
                 (int(project_id),),
             )
             rows = await cur.fetchall()
-        return [dict(row) for row in rows]
+        return [_asset_dict(row) for row in rows]
 
     async def get_asset(self, asset_id: int) -> Optional[dict[str, Any]]:
         async with aiosqlite.connect(self.db_path) as conn:
             conn.row_factory = aiosqlite.Row
             cur = await conn.execute(
                 """
-                SELECT id, project_id, name, kind, mime_type, file_path, duration_sec, width, height, created_at
+                SELECT id, project_id, asset_uid, origin_type, origin_ref, origin_metadata_json,
+                       name, kind, mime_type, file_path,
+                       storage_mode, original_path, managed_path, size_bytes, mtime_ns,
+                       fingerprint, source_status, metadata_status,
+                       duration_sec, width, height, fps, codec_name,
+                       audio_codec_name, pixel_format, has_alpha,
+                       is_looping_animation, created_at
                 FROM lite_cut_assets WHERE id = ?
                 """,
                 (int(asset_id),),
             )
             row = await cur.fetchone()
-        return dict(row) if row else None
+        return _asset_dict(row) if row else None
 
     async def create_asset(
         self,
@@ -530,16 +617,55 @@ class LiteCutDB:
         width: int | None = None,
         height: int | None = None,
         project_id: int | None = None,
+        asset_uid: str | None = None,
+        origin_type: str = "local_file",
+        origin_ref: str | None = None,
+        origin_metadata: dict[str, Any] | None = None,
+        storage_mode: str = "managed",
+        original_path: str | None = None,
+        managed_path: str | None = None,
+        size_bytes: int | None = None,
+        mtime_ns: int | None = None,
+        fingerprint: str | None = None,
+        source_status: str = "available",
+        metadata_status: str = "ready",
+        fps: float | None = None,
+        codec_name: str | None = None,
+        audio_codec_name: str | None = None,
+        pixel_format: str | None = None,
+        has_alpha: bool | None = None,
+        is_looping_animation: bool = False,
     ) -> int:
         now = utc_now_iso()
+        resolved_asset_uid = str(asset_uid or f"asset-{uuid.uuid4().hex}")
+        resolved_origin_type = str(origin_type or "local_file").strip().lower() or "local_file"
+        origin_metadata_json = json.dumps(origin_metadata or {}, ensure_ascii=False, separators=(",", ":"))
+        normalized_storage_mode = "link" if str(storage_mode).lower() == "link" else "managed"
+        resolved_original_path = str(original_path or file_path) if normalized_storage_mode == "link" else None
+        resolved_managed_path = str(managed_path or file_path) if normalized_storage_mode == "managed" else None
         async with aiosqlite.connect(self.db_path) as conn:
             cur = await conn.execute(
                 """
                 INSERT INTO lite_cut_assets(
-                    project_id, name, kind, mime_type, file_path, duration_sec, width, height, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    project_id, asset_uid, origin_type, origin_ref, origin_metadata_json,
+                    name, kind, mime_type, file_path,
+                    storage_mode, original_path, managed_path, size_bytes, mtime_ns,
+                    fingerprint, source_status, metadata_status,
+                    duration_sec, width, height, fps, codec_name,
+                    audio_codec_name, pixel_format, has_alpha,
+                    is_looping_animation, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (project_id, name, kind, mime_type, file_path, duration_sec, width, height, now),
+                (
+                    project_id, resolved_asset_uid, resolved_origin_type, origin_ref, origin_metadata_json,
+                    name, kind, mime_type, file_path,
+                    normalized_storage_mode, resolved_original_path, resolved_managed_path,
+                    size_bytes, mtime_ns, fingerprint, source_status, metadata_status,
+                    duration_sec, width, height, fps, codec_name,
+                    audio_codec_name, pixel_format,
+                    None if has_alpha is None else int(bool(has_alpha)),
+                    int(bool(is_looping_animation)), now,
+                ),
             )
             await conn.commit()
             return int(cur.lastrowid)
@@ -568,6 +694,83 @@ class LiteCutDB:
             )
             await conn.commit()
 
+    async def update_asset_source(
+        self,
+        asset_id: int,
+        *,
+        name: str,
+        kind: str,
+        mime_type: str | None,
+        file_path: str,
+        storage_mode: str,
+        original_path: str | None,
+        managed_path: str | None,
+        size_bytes: int | None,
+        mtime_ns: int | None,
+        fingerprint: str | None,
+        source_status: str,
+        metadata_status: str,
+        duration_sec: float | None,
+        width: int | None,
+        height: int | None,
+        fps: float | None = None,
+        codec_name: str | None = None,
+        audio_codec_name: str | None = None,
+        pixel_format: str | None = None,
+        has_alpha: bool | None = None,
+        is_looping_animation: bool = False,
+    ) -> None:
+        async with aiosqlite.connect(self.db_path) as conn:
+            await conn.execute(
+                """
+                UPDATE lite_cut_assets
+                SET name = ?, kind = ?, mime_type = ?, file_path = ?,
+                    storage_mode = ?, original_path = ?, managed_path = ?,
+                    size_bytes = ?, mtime_ns = ?, fingerprint = ?,
+                    source_status = ?, metadata_status = ?,
+                    duration_sec = ?, width = ?, height = ?, fps = ?,
+                    codec_name = ?, audio_codec_name = ?, pixel_format = ?,
+                    has_alpha = ?, is_looping_animation = ?
+                WHERE id = ?
+                """,
+                (
+                    name, kind, mime_type, file_path, storage_mode, original_path, managed_path,
+                    size_bytes, mtime_ns, fingerprint, source_status, metadata_status,
+                    duration_sec, width, height, fps, codec_name,
+                    audio_codec_name, pixel_format,
+                    None if has_alpha is None else int(bool(has_alpha)),
+                    int(bool(is_looping_animation)), int(asset_id),
+                ),
+            )
+            await conn.commit()
+
+    async def update_asset_media_metadata(
+        self,
+        asset_id: int,
+        *,
+        fps: float | None,
+        codec_name: str | None,
+        audio_codec_name: str | None,
+        pixel_format: str | None,
+        has_alpha: bool | None,
+        is_looping_animation: bool,
+    ) -> None:
+        async with aiosqlite.connect(self.db_path) as conn:
+            await conn.execute(
+                """
+                UPDATE lite_cut_assets
+                SET fps = ?, codec_name = ?, audio_codec_name = ?,
+                    pixel_format = ?, has_alpha = ?, is_looping_animation = ?
+                WHERE id = ?
+                """,
+                (
+                    fps, codec_name, audio_codec_name, pixel_format,
+                    None if has_alpha is None else int(bool(has_alpha)),
+                    int(bool(is_looping_animation)), int(asset_id),
+                ),
+            )
+            await conn.commit()
+
     async def migrate_asset_storage_paths(self, old_root: Path, new_root: Path) -> dict[str, int]:
         """Rewrite every persisted LiteCut path after the storage tree was copied."""
         old = old_root.expanduser().resolve(strict=False)
@@ -576,11 +779,19 @@ class LiteCutDB:
         async with aiosqlite.connect(self.db_path) as conn:
             conn.row_factory = aiosqlite.Row
 
-            assets = await (await conn.execute("SELECT id, file_path FROM lite_cut_assets")).fetchall()
+            assets = await (await conn.execute(
+                "SELECT id, storage_mode, file_path, managed_path FROM lite_cut_assets",
+            )).fetchall()
             for row in assets:
+                if str(row["storage_mode"] or "managed").lower() == "link":
+                    continue
                 replaced = _replace_storage_root(str(row["file_path"]), old, new)
-                if replaced != row["file_path"]:
-                    await conn.execute("UPDATE lite_cut_assets SET file_path = ? WHERE id = ?", (replaced, int(row["id"])))
+                managed = _replace_storage_root(str(row["managed_path"] or row["file_path"]), old, new)
+                if replaced != row["file_path"] or managed != row["managed_path"]:
+                    await conn.execute(
+                        "UPDATE lite_cut_assets SET file_path = ?, managed_path = ? WHERE id = ?",
+                        (replaced, managed, int(row["id"])),
+                    )
                     counts["assets"] += 1
 
             for table, id_column, path_columns in (

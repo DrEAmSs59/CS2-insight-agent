@@ -6,27 +6,31 @@ import asyncio
 import logging
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 from fastapi import APIRouter, File, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from ...api_errors import error_detail
 from .asset_executor import (
     attach_video_facts as _attach_video_fps,
     build_asset_waveform,
+    linked_asset_identity_matches,
     probe_asset_metadata,
+    probe_linked_asset,
     quarantine_asset_files,
     save_and_probe_upload,
 )
 from .proxy_api import (
     _decorate_asset_preview_state,
-    _preview_proxy_job_snapshot,
-    _start_preview_proxy_job,
+    _segment_preview_snapshot,
+    _start_segment_preview_job,
     _stop_preview_proxy_job,
 )
 from .dependencies import build_lite_cut_services
 from .service_http import service_call
+from .text_layout import builtin_text_font_path_for_filename
 from .runtime import (
     get_lite_cut_db,
     get_montage_db,
@@ -43,6 +47,61 @@ def _services():
 
 class LiteCutAssetValidationBody(BaseModel):
     body: dict[str, Any]
+
+
+class LiteCutAssetLinkBody(BaseModel):
+    project_id: int | None = None
+    paths: list[str] = Field(min_length=1, max_length=100)
+
+
+class LiteCutAssetRelinkBody(BaseModel):
+    path: str = Field(min_length=1, max_length=32767)
+
+
+class LiteCutRecordedAssetLinkBody(BaseModel):
+    project_id: int
+    recording_id: int
+
+
+class LiteCutPreviewRequestBody(BaseModel):
+    time_sec: float = Field(ge=0)
+    look_ahead_sec: float = Field(default=12, ge=0, le=30)
+    priority: str = Field(default="interactive", pattern="^(interactive|prefetch)$")
+    retry: bool = False
+
+
+def _decorate_asset_source_state(item: dict[str, Any]) -> dict[str, Any]:
+    from .assets import asset_source_status
+
+    item["asset_registered"] = item.get("id") is not None
+    item["source_status"] = asset_source_status(item)
+    # A changed source must be explicitly relinked so derived metadata and
+    # waveform caches cannot be mistaken for the new file contents.
+    item["source_available"] = item["source_status"] == "available"
+    return item
+
+
+async def _persist_asset_media_metadata(item: dict[str, Any]) -> None:
+    await service_call(_services().assets.update_media_metadata(
+        int(item["id"]),
+        fps=float(item.get("fps") or 0) or None,
+        codec_name=str(item.get("codec_name") or "") or None,
+        audio_codec_name=str(item.get("audio_codec_name") or ""),
+        pixel_format=str(item.get("pixel_format") or ""),
+        has_alpha=item.get("has_alpha") if item.get("has_alpha") is not None else None,
+        is_looping_animation=bool(item.get("is_looping_animation")),
+    ))
+
+
+async def _ensure_asset_preview_metadata(row: dict[str, Any]) -> dict[str, Any]:
+    if str(row.get("kind") or "").lower() not in {"video", "webm"}:
+        return row
+    if row.get("has_alpha") is not None and row.get("codec_name"):
+        return row
+    enriched = (await _attach_video_fps([row]))[0]
+    if enriched.get("id") is not None:
+        await _persist_asset_media_metadata(enriched)
+    return enriched
 
 
 @router.post("/assets/validate")
@@ -79,6 +138,15 @@ async def list_lite_cut_assets(
     services = _services()
     result = await service_call(services.assets.list(project_id=project_id, limit=limit, offset=offset))
     items = result["items"]
+    for item in items:
+        _decorate_asset_source_state(item)
+    from .media_policy import webp_is_animated
+    for item in items:
+        path = Path(str(item.get("file_path") or ""))
+        if str(item.get("kind") or "").lower() == "image" and path.suffix.lower() == ".webp" and webp_is_animated(path):
+            item["kind"] = "video"
+            item["is_looping_animation"] = True
+            await service_call(services.assets.update_kind(int(item["id"]), "video", item.get("mime_type")))
     from .assets import probe_image_dimensions
     for item in items:
         if item.get("kind") != "image" or (item.get("width") and item.get("height")):
@@ -87,7 +155,16 @@ async def list_lite_cut_assets(
         if dimensions:
             item["width"], item["height"] = dimensions
             await services.assets.update_dimensions(int(item["id"]), *dimensions)
+    missing_metadata_ids = {
+        int(item["id"])
+        for item in items
+        if str(item.get("kind") or "").lower() in {"video", "webm"}
+        and (item.get("has_alpha") is None or not item.get("codec_name"))
+    }
     items = await _attach_video_fps(items)
+    for item in items:
+        if int(item.get("id") or 0) in missing_metadata_ids:
+            await _persist_asset_media_metadata(item)
     for item in items:
         _decorate_asset_preview_state(
             item,
@@ -100,15 +177,149 @@ async def list_lite_cut_assets(
     return {"items": items, "limit": limit, "offset": offset}
 
 
-@router.post("/assets/upload")
-async def upload_lite_cut_asset(
+@router.post("/assets/link")
+async def link_lite_cut_assets(body: LiteCutAssetLinkBody):
+    """Register user-selected absolute paths without copying source bytes."""
+    if body.project_id is not None:
+        project = await _services().projects.get(int(body.project_id))
+        if not project:
+            raise HTTPException(404, error_detail("LITECUT_PROJECT_NOT_FOUND"))
+
+    # Validate/probe the complete selection first so one bad path does not
+    # leave a partially registered batch behind.
+    probed = [await probe_linked_asset(raw_path) for raw_path in body.paths]
+    items: list[dict[str, Any]] = []
+    for facts in probed:
+        path = facts.pop("path")
+        item = await service_call(_services().assets.create(
+            name=facts["name"],
+            kind=facts["kind"],
+            file_path=str(path),
+            mime_type=facts["mime_type"],
+            duration_sec=facts["duration_sec"],
+            width=facts["width"],
+            height=facts["height"],
+            project_id=int(body.project_id) if body.project_id is not None else None,
+            storage_mode="link",
+            original_path=str(path),
+            managed_path=None,
+            size_bytes=facts["size_bytes"],
+            mtime_ns=facts["mtime_ns"],
+            fingerprint=facts["fingerprint"],
+            source_status=facts["source_status"],
+            metadata_status=facts["metadata_status"],
+            fps=facts["fps"],
+            codec_name=facts["codec_name"],
+            audio_codec_name=facts["audio_codec_name"],
+            pixel_format=facts["pixel_format"],
+            has_alpha=facts["has_alpha"],
+            is_looping_animation=facts["is_looping_animation"],
+        ))
+        _decorate_asset_source_state(item)
+        items.append(_decorate_asset_preview_state(
+            {**item, "fps": facts["fps"]},
+            has_alpha=facts["has_alpha"],
+            video_codec=facts["codec_name"],
+            audio_codec=facts["audio_codec_name"],
+            pixel_format=facts["pixel_format"],
+            source_fps=facts["fps"],
+        ))
+    return {"items": items}
+
+
+def _recording_origin_metadata(row: dict[str, Any]) -> dict[str, Any]:
+    fields = {
+        "clip_id", "demo_filename", "player_name", "map_name", "map", "round",
+        "category", "workbench_clip_kind", "context_tags", "ai_score", "ai_comment",
+        "ai_commentary", "recording_perspective", "start_tick", "end_tick", "created_at",
+    }
+    return {key: row[key] for key in fields if key in row and row[key] is not None}
+
+
+def _asset_kinds_match(expected: str, actual: str) -> bool:
+    left = str(expected or "file").lower()
+    right = str(actual or "file").lower()
+    if left in {"video", "webm"} and right in {"video", "webm"}:
+        return True
+    return left == right
+
+
+@router.post("/assets/link-recording")
+async def link_lite_cut_recording(body: LiteCutRecordedAssetLinkBody):
+    """Link one Insight recording into a project without copying its media."""
+    services = _services()
+    project = await services.projects.get(int(body.project_id))
+    if not project:
+        raise HTTPException(404, error_detail("LITECUT_PROJECT_NOT_FOUND"))
+    recording_id = int(body.recording_id)
+    recordings = await get_montage_db().get_recorded_clips_by_ids([recording_id])
+    recording = recordings.get(recording_id)
+    if not recording:
+        raise HTTPException(404, error_detail("MONTAGE_CLIP_NOT_FOUND", id=str(recording_id)))
+    facts = await probe_linked_asset(str(recording.get("output_path") or ""))
+    path = facts.pop("path")
+
+    existing = next((
+        item for item in await services.assets.list_for_project(int(body.project_id))
+        if str(item.get("origin_type") or "") == "insight_recording"
+        and str(item.get("origin_ref") or "") == str(recording_id)
+    ), None)
+    if existing:
+        if not linked_asset_identity_matches(existing.get("fingerprint"), facts.get("fingerprint")):
+            raise HTTPException(409, {"code": "LITECUT_ASSET_IDENTITY_MISMATCH", "reason": "Insight recording content does not match the project asset"})
+        item = await service_call(services.assets.update_source(
+            int(existing["id"]),
+            name=facts["name"], kind=facts["kind"], mime_type=facts["mime_type"],
+            file_path=str(path), storage_mode="link", original_path=str(path), managed_path=None,
+            size_bytes=facts["size_bytes"], mtime_ns=facts["mtime_ns"], fingerprint=facts["fingerprint"],
+            source_status="available", metadata_status=facts["metadata_status"],
+            duration_sec=facts["duration_sec"], width=facts["width"], height=facts["height"],
+            fps=facts["fps"], codec_name=facts["codec_name"], audio_codec_name=facts["audio_codec_name"],
+            pixel_format=facts["pixel_format"], has_alpha=facts["has_alpha"],
+            is_looping_animation=facts["is_looping_animation"],
+        ))
+    else:
+        item = await service_call(services.assets.create(
+            project_id=int(body.project_id),
+            origin_type="insight_recording",
+            origin_ref=str(recording_id),
+            origin_metadata=_recording_origin_metadata(recording),
+            name=Path(str(recording.get("output_path") or facts["name"])).name,
+            kind=facts["kind"], mime_type=facts["mime_type"], file_path=str(path),
+            storage_mode="link", original_path=str(path), managed_path=None,
+            size_bytes=facts["size_bytes"], mtime_ns=facts["mtime_ns"], fingerprint=facts["fingerprint"],
+            source_status="available", metadata_status=facts["metadata_status"],
+            duration_sec=facts["duration_sec"], width=facts["width"], height=facts["height"],
+            fps=facts["fps"], codec_name=facts["codec_name"], audio_codec_name=facts["audio_codec_name"],
+            pixel_format=facts["pixel_format"], has_alpha=facts["has_alpha"],
+            is_looping_animation=facts["is_looping_animation"],
+        ))
+    _decorate_asset_source_state(item)
+    return _decorate_asset_preview_state(
+        {**item, "fps": facts["fps"]},
+        has_alpha=facts["has_alpha"], video_codec=facts["codec_name"],
+        audio_codec=facts["audio_codec_name"], pixel_format=facts["pixel_format"],
+        source_fps=facts["fps"],
+    )
+
+
+@router.post("/assets/generated")
+async def create_lite_cut_generated_asset(
     file: UploadFile = File(...),
     project_id: int | None = Query(default=None),
     client_duration_sec: float | None = Query(default=None, ge=0),
 ):
+    """Persist media created inside LiteCut, currently browser-recorded voiceover.
+
+    External user files must use ``/assets/link`` so their bytes are never
+    copied into project storage.
+    """
     from pathlib import Path
 
     from .assets import stable_project_asset_directory
+
+    if not str(file.content_type or "").lower().startswith("audio/"):
+        raise HTTPException(400, "generated asset endpoint only accepts recorded audio")
 
     project = None
     if project_id is not None:
@@ -140,10 +351,20 @@ async def upload_lite_cut_asset(
         width=int(media_info.get("width") or 0) or None,
         height=int(media_info.get("height") or 0) or None,
         project_id=int(project_id) if project_id is not None else None,
+        storage_mode="managed",
+        managed_path=str(dest),
+        size_bytes=dest.stat().st_size,
+        mtime_ns=dest.stat().st_mtime_ns,
+        fps=media_info.get("fps") if kind in {"video", "webm"} else None,
+        codec_name=str(media_info.get("codec_name") or "") or None,
+        audio_codec_name=str(media_info.get("audio_codec_name") or ""),
+        pixel_format=str(media_info.get("pixel_format") or ""),
+        has_alpha=bool(media_info.get("has_alpha")) if "has_alpha" in media_info else None,
+        is_looping_animation=False,
     ))
     alpha_hint = bool(media_info.get("has_alpha")) if "has_alpha" in media_info else None
     return _decorate_asset_preview_state(
-        {**item, "fps": media_info.get("fps") if kind in {"video", "webm"} else None},
+        _decorate_asset_source_state({**item, "fps": media_info.get("fps") if kind in {"video", "webm"} else None}),
         has_alpha=alpha_hint,
         video_codec=str(media_info.get("codec_name") or "") or None,
         audio_codec=str(media_info.get("audio_codec_name") or ""),
@@ -182,26 +403,25 @@ async def get_lite_cut_asset_waveform(
 
 @router.get("/fonts/{font_name}")
 async def stream_lite_cut_builtin_font(font_name: str):
-    allowed = {
-        "Rajdhani-Bold.ttf": "Rajdhani-Bold.ttf",
-        "Rajdhani-SemiBold.ttf": "Rajdhani-SemiBold.ttf",
-        "NotoSansSC-Bold.ttf": "NotoSansSC-Bold.ttf",
-        "NotoSansSC-Medium.ttf": "NotoSansSC-Medium.ttf",
-    }
-    safe_name = allowed.get(font_name)
-    if not safe_name:
+    path = builtin_text_font_path_for_filename(font_name)
+    if path is None:
         raise HTTPException(404, "font not found")
-    path = Path(__file__).resolve().parents[3] / "assets" / "fonts" / safe_name
-    return FileResponse(path, media_type="font/ttf", filename=safe_name)
+    media_type = "font/collection" if path.suffix.lower() == ".ttc" else "font/ttf"
+    return FileResponse(path, media_type=media_type, filename=path.name)
 
 
 @router.get("/assets/{asset_id}/stream")
 async def stream_lite_cut_asset(asset_id: int, request: Request):
-    from .assets import asset_stream_path, validate_stored_asset_path
+    from .assets import asset_source_path, asset_source_status
     from .stream import stream_file_with_range
 
     row = await service_call(_services().assets.get(int(asset_id)))
-    path = validate_stored_asset_path(str(row["file_path"]))
+    source_status = asset_source_status(row)
+    if source_status == "missing":
+        raise HTTPException(404, "素材原文件不存在，请重新链接")
+    if source_status == "changed":
+        raise HTTPException(409, "素材原文件已发生变化，请重新链接以刷新缓存")
+    path = asset_source_path(row)
     if str(row.get("kind") or "").lower() == "font":
         font_mime = {
             ".ttf": "font/ttf",
@@ -210,30 +430,160 @@ async def stream_lite_cut_asset(asset_id: int, request: Request):
             ".woff2": "font/woff2",
         }.get(path.suffix.lower(), "application/font-sfnt")
         return FileResponse(path, media_type=font_mime, headers={"Cache-Control": "no-cache"})
-    state = _decorate_asset_preview_state(row)
-    if state.get("preview_proxy_required") and state.get("preview_proxy_status") != "ready":
-        status = str(state.get("preview_proxy_status") or "queued")
-        if status in {"failed", "missing"}:
-            raise HTTPException(422, state.get("preview_proxy_error") or "预览代理生成失败")
-        # Never pin a video request to a minutes-long FFmpeg job. The editor
-        # polls asset state and replaces the cache-busted URL when ready.
-        raise HTTPException(425, "预览代理正在后台生成", headers={"Retry-After": "1"})
     return await stream_file_with_range(
-        asset_stream_path(path, duration_sec=row.get("duration_sec")),
+        path,
         request,
     )
 
 
-@router.post("/assets/{asset_id}/proxy/retry")
-async def retry_lite_cut_asset_preview_proxy(asset_id: int):
+async def _segment_preview_context(row: dict[str, Any]):
+    from ...env_utils import load_config
+    from .assets import stable_project_asset_directory
+    from .proxy_executor import preview_segment_cache_directory
+
+    project_id = int(row.get("project_id") or 0)
+    if project_id <= 0:
+        raise HTTPException(409, "分段预览需要素材属于当前工程")
+    services = _services()
+    project = await service_call(services.projects.get(project_id))
+    project_assets = await service_call(services.assets.list_for_project(project_id))
+    managed_paths = [
+        str(item.get("managed_path") or item.get("file_path") or "")
+        for item in project_assets
+        if str(item.get("storage_mode") or "managed").lower() != "link"
+    ]
+    project_directory = stable_project_asset_directory(
+        project_id,
+        str(project.get("name") or "未命名工程"),
+        managed_paths,
+    )
+    cfg = load_config()
+    max_edge = max(360, min(2160, int(getattr(cfg, "lite_cut_proxy_resolution", 720) or 720)))
+    return preview_segment_cache_directory(row, project_directory, max_edge=max_edge), max_edge
+
+
+@router.post("/assets/{asset_id}/preview/request")
+async def request_lite_cut_asset_preview(asset_id: int, body: LiteCutPreviewRequestBody):
+    from .assets import asset_source_status
+    from .media_policy import SEGMENT_PREVIEW_ENCODE_SEC
+    from .proxy_executor import preview_segment_index
+    from .runtime import segment_preview_jobs
+
     row = await service_call(_services().assets.get(int(asset_id)))
-    state = _decorate_asset_preview_state(dict(row), schedule=False)
-    if not state.get("preview_proxy_required"):
-        return state
+    if str(row.get("kind") or "").lower() not in {"video", "webm"}:
+        raise HTTPException(400, "only video assets support segmented preview")
+    source_status = asset_source_status(row)
+    if source_status == "missing":
+        raise HTTPException(404, "素材原文件不存在，请重新链接")
+    if source_status == "changed":
+        raise HTTPException(409, "素材原文件已发生变化，请重新链接")
+    row = await _ensure_asset_preview_metadata(row)
+    cache_directory, max_edge = await _segment_preview_context(row)
+    source_duration = max(0.0, float(row.get("duration_sec") or 0.0))
+    requested_time = body.time_sec
+    if source_duration > 0:
+        requested_time = min(requested_time, max(0.0, source_duration - 0.001))
+    job = _start_segment_preview_job(
+        row,
+        requested_time_sec=requested_time,
+        look_ahead_sec=body.look_ahead_sec,
+        cache_directory=cache_directory,
+        max_edge=max_edge,
+        priority=body.priority,
+        force=body.retry,
+    )
+    requested_index = preview_segment_index(requested_time)
+    snapshot = _segment_preview_snapshot(
+        segment_preview_jobs.get(int(asset_id)) or job,
+        requested_index=requested_index,
+        cache_directory=cache_directory,
+    )
+    segment_start = requested_index * float(snapshot["segment_step_sec"])
+    segment_end = segment_start + SEGMENT_PREVIEW_ENCODE_SEC
+    if source_duration > 0:
+        segment_end = min(segment_end, source_duration)
+    snapshot.update({
+        "asset_id": int(asset_id),
+        "priority": body.priority,
+        "segment_end_sec": segment_end,
+        "playable_from": segment_start,
+        "playable_to": segment_end if snapshot["status"] == "ready" else segment_start,
+        "segment_url": (
+            f"/api/lite-cut/assets/{int(asset_id)}/preview/segments/{requested_index}"
+            f"?v={quote(str(row.get('fingerprint') or row.get('mtime_ns') or 'source'), safe='')}"
+            if snapshot["status"] == "ready"
+            else None
+        ),
+    })
+    return snapshot
+
+
+@router.get("/assets/{asset_id}/preview/segments/{segment_index}")
+async def stream_lite_cut_preview_segment(asset_id: int, segment_index: int):
+    from .proxy_executor import preview_segment_path
+
+    if segment_index < 0:
+        raise HTTPException(400, "invalid segment index")
+    row = await service_call(_services().assets.get(int(asset_id)))
+    cache_directory, _max_edge = await _segment_preview_context(row)
+    path = preview_segment_path(cache_directory, segment_index)
+    if not path.is_file() or path.stat().st_size <= 0:
+        raise HTTPException(425, "预览分段正在生成", headers={"Retry-After": "1"})
+    return FileResponse(
+        path,
+        media_type="video/webm" if path.suffix.lower() == ".webm" else "video/mp4",
+        filename=path.name,
+        headers={"Accept-Ranges": "bytes", "Cache-Control": "no-cache"},
+    )
+
+
+@router.post("/assets/{asset_id}/relink")
+async def relink_lite_cut_asset(asset_id: int, body: LiteCutAssetRelinkBody):
+    from .proxy_executor import remove_asset_preview_files, remove_segment_preview_files
+
+    row = await service_call(_services().assets.get(int(asset_id)))
+    facts = await probe_linked_asset(body.path)
+    path = facts.pop("path")
+    if not _asset_kinds_match(str(row.get("kind") or "file"), str(facts.get("kind") or "file")):
+        raise HTTPException(409, {"code": "LITECUT_ASSET_TYPE_MISMATCH", "reason": "replacement media type does not match"})
+    if not linked_asset_identity_matches(row.get("fingerprint"), facts.get("fingerprint")):
+        raise HTTPException(409, {"code": "LITECUT_ASSET_IDENTITY_MISMATCH", "reason": "replacement file is not the same source media"})
     await _stop_preview_proxy_job(int(asset_id))
-    job = _start_preview_proxy_job(row, force=True)
-    row.update(_preview_proxy_job_snapshot(job))
-    return row
+    await asyncio.to_thread(remove_asset_preview_files, row)
+    await asyncio.to_thread(remove_segment_preview_files, row)
+    item = await service_call(_services().assets.update_source(
+        int(asset_id),
+        name=facts["name"],
+        kind=facts["kind"],
+        mime_type=facts["mime_type"],
+        file_path=str(path),
+        storage_mode="link",
+        original_path=str(path),
+        managed_path=None,
+        size_bytes=facts["size_bytes"],
+        mtime_ns=facts["mtime_ns"],
+        fingerprint=facts["fingerprint"],
+        source_status=facts["source_status"],
+        metadata_status=facts["metadata_status"],
+        duration_sec=facts["duration_sec"],
+        width=facts["width"],
+        height=facts["height"],
+        fps=facts["fps"],
+        codec_name=facts["codec_name"],
+        audio_codec_name=facts["audio_codec_name"],
+        pixel_format=facts["pixel_format"],
+        has_alpha=facts["has_alpha"],
+        is_looping_animation=facts["is_looping_animation"],
+    ))
+    _decorate_asset_source_state(item)
+    return _decorate_asset_preview_state(
+        {**item, "fps": facts["fps"]},
+        has_alpha=facts["has_alpha"],
+        video_codec=facts["codec_name"],
+        audio_codec=facts["audio_codec_name"],
+        pixel_format=facts["pixel_format"],
+        source_fps=facts["fps"],
+    )
 
 
 @router.delete("/assets/{asset_id}")

@@ -3,143 +3,71 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
-from ...video_composer import MontageComposerError, _is_hard_cut, _parse_transition_for_edge
+from ...video_composer import MontageComposerError
+from .export_projection import (
+    ffmpeg_color as _ffmpeg_color,
+    project_canvas_settings as _project_canvas_settings,
+    project_encoder_tier as _project_encoder_tier,
+    project_export_range as _project_export_range,
+    project_master_volume as _project_master_volume,
+    project_output_settings as _project_output_settings,
+)
+from .timeline_math import (
+    clip_canvas_fit as _clip_canvas_fit,
+    clip_duration_sec as _clip_duration_sec,
+    clip_freeze_frame_sec as _clip_freeze_frame_sec,
+    clip_has_speed_ramp as _clip_has_speed_ramp,
+    clip_preserve_pitch as _clip_preserve_pitch,
+    clip_reverse as _clip_reverse,
+    clip_speed as _clip_speed,
+    clip_speed_keyframes as _clip_speed_keyframes,
+    clip_speed_segments as _clip_speed_segments,
+    clip_timeline_duration_sec as _clip_timeline_duration_sec,
+)
 from .timeline_selectors import has_solo_audio_tracks, project_tracks, track_by_id, track_clips
-
-_TRANSITION_MAP = {
-    "cut": "cut",
-    "none": "none",
-    "fade": "fade",
-    "flash": "flash",
-    "flashwhite": "flash",
-    "dip": "dip_black",
-    "dip_black": "dip_black",
-    "black": "dip_black",
-    "zoom": "zoom",
-    "wipe_l": "wipe_l",
-    "wipe_r": "wipe_r",
-    "slide_left": "slide_left",
-    "slide_right": "slide_right",
-    "slide_up": "slide_up",
-    "slide_down": "slide_down",
-    "blur": "blur",
-    "glitch": "glitch",
-    "spin": "spin",
-}
+from .project_boundaries import (
+    AUDIO_BGM_GAIN_DEFAULT,
+    AUDIO_CLIP_GAIN_DEFAULT,
+    AUDIO_CLIP_GAIN_MAX,
+    AUDIO_CLIP_GAIN_MIN,
+    AUDIO_DUCKING_GAIN_DEFAULT,
+    AUDIO_FADE_DURATION_DEFAULT,
+    AUDIO_TRACK_GAIN_DEFAULT,
+    AUDIO_TRACK_GAIN_MAX,
+    AUDIO_TRACK_GAIN_MIN,
+    TIMELINE_TIME_DEFAULT,
+    TIMELINE_TIME_MIN,
+)
+from .visual_material import (
+    VISUAL_CROP_POSITION_MAX,
+    VISUAL_CROP_POSITION_MIN,
+    VISUAL_CROP_SIZE_MAX,
+    VISUAL_CROP_SIZE_MIN,
+    VISUAL_MATERIAL_DEFAULTS,
+)
 
 _MAIN_VIDEO_EXT = {".mp4", ".mov", ".m4v", ".webm", ".mkv", ".avi"}
 _AUDIO_EXT = {".mp3", ".wav", ".m4a", ".aac", ".ogg", ".flac"}
-
-
-def _map_transition_type(raw: str) -> str:
-    t = str(raw or "cut").strip().lower()
-    return _TRANSITION_MAP.get(t, "fade")
-
-
-def _clip_duration_sec(clip: dict[str, Any]) -> float:
-    trim_in = float(clip.get("trim_in") or 0)
-    trim_out = clip.get("trim_out")
-    if trim_out is not None:
-        return max(0.1, float(trim_out) - trim_in)
-    if clip.get("duration") is not None:
-        return max(0.1, float(clip.get("duration") or 0) - trim_in)
-    meta = clip.get("meta") if isinstance(clip.get("meta"), dict) else {}
-    if meta.get("duration_sec") is not None:
-        return max(0.1, float(meta["duration_sec"]) - trim_in)
-    return 5.0
-
-
-def _clip_speed(clip: dict[str, Any]) -> float:
-    try:
-        speed = float(clip.get("speed") or 1.0)
-    except (TypeError, ValueError):
-        speed = 1.0
-    return max(0.25, min(4.0, speed))
-
-
-def _clip_speed_keyframes(clip: dict[str, Any]) -> list[tuple[float, float]]:
-    trim_in = max(0.0, float(clip.get("trim_in") or 0.0))
-    trim_out = trim_in + _clip_duration_sec(clip)
-    points: list[tuple[float, float]] = []
-    for raw in clip.get("speed_keyframes") or []:
-        if not isinstance(raw, dict):
-            continue
-        try:
-            source_sec = max(trim_in, min(trim_out, float(raw.get("source_sec"))))
-            speed = max(0.25, min(4.0, float(raw.get("speed"))))
-        except (TypeError, ValueError):
-            continue
-        points.append((source_sec, speed))
-    points.sort(key=lambda point: point[0])
-    deduplicated: list[tuple[float, float]] = []
-    for point in points:
-        if deduplicated and abs(deduplicated[-1][0] - point[0]) <= 1e-6:
-            deduplicated[-1] = point
-        else:
-            deduplicated.append(point)
-    if len(deduplicated) < 2:
-        return []
-    if deduplicated[0][0] > trim_in + 1e-6:
-        deduplicated.insert(0, (trim_in, _clip_speed(clip)))
-    if deduplicated[-1][0] < trim_out - 1e-6:
-        deduplicated.append((trim_out, deduplicated[-1][1]))
-    return deduplicated
-
-
-def _clip_speed_segments(clip: dict[str, Any]) -> list[tuple[float, float, float]]:
-    trim_in = max(0.0, float(clip.get("trim_in") or 0.0))
-    trim_out = trim_in + _clip_duration_sec(clip)
-    points = _clip_speed_keyframes(clip)
-    if not points:
-        return [(trim_in, trim_out, _clip_speed(clip))]
-    return [(left_t, right_t, speed) for (left_t, speed), (right_t, _) in zip(points[:-1], points[1:]) if right_t - left_t > 1e-6]
-
-
-def _clip_has_speed_ramp(clip: dict[str, Any]) -> bool:
-    return len(_clip_speed_keyframes(clip)) >= 2
-
-
-def _clip_reverse(clip: dict[str, Any]) -> bool:
-    return bool(clip.get("reverse"))
-
-
-def _clip_freeze_frame_sec(clip: dict[str, Any]) -> float:
-    try:
-        freeze = float(clip.get("freeze_frame_sec") or 0.0)
-    except (TypeError, ValueError):
-        freeze = 0.0
-    return max(0.0, min(30.0, freeze))
-
-
-def _clip_preserve_pitch(clip: dict[str, Any]) -> bool:
-    return clip.get("preserve_pitch") is not False
-
-
-def _clip_canvas_fit(clip: dict[str, Any], fallback: str = "contain") -> str:
-    raw = str(clip.get("canvas_fit") or "").strip().lower()
-    if raw in {"contain", "cover", "blur"}:
-        return raw
-    fit = str(fallback or "contain").strip().lower()
-    return fit if fit in {"contain", "cover", "blur"} else "contain"
 
 
 def _clip_crop_filter(clip: dict[str, Any]) -> str:
     crop = clip.get("crop") if isinstance(clip.get("crop"), dict) else None
     if not crop:
         return ""
+    crop_defaults = VISUAL_MATERIAL_DEFAULTS["crop"]
     try:
-        width = float(crop.get("width", 1))
-        height = float(crop.get("height", 1))
-        x = float(crop.get("x", 0))
-        y = float(crop.get("y", 0))
+        width = float(crop.get("width", crop_defaults["width"]))
+        height = float(crop.get("height", crop_defaults["height"]))
+        x = float(crop.get("x", crop_defaults["x"]))
+        y = float(crop.get("y", crop_defaults["y"]))
     except (TypeError, ValueError):
         return ""
-    width = max(0.05, min(1.0, width))
-    height = max(0.05, min(1.0, height))
-    x = max(0.0, min(1.0 - width, x))
-    y = max(0.0, min(1.0 - height, y))
+    width = max(VISUAL_CROP_SIZE_MIN, min(VISUAL_CROP_SIZE_MAX, width))
+    height = max(VISUAL_CROP_SIZE_MIN, min(VISUAL_CROP_SIZE_MAX, height))
+    x = max(VISUAL_CROP_POSITION_MIN, min(VISUAL_CROP_POSITION_MAX - width, x))
+    y = max(VISUAL_CROP_POSITION_MIN, min(VISUAL_CROP_POSITION_MAX - height, y))
     if width >= 0.9999 and height >= 0.9999:
         return ""
     return f"crop=iw*{width:.6f}:ih*{height:.6f}:iw*{x:.6f}:ih*{y:.6f}"
@@ -149,10 +77,10 @@ def _clip_volume(clip: dict[str, Any]) -> float:
     if clip.get("muted"):
         return 0.0
     try:
-        volume = float(clip.get("volume") if clip.get("volume") is not None else 1.0)
+        volume = float(clip.get("volume") if clip.get("volume") is not None else AUDIO_CLIP_GAIN_DEFAULT)
     except (TypeError, ValueError):
-        volume = 1.0
-    return max(0.0, min(5.0, volume))
+        volume = AUDIO_CLIP_GAIN_DEFAULT
+    return max(AUDIO_CLIP_GAIN_MIN, min(AUDIO_CLIP_GAIN_MAX, volume))
 
 
 def _clip_audio_keyframes(clip: dict[str, Any]) -> list[tuple[float, float]]:
@@ -162,8 +90,8 @@ def _clip_audio_keyframes(clip: dict[str, Any]) -> list[tuple[float, float]]:
         if not isinstance(keyframe, dict):
             continue
         try:
-            time_sec = max(0.0, min(duration, float(keyframe.get("time_sec") or 0.0)))
-            volume = max(0.0, min(5.0, float(keyframe.get("volume"))))
+            time_sec = max(TIMELINE_TIME_MIN, min(duration, float(keyframe.get("time_sec") or TIMELINE_TIME_DEFAULT)))
+            volume = max(AUDIO_CLIP_GAIN_MIN, min(AUDIO_CLIP_GAIN_MAX, float(keyframe.get("volume"))))
         except (TypeError, ValueError):
             continue
         points.append((time_sec, volume))
@@ -180,9 +108,13 @@ def _clip_audio_keyframes(clip: dict[str, Any]) -> list[tuple[float, float]]:
 def _clip_volume_filter(clip: dict[str, Any]) -> str:
     if clip.get("muted"):
         return "volume=0.000000"
+    try:
+        track_gain = max(AUDIO_TRACK_GAIN_MIN, min(AUDIO_TRACK_GAIN_MAX, float(clip.get("_track_volume") if clip.get("_track_volume") is not None else 1.0)))
+    except (TypeError, ValueError):
+        track_gain = 1.0
     points = _clip_audio_keyframes(clip)
     if not points:
-        return f"volume={_clip_volume(clip):.6f}"
+        return f"volume={_clip_volume(clip) * track_gain:.6f}"
     expression = f"{points[-1][1]:.6f}"
     for index in range(len(points) - 1, 0, -1):
         start_time, start_volume = points[index - 1]
@@ -193,94 +125,9 @@ def _clip_volume_filter(clip: dict[str, Any]) -> str:
     first_time, first_volume = points[0]
     if first_time > 1e-6:
         expression = f"if(lt(t\\,{first_time:.6f})\\,{first_volume:.6f}\\,{expression})"
+    if abs(track_gain - 1.0) > 1e-6:
+        expression = f"({expression})*{track_gain:.6f}"
     return f"volume='{expression}':eval=frame"
-
-
-def _project_master_volume(body: dict[str, Any]) -> float:
-    audio = body.get("audio") if isinstance(body.get("audio"), dict) else {}
-    try:
-        volume = float(audio.get("master_volume") if audio.get("master_volume") is not None else 1.0)
-    except Exception:
-        volume = 1.0
-    return max(0.0, min(2.0, volume))
-
-
-def _project_output_settings(body: dict[str, Any], ref: dict[str, Any]) -> tuple[int, int, float]:
-    output = body.get("output") if isinstance(body.get("output"), dict) else {}
-
-    def _int_setting(key: str, fallback: int, lo: int, hi: int) -> int:
-        try:
-            value = int(output.get(key) if output.get(key) is not None else fallback)
-        except (TypeError, ValueError):
-            value = fallback
-        return max(lo, min(hi, value))
-
-    def _fps_setting(fallback: float) -> float:
-        try:
-            value = float(output.get("fps") if output.get("fps") is not None else fallback)
-        except (TypeError, ValueError):
-            value = fallback
-        return max(1.0, min(1000.0, value))
-
-    fallback_w = int(ref.get("width") or 1920)
-    fallback_h = int(ref.get("height") or 1080)
-    fallback_fps = float(ref.get("fps") or 60)
-    width = _int_setting("width", fallback_w, 320, 7680)
-    height = _int_setting("height", fallback_h, 180, 4320)
-    fps = _fps_setting(fallback_fps)
-    return width, height, fps
-
-
-def _project_encoder_tier(body: dict[str, Any]) -> str:
-    output = body.get("output") if isinstance(body.get("output"), dict) else {}
-    return "fast" if str(output.get("encoder_tier") or "").strip().lower() == "fast" else "quality"
-
-
-def _ffmpeg_color(value: Any) -> str:
-    raw = str(value or "").strip()
-    if raw.startswith("#"):
-        raw = raw[1:]
-    if len(raw) in (3, 6) and all(c in "0123456789abcdefABCDEF" for c in raw):
-        if len(raw) == 3:
-            raw = "".join(c * 2 for c in raw)
-        return f"0x{raw.lower()}"
-    return "black"
-
-
-def _project_canvas_settings(body: dict[str, Any]) -> tuple[str, str, int]:
-    output = body.get("output") if isinstance(body.get("output"), dict) else {}
-    fit = str(output.get("canvas_fit") or "contain").strip().lower()
-    if fit not in {"contain", "cover", "blur"}:
-        fit = "contain"
-    try:
-        blur_amount = int(output.get("blur_amount") if output.get("blur_amount") is not None else 24)
-    except (TypeError, ValueError):
-        blur_amount = 24
-    return fit, _ffmpeg_color(output.get("background_color")), max(4, min(80, blur_amount))
-
-
-def _project_export_range(body: dict[str, Any]) -> tuple[float, Optional[float]]:
-    output = body.get("output") if isinstance(body.get("output"), dict) else {}
-    if str(output.get("range_mode") or "full").strip().lower() != "custom":
-        return 0.0, None
-    try:
-        start_sec = float(output.get("range_start_sec") or 0.0)
-    except (TypeError, ValueError):
-        start_sec = 0.0
-    start_sec = max(0.0, start_sec)
-
-    end_sec: Optional[float] = None
-    raw_end = output.get("range_end_sec")
-    if raw_end is not None:
-        try:
-            parsed_end = float(raw_end)
-            if parsed_end > start_sec + 0.05:
-                end_sec = parsed_end
-        except (TypeError, ValueError):
-            end_sec = None
-    if start_sec <= 0.0 and end_sec is None:
-        return 0.0, None
-    return start_sec, end_sec
 
 
 def _clip_audio_fade(clip: dict[str, Any], key: str) -> float:
@@ -290,28 +137,6 @@ def _clip_audio_fade(clip: dict[str, Any], key: str) -> float:
         fade = 0.0
     duration = _clip_duration_sec(clip)
     return max(0.0, min(duration, fade))
-
-
-def _clip_visual_fade(clip: dict[str, Any], key: str) -> float:
-    try:
-        fade = float(clip.get(key) or 0.0)
-    except (TypeError, ValueError):
-        fade = 0.0
-    duration = _clip_duration_sec(clip)
-    return max(0.0, min(duration, fade))
-
-
-def _clip_timeline_duration_sec(clip: dict[str, Any]) -> float:
-    duration = sum((end - start) / speed for start, end, speed in _clip_speed_segments(clip))
-    return max(0.1, duration) + _clip_freeze_frame_sec(clip)
-
-
-def _clip_video_fade(clip: dict[str, Any], key: str) -> float:
-    try:
-        fade = float(clip.get(key) or 0.0)
-    except (TypeError, ValueError):
-        fade = 0.0
-    return max(0.0, min(_clip_timeline_duration_sec(clip), fade))
 
 
 def _track_main_video_clips(track: dict[str, Any]) -> list[dict[str, Any]]:
@@ -328,29 +153,17 @@ def _has_solo_audio_tracks(body: dict[str, Any]) -> bool:
 
 def _track_volume(track: dict[str, Any]) -> float:
     try:
-        volume = float(track.get("volume") if track.get("volume") is not None else 1.0)
+        volume = float(track.get("volume") if track.get("volume") is not None else AUDIO_TRACK_GAIN_DEFAULT)
     except (TypeError, ValueError):
-        volume = 1.0
-    return max(0.0, min(2.0, volume))
+        volume = AUDIO_TRACK_GAIN_DEFAULT
+    return max(AUDIO_TRACK_GAIN_MIN, min(AUDIO_TRACK_GAIN_MAX, volume))
 
 
 def _clip_with_track_audio_gain(clip: dict[str, Any], track: dict[str, Any], *, force_muted: bool = False) -> dict[str, Any]:
     gain = _track_volume(track)
-    out = {**clip, "volume": _clip_volume(clip) * gain}
+    out = {**clip, "_track_volume": gain}
     if force_muted or track.get("muted"):
         out["muted"] = True
-    keyframes = clip.get("audio_keyframes")
-    if isinstance(keyframes, list):
-        scaled_keyframes: list[dict[str, Any]] = []
-        for point in keyframes:
-            if not isinstance(point, dict):
-                continue
-            try:
-                volume = float(point.get("volume") or 0.0)
-            except (TypeError, ValueError):
-                volume = 0.0
-            scaled_keyframes.append({**point, "volume": max(0.0, min(2.0, volume * gain))})
-        out["audio_keyframes"] = scaled_keyframes
     return out
 
 
@@ -442,17 +255,16 @@ def _schema_overlay_clips(body: dict[str, Any]) -> list[dict[str, Any]]:
             dur = float(ov.get("duration") or 3)
             out.append(
                 {
+                    "id": str(ov.get("id") or ""),
                     "type": "text",
                     "timeline_start": float(ov.get("timeline_start") or 0),
                     "trim_in": 0,
                     "trim_out": dur,
                     "duration": dur,
-                    "fade_in_sec": float(ov.get("fade_in_sec") or 0),
-                    "fade_out_sec": float(ov.get("fade_out_sec") or 0),
-                    "transition_in": ov.get("transition_in") if isinstance(ov.get("transition_in"), dict) else None,
-                    "transition_out": ov.get("transition_out") if isinstance(ov.get("transition_out"), dict) else None,
+                    "_transition_events": ov.get("_transition_events") if isinstance(ov.get("_transition_events"), list) else [],
                     "transform": ov.get("transform") if isinstance(ov.get("transform"), dict) else None,
                     "keyframes": ov.get("keyframes") if isinstance(ov.get("keyframes"), list) else [],
+                    "content_fit": str(ov.get("content_fit") or "fill"),
                     "flip_horizontal": bool(ov.get("flip_horizontal")),
                     "flip_vertical": bool(ov.get("flip_vertical")),
                     "text": ov.get("text") if isinstance(ov.get("text"), dict) else {},
@@ -467,18 +279,19 @@ def _schema_overlay_clips(body: dict[str, Any]) -> list[dict[str, Any]]:
         trim_in = max(0.0, float(ov.get("trim_in") or 0))
         out.append(
             {
+                "id": str(ov.get("id") or ""),
                 "type": "file",
                 "file_path": path,
                 "timeline_start": float(ov.get("timeline_start") or 0),
                 "trim_in": trim_in,
                 "trim_out": trim_in + dur,
                 "duration": dur,
-                "fade_in_sec": float(ov.get("fade_in_sec") or 0),
-                "fade_out_sec": float(ov.get("fade_out_sec") or 0),
-                "transition_in": ov.get("transition_in") if isinstance(ov.get("transition_in"), dict) else None,
-                "transition_out": ov.get("transition_out") if isinstance(ov.get("transition_out"), dict) else None,
+                "_transition_events": ov.get("_transition_events") if isinstance(ov.get("_transition_events"), list) else [],
                 "transform": ov.get("transform") if isinstance(ov.get("transform"), dict) else None,
                 "keyframes": ov.get("keyframes") if isinstance(ov.get("keyframes"), list) else [],
+                "crop": ov.get("crop") if isinstance(ov.get("crop"), dict) else None,
+                "color": ov.get("color") if isinstance(ov.get("color"), dict) else None,
+                "content_fit": str(ov.get("content_fit") or "fill"),
                 "flip_horizontal": bool(ov.get("flip_horizontal")),
                 "flip_vertical": bool(ov.get("flip_vertical")),
                 "meta": ov.get("meta") if isinstance(ov.get("meta"), dict) else {},
@@ -632,30 +445,6 @@ def _audio_track_clips_for_export(body: dict[str, Any]) -> list[dict[str, Any]]:
     return sorted(out, key=lambda c: float(c.get("timeline_start") or 0))
 
 
-def _video_layer_audio_clips_for_export(body: dict[str, Any], *, base_track_id: str | None = None) -> list[dict[str, Any]]:
-    """Collect original audio from visible video layers above the base track."""
-    tracks = body.get("tracks") if isinstance(body.get("tracks"), list) else []
-    if base_track_id is None:
-        base_track_id = _base_video_track_for_export(body)[0]
-    solo_active = _has_solo_audio_tracks(body)
-    base_index = next((index for index, track in enumerate(tracks) if isinstance(track, dict) and str(track.get("id") or "") == str(base_track_id or "")), len(tracks))
-    out: list[dict[str, Any]] = []
-    for track in tracks[:base_index]:
-        if not isinstance(track, dict) or track.get("hidden"):
-            continue
-        ttype = track.get("type")
-        if ttype not in (None, "video"):
-            continue
-        track_id = str(track.get("id") or "")
-        if ttype is None and track_id in ("overlay", "a1", "a2"):
-            continue
-        for clip in track.get("clips") or []:
-            if not isinstance(clip, dict) or not (_is_recorded_timeline_clip(clip) or _is_main_file_clip(clip)):
-                continue
-            out.append(_clip_with_track_audio_gain(clip, track, force_muted=solo_active))
-    return sorted(out, key=lambda c: float(c.get("timeline_start") or 0))
-
-
 def _resolve_audio_clip_paths(audio_clips: list[dict[str, Any]], clip_path_by_id: dict[int, Path]) -> list[dict[str, Any]]:
     """Resolve recorded layer sources to the same local file paths used for video export."""
     out: list[dict[str, Any]] = []
@@ -682,9 +471,9 @@ def _project_bgm_clip_for_export(body: dict[str, Any]) -> dict[str, Any] | None:
     if not path:
         return None
     try:
-        start_sec = max(0.0, float(bgm.get("start_sec") or 0))
+        start_sec = max(TIMELINE_TIME_MIN, float(bgm.get("start_sec") or TIMELINE_TIME_DEFAULT))
     except (TypeError, ValueError):
-        start_sec = 0.0
+        start_sec = TIMELINE_TIME_DEFAULT
     try:
         duration_sec = float(bgm.get("duration_sec") or 0)
     except (TypeError, ValueError):
@@ -694,16 +483,16 @@ def _project_bgm_clip_for_export(body: dict[str, Any]) -> dict[str, Any] | None:
         "source_type": "file",
         "file_path": path,
         "timeline_start": start_sec,
-        "trim_in": 0,
-        "volume": bgm.get("volume", 1.0),
-        "fade_in_sec": bgm.get("fade_in_sec", 0.0),
-        "fade_out_sec": bgm.get("fade_out_sec", 0.0),
+        "trim_in": TIMELINE_TIME_DEFAULT,
+        "volume": bgm.get("volume", AUDIO_BGM_GAIN_DEFAULT),
+        "fade_in_sec": bgm.get("fade_in_sec", AUDIO_FADE_DURATION_DEFAULT),
+        "fade_out_sec": bgm.get("fade_out_sec", AUDIO_FADE_DURATION_DEFAULT),
         "meta": {
             "kind": "audio",
             "name": bgm.get("name") or Path(path).name,
             "project_bgm": True,
             "ducking_enabled": bool(bgm.get("ducking_enabled")),
-            "ducking_volume": bgm.get("ducking_volume", 0.35),
+            "ducking_volume": bgm.get("ducking_volume", AUDIO_DUCKING_GAIN_DEFAULT),
         },
     }
     if bgm.get("asset_id") is not None:
@@ -711,40 +500,6 @@ def _project_bgm_clip_for_export(body: dict[str, Any]) -> dict[str, Any] | None:
     if duration_sec > 0:
         clip["meta"]["duration_sec"] = duration_sec
     return clip
-
-
-def _build_transitions(clips: list[dict[str, Any]]) -> dict[str, Any]:
-    out: dict[str, Any] = {}
-    for clip in clips:
-        sid = clip.get("source_id")
-        if sid is None:
-            continue
-        tr = clip.get("transition_out")
-        if not isinstance(tr, dict):
-            continue
-        t_type = _map_transition_type(str(tr.get("type") or "cut"))
-        try:
-            d = float(tr.get("duration_sec", 0.4))
-        except (TypeError, ValueError):
-            d = 0.4
-        out[str(int(sid))] = {"type": t_type, "duration": d}
-    return out
-
-
-def _build_positional_transitions(clips: list[dict[str, Any]]) -> dict[str, Any]:
-    out: dict[str, Any] = {}
-    for i, clip in enumerate(clips[:-1]):
-        incoming = clips[i + 1].get("transition_in")
-        tr = incoming if isinstance(incoming, dict) else clip.get("transition_out")
-        if not isinstance(tr, dict):
-            continue
-        t_type = _map_transition_type(str(tr.get("type") or "cut"))
-        try:
-            d = float(tr.get("duration_sec", 0.4))
-        except (TypeError, ValueError):
-            d = 0.4
-        out[str(i)] = {"type": t_type, "duration": d}
-    return out
 
 
 def _timeline_gap_plan(clips: list[dict[str, Any]], epsilon: float = 0.001) -> list[tuple[int, float]] | None:
@@ -776,35 +531,3 @@ def _timeline_overlap_pair(
         cursor = max(cursor, start + _clip_timeline_duration_sec(clip))
         previous_id = str(clip.get("id") or index)
     return None
-
-
-def _has_soft_positional_transition(clips: list[dict[str, Any]], transitions: dict[str, Any], fps: float) -> bool:
-    for index in range(max(0, len(clips) - 1)):
-        t_type, duration = _parse_transition_for_edge(transitions, index)
-        if not _is_hard_cut(t_type, duration, fps):
-            return True
-    return False
-
-
-# Compatibility facade: active time semantics live in timeline_math while
-# legacy imports from timeline.py remain valid during the staged migration.
-from .timeline_math import (  # noqa: E402
-    clip_canvas_fit as _clip_canvas_fit,
-    clip_duration_sec as _clip_duration_sec,
-    clip_freeze_frame_sec as _clip_freeze_frame_sec,
-    clip_has_speed_ramp as _clip_has_speed_ramp,
-    clip_preserve_pitch as _clip_preserve_pitch,
-    clip_reverse as _clip_reverse,
-    clip_speed as _clip_speed,
-    clip_speed_keyframes as _clip_speed_keyframes,
-    clip_speed_segments as _clip_speed_segments,
-    clip_timeline_duration_sec as _clip_timeline_duration_sec,
-)
-from .export_projection import (  # noqa: E402
-    ffmpeg_color as _ffmpeg_color,
-    project_canvas_settings as _project_canvas_settings,
-    project_encoder_tier as _project_encoder_tier,
-    project_export_range as _project_export_range,
-    project_master_volume as _project_master_volume,
-    project_output_settings as _project_output_settings,
-)

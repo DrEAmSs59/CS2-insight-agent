@@ -21,7 +21,13 @@ import { useLiteCutEditorStore } from "../state/editorStore.js";
 import { useLiteCutHistoryStore } from "../state/historyStore.js";
 import { liteCutMediaDragSource } from "../state/mediaDragSource.js";
 import { overlayBlocks, trackBlocks } from "../state/playbackUtils.js";
-import { canPlaceOnTrack, clipTimelineEnd, timelineTotalSec } from "../state/timelineUtils.js";
+import {
+  canPlaceOnTrack,
+  clipTimelineEnd,
+  mediaItemHasAudio,
+  orderedTimelineTracks,
+  timelineTotalSec,
+} from "../state/timelineUtils.js";
 import { useLiteCutTimelineStore } from "../state/timelineStore.js";
 import { snapPlayheadToBoundaries, timelineClipIntersectsRange, visibleTimelineRange } from "./timelineInteraction.js";
 import {
@@ -35,6 +41,7 @@ import {
 import { useT } from "../../../i18n/useT.js";
 import {
   clampTimelineZoom,
+  timelinePixelsPerSecond,
   timelineZoomFromSliderPercent,
   timelineZoomToSliderPercent,
 } from "../state/timelineZoomUtils.js";
@@ -43,7 +50,7 @@ import TimelineTrackHeader from "./TimelineTrackHeader.jsx";
 
 const TRACK_HEADER_WIDTH = 128;
 const RULER_HEIGHT = 34;
-const ROW_HEIGHTS = { overlay: 46, video: 58, audio: 42 };
+const ROW_HEIGHTS = { overlay: 46, video: 58, audio: 48 };
 const DRAG_THRESHOLD = 5;
 
 function formatTime(seconds) {
@@ -83,10 +90,15 @@ function ContextMenuItem({ label, shortcut = "", disabled = false, reason = "", 
 }
 
 export function snapPlacementStart(rawStart, width, body, excludeId, playheadSec, pixelsPerSecond) {
+  const excludedIds = new Set(
+    (Array.isArray(excludeId) ? excludeId : [excludeId])
+      .filter((id) => id != null)
+      .map(String),
+  );
   const candidates = [0, Math.max(0, Number(playheadSec) || 0)];
   for (const track of body?.tracks || []) {
     for (const clip of track.clips || []) {
-      if (String(clip.id) === String(excludeId)) continue;
+      if (excludedIds.has(String(clip.id))) continue;
       const start = Number(clip.timeline_start) || 0;
       // The visible end is the speed-adjusted timeline end, rather than the
       // source trim length.  Using the source length here left a false gap
@@ -96,7 +108,7 @@ export function snapPlacementStart(rawStart, width, body, excludeId, playheadSec
     }
   }
   for (const overlay of body?.overlays || []) {
-    if (String(overlay.id) === String(excludeId)) continue;
+    if (excludedIds.has(String(overlay.id))) continue;
     const start = Number(overlay.timeline_start) || 0;
     candidates.push(start, start + (Number(overlay.duration) || 0));
   }
@@ -154,8 +166,8 @@ export default function OpenCutTrackTimeline({ body, onDropMedia }) {
   const selectTrack = useLiteCutTimelineStore((state) => state.selectTrack);
   const toggleClipSelection = useLiteCutTimelineStore((state) => state.toggleClipSelection);
   const clearSelection = useLiteCutTimelineStore((state) => state.clearSelection);
-  const moveClipToTrack = useLiteCutTimelineStore((state) => state.moveClipToTrack);
   const moveSelectionBy = useLiteCutTimelineStore((state) => state.moveSelectionBy);
+  const moveTrackClipByDrag = useLiteCutTimelineStore((state) => state.moveTrackClipByDrag);
   const moveOverlayToTime = useLiteCutTimelineStore((state) => state.moveOverlayToTime);
   const moveOverlayToTrack = useLiteCutTimelineStore((state) => state.moveOverlayToTrack);
   const trimClipLeft = useLiteCutTimelineStore((state) => state.trimClipLeft);
@@ -197,7 +209,7 @@ export default function OpenCutTrackTimeline({ body, onDropMedia }) {
   }, []);
 
   const totalSec = timelineTotalSec(body, 30);
-  const pixelsPerSecond = 44 * clampTimelineZoom(timelineZoom);
+  const pixelsPerSecond = timelinePixelsPerSecond(timelineZoom);
   const timelineWidth = Math.max(canvasWidth, Math.ceil(totalSec * pixelsPerSecond) + 64);
   const [visibleRange, setVisibleRange] = useState({ start: 0, end: Number.POSITIVE_INFINITY });
 
@@ -257,7 +269,9 @@ export default function OpenCutTrackTimeline({ body, onDropMedia }) {
     const overlayTracks = Array.isArray(body?.overlay_tracks) && body.overlay_tracks.length
       ? body.overlay_tracks
       : [{ id: "ot1", label: t("liteCut.track.overlayDefault", { index: 1 }) }];
-    const tracks = (body?.tracks || []).filter((track) => track.type === "video" || track.type === "audio");
+    const tracks = orderedTimelineTracks(body?.tracks || []).filter(
+      (track) => track.type === "video" || track.type === "audio",
+    );
     return [
       ...overlayTracks.map((track, index) => ({
         id: track.id,
@@ -417,19 +431,136 @@ export default function OpenCutTrackTimeline({ body, onDropMedia }) {
     document.addEventListener("pointercancel", end);
   };
 
-  const startClipPointer = (event, row, clip) => {
+  const scrollDuringClipDrag = (clientX) => {
+    const scroller = scrollRef.current;
+    if (!scroller) return;
+    const bounds = scroller.getBoundingClientRect();
+    const edge = 36;
+    if (clientX < bounds.left + edge) scroller.scrollLeft -= 18;
+    else if (clientX > bounds.right - edge) scroller.scrollLeft += 18;
+  };
+
+  const startTrackClipPointer = (event, row, clip) => {
     if ((event.button != null && event.button !== 0) || row.locked) return;
     event.preventDefault();
     event.stopPropagation();
-    const lane = event.currentTarget.closest("[data-oc-lane]");
-    if (!lane) return;
+    const sourceLane = event.currentTarget.closest("[data-oc-lane]");
+    if (!sourceLane) return;
+
+    const primaryId = String(clip.id);
     const sourceStart = Number(clip.start) || 0;
-    const clickOffset = Math.max(0, timeAt(event.clientX, lane) - sourceStart);
     const additiveSelection = Boolean(event.shiftKey || event.ctrlKey || event.metaKey);
-    if (!additiveSelection && !selectedIds.has(String(clip.id))) {
-      if (row.type === "overlay") selectOverlay(clip.id);
-      else selectClip(clip.id, row.id);
-    }
+    if (!additiveSelection && !selectedIds.has(primaryId)) selectClip(primaryId, row.id);
+    const selected = (useLiteCutTimelineStore.getState().selectedClipIds || []).map(String);
+    const selectionIds = !additiveSelection && selected.includes(primaryId) ? selected : [primaryId];
+    const pending = {
+      mediaDrag: true,
+      id: primaryId,
+      sourceRowId: String(row.id),
+      targetRowId: String(row.id),
+      type: row.type,
+      originX: event.clientX,
+      originY: event.clientY,
+      width: Number(clip.width) || 0.1,
+      label: clip.label || clip._clip?.meta?.name || t("liteCut.clip.untitled"),
+      start: sourceStart,
+      sourceStart,
+      clickOffset: Math.max(0, timeAt(event.clientX, sourceLane) - sourceStart),
+      selectionIds,
+      selectionDelta: 0,
+      moved: false,
+      valid: true,
+      createBelow: false,
+    };
+    dragRef.current = pending;
+
+    const move = (next) => {
+      const state = dragRef.current;
+      if (!state) return;
+      if (!state.moved && Math.hypot(next.clientX - state.originX, next.clientY - state.originY) < DRAG_THRESHOLD) return;
+      if (!state.moved) {
+        state.moved = true;
+        setPlaying(false);
+      }
+
+      const hitElement = document.elementFromPoint(next.clientX, next.clientY);
+      const autoTrackZone = hitElement?.closest("[data-auto-track-drop]");
+      const isMatchingAutoZone = autoTrackZone?.dataset.ocAutoTrackType === state.type;
+      const targetElement = isMatchingAutoZone
+        ? autoTrackZone
+        : hitElement?.closest("[data-oc-lane]");
+      const targetId = isMatchingAutoZone
+        ? autoTrackZone.dataset.ocAutoAfterTrackId
+        : targetElement?.dataset.ocTrackId;
+      const targetRow = targetId ? rowsById.get(String(targetId)) : null;
+      if (!targetElement || !targetRow || targetRow.locked || targetRow.type !== state.type) {
+        Object.assign(state, { valid: false, createBelow: false });
+        setSnapGuide(null);
+        setDrag({ ...state });
+        return;
+      }
+
+      const rawStart = Math.max(0, timeAt(next.clientX, targetElement) - state.clickOffset);
+      const snapped = snapEnabled
+        ? snapPlacementStart(rawStart, state.width, body, state.selectionIds, playheadSec, pixelsPerSecond)
+        : { start: rawStart, guide: null };
+      const createBelow = Boolean(isMatchingAutoZone);
+      const valid = createBelow || canPlaceOnTrack(
+        targetRow.track?.clips || [],
+        snapped.start,
+        state.width,
+        state.selectionIds,
+      );
+      Object.assign(state, {
+        targetRowId: String(targetId),
+        start: snapped.start,
+        selectionDelta: snapped.start - state.sourceStart,
+        valid,
+        createBelow,
+      });
+      setSnapGuide(snapped.guide);
+      scrollDuringClipDrag(next.clientX);
+      setDrag({ ...state });
+    };
+
+    const end = () => {
+      const state = dragRef.current;
+      dragRef.current = null;
+      document.removeEventListener("pointermove", move);
+      document.removeEventListener("pointerup", end);
+      document.removeEventListener("pointercancel", end);
+      if (!state) return;
+      if (!state.moved) {
+        if (additiveSelection) toggleClipSelection(state.id, state.sourceRowId);
+        else selectClip(state.id, state.sourceRowId);
+      } else if (state.valid) {
+        moveTrackClipByDrag({
+          clipId: state.id,
+          fromTrackId: state.sourceRowId,
+          toTrackId: state.targetRowId,
+          newStart: state.start,
+          selectionIds: state.selectionIds,
+          createBelow: state.createBelow,
+        });
+      }
+      setDrag(null);
+      setSnapGuide(null);
+    };
+
+    document.addEventListener("pointermove", move);
+    document.addEventListener("pointerup", end);
+    document.addEventListener("pointercancel", end);
+  };
+
+  const startOverlayPointer = (event, row, clip) => {
+    if ((event.button != null && event.button !== 0) || row.locked) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const sourceLane = event.currentTarget.closest("[data-oc-lane]");
+    if (!sourceLane) return;
+    const sourceStart = Number(clip.start) || 0;
+    const additiveSelection = Boolean(event.shiftKey || event.ctrlKey || event.metaKey);
+    if (!additiveSelection && !selectedIds.has(String(clip.id))) selectOverlay(clip.id);
     const currentSelectionIds = additiveSelection
       ? [...selectedIds]
       : useLiteCutTimelineStore.getState().selectedClipIds || [];
@@ -440,13 +571,13 @@ export default function OpenCutTrackTimeline({ body, onDropMedia }) {
       id: String(clip.id),
       sourceRowId: String(row.id),
       targetRowId: String(row.id),
-      type: row.type,
+      type: "overlay",
       originX: event.clientX,
       originY: event.clientY,
       width: Number(clip.width) || 0.1,
-      label: clip.label || clip._clip?.meta?.name || t("liteCut.clip.untitled"),
+      label: clip.label || t("liteCut.clip.untitled"),
       start: sourceStart,
-      clickOffset,
+      clickOffset: Math.max(0, timeAt(event.clientX, sourceLane) - sourceStart),
       selectionMove,
       selectionIds: currentSelectionIds.map(String),
       selectionDelta: 0,
@@ -464,66 +595,49 @@ export default function OpenCutTrackTimeline({ body, onDropMedia }) {
         state.moved = true;
         setPlaying(false);
         if (state.selectionMove) beginClipDrag();
-        else if (state.type === "overlay") beginOverlayDrag();
-        else beginClipDrag();
+        else beginOverlayDrag();
       }
       if (state.selectionMove) {
-        const rawStart = Math.max(0, timeAt(next.clientX, lane) - state.clickOffset);
+        const rawStart = Math.max(0, timeAt(next.clientX, sourceLane) - state.clickOffset);
         const delta = rawStart - sourceStart;
-        const valid = Math.abs(delta) > 1e-6 && useLiteCutTimelineStore.getState().canMoveSelectionBy(delta);
         Object.assign(state, {
-          targetRowId: state.sourceRowId,
           start: sourceStart + delta,
           selectionDelta: delta,
-          valid,
-          createBelow: false,
+          valid: Math.abs(delta) > 1e-6 && useLiteCutTimelineStore.getState().canMoveSelectionBy(delta),
         });
         setSnapGuide(null);
         setDrag({ ...state });
         return;
       }
+
       const hitElement = document.elementFromPoint(next.clientX, next.clientY);
       const autoTrackZone = hitElement?.closest("[data-auto-track-drop]");
-      const autoTrackType = autoTrackZone?.dataset.ocAutoTrackType;
-      if (autoTrackZone && state.type === autoTrackType) {
-        const targetId = autoTrackZone.dataset.ocAutoAfterTrackId;
-        const targetRow = targetId ? rowsById.get(targetId) : null;
-        if (!targetRow || targetRow.locked || targetRow.type !== state.type) {
-          setDrag({ ...state, valid: false, createBelow: false });
-          return;
-        }
-        const rawStart = Math.max(0, timeAt(next.clientX, autoTrackZone) - state.clickOffset);
-        const snapped = snapEnabled
-          ? snapPlacementStart(rawStart, state.width, body, state.id, playheadSec, pixelsPerSecond)
-          : { start: rawStart, guide: null };
-        Object.assign(state, { targetRowId: targetId, start: snapped.start, valid: true, createBelow: true });
-        setSnapGuide(snapped.guide);
+      const isAutoZone = autoTrackZone?.dataset.ocAutoTrackType === "overlay";
+      const targetElement = isAutoZone ? autoTrackZone : hitElement?.closest("[data-oc-lane]");
+      const targetId = isAutoZone
+        ? autoTrackZone.dataset.ocAutoAfterTrackId
+        : targetElement?.dataset.ocTrackId;
+      const targetRow = targetId ? rowsById.get(String(targetId)) : null;
+      if (!targetElement || !targetRow || targetRow.locked || targetRow.type !== "overlay") {
+        Object.assign(state, { valid: false, createBelow: false });
         setDrag({ ...state });
         return;
       }
-      const targetLane = hitElement?.closest("[data-oc-lane]");
-      const targetId = targetLane?.dataset.ocTrackId;
-      const targetRow = targetId ? rowsById.get(targetId) : null;
-      if (!targetRow || targetRow.locked || targetRow.type !== state.type) {
-        setDrag({ ...state, valid: false, createBelow: false });
-        return;
-      }
-      const rawStart = Math.max(0, timeAt(next.clientX, targetLane) - state.clickOffset);
+      const rawStart = Math.max(0, timeAt(next.clientX, targetElement) - state.clickOffset);
       const snapped = snapEnabled
         ? snapPlacementStart(rawStart, state.width, body, state.id, playheadSec, pixelsPerSecond)
         : { start: rawStart, guide: null };
-      const valid = state.type === "overlay" || canPlaceOnTrack(targetRow.track?.clips || [], snapped.start, state.width, state.id);
-      Object.assign(state, { targetRowId: targetId, start: snapped.start, valid, createBelow: false });
+      Object.assign(state, {
+        targetRowId: String(targetId),
+        start: snapped.start,
+        valid: true,
+        createBelow: isAutoZone,
+      });
       setSnapGuide(snapped.guide);
-      const scroller = scrollRef.current;
-      if (scroller) {
-        const bounds = scroller.getBoundingClientRect();
-        const edge = 36;
-        if (next.clientX < bounds.left + edge) scroller.scrollLeft -= 18;
-        else if (next.clientX > bounds.right - edge) scroller.scrollLeft += 18;
-      }
+      scrollDuringClipDrag(next.clientX);
       setDrag({ ...state });
     };
+
     const end = () => {
       const state = dragRef.current;
       dragRef.current = null;
@@ -532,25 +646,28 @@ export default function OpenCutTrackTimeline({ body, onDropMedia }) {
       document.removeEventListener("pointercancel", end);
       if (!state) return;
       if (!state.moved) {
-        if (event.shiftKey || event.ctrlKey || event.metaKey) toggleClipSelection(state.id, state.sourceRowId);
-        else if (state.type === "overlay") selectOverlay(state.id);
-        else selectClip(state.id, state.sourceRowId);
+        if (additiveSelection) toggleClipSelection(state.id, state.sourceRowId);
+        else selectOverlay(state.id);
       } else if (state.valid) {
-        if (state.selectionMove) {
-          moveSelectionBy(state.selectionDelta, { recordHistory: false });
-        } else if (state.type === "overlay") {
+        if (state.selectionMove) moveSelectionBy(state.selectionDelta, { recordHistory: false });
+        else {
           moveOverlayToTime(state.id, state.start, { snap: false, recordHistory: false });
           const targetTrackId = state.createBelow ? addOverlayTrack() : state.targetRowId;
           moveOverlayToTrack(state.id, targetTrackId);
         }
-        else moveClipToTrack(state.id, state.sourceRowId, state.targetRowId, state.start, { snap: false, recordHistory: false, createBelow: state.createBelow });
       }
       setDrag(null);
       setSnapGuide(null);
     };
+
     document.addEventListener("pointermove", move);
     document.addEventListener("pointerup", end);
     document.addEventListener("pointercancel", end);
+  };
+
+  const startClipPointer = (event, row, clip) => {
+    if (row.type === "overlay") startOverlayPointer(event, row, clip);
+    else startTrackClipPointer(event, row, clip);
   };
 
   const startTrimPointer = (event, row, clip, edge) => {
@@ -637,18 +754,15 @@ export default function OpenCutTrackTimeline({ body, onDropMedia }) {
       }
     }
     if (isVideoMedia && row.type === "audio") {
-      const lastVideoRow = [...rows].reverse().find((item) => item.type === "video" && !item.locked);
-      if (!lastVideoRow) return;
+      if (row.locked || !mediaItemHasAudio(media)) return;
       event.preventDefault();
-      const shouldCreateTrack = (lastVideoRow.track?.clips || []).length > 0;
       setExternalDrop({
         rowId: String(row.id),
-        targetTrackId: String(lastVideoRow.id),
+        targetTrackId: String(row.id),
         time: timeAt(event.clientX, event.currentTarget),
         width: Number(media.duration_sec || media.duration || 3),
-        placement: shouldCreateTrack ? { createNewTrack: true, createBelow: true } : {},
-        createsTrack: shouldCreateTrack,
-        insertionEdge: "top",
+        placement: { audioOnly: true },
+        createsTrack: false,
       });
       return;
     }
@@ -678,11 +792,7 @@ export default function OpenCutTrackTimeline({ body, onDropMedia }) {
         onDropMedia?.(media, row.id, atTime);
       }
     } else if (isVideoMedia && row.type === "audio") {
-      const lastVideoRow = [...rows].reverse().find((item) => item.type === "video" && !item.locked);
-      if (lastVideoRow) {
-        const placement = (lastVideoRow.track?.clips || []).length > 0 ? { createNewTrack: true, createBelow: true } : {};
-        onDropMedia?.(media, lastVideoRow.id, atTime, placement);
-      }
+      if (mediaItemHasAudio(media)) onDropMedia?.(media, row.id, atTime, { audioOnly: true });
     } else {
       onDropMedia?.(media, row.id, atTime);
     }
@@ -1011,9 +1121,22 @@ export default function OpenCutTrackTimeline({ body, onDropMedia }) {
                   onDrop={(event) => handleExternalDrop(event, row)}
                 >
                   {visibleClips.map((clip) => {
-                    const isSelectionDragTarget = Boolean(drag?.selectionMove && drag?.selectionIds?.includes(String(clip.id)));
-                    const isDragSource = isSelectionDragTarget || (drag?.id === clip.id && drag?.sourceRowId === row.id);
-                    const isDragTarget = isSelectionDragTarget || (drag?.id === clip.id && drag?.targetRowId === row.id);
+                    const clipId = String(clip.id);
+                    const isMediaDragItem = Boolean(drag?.mediaDrag && drag?.selectionIds?.includes(clipId));
+                    const isMediaPrimaryTrackChange = Boolean(
+                      isMediaDragItem
+                      && drag?.id === clipId
+                      && drag?.sourceRowId !== drag?.targetRowId,
+                    );
+                    const isSelectionDragTarget = Boolean(
+                      (drag?.selectionMove && drag?.selectionIds?.includes(clipId))
+                      || (isMediaDragItem && !isMediaPrimaryTrackChange),
+                    );
+                    const isDragSource = isMediaDragItem
+                      || isSelectionDragTarget
+                      || (drag?.id === clipId && drag?.sourceRowId === row.id);
+                    const isDragTarget = isSelectionDragTarget
+                      || (!drag?.mediaDrag && drag?.id === clipId && drag?.targetRowId === row.id);
                     const isSelected = selectedIds.has(String(clip.id)) || (selectedClipId === clip.id && selectedTrackId === row.id);
                     const start = isSelectionDragTarget
                       ? (Number(clip.start) || 0) + (Number(drag.selectionDelta) || 0)
@@ -1032,6 +1155,7 @@ export default function OpenCutTrackTimeline({ body, onDropMedia }) {
                       start={start}
                       width={width}
                       pixelsPerSecond={pixelsPerSecond}
+                      visibleRange={visibleRange}
                       playheadSec={playheadSec}
                       selected={isSelected}
                       dragSource={isDragSource}
@@ -1124,7 +1248,6 @@ export default function OpenCutTrackTimeline({ body, onDropMedia }) {
       {contextMenu ? (() => {
         const actions = useLiteCutTimelineStore.getState();
         const multiple = selectedIds.size > 1;
-        const canDetach = actions.canDetachSelectedAudio();
         const canRipple = actions.canRippleDeleteSelected();
         const canGroup = actions.canGroupSelectedItems();
         const canUngroup = actions.canUngroupSelectedItems();
@@ -1158,7 +1281,6 @@ export default function OpenCutTrackTimeline({ body, onDropMedia }) {
           <ContextMenuItem label={t("liteCut.timeline.menu.trimStart")} shortcut="Q" disabled={!canTrimStart} reason={t("liteCut.timeline.menu.playheadInsideRequired")} onClick={() => runContextAction(actions.trimSelectedStartToPlayhead)} />
           <ContextMenuItem label={t("liteCut.timeline.menu.trimEnd")} shortcut="W" disabled={!canTrimEnd} reason={t("liteCut.timeline.menu.playheadInsideRequired")} onClick={() => runContextAction(actions.trimSelectedEndToPlayhead)} />
           <div className="my-1 border-t border-cs2-border" />
-          <ContextMenuItem label={t("liteCut.timeline.menu.detachAudio")} shortcut="Ctrl+Shift+D" disabled={!canDetach} reason={t("liteCut.timeline.menu.detachAudioReason")} onClick={() => runContextAction(actions.detachSelectedAudio)} />
           <ContextMenuItem label={t("liteCut.timeline.menu.group")} disabled={!canGroup} reason={t("liteCut.timeline.menu.groupReason")} onClick={() => runContextAction(actions.groupSelectedItems)} />
           <ContextMenuItem label={t("liteCut.timeline.menu.ungroup")} disabled={!canUngroup} reason={t("liteCut.timeline.menu.ungroupReason")} onClick={() => runContextAction(actions.ungroupSelectedItems)} />
           <ContextMenuItem label={t("liteCut.timeline.menu.link")} disabled={!canLink} reason={t("liteCut.timeline.menu.linkReason")} onClick={() => runContextAction(actions.linkSelectedClips)} />
@@ -1195,7 +1317,7 @@ export default function OpenCutTrackTimeline({ body, onDropMedia }) {
             {[
               ["playPause", t("liteCut.timeline.help.playPauseKeys")], ["split", "S"], ["splitAll", "Shift+S"], ["delete", "Delete"],
               ["rippleDelete", "Ctrl+Delete"], ["trimStart", "Q"], ["trimEnd", "W"], ["duplicate", "Ctrl+D"],
-              ["detachAudio", "Ctrl+Shift+D"], ["addMarker", "M"], ["deleteMarker", "Shift+M"], ["jumpMarker", "Alt+[ / Alt+]"],
+              ["addMarker", "M"], ["deleteMarker", "Shift+M"], ["jumpMarker", "Alt+[ / Alt+]"],
               ["transformKeyframe", "Alt+K / Alt+Shift+K"], ["audioKeyframe", "Alt+V / Alt+Shift+V"],
               ["slip", t("liteCut.timeline.help.slipKeys")], ["selectSide", "Alt+Shift+← / →"],
               ["zoom", t("liteCut.timeline.help.zoomKeys")], ["undoRedo", "Ctrl+Z / Ctrl+Y"],

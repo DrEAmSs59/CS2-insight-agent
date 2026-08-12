@@ -43,7 +43,7 @@ def test_job_registry_shutdown_cancels_and_waits_for_owned_tasks():
                 await asyncio.sleep(0)
 
         job.task = asyncio.create_task(worker())
-        registry.register("portable", "job-1", job)
+        registry.register("export", "job-1", job)
         assert await registry.shutdown(1) is True
         assert job.cancel_event.is_set()
         assert job.task.done()

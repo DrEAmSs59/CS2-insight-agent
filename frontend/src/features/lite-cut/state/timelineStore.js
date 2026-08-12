@@ -1,13 +1,25 @@
 import { create } from "zustand";
 import { useLiteCutEditorStore } from "./editorStore.js";
 import { useLiteCutHistoryStore } from "./historyStore.js";
-import { VIDEO_LAYER_TRANSFORM_DEFAULTS } from "./overlayKeyframeUtils.js";
+import { VIDEO_SCENE_TRANSFORM_DEFAULTS } from "./sceneTransform.js";
 import { clampTimelineZoom } from "./timelineZoomUtils.js";
 import {
+  clipTransitionRef,
+  overlayTransitionRef,
+  TRANSITION_DURATION_DEFAULT,
+  reconcileTransitionEvents,
+  rewireTransitionExitEndpointsAfterSplit,
+  resolveTransitionEvent,
+  setNodeEdgeTransition,
+  transitionEventForNodeEdge,
+  transitionEventsForNode,
+  updateTransitionEvent,
+} from "./transitionModel.js";
+import {
   buildAssetClip,
-  buildDetachedAudioClip,
+  buildLinkedAudioClip,
   buildRecordedClip,
-  canDetachClipAudio,
+  buildStandaloneAudioClip,
   canPlaceOnTrack,
   canSplitOverlaysAtPlayhead,
   canSplitTrackClipsAtPlayhead,
@@ -16,10 +28,13 @@ import {
   canTrimOverlayToPlayhead,
   compactTrackGaps,
   findClipById,
+  ensurePairedMediaTrack,
   getTrack,
   isAssetMediaItem,
   markerNearTime,
+  mediaItemHasAudio,
   insertAudioTrack,
+  insertPairedMediaTracks,
   newClipId,
   newOverlayId,
   nextMarker,
@@ -64,6 +79,8 @@ import {
   clipTimelineEnd,
   ensureClipSourceDuration,
 } from "../domain/timelineMath.js";
+import { moveTimelineClipDrag } from "../domain/timelineClipDrag.js";
+import { VISUAL_COLOR_MAX, VISUAL_COLOR_MIN, visualMaterialSupports } from "../domain/visualMaterial.js";
 import {
   addTimelineMarker,
   activeTimelineSelectionIds,
@@ -99,9 +116,9 @@ import {
   upsertTimelineTransformKeyframe,
 } from "../domain/timelineCommands.js";
 
-function normalizedTransitionStyle(type, durationSec = 0.4) {
+function normalizedTransitionStyle(type, durationSec = TRANSITION_DURATION_DEFAULT) {
   const transitionType = String(type || "fade");
-  if (transitionType === "cut" || transitionType === "none") return { type: "cut", duration_sec: 0 };
+  if (transitionType === "cut") return { type: "cut", duration_sec: 0 };
   return { type: transitionType, duration_sec: Math.max(0, Number(durationSec) || 0) };
 }
 
@@ -113,9 +130,9 @@ function transitionsMatch(a, b) {
 
 function normalizedColorStyle(color = {}) {
   return {
-    brightness: Math.max(-100, Math.min(100, Number(color?.brightness) || 0)),
-    contrast: Math.max(-100, Math.min(100, Number(color?.contrast) || 0)),
-    saturation: Math.max(-100, Math.min(100, Number(color?.saturation) || 0)),
+    brightness: Math.max(VISUAL_COLOR_MIN, Math.min(VISUAL_COLOR_MAX, Number(color?.brightness) || 0)),
+    contrast: Math.max(VISUAL_COLOR_MIN, Math.min(VISUAL_COLOR_MAX, Number(color?.contrast) || 0)),
+    saturation: Math.max(VISUAL_COLOR_MIN, Math.min(VISUAL_COLOR_MAX, Number(color?.saturation) || 0)),
     filter_preset: color?.filter_preset && color.filter_preset !== "none" ? String(color.filter_preset) : null,
   };
 }
@@ -138,12 +155,47 @@ function selectedEditableVideoContext(body, selectedClipId) {
   return { clip, track, trackId };
 }
 
-function videoStyleTargets(body, sourceTrackId, scope = "track") {
-  const tracks =
-    scope === "all"
-      ? (body?.tracks || []).filter((track) => track.type === "video" && !track.locked && !track.hidden)
-      : [getTrack(body, sourceTrackId)].filter((track) => track?.type === "video" && !track.locked && !track.hidden);
-  return tracks.flatMap((track) => (track.clips || []).map((clip) => ({ clip, track })));
+function overlayTrackFor(body, overlay) {
+  const trackId = String(overlay?.meta?.overlay_track_id || "ot1");
+  const track = (body?.overlay_tracks || []).find((item) => String(item?.id) === trackId) || { id: trackId };
+  return { track, trackId };
+}
+
+function selectedEditableVisualContext(body, state) {
+  if (!state?.selectedClipId) return null;
+  if (state.selectedTrackId !== "overlay") {
+    const context = selectedEditableVideoContext(body, state.selectedClipId);
+    return context ? { kind: "clip", node: context.clip, track: context.track, trackId: context.trackId } : null;
+  }
+  const node = (body?.overlays || []).find((item) => String(item?.id) === String(state.selectedClipId));
+  if (!node) return null;
+  const { track, trackId } = overlayTrackFor(body, node);
+  if (track?.locked || track?.hidden) return null;
+  return { kind: "overlay", node, track, trackId };
+}
+
+function visualStyleTargets(body, context, scope = "track", capability = null) {
+  if (!context) return [];
+  const targets = [];
+  const includeAll = scope === "all";
+  for (const track of body?.tracks || []) {
+    if (track?.type !== "video" || track.locked || track.hidden) continue;
+    if (!includeAll && (context.kind !== "clip" || String(track.id) !== String(context.trackId))) continue;
+    for (const node of track.clips || []) {
+      if (!capability || visualMaterialSupports(node, capability, { timelineClip: true })) {
+        targets.push({ kind: "clip", node, track, trackId: String(track.id), ref: clipTransitionRef(track.id, node.id) });
+      }
+    }
+  }
+  for (const node of body?.overlays || []) {
+    const { track, trackId } = overlayTrackFor(body, node);
+    if (track?.locked || track?.hidden) continue;
+    if (!includeAll && (context.kind !== "overlay" || String(trackId) !== String(context.trackId))) continue;
+    if (!capability || visualMaterialSupports(node, capability)) {
+      targets.push({ kind: "overlay", node, track, trackId, ref: overlayTransitionRef(node) });
+    }
+  }
+  return targets;
 }
 
 function uniqueIds(ids = []) {
@@ -154,13 +206,63 @@ function activeSelectionIds(state) {
   return activeTimelineSelectionIds(state);
 }
 
+function selectedVisualTransitionRef(body, state) {
+  if (!state?.selectedClipId) return null;
+  if (state.selectedTrackId === "overlay") {
+    const overlay = (body?.overlays || []).find((item) => String(item?.id) === String(state.selectedClipId));
+    return overlay ? overlayTransitionRef(overlay) : null;
+  }
+  const { clip, trackId } = findClipById(body, state.selectedClipId);
+  const track = getTrack(body, trackId);
+  return clip && track?.type === "video" ? clipTransitionRef(trackId, clip.id) : null;
+}
+
+function selectedVisualTransitionRefs(body, state) {
+  const selected = new Set(activeSelectionIds(state).map(String));
+  if (!selected.size && state?.selectedClipId) selected.add(String(state.selectedClipId));
+  const refs = [];
+  for (const track of body?.tracks || []) {
+    if (track?.type !== "video" || track.locked || track.hidden) continue;
+    for (const clip of track.clips || []) {
+      if (selected.has(String(clip?.id))) refs.push(clipTransitionRef(track.id, clip.id));
+    }
+  }
+  const overlayTracks = new Map((body?.overlay_tracks || []).map((track) => [String(track?.id || ""), track]));
+  for (const overlay of body?.overlays || []) {
+    if (!selected.has(String(overlay?.id))) continue;
+    const row = overlayTracks.get(String(overlay?.meta?.overlay_track_id || "ot1"));
+    if (row?.locked || row?.hidden) continue;
+    refs.push(overlayTransitionRef(overlay));
+  }
+  return refs;
+}
+
 function clipPatchForTrack(patch, track) {
   if (!patch || typeof patch !== "object") return {};
   if (track?.type === "video") return patch;
   const next = {};
   for (const [key, value] of Object.entries(patch)) {
-    if (key === "canvas_fit" || key === "crop") continue;
+    if (key === "content_fit" || key === "crop") continue;
     next[key] = value;
+  }
+  return next;
+}
+
+function visualPatchForNode(patch, node, { timelineClip = false } = {}) {
+  const next = { ...(patch || {}) };
+  const capabilityFields = {
+    crop: ["crop"],
+    content_fit: ["content_fit"],
+    color: ["color"],
+    speed: ["speed"],
+    speed_ramp: ["speed_keyframes"],
+    reverse: ["reverse"],
+    freeze: ["freeze_frame_sec"],
+    audio: ["volume", "muted", "fade_in_sec", "fade_out_sec", "audio_keyframes", "preserve_pitch"],
+  };
+  for (const [capability, fields] of Object.entries(capabilityFields)) {
+    if (visualMaterialSupports(node, capability, { timelineClip })) continue;
+    for (const field of fields) delete next[field];
   }
   return next;
 }
@@ -227,8 +329,30 @@ function relatedTimelineItemIds(body, itemId) {
 }
 
 function setLinkedClipPair(video, audio) {
+  video.muted = true;
   video.meta = { ...(video.meta || {}), linked_audio_clip_id: audio.id };
-  audio.meta = { ...(audio.meta || {}), source_clip_id: video.id, detached_from_video: true };
+  audio.meta = { ...(audio.meta || {}), source_clip_id: video.id, linked_from_video: true };
+}
+
+function appendLinkedAudioClip(body, videoClip, preferredAudioTrackId = null) {
+  const audioClip = buildLinkedAudioClip(videoClip, videoClip.timeline_start);
+  if (!audioClip) return null;
+  const duration = clipSourceDuration(audioClip);
+  const preferredTrack = getTrack(body, preferredAudioTrackId);
+  let track = preferredTrack?.type === "audio" && !preferredTrack.hidden && !preferredTrack.locked
+    && canPlaceOnTrack(preferredTrack.clips, audioClip.timeline_start, duration)
+    ? preferredTrack
+    : editableAudioTracks(body).find((candidate) => (
+    canPlaceOnTrack(candidate.clips, audioClip.timeline_start, duration)
+  ));
+  if (!track) {
+    const trackId = insertAudioTrack(body, audioTracks(body).at(-1)?.id || null);
+    track = getTrack(body, trackId);
+  }
+  if (!track || track.locked || !canPlaceOnTrack(track.clips, audioClip.timeline_start, duration)) return null;
+  setLinkedClipPair(videoClip, audioClip);
+  track.clips = sortClips([...(track.clips || []), audioClip]);
+  return audioClip;
 }
 
 function clearLinkedVideoClip(clip) {
@@ -237,7 +361,7 @@ function clearLinkedVideoClip(clip) {
 }
 
 function clearLinkedAudioClip(clip) {
-  const { source_clip_id, ...meta } = clip.meta || {};
+  const { source_clip_id, linked_from_video, ...meta } = clip.meta || {};
   clip.meta = meta;
 }
 
@@ -306,6 +430,7 @@ function rippleDeleteOverlaySelection(overlays, selectedIds) {
 export const useLiteCutTimelineStore = create((set, get) => ({
   selectedClipId: null,
   selectedClipIds: [],
+  selectedTransitionId: null,
   selectedTrackId: "v1",
   selectedOverlayTrackId: "ot1",
   playheadSec: 0,
@@ -482,9 +607,22 @@ export const useLiteCutTimelineStore = create((set, get) => ({
     return moved;
   },
 
+  moveTrackClipByDrag: (input, { recordHistory = true } = {}) => {
+    const command = moveTimelineClipDrag(useLiteCutEditorStore.getState().body, input);
+    if (!command.changed) return false;
+    get().mutateProject(() => command.body, { recordHistory });
+    set({
+      selectedClipId: command.selectedClipId,
+      selectedClipIds: command.selectedIds,
+      selectedTrackId: command.selectedTrackId,
+      selectedTransitionId: null,
+    });
+    return true;
+  },
+
   selectClip: (clipId, trackId = "v1") => {
     const ids = relatedTimelineItemIds(useLiteCutEditorStore.getState().body, clipId);
-    set({ selectedClipId: clipId, selectedClipIds: ids, selectedTrackId: trackId });
+    set({ selectedClipId: clipId, selectedClipIds: ids, selectedTrackId: trackId, selectedTransitionId: null });
   },
 
   canGroupSelectedItems: () => activeSelectionIds(get()).length >= 2,
@@ -523,7 +661,7 @@ export const useLiteCutTimelineStore = create((set, get) => ({
     if (!selectedClipId || selectedTrackId === "overlay") return false;
     const ids = linkedTimelineClipIds(useLiteCutEditorStore.getState().body, selectedClipId);
     if (ids.length <= 1) return false;
-    set({ selectedClipId, selectedClipIds: ids, selectedTrackId });
+    set({ selectedClipId, selectedClipIds: ids, selectedTrackId, selectedTransitionId: null });
     return true;
   },
 
@@ -558,7 +696,7 @@ export const useLiteCutTimelineStore = create((set, get) => ({
   selectTrack: (trackId) => {
     const track = getTrack(useLiteCutEditorStore.getState().body, trackId);
     if (!track) return false;
-    set({ selectedClipId: null, selectedClipIds: [], selectedTrackId: trackId });
+    set({ selectedClipId: null, selectedClipIds: [], selectedTrackId: trackId, selectedTransitionId: null });
     return true;
   },
 
@@ -582,13 +720,31 @@ export const useLiteCutTimelineStore = create((set, get) => ({
         selectedClipId: nextPrimary,
         selectedClipIds: nextIds,
         selectedTrackId: nextPrimary ? fallbackTrackId : state.selectedTrackId,
+        selectedTransitionId: null,
       };
     });
   },
 
   selectOverlay: (overlayId) => {
     const ids = relatedTimelineItemIds(useLiteCutEditorStore.getState().body, overlayId);
-    set({ selectedClipId: overlayId, selectedClipIds: ids, selectedTrackId: "overlay" });
+    set({ selectedClipId: overlayId, selectedClipIds: ids, selectedTrackId: "overlay", selectedTransitionId: null });
+  },
+
+  selectTransition: (transitionId) => {
+    const body = useLiteCutEditorStore.getState().body;
+    const raw = (body?.transitions || []).find((item) => String(item?.id) === String(transitionId));
+    const event = resolveTransitionEvent(body, raw);
+    if (!event) return false;
+    const endpoint = event.to || event.from;
+    set({
+      selectedTransitionId: event.id,
+      selectedClipId: endpoint.id,
+      selectedClipIds: [String(endpoint.id)],
+      selectedTrackId: endpoint.kind === "overlay" ? "overlay" : endpoint.track_id,
+      playheadSec: event.cut_sec,
+      isPlaying: false,
+    });
+    return true;
   },
 
   toggleOverlaySelection: (overlayId) => {
@@ -602,6 +758,7 @@ export const useLiteCutTimelineStore = create((set, get) => ({
       selectedClipId: nextPrimary,
       selectedClipIds: nextIds,
       selectedTrackId: nextPrimary ? trackId : get().selectedTrackId,
+      selectedTransitionId: null,
     });
   },
 
@@ -613,10 +770,10 @@ export const useLiteCutTimelineStore = create((set, get) => ({
     const primaryTrackId = entries[0]?.trackId || "v1";
     const nextIds = uniqueIds(ids);
     if (!nextIds.length) {
-      set({ selectedClipId: null, selectedClipIds: [] });
+      set({ selectedClipId: null, selectedClipIds: [], selectedTransitionId: null });
       return false;
     }
-    set({ selectedClipId: primaryId, selectedClipIds: nextIds, selectedTrackId: primaryTrackId });
+    set({ selectedClipId: primaryId, selectedClipIds: nextIds, selectedTrackId: primaryTrackId, selectedTransitionId: null });
     return true;
   },
 
@@ -632,10 +789,10 @@ export const useLiteCutTimelineStore = create((set, get) => ({
     const primaryTrackId = entries[0]?.trackId || "v1";
     const nextIds = uniqueIds(ids);
     if (!nextIds.length) {
-      set({ selectedClipId: null, selectedClipIds: [] });
+      set({ selectedClipId: null, selectedClipIds: [], selectedTransitionId: null });
       return false;
     }
-    set({ selectedClipId: primaryId, selectedClipIds: nextIds, selectedTrackId: primaryTrackId });
+    set({ selectedClipId: primaryId, selectedClipIds: nextIds, selectedTrackId: primaryTrackId, selectedTransitionId: null });
     return true;
   },
 
@@ -655,21 +812,21 @@ export const useLiteCutTimelineStore = create((set, get) => ({
     const primaryTrackId = entries[0]?.trackId || "v1";
     const nextIds = uniqueIds(ids);
     if (!nextIds.length) {
-      set({ selectedClipId: null, selectedClipIds: [] });
+      set({ selectedClipId: null, selectedClipIds: [], selectedTransitionId: null });
       return false;
     }
-    set({ selectedClipId: primaryId, selectedClipIds: nextIds, selectedTrackId: primaryTrackId });
+    set({ selectedClipId: primaryId, selectedClipIds: nextIds, selectedTrackId: primaryTrackId, selectedTransitionId: null });
     return true;
   },
 
-  clearSelection: () => set({ selectedClipId: null, selectedClipIds: [] }),
+  clearSelection: () => set({ selectedClipId: null, selectedClipIds: [], selectedTransitionId: null }),
 
   mutateProject: (mutator, { recordHistory = true } = {}) => {
     const editor = useLiteCutEditorStore.getState();
     const { body } = editor;
     if (!body) return null;
     if (recordHistory) useLiteCutHistoryStore.getState().push(body);
-    const next = mutator(structuredClone(body));
+    const next = reconcileTransitionEvents(mutator(structuredClone(body)));
     useLiteCutEditorStore.setState({ body: next, dirty: true });
     return next;
   },
@@ -709,6 +866,9 @@ export const useLiteCutTimelineStore = create((set, get) => ({
         return get().addMediaAtTime(mediaItem, targetId, playheadSec);
       }
       if (kind === "video") {
+        if (mediaItem.is_looping_animation) {
+          return get().addOverlayFromAsset(mediaItem, { x: 0.5, y: 0.5, atTime: playheadSec });
+        }
         const body = useLiteCutEditorStore.getState().body;
         const mainId = editableVideoTracks(body)[0]?.id;
         if (!mainId) return;
@@ -725,7 +885,11 @@ export const useLiteCutTimelineStore = create((set, get) => ({
   migrateAlphaMovOverlaysToVideoTracks: (assets) => {
     const alphaAssets = new Map(
       (assets || [])
-        .filter((asset) => asset?.kind === "video" && asset?.has_alpha)
+        .filter((asset) => (
+          asset?.kind === "video"
+          && asset?.has_alpha
+          && /\.mov$/i.test(String(asset?.name || asset?.path || asset?.file_path || ""))
+        ))
         .map((asset) => [Number(asset.id), asset]),
     );
     if (!alphaAssets.size) return 0;
@@ -747,14 +911,18 @@ export const useLiteCutTimelineStore = create((set, get) => ({
         const clip = buildAssetClip(asset, Number(overlay.timeline_start) || 0);
         clip.trim_in = Math.max(0, Number(overlay.trim_in) || 0);
         clip.trim_out = clip.trim_in + Math.max(0.1, Number(overlay.duration) || Number(asset.duration_sec) || 3);
-        clip.transform = overlay.transform ? { ...overlay.transform } : { ...VIDEO_LAYER_TRANSFORM_DEFAULTS };
+        clip.transform = overlay.transform ? { ...overlay.transform } : { ...VIDEO_SCENE_TRANSFORM_DEFAULTS };
         clip.keyframes = Array.isArray(overlay.keyframes) ? overlay.keyframes : [];
         clip.flip_horizontal = Boolean(overlay.flip_horizontal);
         clip.flip_vertical = Boolean(overlay.flip_vertical);
-        clip.transition_in = overlay.transition_in || null;
-        clip.transition_out = overlay.transition_out || null;
-        clip.fade_in_sec = Number(overlay.fade_in_sec) || 0;
-        clip.fade_out_sec = Number(overlay.fade_out_sec) || 0;
+        for (const transition of body.transitions || []) {
+          for (const edge of ["from", "to"]) {
+            const endpoint = transition?.[edge];
+            if (endpoint?.kind === "overlay" && String(endpoint.id) === String(overlay.id)) {
+              transition[edge] = clipTransitionRef(target.id, clip.id);
+            }
+          }
+        }
         target.clips.push(clip);
       }
       target.clips = sortClips(target.clips);
@@ -776,6 +944,7 @@ export const useLiteCutTimelineStore = create((set, get) => ({
     if (!current || !track || (targetIsAudio !== mediaIsAudio) || (!isAsset && targetIsAudio)) return false;
 
     let replaced = false;
+    let replacementSelection = null;
     get().mutateProject((body) => {
       const targetTrack = getTrack(body, selectedTrackId);
       const index = targetTrack?.clips?.findIndex((clip) => clip.id === selectedClipId) ?? -1;
@@ -784,7 +953,7 @@ export const useLiteCutTimelineStore = create((set, get) => ({
       const source = isAsset ? buildAssetClip(mediaItem, old.timeline_start) : buildRecordedClip(mediaItem, old.timeline_start);
       const oldSourceDuration = Math.max(0.1, Number(old.trim_out) - (Number(old.trim_in) || 0) || clipSourceDuration(old));
       const newSourceDuration = Math.max(0.1, clipSourceDuration(source));
-      targetTrack.clips[index] = {
+      const replacement = {
         ...old,
         source_type: source.source_type,
         source_id: source.source_id,
@@ -792,15 +961,38 @@ export const useLiteCutTimelineStore = create((set, get) => ({
         trim_in: 0,
         trim_out: Math.min(oldSourceDuration, newSourceDuration),
         speed_keyframes: [],
+        muted: targetTrack.type === "video" ? true : old.muted,
         meta: source.meta,
       };
+      targetTrack.clips[index] = replacement;
+
+      if (targetTrack.type === "video") {
+        const linkedAudioId = old.meta?.linked_audio_clip_id;
+        const linkedAudioEntry = linkedAudioId ? findClipById(body, linkedAudioId) : { clip: null, trackId: null };
+        const linkedAudioTrack = linkedAudioEntry.trackId ? getTrack(body, linkedAudioEntry.trackId) : null;
+        if (linkedAudioEntry.clip && linkedAudioTrack?.type === "audio") {
+          linkedAudioTrack.clips = linkedAudioTrack.clips.filter((clip) => String(clip.id) !== String(linkedAudioEntry.clip.id));
+        }
+        clearLinkedVideoClip(replacement);
+        if (mediaItemHasAudio(mediaItem)) {
+          const linkedAudio = appendLinkedAudioClip(body, replacement, ensurePairedMediaTrack(body, targetTrack.id));
+          if (linkedAudio) {
+            replacementSelection = [replacement.id, linkedAudio.id];
+          }
+        } else {
+          replacementSelection = [replacement.id];
+        }
+      }
       replaced = true;
       return body;
     });
+    if (replaced && replacementSelection) {
+      set({ selectedClipId: replacementSelection[0], selectedClipIds: replacementSelection, selectedTrackId });
+    }
     return replaced;
   },
 
-  addMediaAtTime: (mediaItem, trackId, atTime, { createBelow = false, createAbove = false, createNewTrack = false } = {}) => {
+  addMediaAtTime: (mediaItem, trackId, atTime, { createBelow = false, createAbove = false, createNewTrack = false, audioOnly = false } = {}) => {
     if (!mediaItem) return;
     const isAsset = isAssetMediaItem(mediaItem);
     if (isAsset) {
@@ -822,19 +1014,30 @@ export const useLiteCutTimelineStore = create((set, get) => ({
     let start = Math.max(0, Number(atTime ?? playheadSec) || 0);
     start = snapTimelinePosition(start, editor.body, { enabled: snapEnabled });
     let newId = null;
+    let newIds = [];
     let placedTrackId = trackId;
     get().mutateProject((body) => {
-      const clip = isAsset ? buildAssetClip(mediaItem, start) : buildRecordedClip(mediaItem, start);
+      const sourceClip = isAsset ? buildAssetClip(mediaItem, start) : buildRecordedClip(mediaItem, start);
+      const placeAsSourceAudio = Boolean(audioOnly && mediaItemHasAudio(mediaItem));
+      const clip = placeAsSourceAudio ? buildStandaloneAudioClip(sourceClip, start) : sourceClip;
+      if (!clip || (audioOnly && !placeAsSourceAudio)) return body;
       const dur = clipSourceDuration(clip);
       let targetTrackId = trackId || videoTracks(body)[0]?.id || "v1";
-      const isAudioAsset = isAsset && (mediaItem.kind || "") === "audio";
-      if (isAudioAsset) {
+      const isAudioPlacement = placeAsSourceAudio || (isAsset && (mediaItem.kind || "") === "audio");
+      const isVideoMedia = !isAudioPlacement;
+      if (isAudioPlacement) {
         targetTrackId = trackId || audioTracks(body)[0]?.id || "a1";
       }
+      const hasLinkedAudio = isVideoMedia && mediaItemHasAudio(mediaItem);
+      let preferredAudioTrackId = null;
 
       if (createNewTrack) {
-        if (isAudioAsset) {
+        if (isAudioPlacement) {
           targetTrackId = insertAudioTrack(body, targetTrackId);
+        } else if (hasLinkedAudio) {
+          const pair = insertPairedMediaTracks(body, "video", targetTrackId, { before: createAbove });
+          targetTrackId = pair?.videoTrackId || targetTrackId;
+          preferredAudioTrackId = pair?.audioTrackId || null;
         } else if (createAbove && targetTrackId) {
           targetTrackId = insertVideoTrackBefore(body, targetTrackId);
         } else if (createBelow && targetTrackId) {
@@ -845,11 +1048,19 @@ export const useLiteCutTimelineStore = create((set, get) => ({
       }
 
       let track = getTrack(body, targetTrackId);
-      if (!track || (isAudioAsset ? track.type !== "audio" : track.type !== "video")) return body;
+      if (!track || (isAudioPlacement ? track.type !== "audio" : track.type !== "video")) return body;
       if (track.locked) return body;
       if (!canPlaceOnTrack(track.clips, start, dur)) {
         if (createNewTrack) {
-          targetTrackId = isAudioAsset ? insertAudioTrack(body, targetTrackId) : insertVideoTrack(body, targetTrackId);
+          if (isAudioPlacement) {
+            targetTrackId = insertAudioTrack(body, targetTrackId);
+          } else if (hasLinkedAudio) {
+            const pair = insertPairedMediaTracks(body, "video", targetTrackId);
+            targetTrackId = pair?.videoTrackId || targetTrackId;
+            preferredAudioTrackId = pair?.audioTrackId || null;
+          } else {
+            targetTrackId = insertVideoTrack(body, targetTrackId);
+          }
           track = getTrack(body, targetTrackId);
           if (!track) return body;
         } else {
@@ -858,11 +1069,19 @@ export const useLiteCutTimelineStore = create((set, get) => ({
         }
       }
       track.clips = sortClips([...(track.clips || []), clip]);
+      if (hasLinkedAudio) {
+        preferredAudioTrackId ||= ensurePairedMediaTrack(body, targetTrackId);
+        const audioClip = appendLinkedAudioClip(body, clip, preferredAudioTrackId);
+        if (audioClip) {
+          newIds = [clip.id, audioClip.id];
+        }
+      }
       placedTrackId = targetTrackId;
       newId = clip.id;
+      if (!newIds.length) newIds = [clip.id];
       return body;
     });
-    if (newId) set({ selectedClipId: newId, selectedClipIds: [newId], selectedTrackId: placedTrackId });
+    if (newId) set({ selectedClipId: newId, selectedClipIds: newIds, selectedTrackId: placedTrackId });
   },
 
   addOverlayFromAsset: (assetItem, { x = 0.5, y = 0.5, atTime = null, overlayTrackId = null } = {}) => {
@@ -885,7 +1104,10 @@ export const useLiteCutTimelineStore = create((set, get) => ({
     const sourceHeight = Math.max(0, Number(assetItem.height) || 0);
     const nativeWidth = kind === "image" && sourceWidth > 0 ? sourceWidth / outputWidth : 0.33;
     const nativeHeight = kind === "image" && sourceHeight > 0 ? sourceHeight / outputHeight : 0.33;
-    const isLoopingAnimation = kind === "video" && /\.gif$/i.test(String(assetItem.name || path));
+    const isLoopingAnimation = kind === "video" && (
+      Boolean(assetItem.is_looping_animation)
+      || /\.(gif|webp)$/i.test(String(assetItem.name || path))
+    );
     const overlayDur = dur;
     let newId = null;
     get().mutateProject((body) => {
@@ -894,11 +1116,15 @@ export const useLiteCutTimelineStore = create((set, get) => ({
         type: kind === "webm" || kind === "video" ? "webm" : "sticker",
         timeline_start: start,
         duration: overlayDur,
-        fade_in_sec: 0,
-        fade_out_sec: 0,
         transform: { x, y, scale: 1, rotation: 0, width: nativeWidth, height: nativeHeight, opacity: 1 },
+        keyframes: [],
+        crop: { x: 0, y: 0, width: 1, height: 1 },
+        content_fit: "fill",
+        color: { brightness: 0, contrast: 0, saturation: 0, filter_preset: null },
+        flip_horizontal: false,
+        flip_vertical: false,
         asset_path: path,
-        meta: { asset_id: assetItem.id, name: assetItem.name, kind, duration_sec: dur, source_width: sourceWidth || null, source_height: sourceHeight || null, source_fps: Number(assetItem.fps) || null, codec_name: assetItem.codec_name || null, preview_proxy_version: assetItem.preview_proxy_version || null, has_alpha: Boolean(assetItem.has_alpha), is_looping_animation: isLoopingAnimation, overlay_track_id: overlayTrackId || get().selectedOverlayTrackId || "ot1" },
+        meta: { asset_id: assetItem.id, name: assetItem.name, kind, duration_sec: dur, source_width: sourceWidth || null, source_height: sourceHeight || null, source_fps: Number(assetItem.fps) || null, codec_name: assetItem.codec_name || null, preview_proxy_required: Boolean(assetItem.preview_proxy_required), preview_proxy_mode: assetItem.preview_proxy_mode || "direct", preview_segment_step_sec: Number(assetItem.preview_segment_step_sec) || null, preview_proxy_version: assetItem.preview_proxy_version || null, has_alpha: Boolean(assetItem.has_alpha), is_looping_animation: isLoopingAnimation, overlay_track_id: overlayTrackId || get().selectedOverlayTrackId || "ot1" },
       };
       body.overlays = [...(body.overlays || []), ov];
       newId = ov.id;
@@ -918,6 +1144,8 @@ export const useLiteCutTimelineStore = create((set, get) => ({
     fontFamily = "微软雅黑",
     fontFile = null,
     fontSize = 64,
+    fontWeight = 700,
+    lineHeight = 1.2,
     align = "center",
     overlayTrackId = null,
   } = {}) => {
@@ -933,18 +1161,17 @@ export const useLiteCutTimelineStore = create((set, get) => ({
         type: "text",
         timeline_start: start,
         duration: 3,
-        fade_in_sec: 0,
-        fade_out_sec: 0,
         transform: { x, y, scale: 1, rotation: 0, width: 0.65, height: 0.18, opacity: 1 },
         text: {
           content,
           font_family: fontFamily || "微软雅黑",
           font_file: fontFile || null,
           font_size: Math.max(12, Math.min(1000, Number(fontSize) || 64)),
+          font_weight: Math.max(100, Math.min(900, Number(fontWeight) || 700)),
+          line_height: Math.max(0.5, Math.min(4, Number(lineHeight) || 1.2)),
+          letter_spacing: 0,
           align: ["left", "center", "right"].includes(align) ? align : "center",
           preset_id: presetId,
-          anim_in: null,
-          anim_out: null,
         },
         meta: { name: content, kind: "text", textStyleId: presetId, overlay_track_id: overlayTrackId || get().selectedOverlayTrackId || "ot1" },
       };
@@ -1065,51 +1292,6 @@ export const useLiteCutTimelineStore = create((set, get) => ({
       return body;
     });
     return changed;
-  },
-
-  canDetachSelectedAudio: () => {
-    const { selectedClipId, selectedTrackId } = get();
-    if (!selectedClipId || selectedTrackId === "overlay") return false;
-    const body = useLiteCutEditorStore.getState().body;
-    const { clip, trackId } = findClipById(body, selectedClipId);
-    const track = getTrack(body, trackId);
-    return Boolean(clip && track && !track.locked && canDetachClipAudio(clip, track.type));
-  },
-
-  detachSelectedAudio: () => {
-    if (!get().canDetachSelectedAudio()) return false;
-    const { selectedClipId } = get();
-    let newId = null;
-    let targetTrackId = null;
-    get().mutateProject((body) => {
-      const { clip, trackId } = findClipById(body, selectedClipId);
-      const sourceTrack = getTrack(body, trackId);
-      if (!clip || !sourceTrack || sourceTrack.locked || !canDetachClipAudio(clip, sourceTrack.type)) return body;
-      const audioClip = buildDetachedAudioClip(clip);
-      if (!audioClip) return body;
-      const duration = clipSourceDuration(audioClip);
-      let target = editableAudioTracks(body).find((track) =>
-        canPlaceOnTrack(track.clips, audioClip.timeline_start, duration),
-      );
-      if (!target) {
-        const lastAudioId = audioTracks(body).at(-1)?.id || null;
-        targetTrackId = insertAudioTrack(body, lastAudioId);
-        target = getTrack(body, targetTrackId);
-      }
-      if (!target || target.locked || !canPlaceOnTrack(target.clips, audioClip.timeline_start, duration)) return body;
-      target.clips = sortClips([...(target.clips || []), audioClip]);
-      clip.meta = { ...(clip.meta || {}), linked_audio_clip_id: audioClip.id };
-      clip.muted = true;
-      newId = audioClip.id;
-      targetTrackId = target.id;
-      return body;
-    });
-    if (newId && targetTrackId) {
-      const relatedIds = relatedTimelineItemIds(useLiteCutEditorStore.getState().body, newId);
-      set({ selectedClipId: newId, selectedClipIds: relatedIds, selectedTrackId: targetTrackId });
-      return true;
-    }
-    return false;
   },
 
   removeTrack: (trackId) => {
@@ -1503,12 +1685,14 @@ export const useLiteCutTimelineStore = create((set, get) => ({
       const overlayResult = splitOverlaysAtPlayhead(body.overlays || [], playheadSec);
       if (overlayResult.changed) {
         body.overlays = overlayResult.overlays;
+        for (const pair of overlayResult.splitPairs || []) rightIds.set(pair.id, pair.rightId);
         if (!firstNewId && overlayResult.newIds[0]) {
           firstNewId = overlayResult.newIds[0];
           firstTrackId = "overlay";
         }
       }
       restoreLinksAfterSplit(body, pairs, rightIds);
+      rewireTransitionExitEndpointsAfterSplit(body, rightIds);
       return body;
     });
     if (firstNewId) set({ selectedClipId: firstNewId, selectedClipIds: [firstNewId], selectedTrackId: firstTrackId });
@@ -1629,25 +1813,25 @@ export const useLiteCutTimelineStore = create((set, get) => ({
     const { selectedClipId } = state;
     if (!selectedClipId) return;
     get().mutateProject((body) => {
-      if (selectedIds.length > 1) {
-        const idSet = new Set(selectedIds.map(String));
-        for (const track of body.tracks || []) {
-          if (track.locked || track.hidden) continue;
+      const idSet = new Set((selectedIds.length ? selectedIds : [selectedClipId]).map(String));
+      for (const track of body.tracks || []) {
+        if (track.locked || track.hidden) continue;
+        for (const clip of track.clips || []) {
+          if (!idSet.has(String(clip.id))) continue;
           const trackPatch = clipPatchForTrack(patch, track);
-          if (!Object.keys(trackPatch).length) continue;
-          for (const clip of track.clips || []) {
-            if (idSet.has(String(clip.id))) Object.assign(clip, trackPatch);
-          }
+          const nodePatch = track.type === "video"
+            ? visualPatchForNode(trackPatch, clip, { timelineClip: true })
+            : trackPatch;
+          if (Object.keys(nodePatch).length) Object.assign(clip, nodePatch);
         }
-        return body;
       }
-      const { clip, trackId } = findClipById(body, selectedClipId);
-      const track = getTrack(body, trackId);
-      if (track?.locked) return body;
-      if (!clip) return body;
-      const trackPatch = clipPatchForTrack(patch, track);
-      if (!Object.keys(trackPatch).length) return body;
-      Object.assign(clip, trackPatch);
+      for (const overlay of body.overlays || []) {
+        if (!idSet.has(String(overlay.id))) continue;
+        const { track } = overlayTrackFor(body, overlay);
+        if (track?.locked || track?.hidden) continue;
+        const nodePatch = visualPatchForNode(patch, overlay);
+        if (Object.keys(nodePatch).length) Object.assign(overlay, nodePatch);
+      }
       return body;
     }, { recordHistory: false });
   },
@@ -1700,83 +1884,77 @@ export const useLiteCutTimelineStore = create((set, get) => ({
 
   updateSelectedTransition: (type, durationSec = 0.4) => {
     const state = get();
-    const selectedIds = activeSelectionIds(state);
-    const { selectedClipId } = state;
-    if (!selectedClipId) return;
-    const target = normalizedTransitionStyle(type, durationSec);
+    if (!state.selectedClipId) return;
     get().mutateProject((body) => {
-      if (selectedIds.length > 1) {
-        const idSet = new Set(selectedIds.map(String));
-        for (const track of body.tracks || []) {
-          if (track.type !== "video" || track.locked || track.hidden) continue;
-          for (const clip of track.clips || []) {
-            if (idSet.has(String(clip.id))) clip.transition_out = { ...target };
-          }
-        }
+      if (state.selectedTransitionId) {
+        updateTransitionEvent(body, state.selectedTransitionId, { type, duration_sec: durationSec });
         return body;
       }
-      const { clip, trackId } = findClipById(body, selectedClipId);
-      if (getTrack(body, trackId)?.locked) return body;
-      if (!clip) return body;
-      clip.transition_out = { ...target };
-      // Older inspector builds accidentally stored transition timing as a
-      // fade-to-black on the clip itself. A transition selection owns the
-      // boundary effect, so clear those stale black fades here.
-      clip.fade_in_sec = 0;
-      clip.fade_out_sec = 0;
+      for (const ref of selectedVisualTransitionRefs(body, state)) {
+        setNodeEdgeTransition(body, ref, "out", type, durationSec);
+      }
       return body;
     });
   },
 
   updateSelectedTransitionType: (type) => {
-    const { selectedClipId } = get();
-    if (!selectedClipId) return;
+    const state = get();
+    if (!state.selectedClipId) return;
     get().mutateProject((body) => {
-      const { clip, trackId } = findClipById(body, selectedClipId);
-      if (!clip || getTrack(body, trackId)?.locked) return body;
-      const incomingDuration = Math.max(0.05, Number(clip.transition_in?.duration_sec) || 0.25);
-      const outgoingDuration = Math.max(0.05, Number(clip.transition_out?.duration_sec) || 0.25);
-      clip.transition_in = normalizedTransitionStyle(type, incomingDuration);
-      clip.transition_out = normalizedTransitionStyle(type, outgoingDuration);
-      clip.fade_in_sec = 0;
-      clip.fade_out_sec = 0;
+      if (state.selectedTransitionId) {
+        updateTransitionEvent(body, state.selectedTransitionId, { type });
+        return body;
+      }
+      for (const ref of selectedVisualTransitionRefs(body, state)) {
+        const incoming = transitionEventForNodeEdge(body, ref, "in");
+        const outgoing = transitionEventForNodeEdge(body, ref, "out");
+        setNodeEdgeTransition(body, ref, "in", type, incoming?.duration_sec || TRANSITION_DURATION_DEFAULT);
+        setNodeEdgeTransition(body, ref, "out", type, outgoing?.duration_sec || TRANSITION_DURATION_DEFAULT);
+      }
       return body;
     });
   },
 
   updateSelectedTransitionDuration: (edge, durationSec) => {
-    const { selectedClipId } = get();
-    if (!selectedClipId || !["in", "out"].includes(edge)) return;
+    const state = get();
+    if (!state.selectedClipId || !["in", "out"].includes(edge)) return;
     get().mutateProject((body) => {
-      const { clip, trackId } = findClipById(body, selectedClipId);
-      if (!clip || getTrack(body, trackId)?.locked) return body;
-      const key = edge === "in" ? "transition_in" : "transition_out";
-      const fallbackType = clip.transition_out?.type || clip.transition_in?.type || "fade";
-      clip[key] = normalizedTransitionStyle(clip[key]?.type || fallbackType, durationSec);
+      if (state.selectedTransitionId) {
+        updateTransitionEvent(body, state.selectedTransitionId, { duration_sec: durationSec });
+        return body;
+      }
+      const ref = selectedVisualTransitionRef(body, state);
+      if (!ref) return body;
+      const existing = transitionEventForNodeEdge(body, ref, edge);
+      const alternate = transitionEventForNodeEdge(body, ref, edge === "in" ? "out" : "in");
+      setNodeEdgeTransition(body, ref, edge, existing?.type || alternate?.type || "fade", durationSec);
       return body;
     }, { recordHistory: false });
   },
 
   canApplySelectedTransitionToScope: (scope = "track", type = "fade", durationSec = 0.4) => {
     const body = useLiteCutEditorStore.getState().body;
-    const { selectedClipId } = get();
-    const context = selectedEditableVideoContext(body, selectedClipId);
+    const state = get();
+    const context = selectedEditableVisualContext(body, state);
     if (!context) return false;
     const target = normalizedTransitionStyle(type, durationSec);
-    return videoStyleTargets(body, context.trackId, scope).some(({ clip }) => !transitionsMatch(clip.transition_out, target));
+    return visualStyleTargets(body, context, scope, "transition").some(({ ref }) => {
+      const event = transitionEventForNodeEdge(body, ref, "out");
+      return !transitionsMatch(event, target);
+    });
   },
 
   applySelectedTransitionToScope: (scope = "track", type = "fade", durationSec = 0.4) => {
     if (!get().canApplySelectedTransitionToScope(scope, type, durationSec)) return false;
-    const { selectedClipId } = get();
+    const state = get();
     const target = normalizedTransitionStyle(type, durationSec);
     let changed = false;
     get().mutateProject((body) => {
-      const context = selectedEditableVideoContext(body, selectedClipId);
+      const context = selectedEditableVisualContext(body, state);
       if (!context) return body;
-      for (const { clip } of videoStyleTargets(body, context.trackId, scope)) {
-        if (transitionsMatch(clip.transition_out, target)) continue;
-        clip.transition_out = { ...target };
+      for (const { ref } of visualStyleTargets(body, context, scope, "transition")) {
+        if (transitionsMatch(transitionEventForNodeEdge(body, ref, "out"), target)) continue;
+        setNodeEdgeTransition(body, ref, "out", target.type, target.duration_sec);
         changed = true;
       }
       return body;
@@ -1790,45 +1968,44 @@ export const useLiteCutTimelineStore = create((set, get) => ({
     const selectedIds = activeSelectionIds(state);
     if (!selectedClipId) return;
     get().mutateProject((body) => {
-      if (selectedIds.length > 1) {
-        const selectedIdSet = new Set(selectedIds.map(String));
-        for (const track of body.tracks || []) {
-          if (track.type !== "video" || track.locked || track.hidden) continue;
-          for (const clip of track.clips || []) {
-            if (!selectedIdSet.has(String(clip.id))) continue;
-            clip.color = { ...(clip.color || {}), ...colorPatch };
-          }
+      const idSet = new Set((selectedIds.length ? selectedIds : [selectedClipId]).map(String));
+      for (const track of body.tracks || []) {
+        if (track.type !== "video" || track.locked || track.hidden) continue;
+        for (const clip of track.clips || []) {
+          if (!idSet.has(String(clip.id)) || !visualMaterialSupports(clip, "color", { timelineClip: true })) continue;
+          clip.color = { ...(clip.color || {}), ...colorPatch };
         }
-        return body;
       }
-      const { clip, trackId } = findClipById(body, selectedClipId);
-      if (getTrack(body, trackId)?.locked) return body;
-      if (!clip) return body;
-      clip.color = { ...(clip.color || {}), ...colorPatch };
+      for (const overlay of body.overlays || []) {
+        if (!idSet.has(String(overlay.id)) || !visualMaterialSupports(overlay, "color")) continue;
+        const { track } = overlayTrackFor(body, overlay);
+        if (track?.locked || track?.hidden) continue;
+        overlay.color = { ...(overlay.color || {}), ...colorPatch };
+      }
       return body;
     }, { recordHistory: false });
   },
 
   canApplySelectedColorToScope: (scope = "track", color = {}) => {
     const body = useLiteCutEditorStore.getState().body;
-    const { selectedClipId } = get();
-    const context = selectedEditableVideoContext(body, selectedClipId);
+    const state = get();
+    const context = selectedEditableVisualContext(body, state);
     if (!context) return false;
     const target = normalizedColorStyle(color);
-    return videoStyleTargets(body, context.trackId, scope).some(({ clip }) => !colorsMatch(clip.color, target));
+    return visualStyleTargets(body, context, scope, "color").some(({ node }) => !colorsMatch(node.color, target));
   },
 
   applySelectedColorToScope: (scope = "track", color = {}) => {
     if (!get().canApplySelectedColorToScope(scope, color)) return false;
-    const { selectedClipId } = get();
+    const state = get();
     const target = normalizedColorStyle(color);
     let changed = false;
     get().mutateProject((body) => {
-      const context = selectedEditableVideoContext(body, selectedClipId);
+      const context = selectedEditableVisualContext(body, state);
       if (!context) return body;
-      for (const { clip } of videoStyleTargets(body, context.trackId, scope)) {
-        if (colorsMatch(clip.color, target)) continue;
-        clip.color = { ...target };
+      for (const { node } of visualStyleTargets(body, context, scope, "color")) {
+        if (colorsMatch(node.color, target)) continue;
+        node.color = { ...target };
         changed = true;
       }
       return body;
@@ -1901,7 +2078,10 @@ export const useLiteCutTimelineStore = create((set, get) => ({
       ok = true;
       return body;
     }, { recordHistory });
-    if (ok) set({ selectedClipId: clipId, selectedClipIds: [clipId], selectedTrackId: finalTrackId });
+    if (ok) {
+      const selectedClipIds = linkedTimelineClipIds(useLiteCutEditorStore.getState().body, clipId);
+      set({ selectedClipId: clipId, selectedClipIds: selectedClipIds.length ? selectedClipIds : [clipId], selectedTrackId: finalTrackId });
+    }
   },
 
   moveOverlayToTime: (overlayId, newStart, { snap = true, recordHistory = true } = {}) => {
@@ -1990,11 +2170,22 @@ export const useLiteCutTimelineStore = create((set, get) => ({
       for (const track of nextBody.tracks || []) {
         for (const candidate of track.clips || []) {
           if (needsUpdate(candidate)) {
+            const previousDuration = Number(candidate.meta?.duration_sec);
+            const previousTrimOut = Number(candidate.trim_out);
+            const usedPreviousSourceEnd = Number.isFinite(previousDuration)
+              && previousDuration > 0.05
+              && Number.isFinite(previousTrimOut)
+              && Math.abs(previousTrimOut - previousDuration) <= 0.05;
             candidate.meta = { ...(candidate.meta || {}), duration_sec: real };
             const trimIn = Math.max(0, Math.min(Number(candidate.trim_in) || 0, Math.max(0, real - 0.1)));
-            const trimOut = Number(candidate.trim_out);
+            const trimOut = previousTrimOut;
             candidate.trim_in = trimIn;
-            if (!Number.isFinite(trimOut) || trimOut > real || trimOut <= trimIn) {
+            if (real > previousDuration + 0.05 && usedPreviousSourceEnd) {
+              // When a fallback/proxy duration is corrected upward, a clip that
+              // previously ended at that false source boundary was untrimmed.
+              // Keep it untrimmed by moving the end to the real source duration.
+              candidate.trim_out = real;
+            } else if (!Number.isFinite(trimOut) || trimOut > real || trimOut <= trimIn) {
               candidate.trim_out = Math.max(trimIn + 0.1, real);
             }
           }

@@ -30,17 +30,19 @@ import {
   trimClipEndDraft,
 } from "../state/timelineUtils.js";
 import {
-  keyframeNearPlayhead,
-  normalizedOverlayKeyframes,
-  normalizedOverlayTransform,
-  overlayTransformAt,
-  VIDEO_LAYER_TRANSFORM_DEFAULTS,
-} from "../state/overlayKeyframeUtils.js";
+  normalizeSceneKeyframes,
+  normalizeSceneTransform,
+  sceneKeyframeNearPlayhead,
+  sceneTransformAt,
+  VIDEO_SCENE_TRANSFORM_DEFAULTS,
+} from "../state/sceneTransform.js";
 import {
   audioKeyframeNearPlayhead,
   clipVolumeAt,
   normalizedAudioKeyframes,
+  normalizedAudioVolume,
 } from "../state/audioKeyframeUtils.js";
+import { rewireTransitionExitEndpointsAfterSplit } from "../state/transitionModel.js";
 import {
   clipMaxTimelineEnd,
   clipMaxTimelineStartForLeftTrim,
@@ -280,8 +282,9 @@ export function linkTimelineClips(body, selectedIds) {
   const next = structuredClone(body);
   const { clip: video } = findClipById(next, check.videoId);
   const { clip: audio } = findClipById(next, check.audioId);
+  video.muted = true;
   video.meta = { ...(video.meta || {}), linked_audio_clip_id: audio.id };
-  audio.meta = { ...(audio.meta || {}), source_clip_id: video.id, detached_from_video: true };
+  audio.meta = { ...(audio.meta || {}), source_clip_id: video.id, linked_from_video: true };
   return { changed: true, body: next, reason: null, selectedIds: uniqueTimelineIds(selectedIds) };
 }
 
@@ -301,7 +304,7 @@ export function unlinkTimelineClips(body, selectedClipId) {
         changed = true;
       }
       if (String(candidate.meta?.source_clip_id || "") === sourceId) {
-        const { source_clip_id, detached_from_video, ...meta } = candidate.meta || {};
+        const { source_clip_id, linked_from_video, ...meta } = candidate.meta || {};
         candidate.meta = meta;
         changed = true;
       }
@@ -534,8 +537,9 @@ function commandLinkedSplitSelection(body, selectedIds, playheadSec) {
 }
 
 function commandSetLinkedClipPair(video, audio) {
+  video.muted = true;
   video.meta = { ...(video.meta || {}), linked_audio_clip_id: audio.id };
-  audio.meta = { ...(audio.meta || {}), source_clip_id: video.id, detached_from_video: true };
+  audio.meta = { ...(audio.meta || {}), source_clip_id: video.id, linked_from_video: true };
 }
 
 function commandRestoreLinksAfterSplit(body, pairs, rightIds) {
@@ -612,10 +616,12 @@ export function splitTimelineSelection(body, selectedIds, playheadSec) {
     const [left, right] = splitOverlayAt(overlay, local);
     overlays.push(left, right);
     newIds.push(right.id);
+    rightIds.set(String(overlay.id), String(right.id));
     primaryTrackId ||= "overlay";
   }
   next.overlays = overlays.sort((left, right) => (left.timeline_start || 0) - (right.timeline_start || 0));
   commandRestoreLinksAfterSplit(next, pairs, rightIds);
+  rewireTransitionExitEndpointsAfterSplit(next, rightIds);
   if (!newIds.length) return { changed: false, body, selectedIds: [], selectedTrackId: null };
   return {
     changed: true,
@@ -684,7 +690,7 @@ function transformKeyframeTarget(body, kind, itemId, trackId) {
   return {
     item,
     locked: Boolean(track?.locked),
-    defaults: VIDEO_LAYER_TRANSFORM_DEFAULTS,
+    defaults: VIDEO_SCENE_TRANSFORM_DEFAULTS,
     duration: item ? clipSourceDuration(item) : 0,
   };
 }
@@ -700,9 +706,9 @@ export function upsertTimelineTransformKeyframe(body, { kind, itemId, trackId, p
   if (!target.item) return { changed: false, body };
   const item = keyframeItem(target.item, target.duration);
   const local = Math.max(0, Math.min(target.duration, (Number(playheadSec) || 0) - (Number(target.item.timeline_start) || 0)));
-  const keyframes = normalizedOverlayKeyframes(item, target.defaults);
-  const existing = keyframeNearPlayhead(item, playheadSec, 0.04, target.defaults);
-  const point = { time_sec: local, transform: overlayTransformAt(item, playheadSec, target.defaults) };
+  const keyframes = normalizeSceneKeyframes(item, target.defaults);
+  const existing = sceneKeyframeNearPlayhead(item, playheadSec, 0.04, target.defaults);
+  const point = { time_sec: local, transform: sceneTransformAt(item, playheadSec, target.defaults) };
   target.item.keyframes = [
     ...keyframes.filter((keyframe) => keyframe !== existing && Math.abs(keyframe.time_sec - local) > 0.04),
     point,
@@ -717,7 +723,7 @@ export function removeTimelineTransformKeyframe(body, { kind, itemId, trackId, p
   if (!target.item) return { changed: false, body };
   const item = keyframeItem(target.item, target.duration);
   const local = (Number(playheadSec) || 0) - (Number(target.item.timeline_start) || 0);
-  target.item.keyframes = normalizedOverlayKeyframes(item, target.defaults)
+  target.item.keyframes = normalizeSceneKeyframes(item, target.defaults)
     .filter((keyframe) => Math.abs(keyframe.time_sec - local) > 0.04);
   return { changed: true, body: next };
 }
@@ -741,7 +747,7 @@ export function moveTimelineTransformKeyframe(body, {
     Math.round(((Number(toPlayheadSec) || 0) - start) / frame) * frame,
   ));
   const item = keyframeItem(target.item, target.duration);
-  const keyframes = normalizedOverlayKeyframes(item, target.defaults);
+  const keyframes = normalizeSceneKeyframes(item, target.defaults);
   const moving = keyframes.find((point) => Math.abs(point.time_sec - fromLocal) <= Math.max(0.04, frame));
   if (!moving || Math.abs(moving.time_sec - targetLocal) < 0.000001) return { changed: false, body };
   target.item.keyframes = [
@@ -757,12 +763,12 @@ export function updateTimelineTransformAtTime(body, { kind, itemId, trackId, pla
   const target = transformKeyframeTarget(next, kind, itemId, trackId);
   if (!target.item) return { changed: false, body };
   const item = keyframeItem(target.item, target.duration);
-  const existing = keyframeNearPlayhead(item, playheadSec, 0.04, target.defaults);
+  const existing = sceneKeyframeNearPlayhead(item, playheadSec, 0.04, target.defaults);
   if (!existing) {
     target.item.transform = { ...(target.defaults || {}), ...(target.item.transform || {}), ...patch };
     return { changed: true, body: next };
   }
-  target.item.keyframes = normalizedOverlayKeyframes(item, target.defaults).map((keyframe) => (
+  target.item.keyframes = normalizeSceneKeyframes(item, target.defaults).map((keyframe) => (
     Math.abs(keyframe.time_sec - existing.time_sec) <= 0.04
       ? { ...keyframe, transform: { ...keyframe.transform, ...patch } }
       : keyframe
@@ -771,7 +777,7 @@ export function updateTimelineTransformAtTime(body, { kind, itemId, trackId, pla
 }
 
 function motionPresetKeyframes(transform, duration, preset, defaults) {
-  const base = normalizedOverlayTransform(transform, defaults);
+  const base = normalizeSceneTransform(transform, defaults);
   const start = { ...base };
   const end = { ...base };
   if (preset === "pan_left") {
@@ -865,7 +871,7 @@ export function updateTimelineVolumeAtTime(body, { clipId, trackId, playheadSec,
   if (!clip || track?.locked) return { changed: false, body };
   const duration = clipSourceDuration(clip);
   const existing = audioKeyframeNearPlayhead(clip, playheadSec, 0.04, duration);
-  const nextVolume = Math.max(0, Math.min(5, Number(volume) || 0));
+  const nextVolume = normalizedAudioVolume(volume, 0);
   if (!existing) clip.volume = nextVolume;
   else {
     clip.audio_keyframes = normalizedAudioKeyframes(clip, duration).map((keyframe) => (

@@ -1,21 +1,176 @@
 {
-  "schema_version": 1,
-  "transform_limits": {
-    "position_min": 0,
-    "position_max": 1,
-    "size_min": 0.01,
-    "size_max": 3,
-    "scale_min": 0.1,
-    "scale_max": 3,
-    "rotation_min": -180,
-    "rotation_max": 180,
-    "opacity_min": 0,
-    "opacity_max": 1
+  "schema_version": 5,
+  "scene_transform": {
+    "coordinate_space": "canvas_normalized",
+    "anchor": "center",
+    "composition_order": ["source_crop", "content_fit", "box_size", "mirror", "scale", "rotate", "translate", "opacity", "composite"],
+    "raster_rounding": "nearest_pixel",
+    "interpolated_fields": ["x", "y", "width", "height", "scale", "rotation", "opacity"],
+    "defaults": {
+      "video": { "x": 0.5, "y": 0.5, "width": 1.0, "height": 1.0, "scale": 1.0, "rotation": 0.0, "opacity": 1.0 },
+      "overlay": { "x": 0.5, "y": 0.5, "width": 0.33, "height": 0.33, "scale": 1.0, "rotation": 0.0, "opacity": 1.0 }
+    },
+    "limits": {
+      "position_min": -10,
+      "position_max": 10,
+      "size_min": 0.0001,
+      "size_max": 20,
+      "scale_min": 0.01,
+      "scale_max": 20,
+      "rotation_min": -3600,
+      "rotation_max": 3600,
+      "opacity_min": 0,
+      "opacity_max": 1
+    }
+  },
+  "visual_material": {
+    "version": 1,
+    "canonical_fit_field": "content_fit",
+    "shared_fields": ["transform", "keyframes", "crop", "content_fit", "flip_horizontal", "flip_vertical", "color"],
+    "content_fit_values": ["inherit", "fill", "contain", "cover", "blur"],
+    "capabilities": {
+      "video_clip": ["transform", "keyframes", "crop", "content_fit", "mirror", "color", "transition", "speed", "speed_ramp", "reverse", "freeze", "audio"],
+      "image_overlay": ["transform", "keyframes", "crop", "content_fit", "mirror", "color", "transition"],
+      "animated_overlay": ["transform", "keyframes", "crop", "content_fit", "mirror", "color", "transition"],
+      "text_overlay": ["transform", "keyframes", "mirror", "transition", "text_layout"]
+    },
+    "defaults": {
+      "crop": { "x": 0.0, "y": 0.0, "width": 1.0, "height": 1.0 },
+      "speed": 1.0,
+      "freeze_frame_sec": 0.0,
+      "color_adjustment": 0.0
+    },
+    "limits": {
+      "crop_position_min": 0.0,
+      "crop_position_max": 1.0,
+      "crop_size_min": 0.05,
+      "crop_size_max": 1.0,
+      "speed_min": 0.25,
+      "speed_max": 4.0,
+      "freeze_min_sec": 0.0,
+      "freeze_max_sec": 30.0,
+      "color_adjustment_min": -100.0,
+      "color_adjustment_max": 100.0
+    }
+  },
+  "canvas_rendering": {
+    "version": 1,
+    "fit_values": ["contain", "cover", "blur"],
+    "background_color_format": "hex_rgb_6",
+    "blur_amount": { "unit": "output_pixel_gaussian_sigma", "min": 4, "max": 80, "default": 24 }
+  },
+  "audio_mix": {
+    "version": 1,
+    "gain_limits": { "clip": [0, 5], "track": [0, 2], "master": [0, 2], "bgm": [0, 2] },
+    "gain_defaults": { "clip": 1, "track": 1, "master": 1, "bgm": 1 },
+    "fade_duration_sec": { "min": 0, "max": 86400, "ui_max": 10, "default": 0 },
+    "gain_composition": "clip_times_track_times_master_times_fades",
+    "fade_overlap": "multiply",
+    "ducking": { "mode": "foreground_activity", "attack_ms": 0, "release_ms": 0, "gain": { "min": 0, "max": 1, "default": 0.35 } },
+    "mix_normalize": false,
+    "preserve_pitch_owner": "media_element_preserves_pitch_and_ffmpeg_atempo"
+  },
+  "text_layout": {
+    "version": 1,
+    "coordinate_space": "authored_box_output_pixels",
+    "box_anchor": "center",
+    "font_size_unit": "output_pixel",
+    "font_size": { "min": 12, "max": 1000, "default": 48 },
+    "font_weight": { "min": 100, "max": 900, "default": 700, "resolution": "nearest_available_face" },
+    "line_height_unit": "font_size_multiplier",
+    "line_height": { "min": 0.5, "max": 4.0, "default": 1.2, "meaning": "baseline_advance" },
+    "font_metric_failure_policy": "reject_export",
+    "letter_spacing": { "supported_values": [0], "default": 0 },
+    "horizontal_alignment": "block_and_each_explicit_line",
+    "vertical_alignment": "center",
+    "wrap_mode": "explicit_lines",
+    "overflow": "clip_to_authored_box",
+    "style_capabilities": ["solid_fill", "uniform_outline"],
+    "fill_color_format": "hex_rgb_6",
+    "outline": { "width_output_px": 3, "color": "#000000", "opacity": 0.72 },
+    "default_font_family": "微软雅黑",
+    "default_preset_id": "plain"
+  },
+  "text_style_presets": [
+    { "id": "plain", "group": "plain", "label_zh": "纯文本", "preview": "Aa", "sample": "在此输入文字", "fill_color": "#ffffff", "card_background": "linear-gradient(135deg, #3f3f46 0%, #18181b 100%)" },
+    { "id": "creator", "group": "styles", "label_zh": "创作者", "preview": "创作者", "sample": "创作者", "fill_color": "#fde047", "card_background": "linear-gradient(135deg, #27272a 0%, #09090b 100%)" },
+    { "id": "retro", "group": "styles", "label_zh": "复古", "preview": "复古", "sample": "复古", "fill_color": "#f0abfc", "card_background": "linear-gradient(135deg, #4a044e 0%, #18181b 100%)" },
+    { "id": "bubble", "group": "styles", "label_zh": "气泡", "preview": "气泡", "sample": "气泡", "fill_color": "#ffffff", "card_background": "linear-gradient(135deg, #3f3f46 0%, #27272a 100%)" },
+    { "id": "large-title", "group": "titles", "label_zh": "大标题", "preview": "标题", "sample": "大标题", "fill_color": "#ffffff", "card_background": "linear-gradient(135deg, #262626 0%, #000000 100%)" },
+    { "id": "ace", "group": "titles", "label_zh": "ACE 电竞", "preview": "ACE", "sample": "ACE!!", "fill_color": "#fbbf24", "card_background": "linear-gradient(135deg, #451a03 0%, #09090b 100%)" },
+    { "id": "clutch", "group": "titles", "label_zh": "残局", "preview": "残局", "sample": "CLUTCH", "fill_color": "#67e8f9", "card_background": "linear-gradient(135deg, #164e63 0%, #09090b 100%)" },
+    { "id": "namecard", "group": "cs2", "label_zh": "CS2 名牌", "preview": "Dream", "sample": "Dream", "fill_color": "#ffffff", "card_background": "linear-gradient(90deg, #0c4a6e 0%, #18181b 100%)" }
+  ],
+  "text_fonts": [
+    {
+      "family": "微软雅黑",
+      "aliases": ["Microsoft YaHei", "Rajdhani", "Rajdhani Bold", "sans-serif"],
+      "default_weight": 700,
+      "faces": [
+        { "weight_min": 100, "weight_max": 300, "source": "windows", "file": "msyhl.ttc" },
+        { "weight_min": 301, "weight_max": 599, "source": "windows", "file": "msyh.ttc" },
+        { "weight_min": 600, "weight_max": 900, "source": "windows", "file": "msyhbd.ttc" }
+      ]
+    },
+    {
+      "family": "思源黑体 Medium",
+      "aliases": [],
+      "default_weight": 500,
+      "faces": [
+        { "weight_min": 100, "weight_max": 900, "source": "bundled", "file": "NotoSansSC-Medium.ttf" }
+      ]
+    },
+    {
+      "family": "Impact",
+      "aliases": [],
+      "default_weight": 700,
+      "faces": [
+        { "weight_min": 100, "weight_max": 900, "source": "windows", "file": "impact.ttf" }
+      ]
+    },
+    {
+      "family": "Noto Sans SC",
+      "aliases": [],
+      "default_weight": 700,
+      "faces": [
+        { "weight_min": 100, "weight_max": 599, "source": "bundled", "file": "NotoSansSC-Medium.ttf" },
+        { "weight_min": 600, "weight_max": 900, "source": "bundled", "file": "NotoSansSC-Bold.ttf" }
+      ]
+    }
+  ],
+  "transition_model": {
+    "version": 1,
+    "storage": "independent_events",
+    "time_alignment": {
+      "paired": "centered_on_cut",
+      "single_enter": "inside_node_head",
+      "single_exit": "inside_node_tail"
+    },
+    "endpoint_kinds": ["clip", "overlay"],
+    "easing": "linear",
+    "limits": {
+      "duration_min": 0.05,
+      "duration_max": 10.0,
+      "duration_default": 0.4,
+      "boundary_epsilon": 0.05
+    },
+    "types": [
+      { "id": "cut", "label_zh": "硬切", "icon": "▶|" },
+      { "id": "fade", "label_zh": "淡化", "icon": "◐" },
+      { "id": "flash", "label_zh": "闪白", "icon": "⚡" },
+      { "id": "dip", "label_zh": "黑场", "icon": "■" },
+      { "id": "zoom", "label_zh": "缩放", "icon": "◉" },
+      { "id": "wipe_l", "label_zh": "左擦", "icon": "◀" },
+      { "id": "wipe_r", "label_zh": "右擦", "icon": "▶" },
+      { "id": "slide_up", "label_zh": "上滑", "icon": "↑" },
+      { "id": "slide_down", "label_zh": "下滑", "icon": "↓" }
+    ]
   },
   "canvas_presets": [
     { "id": "16:9", "width": 1920, "height": 1080 },
     { "id": "9:16", "width": 1080, "height": 1920 },
-    { "id": "1:1", "width": 1080, "height": 1080 }
+    { "id": "1:1", "width": 1080, "height": 1080 },
+    { "id": "4:3", "width": 1440, "height": 1080 }
   ],
   "filter_presets": [
     { "id": "none", "label_zh": "原片", "css": "none", "ffmpeg": "", "thumb": "from-zinc-600 to-zinc-800" },
@@ -27,5 +182,11 @@
     { "id": "fade", "label_zh": "褪色", "css": "saturate(0.55) brightness(1.08)", "ffmpeg": "eq=saturation=0.55,colorchannelmixer=rr=1.08:gg=1.08:bb=1.08", "thumb": "from-stone-500 to-stone-800" },
     { "id": "night", "label_zh": "夜战", "css": "brightness(0.82) saturate(0.75) hue-rotate(-8deg)", "ffmpeg": "colorchannelmixer=rr=0.82:gg=0.82:bb=0.82,eq=saturation=0.75,hue=h=-8", "thumb": "from-indigo-950 to-black" }
   ],
-  "media_extensions": ["mp4", "m4v", "mov", "mkv", "avi", "webm", "png", "jpg", "jpeg", "gif"]
+  "media_extensions": ["mp4", "m4v", "mov", "mkv", "avi", "webm", "png", "jpg", "jpeg", "webp", "gif"],
+  "import_extensions": [
+    "mp4", "m4v", "mov", "mkv", "avi", "webm",
+    "mp3", "wav", "m4a", "aac", "flac", "ogg",
+    "png", "jpg", "jpeg", "webp", "gif",
+    "ttf", "otf", "woff", "woff2"
+  ]
 }

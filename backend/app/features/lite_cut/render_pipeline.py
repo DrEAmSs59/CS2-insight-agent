@@ -14,9 +14,7 @@ from .ffmpeg_runtime import (
     raise_if_cancelled as _raise_if_cancelled,
     run_ffmpeg_process as _run_ffmpeg_process,
 )
-from .filter_graphs import _atempo_chain
 from .graph_builders import (
-    build_audio_filter_chain as _audio_filter_chain,
     build_audio_mix_graph as _audio_mix_filter_complex,
     build_boundary_transition_graph as _boundary_transition_filter_complex,
     build_clip_canvas_graph as _clip_canvas_transform_graph,
@@ -24,21 +22,15 @@ from .graph_builders import (
     build_text_overlay_graph as _drawtext_filter_complex,
     build_equalizer_filter as _eq_filter,
     build_overlay_graph as _overlay_filter_complex,
-    overlay_height_from_transform as _overlay_height_from_transform,
-    overlay_layout_from_transform as _overlay_layout_from_transform,
-    overlay_opacity_from_transform as _overlay_opacity_from_transform,
     stage_custom_font_for_ffmpeg as _stage_custom_font_for_ffmpeg,
 )
 from .export_plan import build_lite_cut_export_plan
+from .project_boundaries import AUDIO_MASTER_GAIN_DEFAULT, AUDIO_MASTER_GAIN_MAX, AUDIO_MASTER_GAIN_MIN
 from .timeline import (
     _all_overlay_clips_for_export,
     _audio_track_clips_for_export,
     _base_video_track_for_export,
-    _build_positional_transitions,
     _clip_crop_filter,
-    _clip_visual_fade,
-    _clip_volume,
-    _clip_volume_filter,
     _first_missing_file_asset_for_export,
     _has_solo_audio_tracks,
     _is_main_file_clip,
@@ -46,7 +38,6 @@ from .timeline import (
     _resolve_audio_clip_paths,
     _resolve_overlay_clip_paths,
     _timeline_gap_plan,
-    _video_layer_audio_clips_for_export,
 )
 from .export_projection import (
     project_canvas_settings as _project_canvas_settings,
@@ -56,18 +47,18 @@ from .export_projection import (
     project_output_settings as _project_output_settings,
 )
 from .timeline_math import (
+    clip_canvas_fit as _clip_canvas_fit,
     clip_duration_sec as _clip_duration_sec,
     clip_freeze_frame_sec as _clip_freeze_frame_sec,
     clip_has_speed_ramp as _clip_has_speed_ramp,
-    clip_preserve_pitch as _clip_preserve_pitch,
     clip_reverse as _clip_reverse,
     clip_speed as _clip_speed,
     clip_speed_segments as _clip_speed_segments,
     clip_timeline_duration_sec as _clip_timeline_duration_sec,
 )
+from .media_policy import is_looping_animation_path
 from ...video_composer import (
     MontageComposerError,
-    _concat_file_line,
     _is_hard_cut,
     _parse_transition_for_edge,
     ffprobe_streams,
@@ -129,7 +120,24 @@ def _overlay_video_decoder_args(path: Path, ffprobe: Path) -> list[str]:
 
 
 def _is_looping_animation_file(path: Path) -> bool:
-    return path.suffix.lower() == ".gif"
+    return is_looping_animation_path(path)
+
+
+def _visual_event_window(clip: dict[str, Any], start: float, end: float) -> tuple[float, float]:
+    events = clip.get("_transition_events") if isinstance(clip.get("_transition_events"), list) else []
+    return (
+        min([start, *(float(event.get("start_sec") or start) for event in events if isinstance(event, dict))]),
+        max([end, *(float(event.get("end_sec") or end) for event in events if isinstance(event, dict))]),
+    )
+
+
+def _visual_enable_window(clip: dict[str, Any], start: float, end: float) -> tuple[float, float]:
+    if not clip.get("_transition_projection_only"):
+        return _visual_event_window(clip, start, end)
+    events = clip.get("_transition_events") if isinstance(clip.get("_transition_events"), list) else []
+    starts = [float(event.get("start_sec") or start) for event in events if isinstance(event, dict)]
+    ends = [float(event.get("end_sec") or end) for event in events if isinstance(event, dict)]
+    return (min(starts), max(ends)) if starts and ends else (start, end)
 
 
 def _composite_overlays_on_base(
@@ -140,6 +148,7 @@ def _composite_overlays_on_base(
     overlay_clips: list[dict[str, Any]],
     out_mp4: Path,
     video_encode_quality: list[str],
+    blur_amount: int = 24,
     progress_callback: ProgressCallback | None = None,
     cancel_event: Any | None = None,
     progress_start: float = 0.70,
@@ -177,10 +186,11 @@ def _composite_overlays_on_base(
             "lite_cut_overlay_base_probe",
             "intermediate",
         )
-        total = max(float(base_info.get("duration") or 0), end, 0.1)
+        render_start, render_end = _visual_enable_window(clip, start, end)
+        total = max(float(base_info.get("duration") or 0), render_end, 0.1)
 
         if clip.get("type") == "text":
-            enable = f"between(t,{start:.4f},{end:.4f})"
+            enable = f"between(t,{render_start:.4f},{render_end:.4f})"
             export_text_clip = clip
             text_config = clip.get("text") if isinstance(clip.get("text"), dict) else {}
             custom_font_file = str(text_config.get("font_file") or "").strip()
@@ -194,7 +204,13 @@ def _composite_overlays_on_base(
                     **clip,
                     "text": {**text_config, "font_file": str(staged_font_path)},
                 }
-            fc = _drawtext_filter_complex(text_clip=export_text_clip, enable_expr=enable, canvas_width=int(base_info.get("width") or 1920), canvas_height=int(base_info.get("height") or 1080))
+            fc = _drawtext_filter_complex(
+                text_clip=export_text_clip,
+                enable_expr=enable,
+                canvas_width=int(base_info.get("width") or 1920),
+                canvas_height=int(base_info.get("height") or 1080),
+                fps=float(base_info.get("fps") or 60.0),
+            )
             cmd = [
                 str(ffmpeg_bin),
                 "-y",
@@ -220,24 +236,17 @@ def _composite_overlays_on_base(
                 logger.warning("lite_cut overlay missing: %s", fp)
                 continue
 
-            if fp.suffix.lower() in still_ext:
+            if fp.suffix.lower() in still_ext and not _is_looping_animation_file(fp):
                 tr = clip.get("transform") if isinstance(clip.get("transform"), dict) else {}
-                tx, ty, size_frac, rotation = _overlay_layout_from_transform(tr)
-                height_frac = _overlay_height_from_transform(tr)
-                opacity = _overlay_opacity_from_transform(tr)
-                enable = f"between(t,{start:.4f},{end:.4f})"
+                render_start, render_end = _visual_enable_window(clip, start, end)
+                enable = f"between(t,{render_start:.4f},{render_end:.4f})"
                 fc = _overlay_filter_complex(
                     enable_expr=enable,
                     timeline_start=start,
                     duration=dur,
-                    tx=tx,
-                    ty=ty,
-                    size_frac=size_frac,
-                    height_frac=height_frac,
-                    rotation=rotation,
-                    opacity=opacity,
-                    fade_in=_clip_visual_fade(clip, "fade_in_sec"),
-                    fade_out=_clip_visual_fade(clip, "fade_out_sec"),
+                    transform=tr,
+                    content_fit=str(clip.get("content_fit") or "fill"),
+                    blur_amount=blur_amount,
                     video_input=False,
                     flip_horizontal=bool(clip.get("flip_horizontal")),
                     flip_vertical=bool(clip.get("flip_vertical")),
@@ -247,8 +256,7 @@ def _composite_overlays_on_base(
                     freeze_frame_sec=_clip_freeze_frame_sec(clip),
                     canvas_width=int(base_info.get("width") or 1920),
                     canvas_height=int(base_info.get("height") or 1080),
-                    transition_in=clip.get("transition_in"),
-                    transition_out=clip.get("transition_out"),
+                    transition_events=clip.get("_transition_events"),
                 )
                 cmd = [
                     str(ffmpeg_bin),
@@ -261,7 +269,7 @@ def _composite_overlays_on_base(
                     "-loop",
                     "1",
                     "-framerate",
-                    "60",
+                    f"{max(1.0, min(1000.0, float(base_info.get('fps') or 60.0))):.6f}",
                     "-t",
                     f"{total:.4f}",
                     "-i",
@@ -279,22 +287,15 @@ def _composite_overlays_on_base(
                 ]
             else:
                 tr = clip.get("transform") if isinstance(clip.get("transform"), dict) else {}
-                tx, ty, size_frac, rotation = _overlay_layout_from_transform(tr)
-                height_frac = _overlay_height_from_transform(tr)
-                opacity = _overlay_opacity_from_transform(tr)
-                enable = f"between(t,{start:.4f},{end:.4f})"
+                render_start, render_end = _visual_enable_window(clip, start, end)
+                enable = f"between(t,{render_start:.4f},{render_end:.4f})"
                 fc = _overlay_filter_complex(
                     enable_expr=enable,
                     timeline_start=start,
                     duration=dur,
-                    tx=tx,
-                    ty=ty,
-                    size_frac=size_frac,
-                    height_frac=height_frac,
-                    rotation=rotation,
-                    opacity=opacity,
-                    fade_in=_clip_visual_fade(clip, "fade_in_sec"),
-                    fade_out=_clip_visual_fade(clip, "fade_out_sec"),
+                    transform=tr,
+                    content_fit=str(clip.get("content_fit") or "fill"),
+                    blur_amount=blur_amount,
                     video_input=True,
                     speed=_clip_speed(clip),
                     flip_horizontal=bool(clip.get("flip_horizontal")),
@@ -306,8 +307,7 @@ def _composite_overlays_on_base(
                     speed_segments=[(a - float(clip.get("trim_in") or 0), b - float(clip.get("trim_in") or 0), s) for a, b, s in _clip_speed_segments(clip)] if _clip_has_speed_ramp(clip) else None,
                     canvas_width=int(base_info.get("width") or 1920),
                     canvas_height=int(base_info.get("height") or 1080),
-                    transition_in=clip.get("transition_in"),
-                    transition_out=clip.get("transition_out"),
+                    transition_events=clip.get("_transition_events"),
                 )
                 cmd = [
                     str(ffmpeg_bin),
@@ -378,11 +378,11 @@ def _mix_audio_tracks_on_base(
     base_mp4: Path,
     audio_clips: list[dict[str, Any]],
     out_mp4: Path,
-    master_volume: float = 1.0,
+    master_volume: float = AUDIO_MASTER_GAIN_DEFAULT,
     cancel_event: Any | None = None,
 ) -> None:
     _raise_if_cancelled(cancel_event)
-    master_volume = max(0.0, min(2.0, float(master_volume)))
+    master_volume = max(AUDIO_MASTER_GAIN_MIN, min(AUDIO_MASTER_GAIN_MAX, float(master_volume)))
     base_info = probe_video_audio_summary(
         base_mp4,
         ffprobe,
@@ -393,7 +393,7 @@ def _mix_audio_tracks_on_base(
         base_duration = max(0.0, float(base_info.get("duration") or 0.0))
     except (TypeError, ValueError):
         base_duration = 0.0
-    if not audio_clips and (not base_info.get("has_audio") or abs(master_volume - 1.0) <= 1e-6):
+    if not audio_clips:
         import shutil
 
         shutil.copy2(base_mp4, out_mp4)
@@ -406,14 +406,14 @@ def _mix_audio_tracks_on_base(
             existing.append((clip, fp))
         else:
             logger.warning("lite_cut audio missing: %s", fp)
-    if not existing and (not base_info.get("has_audio") or abs(master_volume - 1.0) <= 1e-6):
+    if not existing:
         import shutil
 
         shutil.copy2(base_mp4, out_mp4)
         return
 
     filter_complex = _audio_mix_filter_complex(
-        has_base_audio=bool(base_info.get("has_audio")),
+        has_base_audio=False,
         audio_clips=[clip for clip, _fp in existing],
         master_volume=master_volume,
     )
@@ -678,8 +678,6 @@ def _lite_cut_clip_to_ts(
     background_color: str,
     blur_amount: int,
     video_encode_quality: list[str],
-    transition_in_background: bool = False,
-    transition_out_background: bool = False,
     cancel_event: Any | None = None,
 ) -> None:
     _raise_if_cancelled(cancel_event)
@@ -687,10 +685,19 @@ def _lite_cut_clip_to_ts(
     source_duration = _clip_duration_sec(clip)
     timeline_duration = _clip_timeline_duration_sec(clip)
     speed = _clip_speed(clip)
-    preserve_pitch = _clip_preserve_pitch(clip)
-    volume = _clip_volume(clip)
     ramped = _clip_has_speed_ramp(clip)
-    visual_clip = {**clip, "speed": 1.0, "speed_keyframes": []} if ramped else clip
+    visual_clip = {**clip, "speed": 1.0, "speed_keyframes": []} if ramped else {**clip}
+    timeline_start = max(0.0, float(clip.get("timeline_start") or 0.0))
+    visual_clip["_transition_events"] = [
+        {
+            **event,
+            "start_sec": float(event.get("start_sec") or 0.0) - timeline_start,
+            "end_sec": float(event.get("end_sec") or 0.0) - timeline_start,
+            "cut_sec": float(event.get("cut_sec") or 0.0) - timeline_start,
+        }
+        for event in clip.get("_transition_events") or []
+        if isinstance(event, dict) and event.get("mode") != "boundary"
+    ]
     vf = _clip_video_filter_chain(
         visual_clip,
         width=width,
@@ -701,19 +708,7 @@ def _lite_cut_clip_to_ts(
         blur_amount=blur_amount,
         timeline_duration_override=timeline_duration if ramped else None,
     )
-    af = _audio_filter_chain(
-        1.0 if ramped else speed,
-        volume,
-        reverse=_clip_reverse(clip),
-        preserve_pitch=preserve_pitch,
-        volume_filter=_clip_volume_filter(clip),
-        freeze_frame_sec=_clip_freeze_frame_sec(clip),
-    )
-    # Every normalized segment must have matching A/V duration. ``-shortest``
-    # silently picks the shorter stream (often audio by a few packets), which
-    # loses time once per clip and turns into a visible drift after concat.
-    audio_duration_filter = f"apad=pad_dur={timeline_duration:.6f},atrim=end={timeline_duration:.6f},asetpts=PTS-STARTPTS"
-    has_canvas_transform = isinstance(clip.get("transform"), dict) or transition_in_background or transition_out_background
+    content_fit = _clip_canvas_fit(clip, canvas_fit)
 
     cmd = [
         str(ffmpeg_bin),
@@ -738,53 +733,36 @@ def _lite_cut_clip_to_ts(
                 f"[0:v]trim=start={start - trim_in:.6f}:end={end - trim_in:.6f},setpts=PTS-STARTPTS,setpts=PTS/{segment_speed:.6f}{label}"
             )
         graph_parts.append("".join(video_labels) + f"concat=n={len(video_labels)}:v=1:a=0[rampv]")
-        if has_canvas_transform:
-            graph_parts.append(_clip_canvas_transform_graph("[rampv]", "[vout]", clip=clip, fitted_filter=vf, width=width, height=height, fps=fps, duration=timeline_duration, background_color=background_color, transition_in_background=transition_in_background, transition_out_background=transition_out_background))
-        else:
-            graph_parts.append(f"[rampv]{vf}[vout]")
-        has_audio = bool(probe_video_audio_summary(src, resolve_ffprobe_binary(ffmpeg_bin)).get("has_audio"))
-        if has_audio:
-            audio_labels: list[str] = []
-            for index, (start, end, segment_speed) in enumerate(_clip_speed_segments(clip)):
-                label = f"[ra{index}]"
-                audio_labels.append(label)
-                chain = [
-                    f"atrim=start={start - trim_in:.6f}:end={end - trim_in:.6f}",
-                    "asetpts=PTS-STARTPTS",
-                    *(_atempo_chain(segment_speed) if preserve_pitch else _pitch_shift_speed_chain(segment_speed)),
-                ]
-                graph_parts.append(f"[0:a]{','.join(chain)}{label}")
-            graph_parts.append("".join(audio_labels) + f"concat=n={len(audio_labels)}:v=0:a=1[rampa]")
-            graph_parts.append(f"[rampa]{','.join(part for part in (af, audio_duration_filter) if part)}[aout]")
-        else:
-            graph_parts.append(
-                f"anullsrc=r=48000:cl=stereo,atrim=0:{timeline_duration:.6f},asetpts=PTS-STARTPTS[aout]"
-            )
+        graph_parts.append(_clip_canvas_transform_graph(
+            "[rampv]", "[vout]", clip=visual_clip, source_filter=vf,
+            content_fit=content_fit, width=width, height=height, fps=fps,
+            duration=timeline_duration, background_color=background_color,
+            blur_amount=blur_amount,
+        ))
+        graph_parts.append(
+            f"anullsrc=r=48000:cl=stereo,atrim=0:{timeline_duration:.6f},asetpts=PTS-STARTPTS[aout]"
+        )
         cmd.extend(["-filter_complex", ";".join(graph_parts), "-map", "[vout]"])
         cmd.extend(["-map", "[aout]"])
     else:
-        has_audio = bool(probe_video_audio_summary(src, resolve_ffprobe_binary(ffmpeg_bin)).get("has_audio"))
-        if not has_audio:
-            # Keep every normalized segment dual-stream so concat and cut-boundary
-            # transitions work for recordings or uploads with no audio track.
-            cmd.extend([
-                "-f",
-                "lavfi",
-                "-t",
-                f"{timeline_duration + 0.1:.6f}",
-                "-i",
-                "anullsrc=r=48000:cl=stereo",
-            ])
-        if has_canvas_transform:
-            cmd.extend(["-filter_complex", _clip_canvas_transform_graph("[0:v]", "[vout]", clip=clip, fitted_filter=vf, width=width, height=height, fps=fps, duration=timeline_duration, background_color=background_color, transition_in_background=transition_in_background, transition_out_background=transition_out_background), "-map", "[vout]"])
-        else:
-            cmd.extend(["-vf", vf])
-        if has_audio:
-            cmd.extend(["-af", ",".join(part for part in (af, audio_duration_filter) if part)])
-        if has_canvas_transform and has_audio:
-            cmd.extend(["-map", "0:a:0"])
-        if not has_audio:
-            cmd.extend([*([] if has_canvas_transform else ["-map", "0:v:0"]), "-map", "1:a:0"])
+        # V tracks are visual-only. Keep a silent stream solely so normalized
+        # segments remain concat/transition compatible; real audio is mixed
+        # later from explicit A-track events.
+        cmd.extend([
+            "-f",
+            "lavfi",
+            "-t",
+            f"{timeline_duration + 0.1:.6f}",
+            "-i",
+            "anullsrc=r=48000:cl=stereo",
+        ])
+        cmd.extend(["-filter_complex", _clip_canvas_transform_graph(
+            "[0:v]", "[vout]", clip=visual_clip, source_filter=vf,
+            content_fit=content_fit, width=width, height=height, fps=fps,
+            duration=timeline_duration, background_color=background_color,
+            blur_amount=blur_amount,
+        ), "-map", "[vout]"])
+        cmd.extend(["-map", "1:a:0"])
     cmd.extend([
         *video_encode_quality,
         "-c:a",
@@ -812,35 +790,79 @@ def _lite_cut_clip_to_ts(
         raise MontageComposerError("MONTAGE_CLIP_NORMALIZE_FAILED", name=src.name)
 
 
+def _timeline_concat_filter_complex(
+    *,
+    segment_count: int,
+    fps: float,
+) -> str:
+    """Join independently encoded timeline segments in the decoded-frame domain.
+
+    A concat-demuxer stream copy is not a valid scene boundary for independently
+    initialized H.264 encoders.  It can produce a file that decodes in a simple
+    single-input pass but deadlocks FFmpeg framesync when the result is later used
+    by ``overlay``.  Every segment is therefore decoded as its own input and the
+    timeline is rebuilt from continuous video/audio frames before the selected
+    production encoder is invoked.
+    """
+
+    if segment_count <= 0:
+        raise ValueError("segment_count must be positive")
+    fps_s = f"{max(1.0, float(fps)):.9f}".rstrip("0").rstrip(".")
+    parts: list[str] = []
+    inputs: list[str] = []
+    for index in range(segment_count):
+        parts.extend([
+            (
+                f"[{index}:v:0]fps={fps_s},settb=AVTB,"
+                f"setpts=PTS-STARTPTS[timeline_v{index}]"
+            ),
+            (
+                f"[{index}:a:0]aresample=48000:async=1:first_pts=0,"
+                f"asetpts=PTS-STARTPTS[timeline_a{index}]"
+            ),
+        ])
+        inputs.extend([f"[timeline_v{index}]", f"[timeline_a{index}]"])
+    parts.append(
+        "".join(inputs)
+        + f"concat=n={segment_count}:v=1:a=1[timeline_vout][timeline_aout]"
+    )
+    return ";".join(parts)
+
+
 def _concat_timeline_command(
     *,
     ffmpeg_bin: Path,
-    concat_list: Path,
+    segment_paths: Sequence[Path],
     output_path: Path,
+    fps: float,
+    video_encode_quality: Sequence[str],
 ) -> list[str]:
-    """Join PCM timeline segments and perform the base track's sole AAC encode."""
-    return [
+    """Build the frame-domain timeline assembly command.
+
+    ``video_encode_quality`` is supplied by the unchanged shared encoder plan;
+    this assembly layer neither selects a codec nor alters device bindings.
+    """
+
+    paths = [Path(path) for path in segment_paths]
+    if not paths:
+        raise ValueError("at least one timeline segment is required")
+    command = [
         str(ffmpeg_bin),
         "-y",
         "-hide_banner",
         "-loglevel",
         "error",
-        "-fflags",
-        "+genpts",
-        "-f",
-        "concat",
-        "-safe",
-        "0",
-        "-i",
-        str(concat_list),
+    ]
+    for path in paths:
+        command.extend(["-i", str(path)])
+    command.extend([
+        "-filter_complex",
+        _timeline_concat_filter_complex(segment_count=len(paths), fps=fps),
         "-map",
-        "0:v:0",
+        "[timeline_vout]",
         "-map",
-        "0:a:0",
-        "-c:v",
-        "copy",
-        "-af",
-        "aresample=48000:async=1:first_pts=0",
+        "[timeline_aout]",
+        *[str(item) for item in video_encode_quality],
         "-c:a",
         "aac",
         "-b:a",
@@ -854,7 +876,8 @@ def _concat_timeline_command(
         "-movflags",
         "+faststart",
         str(output_path),
-    ]
+    ])
+    return command
 
 
 def _compose_lite_cut_montage_once(
@@ -870,7 +893,7 @@ def _compose_lite_cut_montage_once(
     encoder_adapter: object | None = None,
     rife_device_plan: FrameMeldRifeDevicePlan | None = None,
 ) -> None:
-    """Export LiteCut schema v2 body — V1 main track with trim, eq, and transitions."""
+    """Export a LiteCut schema-v3 body with trim, effects, and transition events."""
     export_plan = build_lite_cut_export_plan(project_body)
     framemeld_requested = export_plan.framemeld_enabled
     external_progress_callback = progress_callback
@@ -928,7 +951,7 @@ def _compose_lite_cut_montage_once(
     ffprobe = resolve_ffprobe_binary(ffmpeg_bin)
 
     overlay_clips = _resolve_overlay_clip_paths(
-        list(export_plan.video_layers),
+        [*export_plan.transition_layers, *export_plan.video_layers],
         clip_path_by_id,
     )
     framemeld_source_paths = list(paths)
@@ -967,6 +990,13 @@ def _compose_lite_cut_montage_once(
         # Preserve one real source-rate family until the external final pass.
         fps = framemeld_working_fps(source_fps_values)
     canvas_fit, background_color, blur_amount = _project_canvas_settings(project_body)
+    overlay_clips = [
+        {
+            **clip,
+            "content_fit": _clip_canvas_fit(clip, canvas_fit),
+        } if clip.get("is_timeline_video_layer") else clip
+        for clip in overlay_clips
+    ]
     range_start_sec, range_end_sec = _project_export_range(project_body)
     _emit_progress(progress_callback, 0.08, "normalizing")
 
@@ -988,8 +1018,6 @@ def _compose_lite_cut_montage_once(
                 background_color=background_color,
                 blur_amount=blur_amount,
                 video_encode_quality=video_encode_quality,
-                transition_in_background=i == 0,
-                transition_out_background=i == len(clips) - 1,
                 cancel_event=cancel_event,
             )
             normed.append(out_ts)
@@ -1061,19 +1089,26 @@ def _compose_lite_cut_montage_once(
             _emit_progress(progress_callback, 0.58, "transitions")
 
         _raise_if_cancelled(cancel_event)
-        concat_list = Path(tmpdir) / "concat.txt"
-        concat_list.write_text("\n".join(_concat_file_line(p) for p in concat_paths) + "\n", encoding="utf-8")
         _emit_progress(progress_callback, 0.62, "concat")
 
         cmd_concat = _concat_timeline_command(
             ffmpeg_bin=ffmpeg_bin,
-            concat_list=concat_list,
+            segment_paths=concat_paths,
             output_path=output_path,
+            fps=fps,
+            video_encode_quality=video_encode_quality,
         )
         r = _run_ffmpeg_process(cmd_concat, timeout=3600, cancel_event=cancel_event)
         if r.returncode != 0:
             tail = (r.stderr or r.stdout or "").strip()[-600:]
             logger.error("lite_cut concat failed: %s", tail)
+            raise_hardware_encoder_failure(
+                cmd_concat,
+                r,
+                stage="lite_cut_timeline_assemble",
+                artifact_path=output_path,
+                public_code="MONTAGE_EXPORT_FAILED",
+            )
             raise MontageComposerError("MONTAGE_EXPORT_FAILED")
         _emit_progress(progress_callback, 0.68, "concat")
 
@@ -1088,6 +1123,7 @@ def _compose_lite_cut_montage_once(
                 ffprobe=ffprobe,
                 base_mp4=v1_base,
                 overlay_clips=overlay_clips,
+                blur_amount=blur_amount,
                 out_mp4=output_path,
                 video_encode_quality=video_encode_quality,
                 progress_callback=progress_callback,
@@ -1101,7 +1137,7 @@ def _compose_lite_cut_montage_once(
         audio_clips = list(export_plan.audio_events)
         audio_clips = _resolve_audio_clip_paths(audio_clips, clip_path_by_id)
         master_volume = export_plan.master_volume
-        if audio_clips or abs(master_volume - 1.0) > 1e-6:
+        if audio_clips:
             _raise_if_cancelled(cancel_event)
             _emit_progress(progress_callback, 0.88, "audio")
             audio_base = Path(tmpdir) / "visual_base.mp4"

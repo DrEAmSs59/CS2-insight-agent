@@ -16,6 +16,7 @@ logger = logging.getLogger(__name__)
 
 _WAVEFORM_SAMPLE_RATE = 400
 _WAVEFORM_CACHE_BUCKETS = 16384
+_WAVEFORM_VIEW_MAX_BUCKETS = 512
 _WAVEFORM_LOCKS = tuple(threading.Lock() for _ in range(64))
 
 
@@ -85,9 +86,11 @@ def load_or_create_waveform_cache(
     *,
     ffmpeg_bin: Path,
     duration_sec: float | None = None,
+    cache_path: Path | None = None,
 ) -> tuple[dict[str, Any], bool]:
     source = source.resolve()
-    cache_path = waveform_cache_path(source)
+    cache_path = (cache_path or waveform_cache_path(source)).resolve()
+    cache_path.parent.mkdir(parents=True, exist_ok=True)
     with _waveform_lock(cache_path):
         cached = _read_valid_cache(cache_path, source)
         if cached is not None:
@@ -141,13 +144,15 @@ def waveform_view(
     left = max(0, min(len(source), int((start / duration) * len(source))))
     right = max(left + 1, min(len(source), int((end / duration) * len(source) + 0.999)))
     selected = array("f", source[left:right])
-    values = _bucket_peaks(selected, max(8, min(512, int(buckets))))
-    peak = max(max(values, default=0.0), 0.0001)
-    normalized = [round(max(0.04, min(1.0, value / peak)), 4) for value in values]
+    values = _bucket_peaks(selected, max(8, min(_WAVEFORM_VIEW_MAX_BUCKETS, int(buckets))))
+    global_peak = max(max(source, default=0.0), 0.0001)
+    normalized = [round(max(0.04, min(1.0, value / global_peak)), 4) for value in values]
     return {
         "peaks": normalized,
         "duration_sec": duration,
         "start_sec": start,
         "end_sec": end,
         "buckets": len(normalized),
+        "cache_buckets": len(source),
+        "normalization_peak": global_peak,
     }

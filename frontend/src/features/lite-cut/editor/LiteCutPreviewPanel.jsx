@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { Maximize2, Minimize2, Pause, Play, SkipBack, SkipForward, Volume2, ZoomIn, ZoomOut } from "lucide-react";
+import { Loader2, Maximize2, Minimize2, Pause, Play, SkipBack, SkipForward, Volume2, ZoomIn, ZoomOut } from "lucide-react";
 import { TEXT_STYLE_CARDS } from "./editorPresets.js";
 import { startPendingDrag } from "./timelineInteraction.js";
-import { normalizePreviewLayerTransform, previewMediaIdentity, promotedUnderlayForMain, shouldPublishVideoTimeUpdate, shouldUseMediaPreviewClock, transitionVisualAtLocalTime } from "./previewFrameUtils.js";
+import { isHandoffFrameReady, previewMediaIdentity, previewUnderlayOpacity, previewUnderlayPlaybackStateKey, previewUnderlaySyncKey, promotedUnderlayForMain, SEGMENT_HANDOFF_TOLERANCE_SEC, shouldPublishVideoTimeUpdate, shouldUseMediaPreviewClock } from "./previewFrameUtils.js";
+import { normalizeSceneTransform, sceneMaterialLayout, sceneTransformStyle, VIDEO_SCENE_TRANSFORM_DEFAULTS } from "../state/sceneTransform.js";
 import PreviewAudioItem from "./PreviewAudioItem.jsx";
-import { createMediaElementRefRegistry, drawVideoFrame, isInterruptedPlaybackError, releaseMediaElement } from "./previewMediaElementUtils.js";
+import { captureThenReleaseMediaElements, createMediaElementRefRegistry, drawVideoFrame, isInterruptedPlaybackError, releaseMediaElement } from "./previewMediaElementUtils.js";
 import PreviewOverlayItem from "./LiteCutPreviewOverlay.jsx";
 import {
   usePreviewFullscreen,
@@ -12,6 +13,12 @@ import {
   usePreviewViewportFit,
 } from "./usePreviewMediaLifecycle.js";
 import { usePreviewFrameClock, usePreviewSeekGuard } from "./usePreviewMediaClock.js";
+import {
+  clampSceneScale,
+  clampSceneSize,
+  scenePositionForCanvasDrag,
+  snapCanvasRotation,
+} from "./sceneCanvasInteraction.js";
 
 function formatTime(sec) {
   const s = Math.max(0, sec);
@@ -45,6 +52,11 @@ export default function LiteCutPreviewPanel({
   textStyleId = "clutch",
   selectedElement = "text",
   streamUrl = null,
+  mediaTimeOffset = 0,
+  segmentedPreview = false,
+  previewPending = false,
+  previewProxyError = "",
+  onPreviewRetry,
   preloadStreamUrl = null,
   preloadSourceTime = 0,
   previewClipId = null,
@@ -58,19 +70,18 @@ export default function LiteCutPreviewPanel({
   freezePlayback = false,
   transitionMainOpacity = 1,
   transitionMainTransform = "",
+  transitionMainTransformOrigin = "",
   transitionMainClipPath = "",
-  transitionOutgoingTransform = "",
-  transitionOutgoingTransformOrigin = "",
+  transitionCompanionTransform = "",
+  transitionCompanionTransformOrigin = "",
   transitionFlashOpacity = 0,
   transitionBlackOpacity = 0,
-  transitionSpec = null,
   clipLocalTime = 0,
-  clipVisibleDuration = 0,
-  clipFadeInSec = 0,
-  clipFadeOutSec = 0,
   mainFlipHorizontal = false,
   mainFlipVertical = false,
   mainCrop = null,
+  mainSourceWidth = 0,
+  mainSourceHeight = 0,
   mainFilter = "",
   mainLayerTransform = null,
   mainLayerSelected = false,
@@ -116,8 +127,10 @@ export default function LiteCutPreviewPanel({
   const [videoDuration, setVideoDuration] = useState(null);
   const [playError, setPlayError] = useState(null);
   const [heldSwitchFrame, setHeldSwitchFrame] = useState(null);
+  const [segmentMediaLoading, setSegmentMediaLoading] = useState(false);
   const [dropHover, setDropHover] = useState(false);
   const [mainLayerDragging, setMainLayerDragging] = useState(false);
+  const [mainNaturalSize, setMainNaturalSize] = useState({ width: 0, height: 0 });
   const [previewZoom, setPreviewZoom] = useState(100);
   const previewFitWidth = usePreviewViewportFit(previewViewportRef, { canvasWidth, canvasHeight });
   const { isFullscreen, toggleFullscreen } = usePreviewFullscreen(canvasRef);
@@ -126,6 +139,8 @@ export default function LiteCutPreviewPanel({
   const [alignmentGuides, setAlignmentGuides] = useState({ x: null, y: null });
   const styleCard = TEXT_STYLE_CARDS.find((c) => c.id === textStyleId) || TEXT_STYLE_CARDS.find((c) => c.id === "clutch");
   const hasStream = Boolean(streamUrl);
+  const sourceOffset = Math.max(0, Number(mediaTimeOffset) || 0);
+  const playbackStreamReady = hasStream && (!segmentedPreview || !previewPending);
   const mediaIdentity = previewMediaIdentity(previewClipId, streamUrl);
   const safePlaybackRate = Math.max(0.25, Math.min(4, Number(playbackRate) || 1));
   const inputTimelineTime = Math.max(0, Number(timelinePlayhead ?? playheadSec) || 0);
@@ -154,40 +169,29 @@ export default function LiteCutPreviewPanel({
   } = usePreviewFrameClock({
     clipLocalTime,
     freezePlayback,
-    hasStream,
+    hasStream: playbackStreamReady,
     inputLocalTime,
     inputTimelineTime,
     isPlaying,
+    mediaTimeOffset: sourceOffset,
     mediaIdentity,
     onPlayheadChange,
     playheadSec,
+    preventBackwardHandoff: segmentedPreview,
     previewClipId,
     reversePlayback,
     safePlaybackRate,
     setHeldSwitchFrame,
     streamUrl,
+    handoffToleranceSec: segmentedPreview ? SEGMENT_HANDOFF_TOLERANCE_SEC : undefined,
     underlayVideoRefs,
     videoRef,
   });
 
-  const useMediaClock = shouldUseMediaPreviewClock({ hasStream, isPlaying, reversePlayback, freezePlayback });
+  const useMediaClock = shouldUseMediaPreviewClock({ hasStream: playbackStreamReady, isPlaying, reversePlayback, freezePlayback });
   const localTime = useMediaClock ? previewClock.clipLocalTime : inputLocalTime;
   const displayTimelineTime = useMediaClock ? previewClock.timelineTime : inputTimelineTime;
-  const visibleDuration = Math.max(0, Number(clipVisibleDuration) || 0);
-  const clipFadeIn = Math.max(0, Number(clipFadeInSec) || 0);
-  const clipFadeOut = Math.max(0, Number(clipFadeOutSec) || 0);
-  const clipFadeInFactor = clipFadeIn > 0 ? Math.min(1, localTime / clipFadeIn) : 1;
-  const clipFadeOutFactor =
-    clipFadeOut > 0 && visibleDuration > 0 ? Math.min(1, Math.max(0, (visibleDuration - localTime) / clipFadeOut)) : 1;
-  const liveTransitionVisual = transitionVisualAtLocalTime(transitionSpec, localTime);
-  const resolvedTransitionOpacity = liveTransitionVisual?.mainOpacity ?? transitionMainOpacity;
-  const resolvedTransitionTransform = liveTransitionVisual?.mainTransform ?? transitionMainTransform;
-  const resolvedTransitionClipPath = liveTransitionVisual?.mainClipPath ?? transitionMainClipPath;
-  const resolvedOutgoingTransitionTransform = liveTransitionVisual?.outgoingTransform ?? transitionOutgoingTransform;
-  const resolvedOutgoingTransitionTransformOrigin = liveTransitionVisual?.outgoingTransformOrigin ?? transitionOutgoingTransformOrigin;
-  const resolvedFlashOpacity = liveTransitionVisual?.flashOpacity ?? transitionFlashOpacity;
-  const resolvedBlackOpacity = liveTransitionVisual?.blackOpacity ?? transitionBlackOpacity;
-  const videoOpacity = Math.min(clipFadeInFactor, clipFadeOutFactor) * Math.max(0, Math.min(1, Number(resolvedTransitionOpacity) || 0));
+  const videoOpacity = Math.max(0, Math.min(1, Number(transitionMainOpacity) || 0));
   const fitMode = ["contain", "cover", "blur"].includes(canvasFit) ? canvasFit : "contain";
   const normalizedMainCrop = {
     x: Math.max(0, Math.min(1, Number(mainCrop?.x) || 0)),
@@ -203,19 +207,11 @@ export default function LiteCutPreviewPanel({
     y: normalizedMainCrop.y + normalizedMainCrop.height / 2,
   };
   const cropPreviewScale = hasMainCrop ? 1 / Math.min(normalizedMainCrop.width, normalizedMainCrop.height) : 1;
-  const mainObjectFit = !mainIsVideoLayer && (fitMode === "cover" || hasMainCrop) ? "object-cover" : "object-contain";
+  const mainObjectFit = fitMode === "cover" || hasMainCrop ? "object-cover" : fitMode === "fill" ? "object-fill" : "object-contain";
   const showCanvasBlur = !mainIsVideoLayer && fitMode === "blur";
   const canvasBg = /^#[0-9a-f]{6}$/i.test(String(canvasBackgroundColor || "")) ? canvasBackgroundColor : "#000000";
-  const blurPx = Math.max(8, Math.min(56, Number(canvasBlurAmount) || 24));
-
-  useLayoutEffect(() => {
-    const main = videoRef.current;
-    const background = bgVideoRef.current;
-    return () => {
-      releaseMediaElement(main);
-      if (background !== main) releaseMediaElement(background);
-    };
-  }, [mediaIdentity, showCanvasBlur]);
+  const blurPx = Math.max(4, Math.min(80, Number(canvasBlurAmount) || 24));
+  const blurFilter = `blur(${((blurPx / Math.max(1, Number(canvasHeight) || 1080)) * 100).toFixed(6)}cqh)`;
 
   useLayoutEffect(() => () => underlayMediaRegistryRef.current?.releaseAll(), []);
 
@@ -246,8 +242,6 @@ export default function LiteCutPreviewPanel({
     && (
       !canPromoteUnderlay
       || String(retainedPromotionLayerRef.current.id) !== String(previewClipId)
-      || String(retainedPromotionLayerRef.current.streamUrl || "") !== String(streamUrl || "")
-      || !hasStream
     )
   ) {
     retainedPromotionLayerRef.current = null;
@@ -260,45 +254,63 @@ export default function LiteCutPreviewPanel({
     : resolvedUnderlayLayers;
   const hasPromotedUnderlay = Boolean(promotedUnderlayLayer);
   const underlayLayerSignature = resolvedUnderlayLayers
-    .map((layer) => `${layer.id}:${layer.streamUrl}:${layer.playbackRate}:${layer.reversePlayback}`)
+    .map(previewUnderlayPlaybackStateKey)
     .join("|");
   const hasUnderlay = renderedUnderlayLayers.length > 0;
-  const hasTransitionUnderlay = renderedUnderlayLayers.some((layer) => String(layer?.id || "").startsWith("transition-"));
+  const hasTransitionUnderlay = renderedUnderlayLayers.some((layer) => Boolean(layer?.transitionLayer));
   useLayoutEffect(() => {
     previousUnderlayLayersRef.current = resolvedUnderlayLayers;
   }, [resolvedUnderlayLayers]);
   const mainReverse = Boolean(reversePlayback);
-  const normalizedMainLayerTransform = normalizePreviewLayerTransform(mainLayerTransform);
-  const transformedMainObjectFit = Math.abs(normalizedMainLayerTransform.width - normalizedMainLayerTransform.height) > 0.001
-    ? "object-fill"
-    : mainObjectFit;
+  const normalizedMainLayerTransform = normalizeSceneTransform(mainLayerTransform, VIDEO_SCENE_TRANSFORM_DEFAULTS);
+  const transformedMaterialFit = fitMode === "blur" ? "contain" : fitMode;
+  const mainMaterialLayout = sceneMaterialLayout({
+    transform: normalizedMainLayerTransform,
+    crop: normalizedMainCrop,
+    contentFit: transformedMaterialFit,
+    canvasWidth,
+    canvasHeight,
+    sourceWidth: mainNaturalSize.width || mainSourceWidth || canvasWidth,
+    sourceHeight: mainNaturalSize.height || mainSourceHeight || canvasHeight,
+  });
+  const mainBlurLayout = sceneMaterialLayout({
+    transform: normalizedMainLayerTransform,
+    crop: normalizedMainCrop,
+    contentFit: "cover",
+    canvasWidth,
+    canvasHeight,
+    sourceWidth: mainNaturalSize.width || mainSourceWidth || canvasWidth,
+    sourceHeight: mainNaturalSize.height || mainSourceHeight || canvasHeight,
+  });
   const mainFlipTransform = mainFlipHorizontal || mainFlipVertical ? `scale(${mainFlipHorizontal ? -1 : 1}, ${mainFlipVertical ? -1 : 1})` : undefined;
   const safeMainFilter = String(mainFilter || "").trim();
-  const safeTransitionTransform = String(resolvedTransitionTransform || "").trim();
-  const safeTransitionClipPath = String(resolvedTransitionClipPath || "").trim();
-  const safeOutgoingTransitionTransform = String(resolvedOutgoingTransitionTransform || "").trim();
-  const safeOutgoingTransitionTransformOrigin = String(resolvedOutgoingTransitionTransformOrigin || "").trim();
-  const flashOpacity = Math.max(0, Math.min(1, Number(resolvedFlashOpacity) || 0));
-  const blackOpacity = Math.max(0, Math.min(1, Number(resolvedBlackOpacity) || 0));
+  const safeTransitionTransform = String(transitionMainTransform || "").trim();
+  const safeTransitionTransformOrigin = String(transitionMainTransformOrigin || "").trim();
+  const safeTransitionClipPath = String(transitionMainClipPath || "").trim();
+  const safeCompanionTransitionTransform = String(transitionCompanionTransform || "").trim();
+  const safeCompanionTransitionTransformOrigin = String(transitionCompanionTransformOrigin || "").trim();
+  const flashOpacity = Math.max(0, Math.min(1, Number(transitionFlashOpacity) || 0));
+  const blackOpacity = Math.max(0, Math.min(1, Number(transitionBlackOpacity) || 0));
   const safeMainVolume = Math.max(0, Math.min(1, Number(mainVolume) || 0));
   const mainAudioMuted = Boolean(mainMuted || safeMainVolume <= 0);
   const mainVideoStyle = mainIsVideoLayer
     ? {
-        left: `${(normalizedMainLayerTransform.x * 100).toFixed(2)}%`,
-        top: `${(normalizedMainLayerTransform.y * 100).toFixed(2)}%`,
-        width: `${(normalizedMainLayerTransform.width * 100).toFixed(2)}%`,
-        height: `${(normalizedMainLayerTransform.height * 100).toFixed(2)}%`,
-        opacity: hasPromotedUnderlay ? 0 : videoOpacity * normalizedMainLayerTransform.opacity,
-        filter: safeMainFilter || undefined,
+        ...sceneTransformStyle(normalizedMainLayerTransform, {
+          defaults: VIDEO_SCENE_TRANSFORM_DEFAULTS,
+          flipHorizontal: mainFlipHorizontal,
+          flipVertical: mainFlipVertical,
+          opacity: hasPromotedUnderlay ? 0 : videoOpacity,
+          prefixTransform: safeTransitionTransform,
+        }),
         clipPath: safeTransitionClipPath || undefined,
-        transform: `${safeTransitionTransform} translate(-50%, -50%) scale(${normalizedMainLayerTransform.scale * (mainFlipHorizontal ? -1 : 1)}, ${normalizedMainLayerTransform.scale * (mainFlipVertical ? -1 : 1)}) rotate(${normalizedMainLayerTransform.rotation}deg)`.trim(),
+        ...(safeTransitionTransformOrigin ? { transformOrigin: safeTransitionTransformOrigin } : {}),
         willChange: isPlaying ? "transform, opacity, clip-path, filter" : undefined,
       }
     : {
         opacity: hasPromotedUnderlay ? 0 : videoOpacity,
         filter: safeMainFilter || undefined,
         objectPosition: `${(cropCenter.x * 100).toFixed(2)}% ${(cropCenter.y * 100).toFixed(2)}%`,
-        transformOrigin: `${(cropCenter.x * 100).toFixed(2)}% ${(cropCenter.y * 100).toFixed(2)}%`,
+        transformOrigin: safeTransitionTransformOrigin || `${(cropCenter.x * 100).toFixed(2)}% ${(cropCenter.y * 100).toFixed(2)}%`,
         clipPath: safeTransitionClipPath || undefined,
         transform: `${safeTransitionTransform} ${mainFlipTransform || ""} scale(${cropPreviewScale.toFixed(4)})`.trim(),
         willChange: isPlaying ? "transform, opacity, clip-path, filter" : undefined,
@@ -349,7 +361,6 @@ export default function LiteCutPreviewPanel({
     e.preventDefault();
     e.stopPropagation();
     onMainLayerSelect?.();
-    if (!mainLayerSelected) return;
     const canvas = e.currentTarget.closest("[data-preview-canvas]");
     const rect = canvas?.getBoundingClientRect();
     if (!rect) return;
@@ -359,10 +370,16 @@ export default function LiteCutPreviewPanel({
     startPendingDrag(e.pointerId, origin, {
       onDragStart: () => setMainLayerDragging(true),
       onDragMove: (ev) => {
-        const sx = snapCanvasValue(Math.max(0, Math.min(1, ox + (ev.clientX - origin.x) / rect.width)));
-        const sy = snapCanvasValue(Math.max(0, Math.min(1, oy + (ev.clientY - origin.y) / rect.height)));
-        setAlignmentGuides({ x: sx.guide, y: sy.guide });
-        onMainLayerTransform?.({ x: sx.value, y: sy.value });
+        const position = scenePositionForCanvasDrag({
+          x: ox,
+          y: oy,
+          deltaX: ev.clientX - origin.x,
+          deltaY: ev.clientY - origin.y,
+          canvasWidth: rect.width,
+          canvasHeight: rect.height,
+        });
+        setAlignmentGuides(position.guides);
+        onMainLayerTransform?.({ x: position.x, y: position.y });
       },
       onDragEnd: () => { setMainLayerDragging(false); setAlignmentGuides({ x: null, y: null }); },
     });
@@ -382,7 +399,7 @@ export default function LiteCutPreviewPanel({
       onDragStart: () => setMainLayerDragging(true),
       onDragMove: (ev) => {
         const dist = Math.hypot(ev.clientX - cx, ev.clientY - cy);
-        onMainLayerTransform?.({ scale: Math.max(0.1, Math.min(5, originScale * (dist / originDist))) });
+        onMainLayerTransform?.({ scale: clampSceneScale(originScale * (dist / originDist)) });
       },
       onDragEnd: () => setMainLayerDragging(false),
     });
@@ -400,8 +417,8 @@ export default function LiteCutPreviewPanel({
     startPendingDrag(e.pointerId, origin, {
       onDragStart: () => setMainLayerDragging(true),
       onDragMove: (ev) => {
-        if (axis === "x") onMainLayerTransform?.({ width: Math.max(0.05, Math.min(1, originW + direction * ((ev.clientX - origin.x) * 2) / rect.width)) });
-        if (axis === "y") onMainLayerTransform?.({ height: Math.max(0.05, Math.min(1, originH + direction * ((ev.clientY - origin.y) * 2) / rect.height)) });
+        if (axis === "x") onMainLayerTransform?.({ width: clampSceneSize(originW + direction * ((ev.clientX - origin.x) * 2) / rect.width) });
+        if (axis === "y") onMainLayerTransform?.({ height: clampSceneSize(originH + direction * ((ev.clientY - origin.y) * 2) / rect.height) });
       },
       onDragEnd: () => setMainLayerDragging(false),
     });
@@ -421,7 +438,7 @@ export default function LiteCutPreviewPanel({
       onDragStart: () => setMainLayerDragging(true),
       onDragMove: (ev) => {
         const angle = Math.atan2(ev.clientY - cy, ev.clientX - cx);
-        onMainLayerTransform?.({ rotation: snapRotation(originRotation + ((angle - startAngle) * 180) / Math.PI) });
+        onMainLayerTransform?.({ rotation: snapCanvasRotation(originRotation + ((angle - startAngle) * 180) / Math.PI) });
       },
       onDragEnd: () => setMainLayerDragging(false),
     });
@@ -430,6 +447,7 @@ export default function LiteCutPreviewPanel({
   useEffect(() => {
     setVideoDuration(null);
     setPlayError(null);
+    setMainNaturalSize({ width: 0, height: 0 });
   }, [mediaIdentity]);
 
   useLayoutEffect(() => {
@@ -440,11 +458,27 @@ export default function LiteCutPreviewPanel({
     handoffStartedAtRef.current = 0;
     handoffSeekAtRef.current = 0;
     const element = videoRef.current;
+    const background = bgVideoRef.current;
     const captureConfig = switchCaptureConfigRef.current;
     return () => {
-      if (!retainedPromotionLayerRef.current) holdCompositedFrame(element, captureConfig);
+      captureThenReleaseMediaElements({
+        main: element,
+        background,
+        capture: (outgoing) => {
+          if (!retainedPromotionLayerRef.current) holdCompositedFrame(outgoing, captureConfig);
+        },
+      });
     };
   }, [holdCompositedFrame, mediaIdentity]);
+
+  useLayoutEffect(() => {
+    const background = bgVideoRef.current;
+    return () => releaseMediaElement(background);
+  }, [mediaIdentity, showCanvasBlur]);
+
+  useLayoutEffect(() => {
+    setSegmentMediaLoading(Boolean(segmentedPreview && hasStream));
+  }, [hasStream, mediaIdentity, segmentedPreview]);
 
   useEffect(() => {
     const el = preloadVideoRef.current;
@@ -486,15 +520,16 @@ export default function LiteCutPreviewPanel({
   }, [underlayLayerSignature]);
 
   const underlaySeekSignature = resolvedUnderlayLayers
-    .map((layer) => `${layer.id}:${Number(layer.sourceTime) || 0}`)
+    .map((layer) => previewUnderlaySyncKey(layer, isPlaying))
     .join("|");
   const { reverseSeekTargetRef } = usePreviewSeekGuard({
     backgroundVideoRef: bgVideoRef,
     fitMode,
     freezePlayback,
-    hasStream,
+    hasStream: playbackStreamReady,
     isPlaying,
     mainReverse,
+    mediaTimeOffset: sourceOffset,
     mediaIdentity,
     playheadSec,
     promotedPlaybackTime,
@@ -511,7 +546,7 @@ export default function LiteCutPreviewPanel({
     if (!hasStream) return;
     for (const el of [videoRef.current, bgVideoRef.current]) {
       if (!el) continue;
-      if (isPlaying && !mainReverse && !freezePlayback) {
+      if (playbackStreamReady && isPlaying && !mainReverse && !freezePlayback) {
         void el.play().catch((err) => {
           if (isInterruptedPlaybackError(err)) return;
           setPlayError(err?.message || "play_failed");
@@ -521,7 +556,7 @@ export default function LiteCutPreviewPanel({
         el.pause();
       }
     }
-  }, [isPlaying, hasStream, onTogglePlay, fitMode, mainReverse, freezePlayback, mediaIdentity]);
+  }, [isPlaying, hasStream, onTogglePlay, fitMode, mainReverse, freezePlayback, mediaIdentity, playbackStreamReady]);
 
   useEffect(() => {
     for (const layer of renderedUnderlayLayers) {
@@ -540,28 +575,36 @@ export default function LiteCutPreviewPanel({
   const handleVideoTimeUpdate = useCallback(() => {
     const el = videoRef.current;
     if (!el || !shouldPublishVideoTimeUpdate({
-      hasStream,
+      hasStream: playbackStreamReady,
       freezePlayback,
       reversePlayback,
       awaitingHandoff: Boolean(retainedPromotionLayerRef.current || presentedStreamRef.current !== mediaIdentity),
     })) return;
     // During a stream handoff the freshly mounted element briefly reports
     // pre-seek times; publishing them would rewind the global timeline clock.
-    onPlayheadChangeRef.current?.(el.currentTime, { clipId: previewClipIdRef.current });
-  }, [hasStream, freezePlayback, mediaIdentity, reversePlayback]);
+    onPlayheadChangeRef.current?.(el.currentTime + sourceOffset, { clipId: previewClipIdRef.current });
+  }, [freezePlayback, mediaIdentity, playbackStreamReady, reversePlayback, sourceOffset]);
 
   const revealPresentedFrame = useCallback((el) => {
     if (!el) return;
     let revealed = false;
     const reveal = (_now, metadata) => {
       if (revealed || videoRef.current !== el) return;
-      const presentedTime = Number(metadata?.mediaTime ?? el.currentTime);
+      const presentedTime = Number(metadata?.mediaTime ?? el.currentTime) + sourceOffset;
       const expectedTime = promotedPlaybackTime(frameAnchorRef.current.sourceTime);
-      const tolerance = retainedPromotionLayerRef.current ? 0.1 : 0.2;
-      if (Math.abs(presentedTime - expectedTime) > tolerance) return;
+      const tolerance = segmentedPreview
+        ? SEGMENT_HANDOFF_TOLERANCE_SEC
+        : (retainedPromotionLayerRef.current ? 0.1 : 0.2);
+      if (!isHandoffFrameReady({
+        mediaTime: presentedTime,
+        expectedMediaTime: expectedTime,
+        toleranceSec: tolerance,
+        preventBackwardPresentation: segmentedPreview,
+      })) return;
       revealed = true;
       presentedStreamRef.current = mediaIdentity;
       setHeldSwitchFrame(null);
+      setSegmentMediaLoading(false);
       releasePromotedUnderlay();
     };
     if (typeof el.requestVideoFrameCallback === "function") {
@@ -576,25 +619,34 @@ export default function LiteCutPreviewPanel({
     } else {
       window.requestAnimationFrame(() => window.requestAnimationFrame(reveal));
     }
-  }, [mediaIdentity, promotedPlaybackTime, releasePromotedUnderlay]);
+  }, [mediaIdentity, promotedPlaybackTime, releasePromotedUnderlay, segmentedPreview, sourceOffset]);
 
   const handleVideoLoaded = useCallback(() => {
     const el = videoRef.current;
     if (!el || !hasStream) return;
+    setPlayError(null);
+    if (el.videoWidth > 0 && el.videoHeight > 0) {
+      setMainNaturalSize({ width: el.videoWidth, height: el.videoHeight });
+    }
+    if (segmentedPreview) return;
     if (Number.isFinite(el.duration) && el.duration > 0) {
       setVideoDuration(el.duration);
       onDurationChange?.(el.duration);
-      setPlayError(null);
     }
-  }, [hasStream, onDurationChange]);
+  }, [hasStream, onDurationChange, segmentedPreview]);
 
   const handleVideoCanPlay = useCallback(() => {
     handleVideoLoaded();
     const el = videoRef.current;
     if (!el) return;
-    const target = promotedPlaybackTime(Math.max(0, Number(playheadSec) || 0));
-    const seekTolerance = retainedPromotionLayerRef.current ? 0.04 : 0.12;
-    if (Math.abs(el.currentTime - target) > seekTolerance) {
+    const target = Math.max(0, promotedPlaybackTime(Math.max(0, Number(playheadSec) || 0)) - sourceOffset);
+    const seekTolerance = segmentedPreview
+      ? SEGMENT_HANDOFF_TOLERANCE_SEC
+      : (retainedPromotionLayerRef.current ? 0.04 : 0.12);
+    const shouldSeek = segmentedPreview
+      ? el.currentTime < target - seekTolerance
+      : Math.abs(el.currentTime - target) > seekTolerance;
+    if (shouldSeek) {
       try {
         el.currentTime = target;
         return;
@@ -603,7 +655,7 @@ export default function LiteCutPreviewPanel({
       }
     }
     revealPresentedFrame(el);
-  }, [handleVideoLoaded, playheadSec, promotedPlaybackTime, revealPresentedFrame]);
+  }, [handleVideoLoaded, playheadSec, promotedPlaybackTime, revealPresentedFrame, segmentedPreview, sourceOffset]);
 
   const handleVideoSeeked = useCallback(() => {
     const el = videoRef.current;
@@ -631,21 +683,24 @@ export default function LiteCutPreviewPanel({
     const el = videoRef.current;
     if (!el || freezePlayback) return;
     onPlayheadChangeRef.current?.(
-      Number.isFinite(el.duration) ? el.duration : el.currentTime,
+      sourceOffset + (Number.isFinite(el.duration) ? el.duration : el.currentTime),
       { clipId: previewClipIdRef.current },
     );
-  }, [freezePlayback]);
+  }, [freezePlayback, sourceOffset]);
 
   const handleVideoError = useCallback(() => {
     const el = videoRef.current;
     const code = el?.error?.code;
-    if (code === 4) {
+    if (segmentedPreview) {
+      setSegmentMediaLoading(false);
+      setPlayError("无法加载已生成的预览片段，请重试或检查后端 FFmpeg");
+    } else if (code === 4) {
       setPlayError("浏览器无法解码此视频编码，请将 OBS 录制设为 H.264/MP4");
     } else {
       setPlayError("无法加载视频流，请确认文件存在且后端已启动");
     }
     onTogglePlay?.(false);
-  }, [onTogglePlay]);
+  }, [onTogglePlay, segmentedPreview]);
 
   const effectiveTotal = videoDuration ?? totalSec;
   const rulerPlayhead = sequenceMode && timelinePlayhead != null ? timelinePlayhead : playheadSec;
@@ -741,65 +796,63 @@ export default function LiteCutPreviewPanel({
             onPointerDown={handleCanvasPointerDown}
             style={{ backgroundColor: canvasBg, aspectRatio: `${Math.max(1, Number(canvasWidth) || 1920)} / ${Math.max(1, Number(canvasHeight) || 1080)}`, containerType: "size", contain: "layout paint" }}
           >
-            {hasStream ? (
+            {hasStream || hasPromotedUnderlay ? (
               <>
                 {hasUnderlay
                   ? renderedUnderlayLayers.map((layer) => {
-                      const isTransitionLayer = String(layer?.id || "").startsWith("transition-");
-                      const boundaryTransform = isTransitionLayer ? safeOutgoingTransitionTransform : "";
-                      const boundaryTransformOrigin = isTransitionLayer ? safeOutgoingTransitionTransformOrigin : "";
-                      const flip = layer.flipHorizontal || layer.flipVertical
-                        ? `scale(${layer.flipHorizontal ? -1 : 1}, ${layer.flipVertical ? -1 : 1})`
-                        : undefined;
-                      const transform = layer.transform && typeof layer.transform === "object" ? normalizePreviewLayerTransform(layer.transform) : null;
-                      const x = transform?.x ?? 0.5;
-                      const y = transform?.y ?? 0.5;
-                      const width = transform?.width ?? 1;
-                      const height = transform?.height ?? 1;
-                      const objectFit = Math.abs(width - height) > 0.001 ? "object-fill" : "object-contain";
-                      const scale = transform?.scale ?? 1;
-                      const rotation = transform?.rotation ?? 0;
-                      const transformOpacity = transform?.opacity ?? 1;
-                      const opacity = Math.max(0, Math.min(1, Number(layer.opacity) || 0)) * transformOpacity;
+                      const isTransitionLayer = Boolean(layer?.transitionLayer);
+                      const boundaryTransform = isTransitionLayer ? safeCompanionTransitionTransform : "";
+                      const boundaryTransformOrigin = isTransitionLayer ? safeCompanionTransitionTransformOrigin : "";
+                      const transform = normalizeSceneTransform(layer.transform, VIDEO_SCENE_TRANSFORM_DEFAULTS);
+                      const materialLayout = sceneMaterialLayout({
+                        transform,
+                        crop: layer.crop,
+                        contentFit: layer.contentFit === "blur" ? "contain" : (layer.contentFit || "contain"),
+                        canvasWidth,
+                        canvasHeight,
+                        sourceWidth: layer.sourceWidth || canvasWidth,
+                        sourceHeight: layer.sourceHeight || canvasHeight,
+                      });
+                      const opacity = previewUnderlayOpacity(layer, promotedUnderlayLayer?.id);
                       const ref = underlayMediaRegistryRef.current.refFor(layer.id);
                       // Lower-track clips never mount in the main <video>, so their
                       // real media duration is only learnable from the underlay element.
                       const reportUnderlayDuration = (event) => {
+                        // A segmented proxy is only a ~4.5s playback window. Its
+                        // media duration must never replace the linked source duration.
+                        if (layer.segmentedPreview) return;
                         const duration = event.currentTarget?.duration;
                         if (Number.isFinite(duration) && duration > 0) onUnderlayDurationChange?.(layer.id, duration);
                       };
-                      if (transform) {
-                        return (
-                          <div
-                            key={`underlay:${layer.streamUrl}:${layer.id}`}
-                            className="pointer-events-none absolute z-0"
-                            style={{
-                              left: `${(x * 100).toFixed(2)}%`,
-                              top: `${(y * 100).toFixed(2)}%`,
-                              width: `${(width * 100).toFixed(2)}%`,
-                              height: `${(height * 100).toFixed(2)}%`,
-                              opacity,
-                              filter: layer.filter || undefined,
-                              transformOrigin: boundaryTransformOrigin || undefined,
-                              transform: `${boundaryTransform} translate(-50%, -50%) scale(${scale * (layer.flipHorizontal ? -1 : 1)}, ${scale * (layer.flipVertical ? -1 : 1)}) rotate(${rotation}deg)`.trim(),
-                            }}
-                          >
-                            <video ref={ref} src={layer.streamUrl} className={`block h-full w-full ${objectFit}`} playsInline preload="auto" muted onLoadedMetadata={reportUnderlayDuration} />
-                          </div>
-                        );
-                      }
                       return (
-                        <video
-                          ref={ref}
+                        <div
                           key={`underlay:${layer.streamUrl}:${layer.id}`}
-                          src={layer.streamUrl}
-                          className="absolute inset-0 z-0 h-full w-full object-contain"
-                          style={{ opacity, filter: layer.filter || undefined, transformOrigin: boundaryTransformOrigin || undefined, transform: `${boundaryTransform} ${flip || ""}`.trim() || undefined }}
-                          playsInline
-                          preload="auto"
-                          muted
-                          onLoadedMetadata={reportUnderlayDuration}
-                        />
+                          className="pointer-events-none absolute z-0"
+                          style={{
+                            ...sceneTransformStyle(transform, {
+                              defaults: VIDEO_SCENE_TRANSFORM_DEFAULTS,
+                              flipHorizontal: layer.flipHorizontal,
+                              flipVertical: layer.flipVertical,
+                              opacity,
+                              prefixTransform: boundaryTransform,
+                            }),
+                            transformOrigin: boundaryTransformOrigin || undefined,
+                          }}
+                        >
+                          <div className="absolute inset-0 overflow-hidden">
+                            <div style={materialLayout.viewportStyle}>
+                              <video
+                                ref={ref}
+                                src={layer.streamUrl}
+                                style={{ ...materialLayout.mediaStyle, filter: layer.filter || undefined }}
+                                playsInline
+                                preload="auto"
+                                muted
+                                onLoadedMetadata={reportUnderlayDuration}
+                              />
+                            </div>
+                          </div>
+                        </div>
                       );
                     })
                   : null}
@@ -808,12 +861,12 @@ export default function LiteCutPreviewPanel({
                     ref={bgVideoRef}
                     key={`bg:${mediaIdentity}`}
                     src={streamUrl}
-                    className="absolute inset-0 z-0 h-full w-full object-cover opacity-75"
+                    className="absolute inset-0 z-0 h-full w-full object-cover"
                     style={{
-                      filter: `${safeMainFilter ? `${safeMainFilter} ` : ""}blur(${blurPx}px)`,
+                      filter: `${safeMainFilter ? `${safeMainFilter} ` : ""}${blurFilter}`,
                       objectPosition: `${(cropCenter.x * 100).toFixed(2)}% ${(cropCenter.y * 100).toFixed(2)}%`,
                       transformOrigin: `${(cropCenter.x * 100).toFixed(2)}% ${(cropCenter.y * 100).toFixed(2)}%`,
-                      transform: `${mainFlipTransform || ""} scale(${(cropPreviewScale * 1.1).toFixed(4)})`.trim(),
+                      transform: `${mainFlipTransform || ""} scale(${cropPreviewScale.toFixed(4)})`.trim(),
                     }}
                     playsInline
                     preload="auto"
@@ -830,21 +883,41 @@ export default function LiteCutPreviewPanel({
                     }`}
                     style={mainVideoStyle}
                   >
-                    <video
-                      ref={videoRef}
-                      key={mediaIdentity}
-                      src={streamUrl}
-                      className={`pointer-events-none block h-full w-full ${transformedMainObjectFit}`}
-                      playsInline
-                      preload="auto"
-                      muted={mainAudioMuted}
-                      onTimeUpdate={handleVideoTimeUpdate}
-                      onLoadedMetadata={handleVideoLoaded}
-                      onCanPlay={handleVideoCanPlay}
-                      onSeeked={handleVideoSeeked}
-                      onError={handleVideoError}
-                      onEnded={handleVideoEnded}
-                    />
+                    <div className="pointer-events-none absolute inset-0 overflow-hidden">
+                      {fitMode === "blur" ? (
+                        <div style={mainBlurLayout.viewportStyle}>
+                          <video
+                            ref={bgVideoRef}
+                            key={`layer-bg:${mediaIdentity}`}
+                            src={streamUrl}
+                            style={{
+                              ...mainBlurLayout.mediaStyle,
+                              filter: `${safeMainFilter ? `${safeMainFilter} ` : ""}${blurFilter}`,
+                            }}
+                            playsInline
+                            preload="auto"
+                            muted
+                          />
+                        </div>
+                      ) : null}
+                      <div style={mainMaterialLayout.viewportStyle}>
+                        <video
+                          ref={videoRef}
+                          key={mediaIdentity}
+                          src={streamUrl}
+                          style={{ ...mainMaterialLayout.mediaStyle, filter: safeMainFilter || undefined }}
+                          playsInline
+                          preload="auto"
+                          muted={mainAudioMuted}
+                          onTimeUpdate={handleVideoTimeUpdate}
+                          onLoadedMetadata={handleVideoLoaded}
+                          onCanPlay={handleVideoCanPlay}
+                          onSeeked={handleVideoSeeked}
+                          onError={handleVideoError}
+                          onEnded={handleVideoEnded}
+                        />
+                      </div>
+                    </div>
                     {mainLayerSelected ? (
                       <>
                         <span data-main-layer-handle onPointerDown={startMainLayerScale} className="absolute -left-1.5 -top-1.5 h-2.5 w-2.5 cursor-nwse-resize rounded-full border-2 border-white bg-cs2-accent shadow" />
@@ -925,10 +998,40 @@ export default function LiteCutPreviewPanel({
                     onDragStart={onOverlayDragStart}
                     onTransform={onOverlayTransform}
                     onGuides={setAlignmentGuides}
+                    canvasWidth={canvasWidth}
                     canvasHeight={canvasHeight}
+                    blurAmount={canvasBlurAmount}
                   />
                 ))
               : null}
+            {segmentedPreview && previewPending && !previewProxyError && !hasPromotedUnderlay && !hasTransitionUnderlay ? (
+              <div className="pointer-events-none absolute inset-0 z-[30] flex items-center justify-center bg-black/35">
+                <div className="flex items-center gap-2 rounded-lg border border-white/10 bg-zinc-950/90 px-3 py-2 text-xs text-white/85 shadow-xl backdrop-blur">
+                  <Loader2 className="h-4 w-4 animate-spin text-cs2-accent" />
+                  <span>正在生成素材附近的预览片段...</span>
+                </div>
+              </div>
+            ) : null}
+            {segmentedPreview && segmentMediaLoading && !previewPending && !previewProxyError && !heldSwitchFrame && !hasPromotedUnderlay && !hasTransitionUnderlay ? (
+              <div className="pointer-events-none absolute inset-0 z-[30] flex items-center justify-center bg-black/35">
+                <div className="flex items-center gap-2 rounded-lg border border-white/10 bg-zinc-950/90 px-3 py-2 text-xs text-white/85 shadow-xl backdrop-blur">
+                  <Loader2 className="h-4 w-4 animate-spin text-cs2-accent" />
+                  <span>正在载入已生成的预览片段…</span>
+                </div>
+              </div>
+            ) : null}
+            {segmentedPreview && previewProxyError ? (
+              <div className="absolute inset-x-4 bottom-4 z-[31] flex items-center justify-center gap-2 rounded-lg bg-rose-950/90 px-3 py-2 text-center text-[11px] text-rose-200">
+                <span>{previewProxyError}</span>
+                <button
+                  type="button"
+                  onClick={() => onPreviewRetry?.()}
+                  className="shrink-0 rounded border border-rose-300/30 bg-white/10 px-2 py-1 font-medium text-rose-100 hover:bg-white/20"
+                >
+                  重试
+                </button>
+              </div>
+            ) : null}
             {alignmentGuides.x != null ? <div className="pointer-events-none absolute inset-y-0 z-[20] w-px bg-cyan-300 shadow-[0_0_6px_rgba(103,232,249,.9)]" style={{ left: `${alignmentGuides.x * 100}%` }} /> : null}
             {alignmentGuides.y != null ? <div className="pointer-events-none absolute inset-x-0 z-[20] h-px bg-cyan-300 shadow-[0_0_6px_rgba(103,232,249,.9)]" style={{ top: `${alignmentGuides.y * 100}%` }} /> : null}
             {!hasStream && !sequenceMode ? (
@@ -941,7 +1044,7 @@ export default function LiteCutPreviewPanel({
                     selectedElement === "text" ? "ring-2 ring-cs2-accent ring-offset-2 ring-offset-transparent" : ""
                   }`}
                 >
-                  <span className={`select-none whitespace-pre-wrap break-words ${styleCard?.className || ""}`}>
+                  <span className={`select-none whitespace-pre-wrap break-words ${styleCard?.className || ""}`} style={styleCard?.previewStyle}>
                     {overlayText || styleCard?.sample}
                   </span>
                 </div>
@@ -1023,7 +1126,10 @@ export default function LiteCutPreviewPanel({
               const el = videoRef.current;
               if (el && hasStream) {
                 try {
-                  el.currentTime = t;
+                  const localTarget = Math.max(0, t - sourceOffset);
+                  if (!segmentedPreview || !Number.isFinite(el.duration) || localTarget <= el.duration) {
+                    el.currentTime = localTarget;
+                  }
                 } catch {
                   // ignore
                 }

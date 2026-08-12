@@ -19,6 +19,7 @@ from app.features.lite_cut.assets import (
     asset_kind_for_path,
     asset_needs_browser_proxy,
     asset_stream_path,
+    delete_asset_row_bundle,
     delete_asset_file_bundle,
     create_browser_preview_proxy,
     preview_proxy_command,
@@ -31,6 +32,18 @@ from app.features.lite_cut.assets import (
     validate_stored_asset_path,
 )
 from app.features.lite_cut.models import empty_project
+from app.features.lite_cut.media_policy import (
+    SEGMENT_PREVIEW_ALPHA_SCHEMA,
+    alpha_preview_segment_command,
+    asset_needs_segmented_preview,
+    probe_webp_container,
+    preview_segment_command,
+    webp_is_animated,
+)
+from app.features.lite_cut.proxy_executor import (
+    preview_segment_cache_directory,
+    preview_segment_path,
+)
 
 
 def test_asset_metadata_reports_resolution_fps_codec_and_duration(tmp_path, monkeypatch):
@@ -206,6 +219,121 @@ def test_reject_unsupported_ext(tmp_path, monkeypatch):
         asyncio.run(_run())
 
 
+@pytest.mark.anyio
+async def test_generated_asset_endpoint_rejects_external_video_uploads():
+    from app.features.lite_cut import assets_api as api_mod
+
+    upload = UploadFile(
+        filename="external.mp4",
+        file=io.BytesIO(b"video"),
+        headers={"content-type": "video/mp4"},
+    )
+
+    with pytest.raises(HTTPException) as caught:
+        await api_mod.create_lite_cut_generated_asset(
+            file=upload,
+            project_id=None,
+            client_duration_sec=None,
+        )
+
+    assert caught.value.status_code == 400
+
+
+def test_link_asset_registers_without_copy_and_delete_preserves_source(tmp_path, monkeypatch):
+    from app.features.lite_cut import assets as assets_mod
+    from app.features.lite_cut import assets_api as api_mod
+    from app.features.lite_cut.db import LiteCutDB
+
+    storage = tmp_path / "managed-assets"
+    source = tmp_path / "external" / "frame.png"
+    source.parent.mkdir()
+    source.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 8 + (64).to_bytes(4, "big") + (32).to_bytes(4, "big"))
+    db = LiteCutDB(tmp_path / "lite-cut.db")
+    monkeypatch.setattr(assets_mod, "lite_cut_assets_dir", lambda: storage)
+    monkeypatch.setattr(api_mod, "get_lite_cut_db", lambda: db)
+
+    async def _run():
+        await db.init_tables()
+        result = await api_mod.link_lite_cut_assets(api_mod.LiteCutAssetLinkBody(paths=[str(source)]))
+        item = result["items"][0]
+        row = await db.get_asset(int(item["id"]))
+
+        assert item["storage_mode"] == "link"
+        assert item["source_status"] == "available"
+        assert item["source_available"] is True
+        assert row["original_path"] == str(source.resolve())
+        assert row["managed_path"] is None
+        assert row["size_bytes"] == source.stat().st_size
+        assert row["fingerprint"]
+        assert list(storage.rglob("frame.png")) == []
+
+        normal_proxy, alpha_proxy = assets_mod.asset_preview_paths(row)
+        assert normal_proxy.is_relative_to(storage)
+        assert alpha_proxy.is_relative_to(storage)
+        assert normal_proxy.parent != source.parent
+        normal_proxy.parent.mkdir(parents=True, exist_ok=True)
+        normal_proxy.write_bytes(b"derived proxy")
+
+        await api_mod.delete_lite_cut_asset(int(item["id"]))
+        assert source.is_file()
+        assert not normal_proxy.exists()
+        assert await db.get_asset(int(item["id"])) is None
+
+    asyncio.run(_run())
+
+
+def test_link_asset_reports_missing_and_can_relink_in_place(tmp_path, monkeypatch):
+    from app.features.lite_cut import assets as assets_mod
+    from app.features.lite_cut import assets_api as api_mod
+    from app.features.lite_cut.db import LiteCutDB
+
+    storage = tmp_path / "managed-assets"
+    first = tmp_path / "external" / "first.png"
+    second = tmp_path / "external" / "second.png"
+    wrong = tmp_path / "external" / "wrong.png"
+    first.parent.mkdir()
+    first.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 24)
+    second.write_bytes(first.read_bytes())
+    wrong.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x01" * 24)
+    db = LiteCutDB(tmp_path / "lite-cut.db")
+    monkeypatch.setattr(assets_mod, "lite_cut_assets_dir", lambda: storage)
+    monkeypatch.setattr(api_mod, "get_lite_cut_db", lambda: db)
+
+    async def _run():
+        await db.init_tables()
+        linked = await api_mod.link_lite_cut_assets(api_mod.LiteCutAssetLinkBody(paths=[str(first)]))
+        asset_id = int(linked["items"][0]["id"])
+        first.unlink()
+
+        listed = await api_mod.list_lite_cut_assets(project_id=None, limit=500, offset=0)
+        assert listed["items"][0]["source_status"] == "missing"
+        assert listed["items"][0]["source_available"] is False
+
+        with pytest.raises(HTTPException) as caught:
+            await api_mod.relink_lite_cut_asset(
+                asset_id,
+                api_mod.LiteCutAssetRelinkBody(path=str(wrong)),
+            )
+        assert caught.value.status_code == 409
+        assert caught.value.detail["code"] == "LITECUT_ASSET_IDENTITY_MISMATCH"
+
+        relinked = await api_mod.relink_lite_cut_asset(
+            asset_id,
+            api_mod.LiteCutAssetRelinkBody(path=str(second)),
+        )
+        assert relinked["id"] == asset_id
+        assert relinked["source_status"] == "available"
+        assert relinked["file_path"] == str(second.resolve())
+        assert (await db.get_asset(asset_id))["original_path"] == str(second.resolve())
+
+        second.write_bytes(second.read_bytes() + b"changed")
+        changed = await api_mod.list_lite_cut_assets(project_id=None, limit=500, offset=0)
+        assert changed["items"][0]["source_status"] == "changed"
+        assert changed["items"][0]["source_available"] is False
+
+    asyncio.run(_run())
+
+
 def test_rejects_oversized_upload_without_leaving_a_partial_file(tmp_path, monkeypatch):
     from app.features.lite_cut import assets as assets_mod
 
@@ -241,13 +369,13 @@ def test_validate_stored_asset_path_rejects_sibling_prefix(tmp_path, monkeypatch
     assert exc.value.status_code == 403
 
 
-def test_browser_proxy_replaces_only_stream_source(tmp_path):
+def test_legacy_browser_proxy_never_replaces_stream_source(tmp_path):
     source = tmp_path / "match.mkv"
     source.write_bytes(b"source")
     proxy = preview_proxy_path_for_asset(source)
     assert asset_stream_path(source) == source
     proxy.write_bytes(b"proxy")
-    assert asset_stream_path(source) == proxy
+    assert asset_stream_path(source) == source
 
 
 def test_relocate_and_delete_asset_bundle_includes_preview_proxies(tmp_path, monkeypatch):
@@ -303,41 +431,34 @@ def test_proxy_process_can_be_cancelled_before_ffmpeg_starts():
     assert result.stderr == "cancelled"
 
 
-def test_preview_proxy_state_moves_from_queue_to_ready_in_background(tmp_path, monkeypatch):
+def test_preview_state_selects_segmented_mode_without_eagerly_queuing_proxy(tmp_path):
     from app.features.lite_cut import proxy_api as api_mod
     from app.features.lite_cut.runtime import preview_proxy_jobs
 
     source = tmp_path / "large.mov"
     source.write_bytes(b"source")
     proxy = preview_proxy_path_for_asset(source)
+    proxy.write_bytes(b"legacy proxy")
     row = {"id": 991, "name": source.name, "kind": "video", "file_path": str(source), "duration_sec": 10.0}
 
-    def fake_create(job, _row):
-        proxy.write_bytes(b"proxy")
-        return proxy, False
-
-    monkeypatch.setattr(api_mod, "_create_preview_proxy_sync", fake_create)
     preview_proxy_jobs.pop(991, None)
+    state = api_mod._decorate_asset_preview_state(dict(row), has_alpha=False)
 
-    async def _run():
-        queued = api_mod._decorate_asset_preview_state(dict(row), has_alpha=False)
-        assert queued["preview_proxy_status"] in {"queued", "running"}
-        await preview_proxy_jobs[991].task
-        ready = api_mod._decorate_asset_preview_state(dict(row), schedule=False)
-        assert ready["preview_proxy_status"] == "ready"
-        assert ready["preview_proxy_required"] is True
-
-    asyncio.run(_run())
-    preview_proxy_jobs.pop(991, None)
+    assert state["preview_proxy_required"] is True
+    assert state["preview_proxy_status"] == "idle"
+    assert state["preview_proxy_mode"] == "segmented"
+    assert state["preview_segment_step_sec"] == 4.0
+    assert preview_proxy_jobs.get(991) is None
 
 
 @pytest.mark.anyio
-async def test_busy_preview_stream_returns_immediately_instead_of_waiting_for_ffmpeg(tmp_path, monkeypatch):
+async def test_preview_stream_returns_original_source_even_if_legacy_proxy_exists(tmp_path, monkeypatch):
     from app.features.lite_cut import assets as assets_mod
     from app.features.lite_cut import assets_api as api_mod
 
     source = tmp_path / "large.mov"
     source.write_bytes(b"source")
+    preview_proxy_path_for_asset(source).write_bytes(b"legacy proxy")
 
     class FakeDb:
         async def get_asset(self, asset_id):
@@ -346,17 +467,10 @@ async def test_busy_preview_stream_returns_immediately_instead_of_waiting_for_ff
 
     monkeypatch.setattr(api_mod, "get_lite_cut_db", lambda: FakeDb())
     monkeypatch.setattr(assets_mod, "validate_stored_asset_path", lambda _path: source)
-    monkeypatch.setattr(api_mod, "_decorate_asset_preview_state", lambda row: {
-        **row,
-        "preview_proxy_required": True,
-        "preview_proxy_status": "running",
-    })
 
-    with pytest.raises(HTTPException) as caught:
-        await api_mod.stream_lite_cut_asset(991, SimpleNamespace())
+    response = await api_mod.stream_lite_cut_asset(991, SimpleNamespace())
 
-    assert caught.value.status_code == 425
-    assert caught.value.headers == {"Retry-After": "1"}
+    assert Path(response.path) == source
 
 
 def test_preview_proxy_command_keeps_original_video_and_optional_audio(tmp_path):
@@ -375,6 +489,392 @@ def test_preview_proxy_command_keeps_original_video_and_optional_audio(tmp_path)
     assert command[command.index("-g") + 1] == "30"
     assert command[command.index("-force_key_frames") + 1] == "expr:gte(t,n_forced*0.5)"
     assert command[-1] == str(output)
+
+
+def test_segmented_preview_policy_covers_large_links_and_incompatible_containers(tmp_path):
+    small_mp4 = tmp_path / "small.mp4"
+    small_mp4.write_bytes(b"h264")
+    mov = tmp_path / "camera.mov"
+    mov.write_bytes(b"video")
+
+    assert asset_needs_segmented_preview(
+        small_mp4,
+        kind="video",
+        storage_mode="link",
+        size_bytes=256 * 1024 * 1024,
+        video_codec="h264",
+        duration_sec=600,
+        fps=60,
+    ) is True
+    assert asset_needs_segmented_preview(
+        mov,
+        kind="video",
+        storage_mode="link",
+        size_bytes=5,
+        duration_sec=10,
+    ) is True
+    assert asset_needs_segmented_preview(
+        small_mp4,
+        kind="video",
+        storage_mode="link",
+        size_bytes=5,
+        video_codec="h264",
+        duration_sec=10,
+        fps=60,
+    ) is False
+
+
+def test_animated_webp_container_is_routed_to_segmented_video_preview(tmp_path):
+    source = tmp_path / "sticker.webp"
+    vp8x = bytes([0x12, 0, 0, 0, 63, 0, 0, 31, 0, 0])
+    anim = bytes(6)
+    anmf = bytes(12) + (240).to_bytes(3, "little") + bytes(1)
+    chunks = b"".join((
+        b"VP8X" + len(vp8x).to_bytes(4, "little") + vp8x,
+        b"ANIM" + len(anim).to_bytes(4, "little") + anim,
+        b"ANMF" + len(anmf).to_bytes(4, "little") + anmf,
+    ))
+    source.write_bytes(b"RIFF" + (len(chunks) + 4).to_bytes(4, "little") + b"WEBP" + chunks)
+
+    facts = probe_webp_container(source)
+
+    assert facts == {
+        "animated": True,
+        "has_alpha": True,
+        "duration_sec": 0.24,
+        "width": 64,
+        "height": 32,
+    }
+    assert webp_is_animated(source) is True
+    assert asset_needs_segmented_preview(source, kind="video", size_bytes=source.stat().st_size) is True
+
+
+def test_preview_segment_command_fast_seeks_and_outputs_independent_mp4(tmp_path):
+    source = tmp_path / "match.mkv"
+    output = tmp_path / "segment.mp4"
+    command = preview_segment_command(
+        ffmpeg_bin=tmp_path / "ffmpeg.exe",
+        source=source,
+        output=output,
+        start_sec=36,
+        duration_sec=4.5,
+        video_encode_quality=["-c:v", "libx264", "-crf", "23"],
+        max_edge=720,
+    )
+
+    assert command.index("-ss") < command.index("-i")
+    assert command[command.index("-ss") + 1] == "36.000000"
+    assert command[command.index("-t") + 1] == "4.500000"
+    assert "min(720,iw)" in command[command.index("-vf") + 1]
+    assert command[command.index("-c:a") + 1] == "aac"
+    assert command[command.index("-movflags") + 1] == "+faststart"
+    assert command[-1] == str(output)
+
+
+def test_alpha_preview_segment_command_preserves_alpha_in_short_webm(tmp_path):
+    source = tmp_path / "lower-third.mov"
+    output = tmp_path / "segment.webm"
+    command = alpha_preview_segment_command(
+        ffmpeg_bin=tmp_path / "ffmpeg.exe",
+        source=source,
+        output=output,
+        start_sec=8,
+        duration_sec=4.5,
+        max_edge=720,
+    )
+
+    assert command.index("-ss") < command.index("-i")
+    assert command[command.index("-ss") + 1] == "8.000000"
+    assert "libvpx-vp9" in command
+    assert "yuva420p" in command
+    assert "alpha_mode=1" in command
+    assert command[command.index("-auto-alt-ref") + 1] == "0"
+    assert command[command.index("-c:a") + 1] == "libopus"
+    assert command[-1] == str(output)
+
+
+def test_animated_webp_segment_uses_output_seek_for_ffmpeg_9_demuxer(tmp_path):
+    source = tmp_path / "animated.webp"
+    output = tmp_path / "segment.webm"
+    command = alpha_preview_segment_command(
+        ffmpeg_bin=tmp_path / "ffmpeg.exe",
+        source=source,
+        output=output,
+        start_sec=4,
+        duration_sec=1,
+    )
+
+    assert command.index("-i") < command.index("-ss")
+    assert command[command.index("-ss") + 1] == "4.000000"
+    assert command[command.index("-abort_on") + 1] == "empty_output"
+
+
+def test_preview_segments_live_under_the_current_project_directory(tmp_path, monkeypatch):
+    from app.features.lite_cut import assets as assets_mod
+
+    monkeypatch.setattr(assets_mod, "lite_cut_assets_dir", lambda: tmp_path)
+    project_directory = tmp_path / "4_My-project"
+    project_directory.mkdir()
+    row = {"id": 12, "fingerprint": "abc:def/123"}
+
+    directory = preview_segment_cache_directory(row, project_directory, max_edge=720)
+
+    assert directory == project_directory / ".preview" / "asset-12-abcdef123" / "segment-v1-720p"
+    assert preview_segment_path(directory, 9).name == "segment-00000009.mp4"
+
+
+def test_alpha_preview_segments_use_separate_schema_and_webm_extension(tmp_path, monkeypatch):
+    from app.features.lite_cut import assets as assets_mod
+
+    monkeypatch.setattr(assets_mod, "lite_cut_assets_dir", lambda: tmp_path)
+    project_directory = tmp_path / "4_My-project"
+    project_directory.mkdir()
+    row = {"id": 12, "fingerprint": "alpha", "has_alpha": True}
+
+    directory = preview_segment_cache_directory(row, project_directory, max_edge=720)
+
+    assert directory.name == f"{SEGMENT_PREVIEW_ALPHA_SCHEMA}-720p"
+    assert preview_segment_path(directory, 9).name == "segment-00000009.webm"
+
+
+def test_deleting_legacy_managed_video_also_removes_segment_cache(tmp_path, monkeypatch):
+    from app.features.lite_cut import assets as assets_mod
+
+    monkeypatch.setattr(assets_mod, "lite_cut_assets_dir", lambda: tmp_path)
+    project = tmp_path / "4_Project"
+    source = project / "legacy.mov"
+    source.parent.mkdir()
+    source.write_bytes(b"managed source")
+    segment = project / ".preview" / "asset-44-fixture" / "segment-v1-720p" / "segment-00000000.mp4"
+    segment.parent.mkdir(parents=True)
+    segment.write_bytes(b"derived segment")
+
+    delete_asset_row_bundle({
+        "id": 44,
+        "storage_mode": "managed",
+        "managed_path": str(source),
+        "file_path": str(source),
+    })
+
+    assert not source.exists()
+    assert not segment.exists()
+
+
+@pytest.mark.anyio
+async def test_far_playhead_seek_preempts_lower_priority_prefetch(tmp_path, monkeypatch):
+    from app.features.lite_cut import proxy_api as api_mod
+    from app.features.lite_cut.runtime import segment_preview_jobs
+
+    release = asyncio.Event()
+
+    async def hold_job(*_args, **_kwargs):
+        await release.wait()
+
+    monkeypatch.setattr(api_mod, "_run_segment_preview_job", hold_job)
+    row = {"id": 812, "duration_sec": 120}
+    segment_preview_jobs.pop(812, None)
+    first = api_mod._start_segment_preview_job(
+        row,
+        requested_time_sec=0,
+        look_ahead_sec=12,
+        cache_directory=tmp_path,
+        max_edge=720,
+        priority="prefetch",
+    )
+    await asyncio.sleep(0)
+    first.active_segment = 1
+
+    urgent = api_mod._start_segment_preview_job(
+        row,
+        requested_time_sec=12,
+        look_ahead_sec=12,
+        cache_directory=tmp_path,
+        max_edge=720,
+    )
+
+    assert first.cancel_event.is_set()
+    assert urgent is not first
+    assert urgent.segment_indexes[0] == 3
+    assert urgent.priority == "interactive"
+    release.set()
+    await asyncio.gather(first.task, urgent.task)
+    segment_preview_jobs.pop(812, None)
+
+
+@pytest.mark.anyio
+async def test_background_cache_waits_for_active_playhead_window(tmp_path, monkeypatch):
+    from app.features.lite_cut import proxy_api as api_mod
+    from app.features.lite_cut.runtime import segment_preview_jobs
+
+    release = asyncio.Event()
+
+    async def hold_job(*_args, **_kwargs):
+        await release.wait()
+
+    monkeypatch.setattr(api_mod, "_run_segment_preview_job", hold_job)
+    row = {"id": 814, "duration_sec": 120}
+    segment_preview_jobs.pop(814, None)
+    foreground = api_mod._start_segment_preview_job(
+        row,
+        requested_time_sec=8,
+        look_ahead_sec=12,
+        cache_directory=tmp_path,
+        max_edge=720,
+        priority="interactive",
+    )
+    await asyncio.sleep(0)
+
+    background = api_mod._start_segment_preview_job(
+        row,
+        requested_time_sec=80,
+        look_ahead_sec=0,
+        cache_directory=tmp_path,
+        max_edge=720,
+        priority="prefetch",
+    )
+
+    assert background is foreground
+    assert not foreground.cancel_event.is_set()
+    release.set()
+    await foreground.task
+    segment_preview_jobs.pop(814, None)
+
+
+def test_segment_snapshot_never_marks_an_unrelated_job_segment_ready(tmp_path):
+    from app.features.lite_cut import proxy_api as api_mod
+    from app.features.lite_cut.runtime import LiteCutSegmentPreviewJob
+
+    job = LiteCutSegmentPreviewJob(
+        asset_id=815,
+        request_id="foreground",
+        segment_indexes=(2, 3, 4, 5),
+        cache_directory=tmp_path,
+        status="ready",
+    )
+
+    snapshot = api_mod._segment_preview_snapshot(job, requested_index=20, cache_directory=tmp_path)
+
+    assert snapshot["status"] == "idle"
+    assert snapshot["requested_segment"] == 20
+
+
+@pytest.mark.anyio
+async def test_failed_segment_job_is_reported_without_tight_retry_loop(tmp_path, monkeypatch):
+    from app.features.lite_cut import proxy_api as api_mod
+    from app.features.lite_cut.runtime import segment_preview_jobs
+
+    async def fail_job(job, *_args, **_kwargs):
+        job.status = "failed"
+        job.error = "fixture failure"
+
+    monkeypatch.setattr(api_mod, "_run_segment_preview_job", fail_job)
+    row = {"id": 813, "duration_sec": 120}
+    segment_preview_jobs.pop(813, None)
+    failed = api_mod._start_segment_preview_job(
+        row,
+        requested_time_sec=8,
+        look_ahead_sec=12,
+        cache_directory=tmp_path,
+        max_edge=720,
+    )
+    await failed.task
+
+    polled = api_mod._start_segment_preview_job(
+        row,
+        requested_time_sec=8,
+        look_ahead_sec=12,
+        cache_directory=tmp_path,
+        max_edge=720,
+    )
+
+    assert polled is failed
+    assert polled.status == "failed"
+    retried = api_mod._start_segment_preview_job(
+        row,
+        requested_time_sec=8,
+        look_ahead_sec=12,
+        cache_directory=tmp_path,
+        max_edge=720,
+        force=True,
+    )
+    assert retried is not failed
+    await retried.task
+    segment_preview_jobs.pop(813, None)
+
+
+@pytest.mark.anyio
+async def test_preview_request_publishes_first_ready_segment_from_project_cache(tmp_path, monkeypatch):
+    from app.features.lite_cut import assets as assets_mod
+    from app.features.lite_cut import assets_api as api_mod
+    from app.features.lite_cut import proxy_api as proxy_mod
+    from app.features.lite_cut.db import LiteCutDB
+    from app.features.lite_cut.runtime import segment_preview_jobs
+    from app import env_utils
+
+    storage = tmp_path / "managed-assets"
+    source = tmp_path / "external" / "large.mp4"
+    source.parent.mkdir()
+    source.write_bytes(b"linked source")
+    stat = source.stat()
+    db = LiteCutDB(tmp_path / "lite-cut.db")
+    monkeypatch.setattr(assets_mod, "lite_cut_assets_dir", lambda: storage)
+    monkeypatch.setattr(api_mod, "get_lite_cut_db", lambda: db)
+    monkeypatch.setattr(env_utils, "load_config", lambda: SimpleNamespace(lite_cut_proxy_resolution=720))
+
+    async def create_segment(job, _row, *, max_edge):
+        assert max_edge == 720
+        job.status = "running"
+        index = job.segment_indexes[0]
+        output = preview_segment_path(job.cache_directory, index)
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_bytes(b"short h264 mp4")
+        job.ready_segments.append(index)
+        job.status = "ready"
+
+    monkeypatch.setattr(proxy_mod, "_run_segment_preview_job", create_segment)
+    await db.init_tables()
+    project_id = await db.create_project(name="Segment Project", body=empty_project().model_dump(mode="json"))
+    asset_id = await db.create_asset(
+        project_id=project_id,
+        name=source.name,
+        kind="video",
+        mime_type="video/mp4",
+        file_path=str(source),
+        storage_mode="link",
+        original_path=str(source),
+        size_bytes=stat.st_size,
+        mtime_ns=stat.st_mtime_ns,
+        fingerprint="fixture-fingerprint",
+        duration_sec=120,
+    )
+    segment_preview_jobs.pop(asset_id, None)
+
+    body = api_mod.LiteCutPreviewRequestBody(time_sec=37.25, look_ahead_sec=12, priority="interactive")
+    queued = await api_mod.request_lite_cut_asset_preview(asset_id, body)
+    assert queued["requested_segment"] == 9
+    assert queued["segment_url"] is None
+    await asyncio.sleep(0)
+    ready = await api_mod.request_lite_cut_asset_preview(asset_id, body)
+
+    expected = (
+        storage
+        / f"{project_id}_Segment Project"
+        / ".preview"
+        / f"asset-{asset_id}-fixture-fingerprint"
+        / "segment-v1-720p"
+        / "segment-00000009.mp4"
+    )
+    assert expected.is_file()
+    assert ready["status"] == "ready"
+    assert ready["segment_start_sec"] == 36
+    assert ready["segment_end_sec"] == 40.5
+    assert ready["segment_url"].startswith(f"/api/lite-cut/assets/{asset_id}/preview/segments/9")
+    assert "?v=" in ready["segment_url"]
+    assert "request=" not in ready["segment_url"]
+    response = await api_mod.stream_lite_cut_preview_segment(asset_id, 9)
+    assert Path(response.path) == expected
+    await asyncio.sleep(0)
+    segment_preview_jobs.pop(asset_id, None)
 
 
 def test_native_h264_mp4_stays_direct_when_average_bitrate_is_light(tmp_path):
@@ -397,25 +897,23 @@ def test_high_bitrate_or_high_fps_h264_mp4_requires_smooth_preview_proxy(tmp_pat
     assert asset_needs_browser_proxy(source, video_codec="h264", duration_sec=60, fps=240) is True
 
 
-def test_high_load_mp4_stream_uses_ready_proxy(tmp_path):
+def test_high_load_mp4_stream_ignores_ready_legacy_proxy(tmp_path):
     source = tmp_path / "high-load.mp4"
     with source.open("wb") as output:
         output.truncate(6 * 1024 * 1024)
     proxy = preview_proxy_path_for_asset(source)
     proxy.write_bytes(b"proxy")
 
-    assert asset_stream_path(source, duration_sec=1) == proxy
+    assert asset_stream_path(source, duration_sec=1) == source
 
 
-def test_ready_high_fps_proxy_survives_requests_without_probe_metadata(tmp_path):
+def test_ready_high_fps_legacy_proxy_is_not_selected(tmp_path):
     source = tmp_path / "high-fps-light-bitrate.mp4"
     source.write_bytes(b"source")
     proxy = preview_proxy_path_for_asset(source)
     proxy.write_bytes(b"proxy")
 
-    # Stream/cache requests only have the persisted asset row after restart;
-    # the FPS that triggered generation was intentionally not persisted.
-    assert asset_stream_path(source, duration_sec=60) == proxy
+    assert asset_stream_path(source, duration_sec=60) == source
 
     from app.features.lite_cut.proxy_api import (
         _decorate_asset_preview_state,
@@ -429,8 +927,8 @@ def test_ready_high_fps_proxy_survives_requests_without_probe_metadata(tmp_path)
     }
     assert _row_requires_or_has_preview_proxy(row) is True
     state = _decorate_asset_preview_state(dict(row), schedule=False)
-    assert state["preview_proxy_required"] is True
-    assert state["preview_proxy_status"] == "ready"
+    assert state["preview_proxy_required"] is False
+    assert state["preview_proxy_status"] == "not_needed"
 
 
 def test_hevc_mp4_requires_browser_preview_proxy(tmp_path):
@@ -518,9 +1016,10 @@ def test_failed_remux_falls_back_to_transcode(tmp_path, monkeypatch):
 
 
 def test_high_fps_h264_proxy_job_transcodes_instead_of_remuxing(tmp_path, monkeypatch):
-    from app import env_utils, video_composer
+    from app import env_utils
     from app.features.lite_cut import assets as assets_mod
     from app.features.lite_cut import proxy_api as api_mod
+    from app.features.lite_cut import proxy_executor as proxy_executor_mod
     from app.features.lite_cut.runtime import LiteCutPreviewProxyJob
 
     source = tmp_path / "240fps.mp4"
@@ -529,7 +1028,7 @@ def test_high_fps_h264_proxy_job_transcodes_instead_of_remuxing(tmp_path, monkey
     captured = {}
 
     monkeypatch.setattr(env_utils, "load_config", lambda: SimpleNamespace(ffmpeg_path=None, lite_cut_proxy_resolution=720))
-    monkeypatch.setattr(video_composer, "resolve_ffmpeg_binary", lambda _path: tmp_path / "ffmpeg.exe")
+    monkeypatch.setattr(proxy_executor_mod, "resolve_ffmpeg_binary", lambda _path: tmp_path / "ffmpeg.exe")
 
     def fake_create(source_path, **kwargs):
         captured.update(kwargs)

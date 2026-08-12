@@ -5,14 +5,12 @@ from __future__ import annotations
 from typing import Any, Optional
 
 from .effect_contract import filter_preset_ffmpeg_map
-from .timeline import _clip_crop_filter, _clip_video_fade
+from .timeline import _clip_crop_filter
 from .timeline_math import (
-    clip_canvas_fit as _clip_canvas_fit,
     clip_freeze_frame_sec as _clip_freeze_frame_sec,
     clip_has_speed_ramp as _clip_has_speed_ramp,
     clip_reverse as _clip_reverse,
     clip_speed as _clip_speed,
-    clip_timeline_duration_sec as _clip_timeline_duration_sec,
 )
 
 _FILTER_PRESET_VF = filter_preset_ffmpeg_map()
@@ -68,45 +66,10 @@ def _clip_video_filter_chain(
     timeline_duration_override: float | None = None,
 ) -> str:
     speed = 1.0 if _clip_has_speed_ramp(clip) else _clip_speed(clip)
-    timeline_duration = max(0.1, float(timeline_duration_override)) if timeline_duration_override is not None else _clip_timeline_duration_sec(clip)
-    fade_in = _clip_video_fade(clip, "fade_in_sec")
-    fade_out = _clip_video_fade(clip, "fade_out_sec")
+    del width, height, canvas_fit, background_color, blur_amount, timeline_duration_override
     fps_s = f"{fps:.4f}".rstrip("0").rstrip(".")
-    fit = _clip_canvas_fit(clip, canvas_fit)
     crop_filter = _clip_crop_filter(clip)
-    if fit == "cover":
-        vf_parts = ([crop_filter] if crop_filter else []) + [
-            f"scale={width}:{height}:force_original_aspect_ratio=increase",
-            f"crop={width}:{height}",
-            f"fps={fps_s}",
-            "setsar=1",
-            "format=yuv420p",
-        ]
-    elif fit == "blur":
-        sigma = max(4, min(80, int(blur_amount or 24)))
-        vf_parts = ([crop_filter] if crop_filter else []) + [
-            (
-                f"split=2[fg][bg];"
-                f"[bg]scale={width}:{height}:force_original_aspect_ratio=increase,crop={width}:{height},gblur=sigma={sigma}[bgfit];"
-                f"[fg]scale={width}:{height}:force_original_aspect_ratio=decrease[fgfit];"
-                f"[bgfit][fgfit]overlay=(W-w)/2:(H-h)/2"
-            ),
-            f"fps={fps_s}",
-            "setsar=1",
-            "format=yuv420p",
-        ]
-    else:
-        vf_parts = ([crop_filter] if crop_filter else []) + [
-            f"scale={width}:{height}:force_original_aspect_ratio=decrease",
-            f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2:color={background_color}",
-            f"fps={fps_s}",
-            "setsar=1",
-            "format=yuv420p",
-        ]
-    if clip.get("flip_horizontal"):
-        vf_parts.append("hflip")
-    if clip.get("flip_vertical"):
-        vf_parts.append("vflip")
+    vf_parts = ([crop_filter] if crop_filter else []) + [f"fps={fps_s}", "setsar=1", "format=rgba"]
     eq = _eq_filter(clip.get("color") if isinstance(clip.get("color"), dict) else None)
     if eq:
         vf_parts.append(eq)
@@ -117,10 +80,4 @@ def _clip_video_filter_chain(
     freeze_frame_sec = _clip_freeze_frame_sec(clip)
     if freeze_frame_sec > 1e-6:
         vf_parts.append(f"tpad=stop_mode=clone:stop_duration={freeze_frame_sec:.6f}")
-    if fade_in > 0:
-        vf_parts.append(f"fade=t=in:st=0:d={fade_in:.6f}")
-    if fade_out > 0:
-        vf_parts.append(f"fade=t=out:st={max(0.0, timeline_duration - fade_out):.6f}:d={fade_out:.6f}")
     return ",".join(vf_parts)
-
-

@@ -2,6 +2,7 @@ import { CopyCheck, Layers, RotateCcw } from "lucide-react";
 import { useT } from "../../../i18n/useT.js";
 import { FILTER_PRESETS } from "./editorPresets.js";
 import { PaneSection, ProSlider, ScopeActionButton } from "./PropertyControls.jsx";
+import { VISUAL_COLOR_DEFAULT, VISUAL_COLOR_MAX, VISUAL_COLOR_MIN } from "../domain/visualMaterial.js";
 
 export default function ColorPropertyPane({
   brightness,
@@ -25,10 +26,10 @@ export default function ColorPropertyPane({
       </div>
     </PaneSection>
     <PaneSection title={t("liteCut.color.adjust")}>
-      <button type="button" onClick={() => onColorChange?.({ brightness: 0, contrast: 0, saturation: 0 })} className="mb-1 flex items-center gap-1 text-[10px] font-semibold text-cs2-accent"><RotateCcw className="h-3 w-3" /> {t("liteCut.color.resetAll")}</button>
-      <ProSlider label={t("liteCut.color.brightness")} value={brightness} onChange={(value) => onColorChange?.({ brightness: value })} />
-      <ProSlider label={t("liteCut.color.contrast")} value={contrast} onChange={(value) => onColorChange?.({ contrast: value })} />
-      <ProSlider label={t("liteCut.color.saturation")} value={saturation} onChange={(value) => onColorChange?.({ saturation: value })} />
+      <button type="button" onClick={() => onColorChange?.({ brightness: VISUAL_COLOR_DEFAULT, contrast: VISUAL_COLOR_DEFAULT, saturation: VISUAL_COLOR_DEFAULT })} className="mb-1 flex items-center gap-1 text-[10px] font-semibold text-cs2-accent"><RotateCcw className="h-3 w-3" /> {t("liteCut.color.resetAll")}</button>
+      <ProSlider label={t("liteCut.color.brightness")} value={brightness} onChange={(value) => onColorChange?.({ brightness: value })} min={VISUAL_COLOR_MIN} max={VISUAL_COLOR_MAX} resetValue={VISUAL_COLOR_DEFAULT} />
+      <ProSlider label={t("liteCut.color.contrast")} value={contrast} onChange={(value) => onColorChange?.({ contrast: value })} min={VISUAL_COLOR_MIN} max={VISUAL_COLOR_MAX} resetValue={VISUAL_COLOR_DEFAULT} />
+      <ProSlider label={t("liteCut.color.saturation")} value={saturation} onChange={(value) => onColorChange?.({ saturation: value })} min={VISUAL_COLOR_MIN} max={VISUAL_COLOR_MAX} resetValue={VISUAL_COLOR_DEFAULT} />
       <div className="grid grid-cols-2 gap-2 pt-1">
         <ScopeActionButton icon={CopyCheck} disabled={!canApplyColorTrack} onClick={() => onApplyColorScope?.("track")}>{t("liteCut.color.applyTrack")}</ScopeActionButton>
         <ScopeActionButton icon={Layers} disabled={!canApplyColorAll} onClick={() => onApplyColorScope?.("all")}>{t("liteCut.color.applyAll")}</ScopeActionButton>

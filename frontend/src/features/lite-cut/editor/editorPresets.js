@@ -1,6 +1,7 @@
 /** LiteCut editor presets. */
 
 import effectContract from "../../../../../data/lite_cut_effect_contract.json";
+import { textPresetCardStyle } from "./textLayout.js";
 
 const FILTER_THUMBNAIL_BACKGROUNDS = {
   none: "linear-gradient(135deg, #52525b 0%, #27272a 100%)",
@@ -39,110 +40,29 @@ export function filterStyleFromColor({ brightness = 0, contrast = 0, saturation 
   };
 }
 
-/** Clipchamp-style visual text style cards */
-export const TEXT_STYLE_CARDS = [
-  {
-    id: "plain",
-    group: "plain",
-    label: "纯文本",
-    preview: "Aa",
-    sample: "在此输入文字",
-    className: "text-white font-medium tracking-wide",
-    cardClass: "bg-zinc-800/90",
-  },
-  {
-    id: "creator",
-    group: "styles",
-    label: "创作者",
-    preview: "创作者",
-    sample: "创作者",
-    className: "text-yellow-300 font-black italic tracking-tighter drop-shadow-[0_2px_8px_rgba(0,0,0,0.8)]",
-    cardClass: "bg-gradient-to-br from-zinc-800 to-zinc-950",
-  },
-  {
-    id: "retro",
-    group: "styles",
-    label: "复古",
-    preview: "复古",
-    sample: "复古",
-    className: "font-black text-transparent bg-clip-text bg-gradient-to-b from-pink-300 to-fuchsia-600",
-    cardClass: "bg-gradient-to-br from-fuchsia-950 to-zinc-900",
-  },
-  {
-    id: "bubble",
-    group: "styles",
-    label: "气泡",
-    preview: "气泡",
-    sample: "气泡",
-    className: "rounded-full bg-white px-3 py-1 text-sm font-bold text-zinc-900",
-    cardClass: "bg-zinc-700/80",
-  },
-  {
-    id: "large-title",
-    group: "titles",
-    label: "大标题",
-    preview: "标题",
-    sample: "大标题",
-    className: "text-2xl font-black uppercase tracking-[0.2em] text-white",
-    cardClass: "bg-gradient-to-br from-neutral-800 to-black",
-  },
-  {
-    id: "ace",
-    group: "titles",
-    label: "ACE 电竞",
-    preview: "ACE",
-    sample: "ACE!!",
-    className: "text-3xl font-black italic text-amber-400 drop-shadow-[0_0_12px_rgba(251,191,36,0.6)]",
-    cardClass: "bg-gradient-to-br from-amber-950/80 to-zinc-950",
-  },
-  {
-    id: "clutch",
-    group: "titles",
-    label: "残局",
-    preview: "残局",
-    sample: "CLUTCH",
-    className: "text-xl font-black tracking-widest text-cyan-300",
-    cardClass: "bg-gradient-to-br from-cyan-950 to-zinc-950",
-  },
-  {
-    id: "namecard",
-    group: "cs2",
-    label: "CS2 名牌",
-    preview: "Dream",
-    sample: "Dream",
-    className: "flex items-center gap-1.5 text-sm font-bold text-white",
-    cardClass: "bg-gradient-to-r from-sky-950/90 to-zinc-900",
-    badge: true,
-  },
-];
+/** Text presets only expose effects supported by the shared preview/export contract. */
+export const TEXT_STYLE_CARDS = effectContract.text_style_presets.map((preset) => ({
+  id: preset.id,
+  group: preset.group,
+  label: preset.label_zh,
+  preview: preset.preview,
+  sample: preset.sample,
+  className: "font-bold",
+  previewStyle: textPresetCardStyle(preset.id),
+  cardClass: "",
+  cardStyle: { background: preset.card_background },
+}));
 
-export const FONT_OPTIONS = [
-  "思源黑体 Medium",
-  "微软雅黑",
-  "Impact",
-  "Noto Sans SC",
-];
+export const FONT_OPTIONS = effectContract.text_fonts.map((font) => font.family);
+export const CANVAS_PRESETS = effectContract.canvas_presets.map((preset) => ({ ...preset }));
 
-export const TEXT_ANIMATION_OPTIONS = [
-  { id: "", label: "无" },
-  { id: "fade", label: "淡化" },
-  { id: "slide_up", label: "上滑" },
-  { id: "slide_down", label: "下滑" },
-  { id: "slide_left", label: "左滑" },
-  { id: "slide_right", label: "右滑" },
-];
+export const TRANSITION_OPTIONS = effectContract.transition_model.types.map((transition) => ({
+  id: transition.id,
+  label: transition.label_zh,
+  icon: transition.icon,
+  builtin: true,
+}));
 
-export const TRANSITION_OPTIONS = [
-  { id: "cut", label: "硬切", icon: "▶|", builtin: true },
-  { id: "fade", label: "淡化", icon: "◐", builtin: true },
-  { id: "flash", label: "闪白", icon: "⚡", builtin: true },
-  { id: "dip", label: "黑场", icon: "▪", builtin: true },
-  { id: "zoom", label: "缩放", icon: "◎", builtin: true },
-  { id: "wipe_l", label: "左擦", icon: "◀", builtin: true },
-  { id: "wipe_r", label: "右擦", icon: "▶", builtin: true },
-  { id: "slide_up", label: "上滑", icon: "↑", builtin: true },
-  { id: "slide_down", label: "下滑", icon: "↓", builtin: true },
-  { id: "blur", label: "模糊", icon: "◎", builtin: true },
-  { id: "glitch", label: "故障", icon: "⌗", builtin: true },
-  { id: "spin", label: "旋转", icon: "↻", builtin: true },
-];
+export const TRANSITION_DURATION_MIN = Number(effectContract.transition_model.limits.duration_min) || 0.05;
+export const TRANSITION_DURATION_MAX = Number(effectContract.transition_model.limits.duration_max) || 10;
+export const TRANSITION_DURATION_DEFAULT = Number(effectContract.transition_model.limits.duration_default) || 0.4;

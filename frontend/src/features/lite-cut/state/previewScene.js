@@ -2,63 +2,104 @@ import {
   resolveAudioPreviewItems,
   resolveAudioPreviewPreloadItems,
   resolveBaseVideoTrackId,
-  resolveIncomingTransitionPlayback,
-  resolveOutgoingTransitionPreload,
   resolveTopVideoPlaybackAt,
+  resolveTransitionEndpointPlayback,
   resolveVideoUnderlayPlaybackAt,
   resolveVideoUnderlayPlaybacksAt,
 } from "./playbackUtils.js";
-import { getTrack, overlaysActiveAt } from "./timelineUtils.js";
+import { overlaysActiveAt } from "./timelineUtils.js";
+import {
+  activeTransitionEvents,
+  overlayTransitionRef,
+  transitionRefKey,
+} from "./transitionModel.js";
 
-function resolveBackgroundTransition(body, playback) {
-  if (!playback?.clip || !playback?.trackId) return null;
-  const clips = [...(getTrack(body, playback.trackId)?.clips || [])]
-    .sort((a, b) => (Number(a.timeline_start) || 0) - (Number(b.timeline_start) || 0));
-  const index = clips.findIndex((clip) => clip.id === playback.clip.id);
-  const localTime = Math.max(0, Number(playback.localTime) || 0);
-  const clipDuration = Math.max(0, (Number(playback.clipEnd) || 0) - (Number(playback.clipStart) || 0));
-  if (index === 0) {
-    const transition = playback.clip.transition_in;
-    const duration = Math.max(0, Math.min(1.5, Number(transition?.duration_sec) || 0));
-    if (transition?.type && transition.type !== "cut" && duration >= 0.02 && localTime < duration) {
-      return {
-        type: transition.type,
-        phase: "in",
-        duration,
-        startLocalTime: 0,
-        progress: Math.max(0, Math.min(1, localTime / duration)),
-      };
-    }
+function transitionPreviewProjection(body, time, normalTop) {
+  const events = activeTransitionEvents(body, time);
+  const event = events[0] || null;
+  if (!event) return { event: null, top: normalTop, companion: null };
+
+  const fromPlayback = event.from?.kind === "clip"
+    ? resolveTransitionEndpointPlayback(body, event.from, time)
+    : null;
+  const toPlayback = event.to?.kind === "clip"
+    ? resolveTransitionEndpointPlayback(body, event.to, time)
+    : null;
+
+  if (fromPlayback && toPlayback) {
+    const sameTrack = event.from?.track_id === event.to?.track_id;
+    const fromUpper = Number(event.fromNode?.layer) > Number(event.toNode?.layer);
+    // A same-track boundary owns one stable primary decoder for the complete
+    // event.  Keeping the outgoing clip primary prevents the transition-start
+    // frame from replacing A with a newly mounted B player.  B is the stable
+    // companion that was already prewarmed before the event and is promoted
+    // only after the transition has fully completed.
+    const topRole = sameTrack ? "from" : fromUpper ? "from" : "to";
+    const topPlayback = topRole === "from" ? fromPlayback : toPlayback;
+    const companionPlayback = topRole === "from" ? toPlayback : fromPlayback;
+    const companionRole = topRole === "from" ? "to" : "from";
+    return {
+      event,
+      top: topPlayback,
+      companion: {
+        ...companionPlayback,
+        transitionEventId: event.id,
+        transitionType: event.type,
+        transitionDuration: event.duration_sec,
+        transitionRole: companionRole,
+        progress: event.progress,
+        freezePlayback: Boolean(companionPlayback.freezePlayback),
+      },
+      nodeTransition: { type: event.type, role: topRole, progress: event.progress, eventId: event.id, mode: event.mode, stack: "upper" },
+      kernel: sameTrack ? "canvas" : "stack",
+    };
   }
-  if (index === clips.length - 1) {
-    const transition = playback.clip.transition_out;
-    const duration = Math.max(0, Math.min(1.5, Number(transition?.duration_sec) || 0));
-    const startLocalTime = clipDuration - duration;
-    if (transition?.type && transition.type !== "cut" && duration >= 0.02 && localTime >= startLocalTime) {
-      return {
-        type: transition.type,
-        phase: "out",
-        duration,
-        startLocalTime,
-        progress: Math.max(0, Math.min(1, 1 - ((localTime - startLocalTime) / duration))),
-      };
-    }
-  }
-  return null;
+  const top = toPlayback || fromPlayback || normalTop;
+  const role = toPlayback ? "to" : fromPlayback ? "from" : null;
+  const currentNode = role ? event[`${role}Node`] : null;
+  const otherNode = role ? event[role === "to" ? "fromNode" : "toNode"] : null;
+  const stack = event.mode === "boundary" && currentNode && otherNode
+    ? (Number(currentNode.layer) > Number(otherNode.layer) || (Number(currentNode.layer) === Number(otherNode.layer) && role === "to") ? "upper" : "lower")
+    : null;
+  return {
+    event,
+    top,
+    companion: null,
+    nodeTransition: role ? { type: event.type, role, progress: event.progress, eventId: event.id, mode: event.mode, stack } : null,
+  };
 }
 
-/**
- * Pure projection of project state + timeline time into preview semantics.
- * DOM media ownership, URL resolution and decoder synchronization remain in
- * the preview adapter; timing and layer decisions live here.
- */
+function transitionAwareOverlays(body, time, events) {
+  const active = overlaysActiveAt(body, time);
+  const byId = new Map(active.map((overlay) => [String(overlay.id), overlay]));
+  for (const event of events) {
+    for (const endpoint of [event.from, event.to]) {
+      if (endpoint?.kind !== "overlay") continue;
+      const overlay = (body?.overlays || []).find((item) => String(item?.id) === String(endpoint.id));
+      if (overlay) byId.set(String(overlay.id), overlay);
+    }
+  }
+  return [...byId.values()].map((overlay) => {
+    const key = transitionRefKey(overlayTransitionRef(overlay));
+    for (const event of events) {
+      if (transitionRefKey(event.from) === key) return { ...overlay, _transition_state: { type: event.type, role: "from", progress: event.progress, eventId: event.id, mode: event.mode, stack: event.mode === "boundary" ? (Number(event.fromNode?.layer) > Number(event.toNode?.layer) ? "upper" : "lower") : null } };
+      if (transitionRefKey(event.to) === key) return { ...overlay, _transition_state: { type: event.type, role: "to", progress: event.progress, eventId: event.id, mode: event.mode, stack: event.mode === "boundary" ? (Number(event.toNode?.layer) >= Number(event.fromNode?.layer) ? "upper" : "lower") : null } };
+    }
+    return overlay;
+  });
+}
+
+/** Pure project + time projection shared by every preview adapter. */
 export function buildPreviewScene(
   body,
   timelineSec,
-  { masterVolume = 1, audioPreloadLeadSec = 1.5, transitionPreloadLeadSec = 2 } = {},
+  { masterVolume = 1, audioPreloadLeadSec = 1.5 } = {},
 ) {
   const time = Math.max(0, Number(timelineSec) || 0);
-  const top = resolveTopVideoPlaybackAt(body, time);
+  const normalTop = resolveTopVideoPlaybackAt(body, time);
+  const transitionProjection = transitionPreviewProjection(body, time, normalTop);
+  const top = transitionProjection.top;
+  const transitionEvents = activeTransitionEvents(body, time);
   const activeAudio = resolveAudioPreviewItems(body, time, masterVolume);
   const activeAudioKeys = new Set(activeAudio.map((item) => `${item.trackId}:${item.id}`));
   const audioPreload = resolveAudioPreviewPreloadItems(body, time, masterVolume, audioPreloadLeadSec)
@@ -69,10 +110,11 @@ export function buildPreviewScene(
     baseVideoTrackId: resolveBaseVideoTrackId(body),
     underlay: resolveVideoUnderlayPlaybackAt(body, time, top),
     underlays: resolveVideoUnderlayPlaybacksAt(body, time, top),
-    overlays: overlaysActiveAt(body, time),
-    incomingTransition: resolveIncomingTransitionPlayback(body, top),
-    outgoingTransitionPreload: resolveOutgoingTransitionPreload(body, top, transitionPreloadLeadSec),
-    backgroundTransition: resolveBackgroundTransition(body, top),
+    overlays: transitionAwareOverlays(body, time, transitionEvents),
+    transitionEvent: transitionProjection.event,
+    transitionCompanion: transitionProjection.companion,
+    nodeTransition: transitionProjection.nodeTransition || null,
+    transitionKernel: transitionProjection.kernel || "node",
     audio: activeAudio,
     audioPreload,
   };

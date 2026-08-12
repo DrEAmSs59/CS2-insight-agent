@@ -35,8 +35,8 @@ describe("LiteCutProjectDrawer", () => {
     expect(screen.getByText("工程管理")).toBeTruthy();
     expect(screen.getByText("当前工程")).toBeTruthy();
     expect(screen.getByText("新建空白工程")).toBeTruthy();
-    expect(screen.getByText("导入工程JSON")).toBeTruthy();
-    expect(screen.getByText("导出工程JSON")).toBeTruthy();
+    expect(screen.getByText("导入 .litecut")).toBeTruthy();
+    expect(screen.getByText("导出 .litecut")).toBeTruthy();
     expect(screen.getByText("工程 #24 · 2 条轨道 · 1 个片段")).toBeTruthy();
     expect(screen.getByDisplayValue("Mirage highlights")).toBeTruthy();
     expect(screen.getByLabelText("视频帧率").value).toBe("60");

@@ -13,12 +13,10 @@ import pytest
 from app.features.lite_cut.composer import (
     _audio_mix_filter_complex,
     _audio_track_clips_for_export,
-    _video_layer_audio_clips_for_export,
     _resolve_audio_clip_paths,
     _audio_filter_chain,
     _builtin_text_font_file,
     _build_color_vf,
-    _build_transitions,
     _clip_audio_fade,
     _clip_canvas_fit,
     _clip_duration_sec,
@@ -29,10 +27,8 @@ from app.features.lite_cut.composer import (
     _clip_speed_keyframes,
     _clip_speed_segments,
     _clip_timeline_duration_sec,
-    _clip_video_fade,
     _clip_video_filter_chain,
     _clip_canvas_transform_graph,
-    _clip_visual_fade,
     _clip_volume,
     _clip_volume_filter,
     _composite_overlays_on_base,
@@ -44,15 +40,12 @@ from app.features.lite_cut.composer import (
     _is_audio_file_clip,
     _is_main_file_clip,
     _has_solo_audio_tracks,
-    _map_transition_type,
     _mix_audio_tracks_on_base,
     _overlay_filter_complex,
-    _overlay_height_from_transform,
     _overlay_video_decoder_args,
     _is_looping_animation_file,
-    _overlay_keyframe_expr,
-    _overlay_layout_from_transform,
-    _overlay_opacity_from_transform,
+    normalize_scene_transform,
+    scene_keyframe_expr,
     _project_bgm_clip_for_export,
     _project_canvas_settings,
     _project_encoder_tier,
@@ -69,7 +62,6 @@ from app.features.lite_cut.composer import (
     _timeline_video_layer_clip,
     _timeline_gap_plan,
     _timeline_overlap_pair,
-    _has_soft_positional_transition,
     _lite_cut_clip_to_ts,
     _boundary_transition_filter_complex,
     _v1_clips_sorted,
@@ -79,18 +71,26 @@ from app.features.lite_cut.composer import (
 from app.video_composer import MontageComposerError
 from app.video_composer import _xfade_transition_name
 from app.features.lite_cut.models import empty_project
-from app.features.lite_cut.render_pipeline import _concat_timeline_command
+from app.features.lite_cut.render_pipeline import (
+    _concat_timeline_command,
+    _timeline_concat_filter_complex,
+)
+from app.features.lite_cut.transition_events import normalize_transition_type
 
 
 def test_map_transition_types():
-    assert _map_transition_type("dip") == "dip_black"
-    assert _map_transition_type("slide_left") == "slide_left"
+    assert normalize_transition_type("dip") == "dip"
+    assert normalize_transition_type("wipe_l") == "wipe_l"
+    assert normalize_transition_type("cut") == "cut"
+    assert normalize_transition_type("dip_black") == "fade"
 
 
 def test_builtin_text_fonts_keep_their_intended_faces_and_legacy_fallback():
     assert _builtin_text_font_file("思源黑体 Medium").endswith("NotoSansSC-Medium.ttf")
     assert _builtin_text_font_file("Noto Sans SC").endswith("NotoSansSC-Bold.ttf")
-    assert _builtin_text_font_file("Rajdhani Bold").endswith("NotoSansSC-Bold.ttf")
+    assert _builtin_text_font_file("Noto Sans SC", 500).endswith("NotoSansSC-Medium.ttf")
+    assert _builtin_text_font_file("微软雅黑", 500).endswith("msyh.ttc")
+    assert _builtin_text_font_file("Rajdhani Bold", 700).endswith("msyhbd.ttc")
 
 
 def test_main_clip_transform_uses_preview_canvas_coordinates():
@@ -98,18 +98,20 @@ def test_main_clip_transform_uses_preview_canvas_coordinates():
         "[0:v]",
         "[vout]",
         clip={"transform": {"x": 0.1, "y": 0.75, "width": 0.5, "height": 0.4, "scale": 1.5, "rotation": 30, "opacity": 0.8}},
-        fitted_filter="scale=1920:1080,format=yuv420p",
+        source_filter="format=rgba",
+        content_fit="fill",
         width=1920,
         height=1080,
         fps=60,
         duration=3,
         background_color="black",
     )
-    assert "scale=1440:648" in graph
-    assert "W*(0.100000)-w/2" in graph
-    assert "H*(0.750000)-h/2" in graph
-    assert "colorchannelmixer=aa=0.800000" in graph
-    assert "rotw(0.52359878)" in graph
+    assert "round(1920*((0.500000000)*(1.500000000)))" in graph
+    assert "round(1080*((0.400000000)*(1.500000000)))" in graph
+    assert "main_w*(0.100000000)-overlay_w/2" in graph
+    assert "main_h*(0.750000000)-overlay_h/2" in graph
+    assert "colorchannelmixer=aa=0.800000000" in graph
+    assert "rotw(iw)" in graph
     assert "[vout]" in graph
 
 
@@ -117,7 +119,8 @@ def test_main_clip_zero_rotation_skips_incompatible_rotate_filter():
     graph = _clip_canvas_transform_graph(
         "[0:v]", "[vout]",
         clip={"transform": {"x": 0.7, "y": 0.6, "width": 1, "height": 1, "scale": 0.72, "rotation": 0}},
-        fitted_filter="scale=1920:1080,format=yuv420p",
+        source_filter="format=rgba",
+        content_fit="fill",
         width=1920, height=1080, fps=60, duration=3, background_color="#000000",
     )
     assert "rotate=" not in graph
@@ -133,22 +136,23 @@ def test_main_clip_keyframes_animate_position_scale_rotation_and_opacity():
                 {"time_sec": 2, "transform": {"x": 0.8, "y": 0.7, "width": 0.8, "height": 0.8, "scale": 1.25, "rotation": 45, "opacity": 1}},
             ],
         },
-        fitted_filter="scale=1920:1080,format=yuv420p",
+        source_filter="format=rgba",
+        content_fit="fill",
         width=1920, height=1080, fps=60, duration=2, background_color="black",
     )
-    assert "scale=w='max(2\\,trunc(1920*(if(" in graph
+    assert "scale=w='max(1\\,round(1920*((if(" in graph
     assert ":eval=frame,format=rgba" in graph
     assert "geq=r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':a='alpha(X,Y)*(if(lt(T" in graph
     assert "rotate=angle='(if(" in graph
-    assert "overlay=x='W*(if(" in graph
+    assert "overlay=x='main_w*(if(" in graph
     assert "eval=frame" in graph
 
 
 def test_single_keyframe_holds_its_value_for_the_entire_clip():
-    expr, animated = _overlay_keyframe_expr(
+    expr, animated = scene_keyframe_expr(
         [{"time_sec": 1, "transform": {"x": 0.75}}], "x", 0.5, 0, 3,
     )
-    assert expr == "0.750000"
+    assert expr == "0.750000000"
     assert animated is False
 
 
@@ -157,11 +161,7 @@ def test_overlay_filter_uses_single_keyframe_values_instead_of_base_transform():
         enable_expr="between(t,0,3)",
         timeline_start=0,
         duration=3,
-        tx=0.5,
-        ty=0.5,
-        size_frac=0.4,
-        rotation=0,
-        opacity=1,
+        transform={"x": 0.5, "y": 0.5, "width": 0.4, "height": 0.4, "rotation": 0, "opacity": 1},
         video_input=False,
         keyframes=[
             {
@@ -171,10 +171,10 @@ def test_overlay_filter_uses_single_keyframe_values_instead_of_base_transform():
         ],
     )
 
-    assert "main_w*0.200000-w/2" in fc
-    assert "main_h*0.800000-h/2" in fc
-    assert "rotate='0.523599'" in fc
-    assert "colorchannelmixer=aa=0.350000" in fc
+    assert "main_w*(0.200000000)-overlay_w/2" in fc
+    assert "main_h*(0.800000000)-overlay_h/2" in fc
+    assert "rotate=angle='0.523598775598'" in fc
+    assert "colorchannelmixer=aa=0.350000000" in fc
 
 
 def test_alpha_webm_uses_libvpx_decoder_but_ordinary_video_keeps_default(monkeypatch, tmp_path):
@@ -192,6 +192,12 @@ def test_alpha_webm_uses_libvpx_decoder_but_ordinary_video_keeps_default(monkeyp
 def test_gif_is_treated_as_a_looping_animation_instead_of_a_still(tmp_path):
     assert _is_looping_animation_file(tmp_path / "sticker.gif") is True
     assert _is_looping_animation_file(tmp_path / "sticker.png") is False
+
+    animated_webp = tmp_path / "sticker.webp"
+    vp8x = bytes([0x02, 0, 0, 0, 15, 0, 0, 15, 0, 0])
+    chunks = b"VP8X" + len(vp8x).to_bytes(4, "little") + vp8x
+    animated_webp.write_bytes(b"RIFF" + (len(chunks) + 4).to_bytes(4, "little") + b"WEBP" + chunks)
+    assert _is_looping_animation_file(animated_webp) is True
 
 
 def test_overlay_intermediate_steps_stay_out_of_export_directory(monkeypatch, tmp_path):
@@ -268,17 +274,16 @@ def test_timeline_video_layer_keeps_clip_transform_for_export():
     layer = _timeline_video_layer_clip({"id": "v2-clip", "transform": transform}, track_id="v2")
     assert layer["source_track_id"] == "v2"
     assert layer["transform"] == transform
-    assert _map_transition_type("flash") == "flash"
-    assert _map_transition_type("cut") == "cut"
-    assert _map_transition_type("glitch") == "glitch"
-    assert _map_transition_type("wipe_l") == "wipe_l"
+    assert normalize_transition_type("flash") == "flash"
+    assert normalize_transition_type("cut") == "cut"
+    assert normalize_transition_type("glitch") == "fade"
+    assert normalize_transition_type("wipe_l") == "wipe_l"
 
 
-def test_xfade_names_for_extended_transitions():
-    assert _xfade_transition_name("glitch") == "pixelize"
+def test_xfade_names_for_canonical_boundary_transitions():
     assert _xfade_transition_name("wipe_l") == "wipeleft"
-    assert _xfade_transition_name("blur") == "hblur"
-    assert _xfade_transition_name("spin") == "radial"
+    assert _xfade_transition_name("slide_up") == "slideup"
+    assert _xfade_transition_name("zoom") == "zoomin"
 
 
 def test_cancellable_ffmpeg_process_raises_cancelled():
@@ -433,12 +438,6 @@ def test_main_timeline_gap_plan_preserves_initial_and_internal_empty_ranges():
     ]) == ("first", "second")
 
 
-def test_soft_transition_detection_distinguishes_boundaries_from_hard_cuts():
-    clips = [{"timeline_start": 0, "trim_out": 4}, {"timeline_start": 6, "trim_out": 10}]
-    assert _has_soft_positional_transition(clips, {"0": {"type": "fade", "duration": 0.4}}, 60) is True
-    assert _has_soft_positional_transition(clips, {"0": {"type": "cut", "duration": 0}}, 60) is False
-
-
 def test_boundary_transition_preserves_clip_timeline_length_and_supplies_silence():
     graph = _boundary_transition_filter_complex(
         transition_type="wipe_l",
@@ -450,13 +449,13 @@ def test_boundary_transition_preserves_clip_timeline_length_and_supplies_silence
         next_has_audio=True,
     )
     assert (
-        "[holdsrc]trim=start=5.750000:end=6.000000,setpts=PTS-STARTPTS,"
+        "[plastholdsrc]trim=start=5.750000:end=6.000000,setpts=PTS-STARTPTS,"
         "reverse,trim=end_frame=1,setpts=PTS-STARTPTS,"
         "loop=loop=-1:size=1:start=0"
     ) in graph
-    assert "loop=loop=-1:size=1:start=0,setpts=N/60/TB,trim=duration=0.500000[hold]" in graph
-    assert "[0:v]split=2[pvsrc][holdsrc]" in graph
-    assert "[1:v]split=2[nintrosrc][ntailsrc]" in graph
+    assert "loop=loop=-1:size=1:start=0,setpts=N/60/TB,trim=duration=0.250000[plasthold]" in graph
+    assert "[0:v]split=3[pvsrc][ptailsrc][plastholdsrc]" in graph
+    assert "[1:v]split=3[nfirstholdsrc][nheadsrc][ntailsrc]" in graph
     assert "xfade=transition=wipeleft:duration=0.500000:offset=0" in graph
     assert "[pv][xf][ntail]concat=n=3:v=1:a=0[vout]" in graph
     assert "anullsrc=r=48000:cl=stereo,atrim=0:6.000000" in graph
@@ -475,7 +474,7 @@ def test_boundary_transition_finds_last_real_frame_when_container_duration_exten
     )
 
     assert (
-        "[holdsrc]trim=start=6.218000:end=6.468000,setpts=PTS-STARTPTS,"
+        "[plastholdsrc]trim=start=6.218000:end=6.468000,setpts=PTS-STARTPTS,"
         "reverse,trim=end_frame=1,setpts=PTS-STARTPTS"
     ) in graph
     assert "trim=start=6.451333:end=6.468000" not in graph
@@ -491,13 +490,13 @@ def test_boundary_transition_keeps_requested_one_point_five_seconds_when_next_cl
         previous_has_audio=True,
         next_has_audio=True,
     )
-    assert "loop=loop=-1:size=1:start=0,setpts=N/60/TB,trim=duration=1.500000[hold]" in graph
+    assert "loop=loop=-1:size=1:start=0,setpts=N/60/TB,trim=duration=0.750000[plasthold]" in graph
     assert "xfade=transition=fade:duration=1.500000:offset=0" in graph
 
 
 def test_boundary_dip_black_reaches_a_true_black_midpoint_without_xfade_variation():
     graph = _boundary_transition_filter_complex(
-        transition_type="dip_black",
+        transition_type="dip",
         duration=1.0,
         previous_duration=2.0,
         next_duration=2.0,
@@ -505,8 +504,8 @@ def test_boundary_dip_black_reaches_a_true_black_midpoint_without_xfade_variatio
         previous_has_audio=True,
         next_has_audio=True,
     )
-    assert "trim=start=1.500000:end=2.000000,setpts=PTS-STARTPTS,fade=t=out:st=0:d=0.500000:color=black[dipout]" in graph
-    assert "trim=start=0.500000:end=1.000000" in graph
+    assert "[ptransition]trim=start=0:end=0.500000,setpts=PTS-STARTPTS,fade=t=out:st=0:d=0.500000:color=black[dipout]" in graph
+    assert "[ntransition]trim=start=0.500000:end=1.000000" in graph
     assert "fade=t=in:st=0:d=0.500000:color=black[dipin]" in graph
     assert "[dipout][dipin]concat=n=2:v=1:a=0[xf]" in graph
     assert "xfade=transition=fadeblack" not in graph
@@ -528,16 +527,14 @@ def test_boundary_flash_reaches_a_true_white_midpoint_without_xfade_variation():
     assert "xfade=transition=fadewhite" not in graph
 
 
-def test_clip_normalizer_keeps_slow_silent_clips_dual_stream_and_untruncated(monkeypatch, tmp_path):
+def test_clip_normalizer_keeps_video_visual_only_with_silent_audio_placeholder(monkeypatch, tmp_path):
     commands = []
-    monkeypatch.setitem(_lite_cut_clip_to_ts.__globals__, "probe_video_audio_summary", lambda *_args: {"has_audio": False})
-    monkeypatch.setitem(_lite_cut_clip_to_ts.__globals__, "resolve_ffprobe_binary", lambda _ffmpeg: tmp_path / "ffprobe.exe")
     monkeypatch.setitem(
         _lite_cut_clip_to_ts.__globals__,
         "_run_ffmpeg_process",
         lambda cmd, **_kwargs: commands.append(cmd) or SimpleNamespace(returncode=0, stderr="", stdout=""),
     )
-    src = tmp_path / "silent.mp4"
+    src = tmp_path / "source-with-audio.mp4"
     _lite_cut_clip_to_ts(
         ffmpeg_bin=tmp_path / "ffmpeg.exe",
         src=src,
@@ -558,23 +555,39 @@ def test_clip_normalizer_keeps_slow_silent_clips_dual_stream_and_untruncated(mon
     assert "anullsrc=r=48000:cl=stereo" in cmd
     assert "-shortest" not in cmd
     assert cmd[cmd.index("-c:a") + 1] == "pcm_s16le"
+    assert "0:a" not in " ".join(cmd)
     output_duration_index = [index for index, value in enumerate(cmd) if value == "-t"][-1]
     assert cmd[output_duration_index + 1] == "14.000000"
-    assert ["-map", "0:v:0", "-map", "1:a:0"] == cmd[cmd.index("-map") : cmd.index("-map") + 4]
+    assert ["-map", "[vout]", "-map", "1:a:0"] == cmd[cmd.index("-map") : cmd.index("-map") + 4]
     assert "14.100000" in cmd
 
 
-def test_timeline_concat_encodes_pcm_audio_to_aac_once(tmp_path):
+def test_timeline_concat_decodes_each_segment_before_the_selected_encoder(tmp_path):
+    segments = [tmp_path / "a.mkv", tmp_path / "b.mkv"]
     cmd = _concat_timeline_command(
         ffmpeg_bin=Path("ffmpeg"),
-        concat_list=tmp_path / "concat.txt",
+        segment_paths=segments,
         output_path=tmp_path / "output.mp4",
+        fps=60,
+        video_encode_quality=["-c:v", "h264_qsv", "-global_quality", "22"],
     )
 
-    assert cmd[cmd.index("-c:v") + 1] == "copy"
+    assert cmd.count("-i") == 2
+    assert "-f" not in cmd
+    assert "concat" not in cmd
+    assert cmd[cmd.index("-c:v") + 1] == "h264_qsv"
+    assert cmd[cmd.index("-global_quality") + 1] == "22"
     assert cmd[cmd.index("-c:a") + 1] == "aac"
-    assert cmd[cmd.index("-af") + 1] == "aresample=48000:async=1:first_pts=0"
+    graph = cmd[cmd.index("-filter_complex") + 1]
+    assert "[0:v:0]fps=60,settb=AVTB,setpts=PTS-STARTPTS[timeline_v0]" in graph
+    assert "[1:v:0]fps=60,settb=AVTB,setpts=PTS-STARTPTS[timeline_v1]" in graph
+    assert "concat=n=2:v=1:a=1[timeline_vout][timeline_aout]" in graph
     assert "-c" not in cmd
+
+
+def test_timeline_concat_filter_requires_at_least_one_segment():
+    with pytest.raises(ValueError, match="segment_count"):
+        _timeline_concat_filter_complex(segment_count=0, fps=60)
 
 
 def test_real_multicut_timeline_does_not_accumulate_aac_padding(tmp_path):
@@ -615,11 +628,15 @@ def test_real_multicut_timeline_does_not_accumulate_aac_padding(tmp_path):
         )
         segments.append(segment)
 
-    concat_list = tmp_path / "concat.txt"
-    concat_list.write_text("\n".join(f"file '{path.as_posix()}'" for path in segments) + "\n", encoding="utf-8")
     output = tmp_path / "output.mp4"
     subprocess.run(
-        _concat_timeline_command(ffmpeg_bin=ffmpeg, concat_list=concat_list, output_path=output),
+        _concat_timeline_command(
+            ffmpeg_bin=ffmpeg,
+            segment_paths=segments,
+            output_path=output,
+            fps=60,
+            video_encode_quality=["-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p"],
+        ),
         check=True,
     )
     probe = subprocess.run(
@@ -643,22 +660,21 @@ def test_real_multicut_timeline_does_not_accumulate_aac_padding(tmp_path):
     assert video_duration == pytest.approx(4.8, abs=0.025)
 
 
-def test_speed_ramp_uses_timeline_duration_for_video_fade_out():
+def test_speed_ramp_uses_timeline_duration_for_canonical_scene_exit():
     ramped_clip = {
         "trim_in": 0,
         "trim_out": 4,
         "speed_keyframes": [{"source_sec": 0, "speed": 0.5}, {"source_sec": 2, "speed": 2}],
-        "fade_out_sec": 1,
+        "_transition_events": [{"id": "exit", "type": "fade", "role": "from", "mode": "exit", "start_sec": 4, "end_sec": 5}],
     }
     visual_clip = {**ramped_clip, "speed": 1.0, "speed_keyframes": []}
-    graph = _clip_video_filter_chain(
-        visual_clip,
-        width=1920,
-        height=1080,
-        fps=60,
-        timeline_duration_override=_clip_timeline_duration_sec(ramped_clip),
+    duration = _clip_timeline_duration_sec(ramped_clip)
+    graph = _clip_canvas_transform_graph(
+        "[0:v]", "[vout]", clip=visual_clip, source_filter="format=rgba",
+        content_fit="contain", width=1920, height=1080, fps=60,
+        duration=duration, background_color="black",
     )
-    assert "fade=t=out:st=4.000000:d=1.000000" in graph
+    assert "clip((T-4.000000000)/1.000000000" in graph
 
 
 def test_v1_hidden_track_is_not_exported():
@@ -710,10 +726,14 @@ def test_track_gain_scales_clip_audio_and_automation_for_export():
     }
     _, video = _base_video_track_for_export(body)
     audio = _audio_track_clips_for_export(body)
-    assert video[0]["volume"] == 0.4
-    assert video[0]["audio_keyframes"][0]["volume"] == 0.6
-    assert audio[0]["volume"] == 0.25
-    assert audio[0]["audio_keyframes"][0]["volume"] == 0.2
+    assert video[0]["volume"] == 0.8
+    assert video[0]["audio_keyframes"][0]["volume"] == 1.2
+    assert video[0]["_track_volume"] == 0.5
+    assert "*0.500000" in _clip_volume_filter(video[0])
+    assert audio[0]["volume"] == 1.0
+    assert audio[0]["audio_keyframes"][0]["volume"] == 0.8
+    assert audio[0]["_track_volume"] == 0.25
+    assert "*0.250000" in _clip_volume_filter(audio[0])
 
 
 def test_solo_audio_track_mutes_main_video_audio_and_filters_audio_tracks():
@@ -727,15 +747,6 @@ def test_solo_audio_track_mutes_main_video_audio_and_filters_audio_tracks():
     assert _has_solo_audio_tracks(body) is True
     assert _v1_clips_sorted(body)[0]["muted"] is True
     assert [clip["id"] for clip in _audio_track_clips_for_export(body)] == ["solo"]
-
-
-def test_build_transitions_uses_source_id():
-    clips = [
-        {"source_id": 42, "transition_out": {"type": "fade", "duration_sec": 0.5}},
-    ]
-    tr = _build_transitions(clips)
-    assert tr["42"]["type"] == "fade"
-    assert tr["42"]["duration"] == 0.5
 
 
 def test_clip_duration_from_trim():
@@ -792,15 +803,12 @@ def test_speed_ramp_audio_mix_and_video_overlay_build_concat_graphs():
         enable_expr="between(t,1,7)",
         timeline_start=1,
         duration=7,
-        tx=0.5,
-        ty=0.5,
-        size_frac=1,
-        rotation=0,
+        transform={"x": 0.5, "y": 0.5, "width": 1, "height": 1},
         video_input=True,
         speed_segments=[(0, 4, 0.5), (4, 8, 2)],
     )
-    assert "concat=n=2:v=1:a=0[ovramp]" in overlay_graph
-    assert "[ovramp]format=rgba" in overlay_graph
+    assert "concat=n=2:v=1:a=0[scene_ramp]" in overlay_graph
+    assert "[scene_ramp]format=rgba" in overlay_graph
 
 
 def test_audio_track_mix_trims_uploaded_source_before_delay_and_effects():
@@ -848,6 +856,7 @@ def test_audio_mix_passes_full_source_to_filter_to_avoid_double_trim(monkeypatch
     assert "-ss" not in command
     graph = command[command.index("-filter_complex") + 1]
     assert "[1:a]atrim=start=1.500000:end=5.250000" in graph
+    assert "[0:a]" not in graph
 
 
 def test_audio_mix_keeps_silent_base_video_duration_when_added_audio_ends_early(monkeypatch, tmp_path):
@@ -882,10 +891,10 @@ def test_audio_mix_keeps_silent_base_video_duration_when_added_audio_ends_early(
 
 
 def test_clip_canvas_fit_uses_clip_override_or_project_fallback():
-    assert _clip_canvas_fit({"canvas_fit": "cover"}, "contain") == "cover"
-    assert _clip_canvas_fit({"canvas_fit": "blur"}, "cover") == "blur"
-    assert _clip_canvas_fit({"canvas_fit": "inherit"}, "cover") == "cover"
-    assert _clip_canvas_fit({"canvas_fit": "bad"}, "bad") == "contain"
+    assert _clip_canvas_fit({"content_fit": "cover"}, "contain") == "cover"
+    assert _clip_canvas_fit({"content_fit": "blur"}, "cover") == "blur"
+    assert _clip_canvas_fit({"content_fit": "inherit"}, "cover") == "cover"
+    assert _clip_canvas_fit({"content_fit": "bad"}, "bad") == "contain"
 
 
 def test_project_master_volume_is_bounded():
@@ -941,19 +950,6 @@ def test_clip_audio_fade_is_bounded_to_clip_duration():
     assert _clip_audio_fade(clip, "fade_out_sec") == 0.0
 
 
-def test_clip_visual_fade_is_bounded_to_clip_duration():
-    clip = {"timeline_start": 1, "duration": 2.5, "fade_in_sec": 9, "fade_out_sec": 0.75}
-    assert _clip_visual_fade(clip, "fade_in_sec") == 2.5
-    assert _clip_visual_fade(clip, "fade_out_sec") == 0.75
-
-
-def test_clip_video_fade_uses_timeline_duration_after_speed():
-    clip = {"trim_in": 0, "trim_out": 6, "speed": 2, "fade_in_sec": 9, "fade_out_sec": 1}
-    assert _clip_timeline_duration_sec(clip) == 3
-    assert _clip_video_fade(clip, "fade_in_sec") == 3
-    assert _clip_video_fade(clip, "fade_out_sec") == 1
-
-
 def test_video_and_audio_filters_append_final_frame_hold():
     vf = _clip_video_filter_chain({"trim_in": 0, "trim_out": 3, "freeze_frame_sec": 1.5}, width=1920, height=1080, fps=60)
     assert "tpad=stop_mode=clone:stop_duration=1.500000" in vf
@@ -987,7 +983,7 @@ def test_audio_mix_filter_applies_speed_to_extra_audio_tracks():
         has_base_audio=False,
         audio_clips=[
             {
-                "id": "detached",
+                "id": "linked-audio",
                 "timeline_start": 1,
                 "trim_in": 0,
                 "trim_out": 8,
@@ -1006,35 +1002,61 @@ def test_audio_mix_filter_applies_speed_to_extra_audio_tracks():
     assert "adelay=1000:all=1" in chain
 
 
-def test_clip_video_filter_chain_applies_visual_fades_after_speed():
+def test_scene_compositor_applies_canonical_events_after_source_speed():
     vf = _clip_video_filter_chain(
         {"trim_in": 0, "trim_out": 6, "speed": 2, "fade_in_sec": 0.5, "fade_out_sec": 1},
         width=1920,
         height=1080,
         fps=60,
     )
-    assert "setpts=PTS/2.000000,fade=t=in:st=0:d=0.500000" in vf
-    assert "fade=t=out:st=2.000000:d=1.000000" in vf
+    assert vf.endswith("setpts=PTS/2.000000")
+    graph = _clip_canvas_transform_graph(
+        "[0:v]", "[vout]",
+        clip={"_transition_events": [
+            {"id": "enter", "type": "fade", "role": "to", "mode": "enter", "start_sec": 0, "end_sec": 0.5},
+            {"id": "exit", "type": "fade", "role": "from", "mode": "exit", "start_sec": 2, "end_sec": 3},
+        ]}, source_filter=vf,
+        content_fit="contain", width=1920, height=1080, fps=60,
+        duration=3, background_color="black",
+    )
+    assert "clip((T-0.000000000)/0.500000000" in graph
+    assert "1-(clip((T-2.000000000)/1.000000000" in graph
 
 
-def test_clip_video_filter_chain_supports_reverse_before_speed_and_fades():
+def test_main_scene_transitions_have_one_canonical_event_owner():
+    clip = {"_transition_events": [{"id": "enter", "type": "flash", "role": "to", "mode": "enter", "start_sec": 0, "end_sec": 1}]}
+    base = dict(
+        input_label="[0:v]", output_label="[vout]", clip=clip,
+        source_filter="format=rgba", content_fit="contain",
+        width=1920, height=1080, fps=60, duration=3,
+        background_color="black",
+    )
+    endpoint_graph = _clip_canvas_transform_graph(**base)
+    ordinary_clip_graph = _clip_canvas_transform_graph(**{**base, "clip": {}})
+    assert "eq=brightness" not in ordinary_clip_graph
+    assert "eq=brightness" in endpoint_graph
+    assert "clip((T-0.000000000)/1.000000000" in endpoint_graph
+
+
+def test_clip_source_filter_supports_reverse_before_speed():
     vf = _clip_video_filter_chain(
         {"trim_in": 0, "trim_out": 6, "speed": 2, "reverse": True, "fade_in_sec": 0.5},
         width=1920,
         height=1080,
         fps=60,
     )
-    assert "format=yuv420p,reverse,setpts=PTS/2.000000,fade=t=in:st=0:d=0.500000" in vf
+    assert "format=rgba,reverse,setpts=PTS/2.000000" in vf
+    assert "fade=" not in vf
 
 
-def test_clip_video_filter_chain_applies_horizontal_and_vertical_flips():
-    vf = _clip_video_filter_chain(
-        {"flip_horizontal": True, "flip_vertical": True},
-        width=1920,
-        height=1080,
-        fps=60,
+def test_scene_compositor_applies_horizontal_and_vertical_flips():
+    graph = _clip_canvas_transform_graph(
+        "[0:v]", "[vout]",
+        clip={"flip_horizontal": True, "flip_vertical": True},
+        source_filter="format=rgba", content_fit="contain",
+        width=1920, height=1080, fps=60, duration=3, background_color="black",
     )
-    assert "format=yuv420p,hflip,vflip" in vf
+    assert "[scenebox]hflip,vflip[scenemirror]" in graph
 
 
 def test_clip_video_filter_chain_applies_normalized_crop_before_canvas_fit():
@@ -1057,36 +1079,32 @@ def test_clip_video_filter_chain_clamps_crop_to_source_bounds():
     assert vf.startswith("crop=iw*0.400000:ih*1.000000:iw*0.600000:ih*0.000000,")
 
 
-def test_clip_video_filter_chain_uses_project_render_settings():
-    vf = _clip_video_filter_chain({}, width=1280, height=720, fps=30, background_color="0x112233")
-    assert "scale=1280:720:force_original_aspect_ratio=decrease" in vf
-    assert "pad=1280:720:(ow-iw)/2:(oh-ih)/2:color=0x112233" in vf
-    assert "fps=30" in vf
+def test_scene_compositor_uses_project_render_settings():
+    graph = _clip_canvas_transform_graph(
+        "[0:v]", "[vout]", clip={}, source_filter="fps=30,format=rgba",
+        content_fit="contain", width=1280, height=720, fps=30,
+        duration=3, background_color="0x112233",
+    )
+    assert "force_original_aspect_ratio=decrease" in graph
+    assert "pad=w='max(1\\,round(1280*((1.000000000)*(1.000000000))))'" in graph
+    assert "color=c=0x112233:s=1280x720:r=30" in graph
 
 
-def test_clip_video_filter_chain_supports_cover_and_blur_canvas_modes():
-    cover = _clip_video_filter_chain({}, width=1280, height=720, fps=30, canvas_fit="cover")
+def test_scene_compositor_supports_cover_and_blur_canvas_modes():
+    base = dict(input_label="[0:v]", output_label="[vout]", clip={}, source_filter="format=rgba", width=1280, height=720, fps=30, duration=3, background_color="black")
+    cover = _clip_canvas_transform_graph(content_fit="cover", **base)
     assert "force_original_aspect_ratio=increase" in cover
-    assert "crop=1280:720" in cover
+    assert "crop=w='max(1\\,round(1280*((1.000000000)*(1.000000000))))'" in cover
     assert "pad=" not in cover
 
-    blur = _clip_video_filter_chain({}, width=1280, height=720, fps=30, canvas_fit="blur", blur_amount=18)
-    assert "split=2[fg][bg]" in blur
-    assert "gblur=sigma=18" in blur
-    assert "[bgfit][fgfit]overlay=(W-w)/2:(H-h)/2" in blur
+    blur = _clip_canvas_transform_graph(content_fit="blur", **base)
+    assert "split=2[scenefg][scenebg]" in blur
+    assert "gblur=sigma=24" in blur
+    assert "[scenebgfit][scenefgfit]overlay=" in blur
 
 
-def test_clip_video_filter_chain_uses_clip_canvas_fit_override():
-    vf = _clip_video_filter_chain(
-        {"canvas_fit": "cover"},
-        width=1280,
-        height=720,
-        fps=30,
-        canvas_fit="contain",
-    )
-    assert "force_original_aspect_ratio=increase" in vf
-    assert "crop=1280:720" in vf
-    assert "pad=" not in vf
+def test_clip_canvas_fit_override_resolves_before_scene_composition():
+    assert _clip_canvas_fit({"content_fit": "cover"}, "contain") == "cover"
 
 
 def test_audio_track_clips_for_export():
@@ -1125,24 +1143,6 @@ def test_audio_track_clips_for_export():
     clips = _audio_track_clips_for_export(body)
     assert [c["id"] for c in clips] == ["aud"]
     assert _is_audio_file_clip(clips[0])
-
-
-def test_video_layer_audio_is_mixed_with_track_gain_and_recording_path(tmp_path):
-    recording = tmp_path / "angle.mp4"
-    recording.write_bytes(b"video")
-    body = {
-        "tracks": [
-            {"id": "v1", "type": "video", "volume": 0.5, "clips": [{"id": "angle", "source_type": "recorded_clip", "source_id": 9, "volume": 1.2}]},
-            {"id": "v2", "type": "video", "clips": [{"id": "base", "source_type": "file", "file_path": str(recording)}]},
-            {"id": "v3", "type": "video", "hidden": True, "clips": [{"id": "hidden", "source_type": "recorded_clip", "source_id": 10}]},
-        ],
-    }
-
-    layer_audio = _video_layer_audio_clips_for_export(body, base_track_id="v2")
-    assert layer_audio == [{"id": "angle", "source_type": "recorded_clip", "source_id": 9, "volume": 0.6}]
-    assert _resolve_audio_clip_paths(layer_audio, {9: recording}) == [
-        {"id": "angle", "source_type": "recorded_clip", "source_id": 9, "volume": 0.6, "file_path": str(recording)},
-    ]
 
 
 def test_project_bgm_clip_for_export_maps_audio_config():
@@ -1189,8 +1189,8 @@ def test_audio_mix_filter_ducks_project_bgm_under_foreground_audio():
             },
         ],
     )
-    assert "sidechaincompress=" in fc
-    assert "[duckside]" in fc
+    assert "[a2]volume='if(gt(between(t\\,0.000000\\,5.000000)\\,0)\\,0.300000\\,1)':eval=frame[bgmduck]" in fc
+    assert "normalize=0" in fc
     assert "adelay=0:all=1[a1]" in fc
 
 
@@ -1240,49 +1240,41 @@ def test_audio_mix_filter_applies_mute_and_fades():
     assert "adelay=500:all=1[a1]" in fc
 
 
-def test_overlay_layout_matches_preview_defaults():
-    tx, ty, size, rot = _overlay_layout_from_transform({})
-    assert tx == 0.5
-    assert ty == 0.5
-    assert abs(size - 0.33 * 0.38) < 1e-6
-    assert rot == 0.0
+def test_scene_transform_defaults_match_preview():
+    assert normalize_scene_transform({}) == {
+        "x": 0.5, "y": 0.5, "width": 1.0, "height": 1.0,
+        "scale": 1.0, "rotation": 0.0, "opacity": 1.0,
+    }
 
 
-def test_overlay_layout_width_and_scale():
-    tx, ty, size, rot = _overlay_layout_from_transform(
-        {"x": 0.2, "y": 0.8, "width": 0.4, "scale": 0.5, "rotation": 45}
-    )
-    assert tx == 0.2
-    assert ty == 0.8
-    assert abs(size - 0.2) < 1e-6
-    assert rot == 45.0
+def test_scene_transform_preserves_one_canonical_parameter_set():
+    transform = normalize_scene_transform({
+        "x": 0.2, "y": 0.8, "width": 0.4, "height": 0.3,
+        "scale": 0.5, "rotation": 45, "opacity": 0.35,
+    })
+    assert transform == {
+        "x": 0.2, "y": 0.8, "width": 0.4, "height": 0.3,
+        "scale": 0.5, "rotation": 45.0, "opacity": 0.35,
+    }
 
 
-def test_overlay_height_and_filter_support_non_uniform_export():
-    height = _overlay_height_from_transform({"height": 0.4, "scale": 0.5})
-    assert height == 0.2
-    assert _overlay_height_from_transform({"width": 0.4, "scale": 0.5}) is None
-
+def test_scene_filter_supports_non_uniform_export():
     fc = _overlay_filter_complex(
         enable_expr="between(t,0,3)",
         timeline_start=0,
         duration=3,
-        tx=0.5,
-        ty=0.5,
-        size_frac=0.3,
-        height_frac=height,
-        rotation=0,
+        transform={"x": 0.5, "y": 0.5, "width": 0.6, "height": 0.4, "scale": 0.5},
         video_input=False,
     )
-    assert "w='1920*(0.300000)'" in fc
-    assert "h='1080*(0.200000)'" in fc
+    assert "round(1920*((0.600000000)*(0.500000000)))" in fc
+    assert "round(1080*((0.400000000)*(0.500000000)))" in fc
     assert "force_original_aspect_ratio" not in fc
 
 
-def test_overlay_opacity_is_bounded():
-    assert _overlay_opacity_from_transform({"opacity": 0.35}) == 0.35
-    assert _overlay_opacity_from_transform({"opacity": 8}) == 1.0
-    assert _overlay_opacity_from_transform({"opacity": -1}) == 0.0
+def test_scene_opacity_is_bounded():
+    assert normalize_scene_transform({"opacity": 0.35})["opacity"] == 0.35
+    assert normalize_scene_transform({"opacity": 8})["opacity"] == 1.0
+    assert normalize_scene_transform({"opacity": -1})["opacity"] == 0.0
 
 
 def test_overlay_filter_uses_center_anchor():
@@ -1290,17 +1282,13 @@ def test_overlay_filter_uses_center_anchor():
         enable_expr="between(t,0,3)",
         timeline_start=0,
         duration=3,
-        tx=0.5,
-        ty=0.5,
-        size_frac=0.125,
-        rotation=0,
+        transform={"x": 0.5, "y": 0.5, "width": 0.125, "height": 0.125},
         video_input=False,
     )
-    assert "main_w*0.500000-w/2" in fc
-    assert "main_h*0.500000-h/2" in fc
-    assert "scale=w='1920*(0.125000)'" in fc
-    assert "[0:v]null[vbase]" in fc
-    assert "[vbase][ov]overlay=" in fc
+    assert "main_w*(0.500000000)-overlay_w/2" in fc
+    assert "main_h*(0.500000000)-overlay_h/2" in fc
+    assert "round(1920*((0.125000000)*(1.000000000)))" in fc
+    assert "[0:v][scenebox]overlay=" in fc
 
 
 def test_overlay_keyframes_generate_linear_export_expressions():
@@ -1308,16 +1296,17 @@ def test_overlay_keyframes_generate_linear_export_expressions():
         {"time_sec": 0, "transform": {"x": 0.1, "y": 0.2, "width": 0.25, "scale": 1, "rotation": 0}},
         {"time_sec": 2, "transform": {"x": 0.9, "y": 0.8, "width": 0.5, "scale": 2, "rotation": 90}},
     ]
-    x_expr, dynamic_x = _overlay_keyframe_expr(keyframes, "x", 0.5, 3, 2)
-    size_expr, dynamic_size = _overlay_keyframe_expr(keyframes, "size", 0.33, 3, 2)
-    assert dynamic_x is True and "t-3.000000" in x_expr and "0.900000" in x_expr
-    assert dynamic_size is True and "1.000000" in size_expr
+    x_expr, dynamic_x = scene_keyframe_expr(keyframes, "x", 0.5, 3, 2)
+    size_expr, dynamic_size = scene_keyframe_expr(keyframes, "width", 0.33, 3, 2)
+    assert dynamic_x is True and "t-3.000000000" in x_expr and "0.900000000" in x_expr
+    assert dynamic_size is True and "0.500000000" in size_expr
     fc = _overlay_filter_complex(
-        enable_expr="between(t,3,5)", timeline_start=3, duration=2, tx=0.5, ty=0.5, size_frac=0.33, rotation=0,
+        enable_expr="between(t,3,5)", timeline_start=3, duration=2,
+        transform={"x": 0.5, "y": 0.5, "width": 0.33, "height": 0.33},
         video_input=False, keyframes=keyframes,
     )
     assert "eval=frame" in fc
-    assert "rotate='(" in fc
+    assert "rotate=angle='(" in fc
     assert "main_w*(if(" in fc
 
 
@@ -1326,14 +1315,10 @@ def test_overlay_filter_applies_opacity():
         enable_expr="between(t,0,3)",
         timeline_start=0,
         duration=3,
-        tx=0.5,
-        ty=0.5,
-        size_frac=0.125,
-        rotation=0,
-        opacity=0.42,
+        transform={"x": 0.5, "y": 0.5, "width": 0.125, "height": 0.125, "opacity": 0.42},
         video_input=False,
     )
-    assert "colorchannelmixer=aa=0.420000" in fc
+    assert "colorchannelmixer=aa=0.420000000" in fc
 
 
 def test_overlay_filter_applies_horizontal_and_vertical_flips():
@@ -1341,15 +1326,12 @@ def test_overlay_filter_applies_horizontal_and_vertical_flips():
         enable_expr="between(t,0,3)",
         timeline_start=0,
         duration=3,
-        tx=0.5,
-        ty=0.5,
-        size_frac=0.125,
-        rotation=0,
+        transform={"x": 0.5, "y": 0.5, "width": 0.125, "height": 0.125},
         video_input=True,
         flip_horizontal=True,
         flip_vertical=True,
     )
-    assert "[ovbase]hflip,vflip[ovflip]" in fc
+    assert "[scenebox]hflip,vflip[scenemirror]" in fc
 
 
 def test_overlay_wipe_uses_an_alpha_reveal_without_sliding_the_overlay_box():
@@ -1357,17 +1339,13 @@ def test_overlay_wipe_uses_an_alpha_reveal_without_sliding_the_overlay_box():
         enable_expr="between(t,0,2)",
         timeline_start=0,
         duration=2,
-        tx=0.5,
-        ty=0.5,
-        size_frac=0.5,
-        height_frac=0.4,
-        rotation=0,
+        transform={"x": 0.5, "y": 0.5, "width": 0.5, "height": 0.4},
         video_input=False,
-        transition_in={"type": "wipe_l", "duration_sec": 1.0},
+        transition_events=[{"id": "enter", "type": "wipe_l", "role": "to", "mode": "enter", "start_sec": 0, "end_sec": 1}],
     )
     assert "geq=r='r(X,Y)':g='g(X,Y)':b='b(X,Y)'" in fc
-    assert "alpha(X,Y)*gte(X/W\\,1-(clip((T-0.000000)/1.000000" in fc
-    assert "main_w*((0.500000)-(1-" not in fc
+    assert "alpha(X,Y)*(gte(X/W\\,1-(clip((T-0.000000000)/1.000000000" in fc
+    assert "main_w*((0.500000000)-(1-" not in fc
 
 
 def test_overlay_slide_uses_its_own_box_size_instead_of_the_full_canvas():
@@ -1375,16 +1353,12 @@ def test_overlay_slide_uses_its_own_box_size_instead_of_the_full_canvas():
         enable_expr="between(t,0,2)",
         timeline_start=0,
         duration=2,
-        tx=0.5,
-        ty=0.5,
-        size_frac=0.46,
-        height_frac=0.34,
-        rotation=0,
+        transform={"x": 0.5, "y": 0.5, "width": 0.46, "height": 0.34},
         video_input=False,
-        transition_in={"type": "slide_up", "duration_sec": 1.0},
+        transition_events=[{"id": "enter", "type": "slide_up", "role": "to", "mode": "enter", "start_sec": 0, "end_sec": 1}],
     )
-    assert "(0.500000)+((1-(clip((t-0.000000)/1.000000" in fc
-    assert "*(0.340000)" in fc
+    assert "(0.500000000)+(1)*((1-(clip((t-0.000000000)/1.000000000" in fc
+    assert "*(0.340000000)" in fc
 
 
 def test_video_layer_overlay_filter_keeps_source_color_and_reverse_processing():
@@ -1392,10 +1366,7 @@ def test_video_layer_overlay_filter_keeps_source_color_and_reverse_processing():
         enable_expr="between(t,0,3)",
         timeline_start=0,
         duration=3,
-        tx=0.5,
-        ty=0.5,
-        size_frac=1,
-        rotation=0,
+        transform={"x": 0.5, "y": 0.5, "width": 1, "height": 1},
         video_input=True,
         source_filters=["eq=contrast=1.1200:saturation=1.3500"],
         reverse=True,
@@ -1403,22 +1374,21 @@ def test_video_layer_overlay_filter_keeps_source_color_and_reverse_processing():
     assert "[1:v]eq=contrast=1.1200:saturation=1.3500,reverse,format=rgba" in fc
 
 
-def test_overlay_filter_applies_visual_fades():
+def test_overlay_filter_applies_canonical_enter_and_exit_events():
     fc = _overlay_filter_complex(
         enable_expr="between(t,1,4)",
         timeline_start=1,
         duration=3,
-        tx=0.5,
-        ty=0.5,
-        size_frac=0.125,
-        rotation=0,
-        fade_in=0.5,
-        fade_out=0.75,
+        transform={"x": 0.5, "y": 0.5, "width": 0.125, "height": 0.125},
         video_input=False,
+        transition_events=[
+            {"id": "enter", "type": "fade", "role": "to", "mode": "enter", "start_sec": 1, "end_sec": 1.5},
+            {"id": "exit", "type": "fade", "role": "from", "mode": "exit", "start_sec": 3.25, "end_sec": 4},
+        ],
     )
-    assert "setpts=PTS-STARTPTS+1.000000/TB" in fc
-    assert "fade=t=in:st=1.000000:d=0.500000:alpha=1" in fc
-    assert "fade=t=out:st=3.250000:d=0.750000:alpha=1" in fc
+    assert "setpts=PTS-STARTPTS+1.000000000/TB" in fc
+    assert "clip((T-1.000000000)/0.500000000" in fc
+    assert "1-(clip((T-3.250000000)/0.750000000" in fc
 
 
 def test_overlay_filter_interpolates_keyframed_opacity():
@@ -1426,19 +1396,15 @@ def test_overlay_filter_interpolates_keyframed_opacity():
         enable_expr="between(t,1,5)",
         timeline_start=1,
         duration=4,
-        tx=0.5,
-        ty=0.5,
-        size_frac=0.5,
-        rotation=0,
-        opacity=1,
+        transform={"x": 0.5, "y": 0.5, "width": 0.5, "height": 0.5, "opacity": 1},
         video_input=False,
         keyframes=[
             {"time_sec": 0, "transform": {"opacity": 0.2}},
             {"time_sec": 4, "transform": {"opacity": 0.8}},
         ],
     )
-    assert "geq=r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':a='alpha(X,Y)*(if(lt(T\\,5.000000)" in fc
-    assert "(T-1.000000)/4.000000" in fc
+    assert "geq=r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':a='alpha(X,Y)*(if(lt(T\\,5.000000000)" in fc
+    assert "(T-1.000000000)/4.000000000" in fc
 
 
 def test_overlay_filter_applies_video_speed_to_pts():
@@ -1446,14 +1412,11 @@ def test_overlay_filter_applies_video_speed_to_pts():
         enable_expr="between(t,1,3)",
         timeline_start=1,
         duration=2,
-        tx=0.5,
-        ty=0.5,
-        size_frac=1,
-        rotation=0,
+        transform={"x": 0.5, "y": 0.5, "width": 1, "height": 1},
         video_input=True,
         speed=2,
     )
-    assert "setpts=(PTS-STARTPTS)/2.000000+1.000000/TB" in fc
+    assert "setpts=(PTS-STARTPTS)/2.000000000,setpts=PTS-STARTPTS+1.000000000/TB" in fc
 
 
 def test_schema_text_overlay_is_exportable():
@@ -1476,8 +1439,9 @@ def test_schema_text_overlay_is_exportable():
     assert overlays[0]["type"] == "text"
     assert overlays[0]["timeline_start"] == 1.5
     assert overlays[0]["trim_out"] == 2.5
-    assert overlays[0]["fade_in_sec"] == 0.3
-    assert overlays[0]["fade_out_sec"] == 0.4
+    assert overlays[0]["_transition_events"] == []
+    assert "fade_in_sec" not in overlays[0]
+    assert "fade_out_sec" not in overlays[0]
 
 
 def test_schema_file_overlay_preserves_source_trim():
@@ -1570,13 +1534,13 @@ def test_drawtext_filter_uses_center_anchor_and_escapes_text():
     )
     assert "drawtext=" in fc
     assert "A\\:B\\'s 100\\%" in fc
-    assert "w*0.250000-w*0.650000/2" in fc
-    assert "h*0.750000-h*0.180000/2+(h*0.180000-text_h)/2" in fc
-    assert "text_align=center" in fc
-    assert "boxw=1248" in fc
-    assert "boxh=194" in fc
+    assert "x='(w-text_w)/2'" in fc
+    assert "y='(h-text_h)/2'" in fc
+    assert "s=1248x194" in fc
+    assert "main_w*(0.250000000)-overlay_w/2" in fc
+    assert "main_h*(0.750000000)-overlay_h/2" in fc
     assert "fontcolor=0x67e8f9" in fc
-    assert "alpha='0.500000'" in fc
+    assert "colorchannelmixer=aa=0.500000000" in fc
 
 
 def test_drawtext_filter_preserves_text_newlines_for_ffmpeg():
@@ -1592,14 +1556,7 @@ def test_drawtext_filter_preserves_text_newlines_for_ffmpeg():
     assert "CLUTCHnTETE" not in fc
 
 
-@pytest.mark.parametrize(
-    ("align", "expected_x"),
-    [
-        ("left", "w*0.500000-text_w/2"),
-        ("center", "w*0.500000-w*0.650000/2"),
-        ("right", "w*0.500000-w*0.650000+text_w/2"),
-    ],
-)
+@pytest.mark.parametrize(("align", "expected_x"), [("left", "0"), ("center", "(w-text_w)/2"), ("right", "w-text_w")])
 def test_drawtext_alignment_keeps_rendered_text_centered(align, expected_x):
     fc = _drawtext_filter_complex(
         text_clip={
@@ -1609,30 +1566,36 @@ def test_drawtext_alignment_keeps_rendered_text_centered(align, expected_x):
         },
         enable_expr="between(t,0,3)",
     )
-    assert "fontsize=160" in fc
+    assert "fontsize=64" in fc
+    assert "line_spacing=-7" in fc
     assert f"text_align={align}" in fc
-    assert "boxw=1248" in fc
-    assert "boxh=194" in fc
+    assert "s=1248x194" in fc
     assert f"x='{expected_x}'" in fc
+    assert "round(1920*((0.650000000)*(2.500000000)))" in fc
+    assert "round(1080*((0.180000000)*(2.500000000)))" in fc
 
 
-def test_drawtext_filter_applies_visual_fades():
+def test_drawtext_filter_applies_canonical_enter_and_exit_events():
     fc = _drawtext_filter_complex(
         text_clip={
             "type": "text",
             "timeline_start": 1,
             "duration": 3,
-            "fade_in_sec": 0.5,
-            "fade_out_sec": 0.75,
+            "_transition_events": [
+                {"id": "enter", "type": "fade", "role": "to", "mode": "enter", "start_sec": 1, "end_sec": 1.5},
+                {"id": "exit", "type": "fade", "role": "from", "mode": "exit", "start_sec": 3.25, "end_sec": 4},
+            ],
             "transform": {"x": 0.25, "y": 0.75, "scale": 1, "opacity": 0.8},
             "text": {"content": "ACE", "font_size": 48, "preset_id": "clutch"},
         },
         enable_expr="between(t,1,4)",
     )
-    assert "alpha='if(gt(t\\,3.250000)\\,0.800000*(4.000000-t)/0.750000\\,if(lt(t\\,1.500000)" in fc
+    assert "alpha(X,Y)*(((0.800000000)*(clip((T-1.000000000)/0.500000000" in fc
+    assert "clip((T-1.000000000)/0.500000000" in fc
+    assert "1-(clip((T-3.250000000)/0.750000000" in fc
 
 
-def test_drawtext_filter_applies_text_animation_expressions():
+def test_drawtext_filter_does_not_execute_removed_text_only_animation_fields():
     fc = _drawtext_filter_complex(
         text_clip={
             "type": "text",
@@ -1649,25 +1612,27 @@ def test_drawtext_filter_applies_text_animation_expressions():
         },
         enable_expr="between(t,2,6)",
     )
-    assert "x='if(lt(t\\,2.450000)\\,w*0.500000-w*0.650000/2+w*0.120000*(1-(t-2.000000)/0.450000)" in fc
-    assert "alpha='if(gt(t\\,5.550000)\\,1.000000*(6.000000-t)/0.450000\\,1.000000)'" in fc
+    assert "clip((t-2.000000000)/0.450000000" not in fc
+    assert "fade=t=" not in fc
 
 
-def test_drawtext_filter_applies_clip_transition_timing_and_slide_position():
+def test_drawtext_filter_uses_the_same_canonical_transition_events_as_other_materials():
     fc = _drawtext_filter_complex(
         text_clip={
             "type": "text",
             "timeline_start": 2,
             "duration": 4,
             "transform": {"x": 0.5, "y": 0.3, "scale": 1, "opacity": 1},
-            "transition_in": {"type": "slide_left", "duration_sec": 0.6},
-            "transition_out": {"type": "wipe_l", "duration_sec": 0.5},
+            "_transition_events": [
+                {"id": "enter", "type": "slide_up", "role": "to", "mode": "enter", "start_sec": 2, "end_sec": 2.6},
+                {"id": "exit", "type": "wipe_l", "role": "from", "mode": "exit", "start_sec": 5.5, "end_sec": 6},
+            ],
             "text": {"content": "CLUTCH", "font_size": 48},
         },
         enable_expr="between(t,2,6)",
     )
-    assert "x='if(lt(t\\,2.600000)\\,w*0.500000-w*0.650000/2+w*0.120000*(1-(t-2.000000)/0.600000)" in fc
-    assert "alpha='if(gt(t\\,5.500000)\\,1.000000*(6.000000-t)/0.500000\\,1.000000)'" in fc
+    assert "main_h*((0.300000000)+(1)*((1-(clip((t-2.000000000)/0.600000000" in fc
+    assert "geq=r='r(X,Y)':g='g(X,Y)':b='b(X,Y)'" in fc
 
 
 def test_drawtext_filter_uses_custom_font_file():

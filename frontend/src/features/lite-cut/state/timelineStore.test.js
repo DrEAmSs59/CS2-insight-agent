@@ -48,7 +48,7 @@ describe("liteCut timeline store scoped style sync", () => {
           type: "video",
           locked: false,
           hidden: false,
-          clips: [clip("a", { transition_out: { type: "flash", duration_sec: 0.5 } }), clip("b")],
+          clips: [clip("a"), clip("b")],
         },
         { id: "v2", type: "video", locked: false, hidden: false, clips: [clip("c")] },
         { id: "v3", type: "video", locked: true, hidden: false, clips: [clip("locked")] },
@@ -56,21 +56,29 @@ describe("liteCut timeline store scoped style sync", () => {
         { id: "a1", type: "audio", locked: false, hidden: false, clips: [clip("audio")] },
       ],
       overlays: [],
+      transitions: [{ id: "a-exit", type: "flash", duration_sec: 0.5, from: { kind: "clip", track_id: "v1", id: "a" }, to: null }],
     });
 
     const store = useLiteCutTimelineStore.getState();
     expect(store.canApplySelectedTransitionToScope("all", "flash", 0.5)).toBe(true);
     expect(store.applySelectedTransitionToScope("all", "flash", 0.5)).toBe(true);
 
-    const tracks = useLiteCutEditorStore.getState().body.tracks;
-    const byId = Object.fromEntries(tracks.flatMap((track) => (track.clips || []).map((c) => [c.id, c])));
-    expect(byId.a.transition_out).toEqual({ type: "flash", duration_sec: 0.5 });
-    expect(byId.b.transition_out).toEqual({ type: "flash", duration_sec: 0.5 });
-    expect(byId.c.transition_out).toEqual({ type: "flash", duration_sec: 0.5 });
-    expect(byId.locked.transition_out).toBeUndefined();
-    expect(byId.hidden.transition_out).toBeUndefined();
-    expect(byId.audio.transition_out).toBeUndefined();
+    const transitions = useLiteCutEditorStore.getState().body.transitions;
+    expect(transitions.filter((event) => event.type === "flash").map((event) => event.from?.id).sort()).toEqual(["a", "b", "c"]);
+    expect(transitions.some((event) => ["locked", "hidden", "audio"].includes(event.from?.id))).toBe(false);
     expect(useLiteCutHistoryStore.getState().past).toHaveLength(1);
+  });
+
+  it("selects an edit-point event directly and clears that selection when a material is selected", () => {
+    setProject({
+      tracks: [{ id: "v1", type: "video", clips: [clip("a"), clip("b", { timeline_start: 5 })] }],
+      overlays: [],
+      transitions: [{ id: "a-exit", type: "fade", duration_sec: 0.5, from: { kind: "clip", track_id: "v1", id: "a" }, to: null }],
+    });
+    expect(useLiteCutTimelineStore.getState().selectTransition("a-exit")).toBe(true);
+    expect(useLiteCutTimelineStore.getState()).toMatchObject({ selectedTransitionId: "a-exit", selectedClipId: "a", playheadSec: 4 });
+    useLiteCutTimelineStore.getState().selectClip("b", "v1");
+    expect(useLiteCutTimelineStore.getState().selectedTransitionId).toBeNull();
   });
 
   it("applies color only to the selected track when requested", () => {
@@ -243,9 +251,9 @@ describe("liteCut timeline store track ordering", () => {
     expect(store.moveTrack("v2", "up")).toBe(true);
 
     const tracks = useLiteCutEditorStore.getState().body.tracks;
-    expect(tracks.map((track) => track.id)).toEqual(["v2", "a1", "v1", "a2"]);
-    expect(tracks.find((track) => track.id === "v2")).toMatchObject({ label: "V2", name: "Top angle" });
-    expect(tracks.find((track) => track.id === "v1").label).toBe("V1");
+    expect(tracks.map((track) => track.id)).toEqual(["v2", "v1", "a1", "a2"]);
+    expect(tracks.find((track) => track.id === "v2")).toMatchObject({ label: "V1", name: "Top angle" });
+    expect(tracks.find((track) => track.id === "v1").label).toBe("V2");
     expect(useLiteCutHistoryStore.getState().past).toHaveLength(1);
   });
 
@@ -260,9 +268,9 @@ describe("liteCut timeline store track ordering", () => {
     const store = useLiteCutTimelineStore.getState();
     expect(store.canMoveTrackTo("v2", "v1", "before")).toBe(true);
     expect(store.moveTrackTo("v2", "v1", "before")).toBe(true);
-    expect(useLiteCutEditorStore.getState().body.tracks.map((track) => track.id)).toEqual(["v2", "a1", "v1", "a2"]);
+    expect(useLiteCutEditorStore.getState().body.tracks.map((track) => track.id)).toEqual(["v2", "v1", "a1", "a2"]);
     expect(store.moveTrackTo("a2", "a1", "before")).toBe(true);
-    expect(useLiteCutEditorStore.getState().body.tracks.map((track) => track.id)).toEqual(["v2", "a2", "v1", "a1"]);
+    expect(useLiteCutEditorStore.getState().body.tracks.map((track) => track.id)).toEqual(["v2", "v1", "a2", "a1"]);
     expect(useLiteCutHistoryStore.getState().past).toHaveLength(2);
   });
 
@@ -335,8 +343,26 @@ describe("liteCut timeline store source duration backfill", () => {
     const clips = useLiteCutEditorStore.getState().body.tracks[0].clips;
     expect(clips[0].meta.duration_sec).toBeCloseTo(18.4);
     expect(clips[1].meta.duration_sec).toBeCloseTo(18.4);
+    expect(clips[0].trim_out).toBeCloseTo(18.4);
+    expect(clips[1].trim_out).toBeCloseTo(18.4);
     expect(clips[2].meta.duration_sec).toBe(4);
     expect(useLiteCutHistoryStore.getState().past).toHaveLength(0);
+  });
+
+  it("preserves an intentional right trim while correcting the source duration upward", () => {
+    setProject({
+      tracks: [{
+        id: "v1",
+        type: "video",
+        clips: [clip("a", { source_type: "file", file_path: "C:/long.mp4", trim_out: 3, meta: { asset_id: 5, duration_sec: 4.5 } })],
+      }],
+      overlays: [],
+    });
+    const store = useLiteCutTimelineStore.getState();
+    expect(store.backfillClipSourceDuration("a", 1383.416667)).toBe(true);
+    const next = useLiteCutEditorStore.getState().body.tracks[0].clips[0];
+    expect(next.meta.duration_sec).toBeCloseTo(1383.416667);
+    expect(next.trim_out).toBe(3);
   });
 
   it("unlocks right-edge trims beyond the 5s fallback after the backfill", () => {
@@ -409,18 +435,18 @@ describe("liteCut timeline store video layer transform", () => {
   });
 });
 
-describe("liteCut timeline store detached audio selection", () => {
+describe("liteCut timeline store linked audio selection", () => {
   beforeEach(() => {
     setProject({
       tracks: [
         { id: "v1", type: "video", clips: [clip("video")] },
-        { id: "a1", type: "audio", clips: [clip("audio", { meta: { source_clip_id: "video", detached_from_video: true } })] },
+        { id: "a1", type: "audio", clips: [clip("audio", { meta: { source_clip_id: "video", linked_from_video: true } })] },
       ],
       overlays: [],
     }, "audio", "a1");
   });
 
-  it("selects the detached audio pair as one editing selection", () => {
+  it("selects the linked audio pair as one editing selection", () => {
     const store = useLiteCutTimelineStore.getState();
     expect(store.canSelectLinkedClips()).toBe(true);
     expect(store.selectLinkedClips()).toBe(true);
@@ -438,32 +464,6 @@ describe("liteCut timeline store detached audio selection", () => {
     expect(useLiteCutTimelineStore.getState().selectedClipIds).toEqual(["audio", "video"]);
   });
 
-  it("detaches recorded audio with a streamable source id and keeps the pair selected", () => {
-    setProject({
-      tracks: [
-        {
-          id: "v1",
-          type: "video",
-          clips: [clip("recorded", {
-            source_type: "recorded_clip",
-            source_id: 91,
-            meta: { duration_sec: 5, output_path: "C:/recordings/clip-91.mp4" },
-          })],
-        },
-        { id: "a1", type: "audio", clips: [] },
-      ],
-      overlays: [],
-    }, "recorded", "v1");
-
-    expect(useLiteCutTimelineStore.getState().detachSelectedAudio()).toBe(true);
-    const body = useLiteCutEditorStore.getState().body;
-    const video = body.tracks[0].clips[0];
-    const audio = body.tracks[1].clips[0];
-    expect(video.muted).toBe(true);
-    expect(audio).toMatchObject({ source_type: "file", source_id: 91, file_path: "C:/recordings/clip-91.mp4" });
-    expect(useLiteCutTimelineStore.getState().selectedClipIds).toEqual([audio.id, video.id]);
-  });
-
   it("unlinks the audio while retaining both timeline clips", () => {
     const store = useLiteCutTimelineStore.getState();
     const body = useLiteCutEditorStore.getState().body;
@@ -474,6 +474,7 @@ describe("liteCut timeline store detached audio selection", () => {
     const [audio] = useLiteCutEditorStore.getState().body.tracks[1].clips;
     expect(video.meta?.linked_audio_clip_id).toBeUndefined();
     expect(audio.meta?.source_clip_id).toBeUndefined();
+    expect(audio.meta?.linked_from_video).toBeUndefined();
     expect(useLiteCutEditorStore.getState().body.tracks.flatMap((track) => track.clips).map((item) => item.id)).toEqual(["video", "audio"]);
   });
 
@@ -492,7 +493,9 @@ describe("liteCut timeline store detached audio selection", () => {
     const [video] = useLiteCutEditorStore.getState().body.tracks[0].clips;
     const [audio] = useLiteCutEditorStore.getState().body.tracks[1].clips;
     expect(video.meta?.linked_audio_clip_id).toBe("audio");
+    expect(video.muted).toBe(true);
     expect(audio.meta?.source_clip_id).toBe("video");
+    expect(audio.meta?.linked_from_video).toBe(true);
   });
 
   it("splits a linked pair together and rebuilds both right-side links", () => {
@@ -1032,7 +1035,7 @@ describe("liteCut timeline store multi selection", () => {
     useLiteCutTimelineStore.getState().updateSelectedClip({
       volume: 0.35,
       speed: 1.5,
-      canvas_fit: "cover",
+      content_fit: "cover",
       crop: { x: 0.1, y: 0.2, width: 0.8, height: 0.7 },
     });
 
@@ -1040,7 +1043,7 @@ describe("liteCut timeline store multi selection", () => {
     expect(body.tracks.find((t) => t.id === "v1").clips.find((c) => c.id === "a")).toMatchObject({
       volume: 0.35,
       speed: 1.5,
-      canvas_fit: "cover",
+      content_fit: "cover",
       crop: { x: 0.1, y: 0.2, width: 0.8, height: 0.7 },
     });
     expect(body.tracks.find((t) => t.id === "v1").clips.find((c) => c.id === "b")).toMatchObject({
@@ -1051,7 +1054,7 @@ describe("liteCut timeline store multi selection", () => {
       volume: 0.35,
       speed: 1.5,
     });
-    expect(body.tracks.find((t) => t.id === "a1").clips.find((c) => c.id === "music").canvas_fit).toBeUndefined();
+    expect(body.tracks.find((t) => t.id === "a1").clips.find((c) => c.id === "music").content_fit).toBeUndefined();
     expect(body.tracks.find((t) => t.id === "a1").clips.find((c) => c.id === "music").crop).toBeUndefined();
     expect(body.tracks.find((t) => t.id === "v2").clips.find((c) => c.id === "locked")).toMatchObject({
       volume: 1,
@@ -1069,15 +1072,15 @@ describe("liteCut timeline store multi selection", () => {
       overlays: [],
     }, "music", "a1");
 
-    useLiteCutTimelineStore.getState().updateSelectedClip({ canvas_fit: "blur", crop: { width: 0.5 } });
+    useLiteCutTimelineStore.getState().updateSelectedClip({ content_fit: "blur", crop: { width: 0.5 } });
 
     const music = useLiteCutEditorStore.getState().body.tracks.find((t) => t.id === "a1").clips[0];
-    expect(music.canvas_fit).toBeUndefined();
+    expect(music.content_fit).toBeUndefined();
     expect(music.crop).toBeUndefined();
     expect(music.volume).toBe(1);
   });
 
-  it("applies transition patches to selected editable video clips only", () => {
+  it("applies transition patches to every selected editable visual material", () => {
     setProject({
       tracks: [
         {
@@ -1109,14 +1112,10 @@ describe("liteCut timeline store multi selection", () => {
     useLiteCutTimelineStore.getState().updateSelectedTransition("flash", 0.75);
 
     const body = useLiteCutEditorStore.getState().body;
-    expect(body.tracks.find((t) => t.id === "v1").clips.find((c) => c.id === "a").transition_out).toEqual({
-      type: "flash",
-      duration_sec: 0.75,
-    });
-    expect(body.tracks.find((t) => t.id === "v1").clips.find((c) => c.id === "b").transition_out).toBeUndefined();
-    expect(body.tracks.find((t) => t.id === "a1").clips.find((c) => c.id === "music").transition_out).toBeUndefined();
-    expect(body.tracks.find((t) => t.id === "v2").clips.find((c) => c.id === "locked").transition_out).toBeUndefined();
-    expect(body.overlays.find((o) => o.id === "title").transition_out).toBeUndefined();
+    expect(body.transitions.map((event) => ({ type: event.type, duration: event.duration_sec, from: event.from?.id })).sort((a, b) => a.from.localeCompare(b.from))).toEqual([
+      { type: "flash", duration: 0.75, from: "a" },
+      { type: "flash", duration: 0.75, from: "title" },
+    ]);
   });
 
   it("normalizes cut transition when applying to a multi selection", () => {
@@ -1126,13 +1125,10 @@ describe("liteCut timeline store multi selection", () => {
     });
     useLiteCutTimelineStore.getState().toggleClipSelection("b", "v1");
 
-    useLiteCutTimelineStore.getState().updateSelectedTransition("none", 0.75);
+    useLiteCutTimelineStore.getState().updateSelectedTransition("cut", 0.75);
 
     const body = useLiteCutEditorStore.getState().body;
-    expect(body.tracks[0].clips.map((c) => c.transition_out)).toEqual([
-      { type: "cut", duration_sec: 0 },
-      { type: "cut", duration_sec: 0 },
-    ]);
+    expect(body.transitions).toEqual([]);
   });
 
   it("applies color patches to selected editable video clips only", () => {
@@ -1268,10 +1264,65 @@ describe("liteCut timeline store multi selection", () => {
       trim_out: 4,
       speed: 1.5,
       speed_keyframes: [],
+      muted: true,
       volume: 0.4,
       color: { brightness: 8, contrast: 0, saturation: 0 },
       meta: { asset_id: 21, name: "replacement.mp4", kind: "video" },
     });
+  });
+
+  it("replaces both sides of a linked V/A pair from one new video source", () => {
+    setProject({
+      tracks: [
+        { id: "v1", type: "video", clips: [clip("video", { source_type: "file", file_path: "C:/old.mp4", muted: true, meta: { asset_id: 1, duration_sec: 10, linked_audio_clip_id: "audio" } })] },
+        { id: "a1", type: "audio", clips: [clip("audio", { source_type: "file", file_path: "C:/old.mp4", muted: false, meta: { asset_id: 1, kind: "audio", source_clip_id: "video", linked_from_video: true } })] },
+      ],
+      overlays: [],
+    }, "video", "v1");
+
+    expect(useLiteCutTimelineStore.getState().replaceSelectedClipSource({
+      id: 22,
+      mediaKind: "asset",
+      kind: "video",
+      name: "new.mp4",
+      path: "C:/new.mp4",
+      duration_sec: 8,
+      audio_codec_name: "aac",
+      has_audio: true,
+    })).toBe(true);
+
+    const body = useLiteCutEditorStore.getState().body;
+    const video = body.tracks[0].clips[0];
+    const audio = body.tracks[1].clips[0];
+    expect(video).toMatchObject({ id: "video", file_path: "C:/new.mp4", muted: true, meta: { asset_id: 22, linked_audio_clip_id: audio.id } });
+    expect(audio).toMatchObject({ file_path: "C:/new.mp4", muted: false, meta: { asset_id: 22, source_clip_id: "video", linked_from_video: true } });
+    expect(audio.id).not.toBe("audio");
+    expect(useLiteCutTimelineStore.getState().selectedClipIds).toEqual(["video", audio.id]);
+  });
+
+  it("removes the linked A clip when replacement video has no audio stream", () => {
+    setProject({
+      tracks: [
+        { id: "v1", type: "video", clips: [clip("video", { muted: true, meta: { linked_audio_clip_id: "audio" } })] },
+        { id: "a1", type: "audio", clips: [clip("audio", { meta: { kind: "audio", source_clip_id: "video", linked_from_video: true } })] },
+      ],
+      overlays: [],
+    }, "video", "v1");
+
+    expect(useLiteCutTimelineStore.getState().replaceSelectedClipSource({
+      id: 23,
+      mediaKind: "asset",
+      kind: "video",
+      name: "transparent.mov",
+      path: "C:/transparent.mov",
+      duration_sec: 3,
+      has_audio: false,
+    })).toBe(true);
+
+    const body = useLiteCutEditorStore.getState().body;
+    expect(body.tracks[0].clips[0].meta.linked_audio_clip_id).toBeUndefined();
+    expect(body.tracks[1].clips).toEqual([]);
+    expect(useLiteCutTimelineStore.getState().selectedClipIds).toEqual(["video"]);
   });
 
   it("edits a video layer keyframe at the playhead without changing its base transform", () => {
@@ -1318,7 +1369,7 @@ describe("liteCut timeline store multi selection", () => {
     expect(useLiteCutEditorStore.getState().body.tracks[0].clips[0].audio_keyframes).toEqual([]);
   });
 
-  it("adds and edits a detached audio keyframe while its linked video is selected too", () => {
+  it("adds and edits a linked audio keyframe while its linked video is selected too", () => {
     setProject({
       tracks: [
         {
@@ -1501,6 +1552,40 @@ describe("liteCut timeline store multi selection", () => {
     expect(alphaTrack?.clips[0]).toMatchObject({ timeline_start: 1, trim_out: 2.5, meta: { asset_id: 54, kind: "video" } });
   });
 
+  it("keeps animated WebP as a controllable looping overlay", () => {
+    setProject({
+      tracks: [{ id: "v1", type: "video", label: "V1", clips: [] }],
+      overlays: [],
+    }, null, "v1");
+
+    const asset = {
+      id: 77,
+      name: "sticker.webp",
+      kind: "video",
+      mediaKind: "asset",
+      asset_registered: true,
+      path: "C:/assets/sticker.webp",
+      duration_sec: 1.2,
+      has_alpha: true,
+      is_looping_animation: true,
+      preview_proxy_required: true,
+      preview_proxy_mode: "segmented",
+    };
+    useLiteCutTimelineStore.getState().addFromMediaBin(asset);
+
+    const body = useLiteCutEditorStore.getState().body;
+    expect(body.tracks[0].clips).toHaveLength(0);
+    expect(body.overlays[0]).toMatchObject({
+      type: "webm",
+      meta: {
+        asset_id: 77,
+        is_looping_animation: true,
+        preview_proxy_mode: "segmented",
+      },
+    });
+    expect(useLiteCutTimelineStore.getState().migrateAlphaMovOverlaysToVideoTracks([asset])).toBe(0);
+  });
+
   it("creates V2 below an occupied V1 for a smart external drop", () => {
     setProject({
       tracks: [
@@ -1522,6 +1607,140 @@ describe("liteCut timeline store multi selection", () => {
     expect(videoTracks.map((track) => track.label)).toEqual(["V1", "V2"]);
     expect(videoTracks[1].clips[0]).toMatchObject({ timeline_start: 1.5, meta: { asset_id: 88, kind: "video" } });
     expect(useLiteCutTimelineStore.getState().playheadSec).toBe(9.25);
+  });
+
+  it("creates matching V2 and A2 lanes for an audio-bearing video dropped on the next track", () => {
+    setProject({
+      tracks: [
+        { id: "v1", type: "video", label: "V1", locked: false, hidden: false, clips: [] },
+        { id: "a1", type: "audio", label: "A1", locked: false, hidden: false, clips: [] },
+      ],
+      overlays: [],
+    }, null, "v1");
+
+    useLiteCutTimelineStore.getState().addMediaAtTime(
+      { id: 89, mediaKind: "asset", kind: "video", name: "paired.mp4", path: "C:/paired.mp4", duration_sec: 3, audio_codec_name: "aac", has_audio: true },
+      "v1",
+      1.5,
+      { createNewTrack: true, createBelow: true },
+    );
+
+    const tracks = useLiteCutEditorStore.getState().body.tracks;
+    expect(tracks.map((track) => track.type)).toEqual(["video", "video", "audio", "audio"]);
+    expect(tracks.map((track) => track.label)).toEqual(["V1", "V2", "A1", "A2"]);
+    expect(tracks[1].clips[0]).toMatchObject({ timeline_start: 1.5, meta: { asset_id: 89 } });
+    expect(tracks[3].clips[0]).toMatchObject({ timeline_start: 1.5, meta: { source_clip_id: tracks[1].clips[0].id } });
+  });
+
+  it("places a video with source audio as one linked V/A pair", () => {
+    setProject({
+      tracks: [
+        { id: "v1", type: "video", label: "V1", clips: [] },
+        { id: "a1", type: "audio", label: "A1", clips: [] },
+      ],
+      overlays: [],
+    }, null, "v1");
+
+    useLiteCutTimelineStore.getState().addMediaAtTime(
+      { id: 90, mediaKind: "asset", kind: "video", name: "match.mp4", path: "C:/match.mp4", duration_sec: 12, audio_codec_name: "aac", has_audio: true },
+      "v1",
+      4,
+    );
+
+    const body = useLiteCutEditorStore.getState().body;
+    const video = body.tracks.find((track) => track.id === "v1").clips[0];
+    const audio = body.tracks.find((track) => track.id === "a1").clips[0];
+    expect(video).toMatchObject({ timeline_start: 4, trim_out: 12, muted: true });
+    expect(audio).toMatchObject({ timeline_start: 4, trim_out: 12, muted: false, file_path: "C:/match.mp4" });
+    expect(video.meta.linked_audio_clip_id).toBe(audio.id);
+    expect(audio.meta).toMatchObject({ source_clip_id: video.id, linked_from_video: true, kind: "audio" });
+    expect(useLiteCutTimelineStore.getState().selectedClipIds).toEqual([video.id, audio.id]);
+  });
+
+  it("places only source audio when an audio-bearing video is dropped directly on A track", () => {
+    setProject({
+      tracks: [
+        { id: "v1", type: "video", label: "V1", clips: [] },
+        { id: "a1", type: "audio", label: "A1", clips: [] },
+      ],
+      overlays: [],
+    }, null, "a1");
+
+    useLiteCutTimelineStore.getState().addMediaAtTime(
+      { id: 93, mediaKind: "asset", kind: "video", name: "match.mp4", path: "C:/match.mp4", duration_sec: 12, audio_codec_name: "aac", has_audio: true },
+      "a1",
+      6,
+      { audioOnly: true },
+    );
+
+    const body = useLiteCutEditorStore.getState().body;
+    expect(body.tracks.find((track) => track.id === "v1").clips).toEqual([]);
+    const audio = body.tracks.find((track) => track.id === "a1").clips[0];
+    expect(audio).toMatchObject({ timeline_start: 6, trim_out: 12, file_path: "C:/match.mp4", muted: false, meta: { asset_id: 93, kind: "audio" } });
+    expect(audio.meta.source_clip_id).toBeUndefined();
+    expect(audio.meta.linked_from_video).toBeUndefined();
+    expect(useLiteCutTimelineStore.getState()).toMatchObject({ selectedClipId: audio.id, selectedTrackId: "a1" });
+  });
+
+  it("does not place a silent video on A track", () => {
+    setProject({
+      tracks: [
+        { id: "v1", type: "video", clips: [] },
+        { id: "a1", type: "audio", clips: [] },
+      ],
+      overlays: [],
+    }, null, "a1");
+
+    useLiteCutTimelineStore.getState().addMediaAtTime(
+      { id: 94, mediaKind: "asset", kind: "video", name: "transparent.mov", path: "C:/transparent.mov", duration_sec: 3, has_audio: false },
+      "a1",
+      0,
+      { audioOnly: true },
+    );
+
+    expect(useLiteCutEditorStore.getState().body.tracks.every((track) => track.clips.length === 0)).toBe(true);
+  });
+
+  it("keeps a video without an audio stream visual-only", () => {
+    setProject({
+      tracks: [
+        { id: "v1", type: "video", label: "V1", clips: [] },
+        { id: "a1", type: "audio", label: "A1", clips: [] },
+      ],
+      overlays: [],
+    }, null, "v1");
+
+    useLiteCutTimelineStore.getState().addMediaAtTime(
+      { id: 91, mediaKind: "asset", kind: "video", name: "overlay.mov", path: "C:/overlay.mov", duration_sec: 3, audio_codec_name: null, has_audio: false },
+      "v1",
+      0,
+    );
+
+    const body = useLiteCutEditorStore.getState().body;
+    const video = body.tracks.find((track) => track.id === "v1").clips[0];
+    expect(video.muted).toBe(true);
+    expect(video.meta.linked_audio_clip_id).toBeUndefined();
+    expect(body.tracks.find((track) => track.id === "a1").clips).toEqual([]);
+  });
+
+  it("creates another A track when the matching time range is occupied", () => {
+    setProject({
+      tracks: [
+        { id: "v1", type: "video", label: "V1", clips: [] },
+        { id: "a1", type: "audio", label: "A1", clips: [clip("existing", { timeline_start: 0, trim_out: 20, meta: { kind: "audio" } })] },
+      ],
+      overlays: [],
+    }, null, "v1");
+
+    useLiteCutTimelineStore.getState().addMediaAtTime(
+      { id: 92, mediaKind: "asset", kind: "video", name: "match.mp4", path: "C:/match.mp4", duration_sec: 12, audio_codec_name: "aac", has_audio: true },
+      "v1",
+      4,
+    );
+
+    const audioTracks = useLiteCutEditorStore.getState().body.tracks.filter((track) => track.type === "audio");
+    expect(audioTracks).toHaveLength(2);
+    expect(audioTracks[1].clips[0]).toMatchObject({ timeline_start: 4, file_path: "C:/match.mp4" });
   });
 
   it("keeps the playhead fixed when dropping video and audio media", () => {

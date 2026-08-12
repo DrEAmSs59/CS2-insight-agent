@@ -1,9 +1,4 @@
 import { boundaryTransitionPreviewVisual } from "./transitionPreviewUtils.js";
-import { normalizeVideoLayerTransform } from "./effectContract.js";
-
-export function normalizePreviewLayerTransform(transform = {}, defaults = {}) {
-  return normalizeVideoLayerTransform(transform, defaults);
-}
 
 export function previewFrameTimes(anchor, mediaTime) {
   const sourceTime = Math.max(0, Number(mediaTime) || 0);
@@ -30,10 +25,49 @@ export function transitionVisualAtLocalTime(spec, localTime) {
 }
 
 export function promotedUnderlayForMain(previousUnderlays, previewClipId, streamUrl) {
-  if (previewClipId == null || !streamUrl) return null;
-  return (previousUnderlays || []).find(
-    (layer) => String(layer?.id) === String(previewClipId) && String(layer?.streamUrl || "") === String(streamUrl),
-  ) || null;
+  if (previewClipId == null) return null;
+  const matchingClipLayers = (previousUnderlays || []).filter(
+    (layer) => String(layer?.id) === String(previewClipId) && Boolean(layer?.streamUrl),
+  );
+  if (!matchingClipLayers.length) return null;
+  // Prefer the exact proxy URL when it is already mounted. If the segmented
+  // main source is still pending, retain the direct underlay for the same clip
+  // so a layer promotion never exposes the black canvas.
+  return matchingClipLayers.find(
+    (layer) => streamUrl && String(layer.streamUrl) === String(streamUrl),
+  ) || matchingClipLayers[0];
+}
+
+export function previewUnderlayOpacity(layer, promotedLayerId = null) {
+  if (layer?.prewarm && promotedLayerId != null && String(layer.id) === String(promotedLayerId)) return 1;
+  return Math.max(0, Math.min(1, Number(layer?.opacity) || 0));
+}
+
+export function previewUnderlayPlaybackStateKey(layer) {
+  return [
+    String(layer?.id ?? ""),
+    String(layer?.streamUrl || ""),
+    Number(layer?.playbackRate) || 1,
+    layer?.reversePlayback ? "reverse" : "forward",
+    layer?.freezePlayback ? "frozen" : "live",
+    layer?.prewarm ? "prewarm" : "active",
+  ].join(":");
+}
+
+export function previewUnderlaySyncKey(layer, isPlaying) {
+  const continuousForwardPlayback = Boolean(
+    isPlaying
+    && !layer?.reversePlayback
+    && !layer?.freezePlayback
+    && !layer?.prewarm,
+  );
+  // A live forward decoder owns its clock after the initial synchronization.
+  // Keeping sourceTime out of this key prevents every scene-clock frame from
+  // scheduling another seek while the video is already playing normally.
+  const sourceToken = continuousForwardPlayback
+    ? "media-clock"
+    : (Number(layer?.sourceTime) || 0).toFixed(6);
+  return `${previewUnderlayPlaybackStateKey(layer)}:${sourceToken}:${(Number(layer?.mediaTimeOffset) || 0).toFixed(6)}`;
 }
 
 export function previewMediaIdentity(clipId, streamUrl) {
@@ -63,6 +97,25 @@ export function shouldUseMediaPreviewClock({
   return Boolean(hasStream && isPlaying && !reversePlayback && !freezePlayback);
 }
 
+export const NEXT_CLIP_PREWARM_LEAD_SEC = 6;
+
+export function shouldPrewarmNextClip({
+  currentClipEnd,
+  isPlaying,
+  nextClipStart,
+  playheadSec,
+  leadSec = NEXT_CLIP_PREWARM_LEAD_SEC,
+}) {
+  if (!isPlaying) return false;
+  const currentEnd = Number(currentClipEnd);
+  const nextStart = Number(nextClipStart);
+  const playhead = Number(playheadSec);
+  if (![currentEnd, nextStart, playhead].every(Number.isFinite)) return false;
+  if (Math.abs(nextStart - currentEnd) > 0.05) return false;
+  const secondsToCut = currentEnd - playhead;
+  return secondsToCut >= -0.02 && secondsToCut <= Math.max(0.25, Number(leadSec) || NEXT_CLIP_PREWARM_LEAD_SEC);
+}
+
 export function shouldPublishVideoTimeUpdate({ hasStream, freezePlayback, reversePlayback, awaitingHandoff }) {
   return Boolean(hasStream && !freezePlayback && !reversePlayback && !awaitingHandoff);
 }
@@ -78,6 +131,18 @@ export function shouldPublishPreviewClock(now, lastPublishedAt, intervalMs = 33)
 export const HANDOFF_MAX_WAIT_MS = 700;
 export const HANDOFF_SEEK_RETRY_MS = 200;
 export const HANDOFF_MAX_SEEK_LEAD_SEC = 0.6;
+export const SEGMENT_HANDOFF_TOLERANCE_SEC = 1 / 30;
+
+export function isHandoffFrameReady({
+  mediaTime,
+  expectedMediaTime,
+  toleranceSec,
+  preventBackwardPresentation = false,
+}) {
+  const tolerance = Math.max(0, Number(toleranceSec) || 0);
+  if (preventBackwardPresentation) return mediaTime + tolerance >= expectedMediaTime;
+  return Math.abs(mediaTime - expectedMediaTime) <= tolerance;
+}
 
 /**
  * Decide how to treat a presented main-video frame while a stream handoff
@@ -95,28 +160,38 @@ export function handoffFrameAction({
   keepPromotedFrameUntilCaughtUp = false,
   handoffStartedAt,
   lastCorrectiveSeekAt,
+  preventBackwardPresentation = false,
   seeking,
+  toleranceSec,
   now,
 }) {
   if (!awaitingHandoff) return { type: "present" };
-  const tolerance = hasPromotedLayer ? 0.1 : 0.2;
-  if (Math.abs(mediaTime - expectedMediaTime) <= tolerance) return { type: "present" };
+  const tolerance = Math.max(0, Number(toleranceSec) || (hasPromotedLayer ? 0.1 : 0.2));
+  if (isHandoffFrameReady({
+    mediaTime,
+    expectedMediaTime,
+    toleranceSec: tolerance,
+    preventBackwardPresentation,
+  })) return { type: "present" };
   const startedAt = handoffStartedAt || now;
   // A prewarmed next clip is the visible frame at a plain cut.  Replacing it
   // with a newly mounted player that is still behind produces a visible jump
   // backwards. Keep that prewarm on screen until the new player catches up.
   // Existing lower-layer/transition handoffs retain the historical deadline.
-  if (!keepPromotedFrameUntilCaughtUp && now - startedAt > HANDOFF_MAX_WAIT_MS) return { type: "present" };
+  if (!keepPromotedFrameUntilCaughtUp && !preventBackwardPresentation && now - startedAt > HANDOFF_MAX_WAIT_MS) return { type: "present" };
   const behind = expectedMediaTime - mediaTime;
   if (
-    hasPromotedLayer
+    (hasPromotedLayer || preventBackwardPresentation)
     && behind > tolerance
     && !seeking
     && now - (lastCorrectiveSeekAt || 0) >= HANDOFF_SEEK_RETRY_MS
   ) {
     // `behind` measures how far the promoted layer advanced during the last
     // seek, so reusing it as the lead lands the next seek near the live time.
-    return { type: "seek", target: expectedMediaTime + Math.min(HANDOFF_MAX_SEEK_LEAD_SEC, behind), startedAt };
+    const target = hasPromotedLayer
+      ? expectedMediaTime + Math.min(HANDOFF_MAX_SEEK_LEAD_SEC, behind)
+      : expectedMediaTime;
+    return { type: "seek", target, startedAt };
   }
   return { type: "wait", startedAt };
 }

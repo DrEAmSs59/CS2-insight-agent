@@ -3,6 +3,14 @@ import { useEffect, useState } from "react";
 import { useT } from "../../../i18n/useT.js";
 import ColorPropertyPane from "./ColorPropertyPane.jsx";
 import SpeedPropertyPane from "./SpeedPropertyPane.jsx";
+import { LITE_CUT_OUTPUT_DEFAULTS, LITE_CUT_TIMELINE_LIMITS } from "../state/projectContract.js";
+import { AUDIO_CLIP_GAIN, AUDIO_FADE_DURATION, AUDIO_MASTER_GAIN, AUDIO_TRACK_GAIN } from "../domain/audioContract.js";
+import { VISUAL_COLOR_DEFAULT, VISUAL_FREEZE_DEFAULT_SEC, VISUAL_SPEED_DEFAULT } from "../domain/visualMaterial.js";
+import { TRANSITION_DURATION_DEFAULT } from "../state/transitionModel.js";
+import {
+  TEXT_FONT_WEIGHT_DEFAULT,
+  TEXT_LINE_HEIGHT_DEFAULT,
+} from "./textLayout.js";
 import {
   AudioPane,
   CanvasPane,
@@ -38,10 +46,10 @@ export default function LiteCutPropertyPanel({
   clipPreviewSourceTime = 0,
   clipPreviewKey = null,
   clipPreviewPlaying = false,
-  transitionType = "fade",
-  transitionDuration = 0.4,
-  transitionInDuration = 0.25,
-  transitionOutDuration = 0.25,
+  transitionType = "cut",
+  transitionDuration = TRANSITION_DURATION_DEFAULT,
+  transitionInDuration = TRANSITION_DURATION_DEFAULT,
+  transitionOutDuration = TRANSITION_DURATION_DEFAULT,
   onTransitionChange,
   onTransitionDurationChange,
   onTransitionInDurationChange,
@@ -49,9 +57,9 @@ export default function LiteCutPropertyPanel({
   onApplyTransitionScope,
   canApplyTransitionTrack = false,
   canApplyTransitionAll = false,
-  brightness = 0,
-  contrast = 0,
-  saturation = 0,
+  brightness = VISUAL_COLOR_DEFAULT,
+  contrast = VISUAL_COLOR_DEFAULT,
+  saturation = VISUAL_COLOR_DEFAULT,
   onColorChange,
   filterPreset = "esports",
   onFilterPresetChange,
@@ -66,7 +74,10 @@ export default function LiteCutPropertyPanel({
   textFontFamily,
   textFontFile,
   textFontSize,
+  textFontWeight = TEXT_FONT_WEIGHT_DEFAULT,
+  textLineHeight = TEXT_LINE_HEIGHT_DEFAULT,
   textAlign = "center",
+  textFillColor = null,
   textAnimIn = "",
   textAnimOut = "",
   fontAssets = [],
@@ -78,21 +89,21 @@ export default function LiteCutPropertyPanel({
   onTabChange,
   outputDir = "",
   outputDirHint = "",
-  outputFilename = "lite_cut_export.mp4",
-  outputWidth = 1920,
-  outputHeight = 1080,
-  outputFps = 60,
+  outputFilename = LITE_CUT_OUTPUT_DEFAULTS.filename,
+  outputWidth = LITE_CUT_OUTPUT_DEFAULTS.width,
+  outputHeight = LITE_CUT_OUTPUT_DEFAULTS.height,
+  outputFps = LITE_CUT_OUTPUT_DEFAULTS.fps,
   outputFrameMeldEnabled = false,
   outputFrameMeldAvailable = false,
   framemeldSourceItems = [],
-  outputEncoder = "auto",
-  outputEncoderTier = "quality",
-  outputCanvasFit = "contain",
-  outputBackgroundColor = "#000000",
-  outputBlurAmount = 24,
-  outputRangeMode = "full",
-  outputRangeStartSec = 0,
-  outputRangeEndSec = 1,
+  outputEncoder = LITE_CUT_OUTPUT_DEFAULTS.encoder,
+  outputEncoderTier = LITE_CUT_OUTPUT_DEFAULTS.encoder_tier,
+  outputCanvasFit = LITE_CUT_OUTPUT_DEFAULTS.canvas_fit,
+  outputBackgroundColor = LITE_CUT_OUTPUT_DEFAULTS.background_color,
+  outputBlurAmount = LITE_CUT_OUTPUT_DEFAULTS.blur_amount,
+  outputRangeMode = LITE_CUT_OUTPUT_DEFAULTS.range_mode,
+  outputRangeStartSec = LITE_CUT_OUTPUT_DEFAULTS.range_start_sec,
+  outputRangeEndSec = LITE_CUT_TIMELINE_LIMITS.duration.uiMin,
   outputRangeValid = true,
   selectedExportRange = null,
   timelineTotalSec = 0,
@@ -112,8 +123,6 @@ export default function LiteCutPropertyPanel({
   v1ClipCount = 0,
   isOverlay = false,
   overlayTransform = null,
-  overlayFadeInSec = 0,
-  overlayFadeOutSec = 0,
   overlayTransitionType = "cut",
   overlayTransitionInSec = 0,
   overlayTransitionOutSec = 0,
@@ -123,29 +132,29 @@ export default function LiteCutPropertyPanel({
   overlayHasKeyframe = false,
   onAddOverlayKeyframe,
   onRemoveOverlayKeyframe,
-  clipSpeed = 1,
+  clipSpeed = VISUAL_SPEED_DEFAULT,
   onClipSpeedChange,
   clipSpeedKeyframes = [],
-  clipTrimIn = 0,
+  clipTrimIn = LITE_CUT_TIMELINE_LIMITS.time.default,
   onClipSpeedKeyframesChange,
   clipPreservePitch = true,
   onClipPreservePitchChange,
   clipReverse = false,
   onClipReverseChange,
-  clipFreezeFrameSec = 0,
+  clipFreezeFrameSec = VISUAL_FREEZE_DEFAULT_SEC,
   onClipFreezeFrameChange,
-  clipVolume = 1,
+  clipVolume = AUDIO_CLIP_GAIN.default,
   onClipVolumeChange,
   clipHasAudioKeyframe = false,
   onAddClipAudioKeyframe,
   onRemoveClipAudioKeyframe,
   isAudioClip = false,
   clipMuted = false,
-  clipFadeInSec = 0,
-  clipFadeOutSec = 0,
+  clipFadeInSec = AUDIO_FADE_DURATION.default,
+  clipFadeOutSec = AUDIO_FADE_DURATION.default,
   clipVisibleDuration = 0,
   clipCanvasFit = null,
-  projectCanvasFit = "contain",
+  projectCanvasFit = LITE_CUT_OUTPUT_DEFAULTS.canvas_fit,
   onClipCanvasFitChange,
   clipFlipHorizontal = false,
   clipFlipVertical = false,
@@ -156,8 +165,15 @@ export default function LiteCutPropertyPanel({
   onRemoveClipKeyframe,
   clipCrop = null,
   onClipCropChange,
+  clipSupportsCrop = false,
+  clipSupportsContentFit = false,
+  clipSupportsSpeed = false,
+  clipSupportsSpeedRamp = false,
+  clipSupportsReverse = false,
+  clipSupportsFreeze = false,
+  clipSupportsPreservePitch = false,
   isVideoLayer = false,
-  masterVolume = 1,
+  masterVolume = AUDIO_MASTER_GAIN.default,
   onMasterVolumeChange,
   bgm = null,
   onBgmChange,
@@ -170,13 +186,16 @@ export default function LiteCutPropertyPanel({
   audioTargetTrimIn = clipTrimIn,
   selectedClipLabel = "",
   clipAudioUrl = null,
-  trackVolume = 1,
+  trackVolume = AUDIO_TRACK_GAIN.default,
   trackLabel = "Track",
   onTrackVolumeChange,
 }) {
   const t = useT();
   const [tab, setTab] = useState(defaultTab);
   useEffect(() => setTab(defaultTab), [defaultTab]);
+  useEffect(() => {
+    if (tab === "speed" && !clipSupportsSpeed) setTab("clip");
+  }, [clipSupportsSpeed, tab]);
   const media = selectedMedia;
   const setTabBoth = (id) => {
     setTab(id);
@@ -197,22 +216,26 @@ export default function LiteCutPropertyPanel({
         data-litecut-inspector-tabs
         className="litecut-inspector-tabs grid h-[58px] shrink-0 grid-cols-6 border-b border-cs2-border bg-cs2-bg-card px-1.5 py-1.5"
       >
-        {RAIL.map((item) => (
+        {RAIL.map((item) => {
+          const unavailable = item.id === "speed" && !clipSupportsSpeed;
+          return (
           <button
             key={item.id}
             type="button"
             title={t(item.labelKey)}
+            disabled={unavailable}
             onClick={() => setTabBoth(item.id)}
             className={`relative flex min-w-0 flex-col items-center justify-center gap-1 rounded-md border text-[8px] font-medium transition-colors ${
               tab === item.id
                 ? "border-cs2-accent/25 bg-cs2-accent-soft text-cs2-accent"
                 : "border-transparent text-cs2-text-secondary hover:border-cs2-border hover:bg-cs2-bg-hover hover:text-cs2-text-primary"
-            }`}
+            } ${unavailable ? "cursor-not-allowed opacity-30" : ""}`}
           >
             <item.icon className="h-4 w-4 shrink-0" />
             <span className="litecut-inspector-tab-label max-w-full truncate">{t(item.labelKey)}</span>
           </button>
-        ))}
+          );
+        })}
       </nav>
       <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden">
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
@@ -248,8 +271,6 @@ export default function LiteCutPropertyPanel({
               canApplyTransitionAll={canApplyTransitionAll}
               isOverlay={isOverlay}
               overlayTransform={overlayTransform}
-              overlayFadeInSec={overlayFadeInSec}
-              overlayFadeOutSec={overlayFadeOutSec}
               overlayTransitionType={overlayTransitionType}
               overlayTransitionInSec={overlayTransitionInSec}
               overlayTransitionOutSec={overlayTransitionOutSec}
@@ -278,6 +299,8 @@ export default function LiteCutPropertyPanel({
               onRemoveClipAudioKeyframe={onRemoveClipAudioKeyframe}
               clipCrop={clipCrop}
               onClipCropChange={onClipCropChange}
+              supportsCrop={clipSupportsCrop}
+              supportsContentFit={clipSupportsContentFit}
               isVideoLayer={isVideoLayer}
               isAudioClip={isAudioClip}
               clipVolume={clipVolume}
@@ -296,9 +319,16 @@ export default function LiteCutPropertyPanel({
               fontFamily={textFontFamily}
               fontFile={textFontFile}
               fontSize={textFontSize}
+              fontWeight={textFontWeight}
+              lineHeight={textLineHeight}
               textAlign={textAlign}
-              animIn={textAnimIn}
-              animOut={textAnimOut}
+              fillColor={textFillColor}
+              transitionType={overlayTransitionType || transitionType}
+              transitionInDuration={overlayTransitionInSec || transitionInDuration}
+              transitionOutDuration={overlayTransitionOutSec || transitionOutDuration}
+              onTransitionChange={onTransitionChange}
+              onTransitionInDurationChange={onTransitionInDurationChange}
+              onTransitionOutDurationChange={onTransitionOutDurationChange}
               fontAssets={fontAssets}
               onTextPatch={onTextPatch}
               onImportSubtitles={onImportSubtitles}
@@ -307,12 +337,12 @@ export default function LiteCutPropertyPanel({
               overlayTransform={overlayTransform}
               overlayDuration={selectedMedia?.duration || 3}
               maxTextDuration={Math.max(60, Number(timelineTotalSec) || 60)}
-              overlayFadeInSec={overlayFadeInSec}
-              overlayFadeOutSec={overlayFadeOutSec}
               onOverlayTransformChange={onOverlayTransformChange}
               onOverlayPatch={onOverlayPatch}
               flipHorizontal={clipFlipHorizontal}
               flipVertical={clipFlipVertical}
+              outputWidth={outputWidth}
+              outputHeight={outputHeight}
             />
           ) : null}
           {tab === "color" ? (
@@ -341,6 +371,7 @@ export default function LiteCutPropertyPanel({
               bgm={bgm}
               audioAssets={audioAssets}
               onBgmChange={onBgmChange}
+              timelineTotalSec={timelineTotalSec}
               clipDuration={audioTargetSourceDuration}
               trimIn={audioTargetTrimIn}
               onAudioPatch={onClipAudioPatch}
@@ -370,6 +401,10 @@ export default function LiteCutPropertyPanel({
               freezeFrameSec={clipFreezeFrameSec}
               onFreezeFrameChange={onClipFreezeFrameChange}
               isAudioClip={isAudioClip}
+              supportsSpeedRamp={clipSupportsSpeedRamp}
+              supportsPreservePitch={clipSupportsPreservePitch}
+              supportsReverse={clipSupportsReverse}
+              supportsFreeze={clipSupportsFreeze}
             />
           ) : null}
           {tab === "export" ? (

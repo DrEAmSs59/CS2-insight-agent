@@ -45,6 +45,27 @@ export const desktopBridge = isDesktopApp
         const filePaths = selected == null ? [] : Array.isArray(selected) ? selected : [selected];
         return { canceled: filePaths.length === 0, filePaths };
       },
+      onFileDragDrop(callback) {
+        let active = true;
+        let scaleFactor = window.devicePixelRatio || 1;
+        void currentWindow.scaleFactor().then((value) => {
+          if (Number.isFinite(value) && value > 0) scaleFactor = value;
+        }).catch(() => {});
+        const unlistenPromise = currentWindow.onDragDropEvent(({ payload }) => {
+          if (!active) return;
+          const logicalPosition = payload.position?.toLogical?.(scaleFactor);
+          callback({
+            ...payload,
+            position: logicalPosition
+              ? { x: logicalPosition.x, y: logicalPosition.y }
+              : null,
+          });
+        });
+        return () => {
+          active = false;
+          void unlistenPromise.then((unlisten) => unlisten());
+        };
+      },
       async chooseDemoFiles() {
         try {
           const selected = await open({

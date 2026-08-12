@@ -7,8 +7,8 @@ from unittest.mock import AsyncMock
 import pytest
 
 from app.features.lite_cut.repositories import DbAssetRepository, DbExportRepository, DbProjectRepository, DbSnapshotRepository
-from app.features.lite_cut.services import AssetService, ExportHistoryService, LiteCutServiceError, PortableService, ProjectService, SnapshotService
-from app.features.lite_cut import assets_api, export_api, portable_api
+from app.features.lite_cut.services import AssetService, ExportHistoryService, LiteCutServiceError, ProjectService, SnapshotService
+from app.features.lite_cut import assets_api, export_api, project_file_api
 
 
 class MemoryProjects:
@@ -50,7 +50,7 @@ def test_project_service_owns_normalization_and_snapshot_transaction():
 
     created = asyncio.run(service.create(name="  Demo  ", body=None))
     assert created["name"] == "Demo"
-    assert created["body"]["schema_version"] == 2
+    assert created["body"]["schema_version"] == 3
 
     updated = asyncio.run(service.patch(1, name="Saved", body=created["body"]))
     assert updated["name"] == "Saved"
@@ -96,13 +96,10 @@ def test_use_case_services_work_with_fake_repositories():
     assert asyncio.run(asset_service.list(project_id=1, limit=20, offset=0))["items"] == [{"id": 5}]
 
     projects = AsyncMock()
-    projects.get.return_value = {"id": 1, "name": "P", "body": {"tracks": [], "overlays": []}}
+    projects.get.return_value = {"id": 1, "name": "P", "body": {"schema_version": 3, "tracks": [], "overlays": []}}
     snapshots = AsyncMock()
     snapshots.create.return_value = 11
     assert asyncio.run(SnapshotService(projects, snapshots).create(1, reason="before_export")) == 11
-    project, package_assets = asyncio.run(PortableService(projects, assets).package_inputs(1))
-    assert project["id"] == 1 and package_assets == [{"id": 5}]
-
     exports = AsyncMock()
     exports.list.return_value = [{"id": 7}]
     result = asyncio.run(ExportHistoryService(exports).list(project_id=1, limit=8, offset=0))
@@ -110,12 +107,12 @@ def test_use_case_services_work_with_fake_repositories():
 
 
 def test_http_routes_do_not_own_database_file_copy_or_ffmpeg_execution():
-    source = "\n".join(inspect.getsource(module) for module in (assets_api, export_api, portable_api))
+    source = "\n".join(inspect.getsource(module) for module in (assets_api, export_api, project_file_api))
     forbidden = (
         "get_lite_cut_db().",
         "resolve_ffmpeg_binary",
         "resolve_ffprobe_binary",
-        "export_lite_cut_project",
+        "export_lite_cut_project(",
         "shutil.copy",
         "zipfile.ZipFile",
     )

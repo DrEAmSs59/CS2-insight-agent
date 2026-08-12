@@ -16,7 +16,6 @@ from .runtime import get_lite_cut_db
 from .services import (
     AssetService,
     ExportHistoryService,
-    PortableService,
     PresetService,
     SnapshotService,
 )
@@ -26,7 +25,6 @@ from .services import (
 class LiteCutServices:
     assets: AssetService
     exports: ExportHistoryService
-    portable: PortableService
     presets: PresetService
     snapshots: SnapshotService
     projects: DbProjectRepository
@@ -40,7 +38,6 @@ def build_lite_cut_services(db) -> LiteCutServices:
     return LiteCutServices(
         assets=AssetService(assets),
         exports=ExportHistoryService(DbExportRepository(db)),
-        portable=PortableService(projects, assets),
         presets=PresetService(DbPresetRepository(db), projects),
         snapshots=SnapshotService(projects, DbSnapshotRepository(db)),
         projects=projects,

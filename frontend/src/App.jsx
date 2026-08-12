@@ -1397,6 +1397,10 @@ export default function App() {
     batchRecording ||
     (Boolean(progressText?.trim()) && !parsingShownInline) ||
     (anyDemoParsing && !parsingShownInline);
+  const globalNoticeText = progressText
+    || (batchRecording ? t("app.batchRecording") : "")
+    || (analysisInlineProgress?.active === true ? analysisInlineProgress.text : "")
+    || (anyDemoParsing ? t("analysis.parsing") : "");
   const isStandalonePreview = [
     "/obs-ai-preview",
     "/obs-ai-entry-preview",
@@ -1488,7 +1492,7 @@ export default function App() {
           >
             <div className="pointer-events-auto w-full max-w-lg rounded-xl shadow-2xl shadow-black/50">
               <ProgressBar
-                text={progressText || (batchRecording ? t("app.batchRecording") : "")}
+                text={globalNoticeText}
                 active={progressToastShowsBusy(progressText, {
                   parsing: anyDemoParsing,
                   loading: progressToastMeta?.loading === true,

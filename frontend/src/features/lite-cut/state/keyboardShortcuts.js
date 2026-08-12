@@ -31,9 +31,6 @@ export function resolveLiteCutShortcut(event) {
     return { action: "insertPasteClipboard", preventDefault: "handled" };
   }
   if (primary && lower === "v") return { action: "pasteClipboard", preventDefault: "handled" };
-  if (primary && shift && lower === "d") {
-    return { action: "detachSelectedAudio", preventDefault: "always" };
-  }
   if (primary && lower === "d") return { action: "duplicateSelected", preventDefault: "always" };
   if (primary && lower === "g") return { action: "compactSelectedTrackGaps", preventDefault: "handled" };
   if (primary && (key === "+" || key === "=")) {

@@ -12,7 +12,7 @@
         "freeze_frame_sec": 1,
         "reverse": true,
         "preserve_pitch": false,
-        "canvas_fit": "cover"
+        "content_fit": "cover"
       },
       "expected_segments": [[2, 10, 2]],
       "source_to_timeline": [[2, 0], [4, 1], [8, 3], [10, 4]],

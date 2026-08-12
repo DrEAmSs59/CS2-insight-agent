@@ -14,10 +14,28 @@ from .timeline_math import (
     clip_speed_segments as _clip_speed_segments,
     clip_timeline_duration_sec as _clip_timeline_duration_sec,
 )
+from .project_boundaries import (
+    AUDIO_BGM_GAIN_DEFAULT,
+    AUDIO_CLIP_GAIN_DEFAULT,
+    AUDIO_DUCKING_GAIN_DEFAULT,
+    AUDIO_DUCKING_GAIN_MAX,
+    AUDIO_DUCKING_GAIN_MIN,
+    AUDIO_MASTER_GAIN_DEFAULT,
+    AUDIO_MASTER_GAIN_MAX,
+    AUDIO_MASTER_GAIN_MIN,
+)
+from .visual_material import (
+    VISUAL_FREEZE_DEFAULT_SEC,
+    VISUAL_FREEZE_MAX_SEC,
+    VISUAL_FREEZE_MIN_SEC,
+    VISUAL_SPEED_DEFAULT,
+    VISUAL_SPEED_MAX,
+    VISUAL_SPEED_MIN,
+)
 
 
 def _atempo_chain(speed: float) -> list[str]:
-    remaining = max(0.25, min(4.0, float(speed or 1.0)))
+    remaining = max(VISUAL_SPEED_MIN, min(VISUAL_SPEED_MAX, float(speed or VISUAL_SPEED_DEFAULT)))
     parts: list[str] = []
     while remaining > 2.0 + 1e-6:
         parts.append("atempo=2.000000")
@@ -29,44 +47,45 @@ def _atempo_chain(speed: float) -> list[str]:
     return parts
 
 def _pitch_shift_speed_chain(speed: float) -> list[str]:
-    bounded = max(0.25, min(4.0, float(speed or 1.0)))
+    bounded = max(VISUAL_SPEED_MIN, min(VISUAL_SPEED_MAX, float(speed or VISUAL_SPEED_DEFAULT)))
     return [
         "aresample=48000",
         f"asetrate={48000 * bounded:.6f}",
         "aresample=48000",
     ]
 
-def _audio_filter_chain(speed: float, volume: float, reverse: bool = False, preserve_pitch: bool = True, volume_filter: str | None = None, freeze_frame_sec: float = 0.0) -> str:
+def _audio_filter_chain(speed: float, volume: float, reverse: bool = False, preserve_pitch: bool = True, volume_filter: str | None = None, freeze_frame_sec: float = VISUAL_FREEZE_DEFAULT_SEC) -> str:
     parts: list[str] = []
     if reverse:
         parts.append("areverse")
-    if abs(speed - 1.0) > 1e-6:
+    if abs(speed - VISUAL_SPEED_DEFAULT) > 1e-6:
         parts.extend(_atempo_chain(speed) if preserve_pitch else _pitch_shift_speed_chain(speed))
     if volume_filter:
         parts.append(volume_filter)
-    elif abs(volume - 1.0) > 1e-6:
+    elif abs(volume - AUDIO_CLIP_GAIN_DEFAULT) > 1e-6:
         parts.append(f"volume={volume:.6f}")
     if freeze_frame_sec > 1e-6:
-        parts.append(f"apad=pad_dur={max(0.0, min(30.0, freeze_frame_sec)):.6f}")
+        parts.append(f"apad=pad_dur={max(VISUAL_FREEZE_MIN_SEC, min(VISUAL_FREEZE_MAX_SEC, freeze_frame_sec)):.6f}")
     return ",".join(parts)
 
 def _audio_mix_filter_complex(
     *,
     has_base_audio: bool,
     audio_clips: list[dict[str, Any]],
-    master_volume: float = 1.0,
+    master_volume: float = AUDIO_MASTER_GAIN_DEFAULT,
 ) -> str:
     parts: list[str] = []
     foreground_labels: list[str] = []
     bgm_label: str | None = None
     bgm_duck_enabled = False
-    bgm_duck_volume = 0.35
+    bgm_duck_volume = AUDIO_DUCKING_GAIN_DEFAULT
+    foreground_windows: list[tuple[float, float]] = []
 
     def mix_labels(labels: list[str], output_label: str) -> None:
         if len(labels) == 1:
             parts.append(f"{labels[0]}anull{output_label}")
         else:
-            parts.append("".join(labels) + f"amix=inputs={len(labels)}:duration=longest:dropout_transition=0{output_label}")
+            parts.append("".join(labels) + f"amix=inputs={len(labels)}:duration=longest:dropout_transition=0:normalize=0{output_label}")
 
     if has_base_audio:
         parts.append("[0:a]asetpts=PTS-STARTPTS[basea]")
@@ -120,27 +139,30 @@ def _audio_mix_filter_complex(
             bgm_label = label
             bgm_duck_enabled = bool(meta.get("ducking_enabled"))
             try:
-                bgm_duck_volume = max(0.05, min(1.0, float(meta.get("ducking_volume", 0.35))))
+                bgm_duck_volume = max(AUDIO_DUCKING_GAIN_MIN, min(AUDIO_DUCKING_GAIN_MAX, float(meta.get("ducking_volume", AUDIO_DUCKING_GAIN_DEFAULT))))
             except (TypeError, ValueError):
-                bgm_duck_volume = 0.35
+                bgm_duck_volume = AUDIO_DUCKING_GAIN_DEFAULT
         else:
             foreground_labels.append(label)
+            if not clip.get("muted") and _clip_volume(clip) > 0.0 and duration > 0.0:
+                start_sec = max(0.0, float(clip.get("timeline_start") or 0.0))
+                foreground_windows.append((start_sec, start_sec + duration))
     labels: list[str]
     if bgm_label and bgm_duck_enabled and foreground_labels:
-        mix_labels(foreground_labels, "[duckside]")
-        ratio = 1.0 + (1.0 - bgm_duck_volume) * 18.0
-        parts.append(f"{bgm_label}[duckside]sidechaincompress=threshold=0.015:ratio={ratio:.6f}:attack=25:release=280[bgmduck]")
-        labels = ["[duckside]", "[bgmduck]"]
+        activity = "+".join(f"between(t\\,{start:.6f}\\,{end:.6f})" for start, end in foreground_windows) or "0"
+        parts.append(f"{bgm_label}volume='if(gt({activity}\\,0)\\,{bgm_duck_volume:.6f}\\,{AUDIO_BGM_GAIN_DEFAULT:g})':eval=frame[bgmduck]")
+        labels = [*foreground_labels, "[bgmduck]"]
     else:
         labels = [*foreground_labels, *([bgm_label] if bgm_label else [])]
     if not labels:
         return ""
     mix_label = "[premaster]"
     mix_labels(labels, mix_label)
-    master = max(0.0, min(2.0, float(master_volume)))
+    master = max(AUDIO_MASTER_GAIN_MIN, min(AUDIO_MASTER_GAIN_MAX, float(master_volume)))
     if abs(master - 1.0) > 1e-6:
         parts.append(f"{mix_label}volume={master:.6f}[mixa]")
     else:
         parts.append(f"{mix_label}anull[mixa]")
     return ";".join(parts)
-
+    AUDIO_MASTER_GAIN_DEFAULT,
+    VISUAL_SPEED_DEFAULT,

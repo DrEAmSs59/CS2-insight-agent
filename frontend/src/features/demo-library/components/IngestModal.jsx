@@ -180,14 +180,16 @@ export default function IngestModal({ isOpen, onClose, onIngest }) {
       >
         {ingesting ? (
           <div
-            className="absolute inset-0 z-[2] flex flex-col items-center justify-center gap-2 bg-black/60 backdrop-blur-[1px]"
+            className="absolute inset-0 z-[2] flex items-center justify-center bg-cs2-bg-card/90 p-6 backdrop-blur-[2px]"
             aria-busy="true"
             aria-label={t("dialog.ingestIngesting")}
           >
-            <Loader2 className="h-8 w-8 animate-spin text-cs2-accent" />
-            <p className="text-xs font-semibold text-cs2-text-primary">
-              {t("dialog.ingestIngestingMsg", { count: selectedIds.size })}
-            </p>
+            <div className="flex max-w-md items-center gap-3 rounded-lg border border-cs2-border bg-cs2-bg-elevated px-4 py-3 shadow-md">
+              <Loader2 className="h-5 w-5 shrink-0 animate-spin text-cs2-accent" />
+              <p className="text-[12px] font-semibold leading-relaxed text-cs2-text-primary">
+                {t("dialog.ingestIngestingMsg", { count: selectedIds.size })}
+              </p>
+            </div>
           </div>
         ) : null}
         {/* Header */}

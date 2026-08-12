@@ -10,12 +10,12 @@ function timelineDuration(clip) {
   const sourceDuration = Number.isFinite(trimOut)
     ? Math.max(0.1, trimOut - trimIn)
     : Math.max(0.1, number(clip?.meta?.duration_sec, 5) - trimIn);
-  const speed = Math.max(0.25, Math.min(4, number(clip?.speed, 1)));
+  const speed = Math.max(VISUAL_SPEED_MIN, Math.min(VISUAL_SPEED_MAX, number(clip?.speed, 1)));
   return Math.max(0.1, sourceDuration / speed);
 }
 
 export function normalizedAudioVolume(value, fallback = 1) {
-  return Math.max(0, Math.min(5, number(value, fallback)));
+  return clampAudioGain(number(value, fallback), AUDIO_CLIP_GAIN, fallback);
 }
 
 export function normalizedAudioKeyframes(clip, duration = timelineDuration(clip)) {
@@ -74,3 +74,5 @@ export function rebaseAudioKeyframes(original, nextClip) {
     .map((time_sec) => ({ time_sec, volume: clipVolumeAt(source, nextStart + time_sec, oldDuration) }));
   return { ...nextClip, audio_keyframes: bounded };
 }
+import { AUDIO_CLIP_GAIN, clampAudioGain } from "../domain/audioContract.js";
+import { VISUAL_SPEED_MAX, VISUAL_SPEED_MIN } from "../domain/visualMaterial.js";

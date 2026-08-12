@@ -11,16 +11,6 @@ import {
 } from "../state/autosaveUtils.js";
 import { projectBodyFromTemplate } from "../editor/projectTemplates.js";
 
-export function createLiteCutProjectExport(body, projectName, exportedAt = new Date().toISOString()) {
-  return {
-    format: "litecut-project",
-    schema_version: 2,
-    exported_at: exportedAt,
-    name: projectName || "LiteCut Project",
-    body,
-  };
-}
-
 function resetTimeline(setPlayhead, clearSelection) {
   setPlayhead(0);
   clearSelection();
@@ -94,7 +84,7 @@ export function useLiteCutProjectController({
   deleteProjects,
   dirty,
   duplicateProject,
-  importProject,
+  listProjects,
   openProject,
   projectId,
   projectName,
@@ -126,18 +116,26 @@ export function useLiteCutProjectController({
     return result;
   }, [clearSelection, createNewProject, dirty, saveProject, saving, setPlayhead]);
 
-  const handleExportProject = useCallback(() => {
-    const currentBody = useLiteCutEditorStore.getState().body;
-    if (!currentBody) return;
-    const safeName = String(projectName || "litecut-project").trim().replace(/[\\/:*?\"<>|]+/g, "-") || "litecut-project";
-    const payload = createLiteCutProjectExport(currentBody, projectName);
-    const url = URL.createObjectURL(new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" }));
-    const anchor = document.createElement("a");
-    anchor.href = url;
-    anchor.download = `${safeName}.litecut.json`;
-    anchor.click();
-    window.setTimeout(() => URL.revokeObjectURL(url), 0);
-  }, [projectName]);
+  const handleExportProject = useCallback(async () => {
+    if (!projectId) return { cancelled: true };
+    if (dirty || saving) {
+      const saved = await saveProject();
+      if (!saved?.ok) return { cancelled: true };
+    }
+    let destination = "";
+    if (desktopBridge?.chooseDirectory) {
+      destination = await desktopBridge.chooseDirectory("");
+      if (!destination) return { cancelled: true };
+    }
+    const data = await liteCutClient.exportProjectFile(projectId, destination);
+    if (!data.saved_path && data.download_url && typeof document !== "undefined") {
+      const anchor = document.createElement("a");
+      anchor.href = data.download_url;
+      anchor.download = data.filename || "LiteCut.litecut";
+      anchor.click();
+    }
+    return { ok: true, data };
+  }, [dirty, projectId, saveProject, saving]);
 
   const handleImportProject = useCallback(async (file) => {
     try {
@@ -145,17 +143,15 @@ export function useLiteCutProjectController({
         const saved = await saveProject();
         if (!saved?.ok) return { ok: false };
       }
-      const raw = JSON.parse(await file.text());
-      const importedBody = raw?.body && typeof raw.body === "object" ? raw.body : raw;
-      if (!importedBody || typeof importedBody !== "object" || !Array.isArray(importedBody.tracks)) return { ok: false };
-      const importedName = raw?.name || String(file.name || "Imported LiteCut Project").replace(/\.litecut\.json$|\.json$/i, "");
-      const result = await importProject({ name: importedName, body: importedBody });
-      if (result.ok) resetTimeline(setPlayhead, clearSelection);
-      return result;
-    } catch {
-      return { ok: false };
+      const data = await liteCutClient.importProjectFile(file);
+      await listProjects?.();
+      await openProject(data.id);
+      resetTimeline(setPlayhead, clearSelection);
+      return { ok: true, data };
+    } catch (error) {
+      return { ok: false, error };
     }
-  }, [clearSelection, dirty, importProject, saveProject, saving, setPlayhead]);
+  }, [clearSelection, dirty, listProjects, openProject, saveProject, saving, setPlayhead]);
 
   const handleOpenProject = useCallback(async (nextProjectId) => {
     if (Number(nextProjectId) === Number(projectId)) return;
@@ -210,28 +206,6 @@ export function useLiteCutProjectController({
     return { ok: true };
   }, [clearSelection, dirty, projectId, projectName, saveProject, saving, setPlaying, setPlayhead]);
 
-  const handleImportPortable = useCallback(async (file) => {
-    if (dirty || saving) {
-      const saved = await saveProject();
-      if (!saved?.ok) return { ok: false };
-    }
-    const data = await liteCutClient.importPortableProject(file);
-    await openProject(data.id);
-    resetTimeline(setPlayhead, clearSelection);
-    return { ok: true };
-  }, [clearSelection, dirty, openProject, saveProject, saving, setPlayhead]);
-
-  const handleStartPortableExport = useCallback(async () => {
-    if (!projectId) return { cancelled: true };
-    let destination = "";
-    if (desktopBridge?.chooseDirectory) {
-      destination = await desktopBridge.chooseDirectory("");
-      if (!destination) return { cancelled: true };
-    }
-    const data = await liteCutClient.startPortablePackage(projectId, destination);
-    return { data };
-  }, [projectId]);
-
   return {
     handleNewProject,
     handleExportProject,
@@ -241,7 +215,5 @@ export function useLiteCutProjectController({
     handleDeleteProject,
     handleDeleteProjects,
     handleRestoreSnapshot,
-    handleImportPortable,
-    handleStartPortableExport,
   };
 }

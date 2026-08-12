@@ -3,7 +3,8 @@
   "canvas_presets": [
     { "id": "16:9", "width": 320, "height": 180 },
     { "id": "9:16", "width": 180, "height": 320 },
-    { "id": "1:1", "width": 240, "height": 240 }
+    { "id": "1:1", "width": 240, "height": 240 },
+    { "id": "4:3", "width": 320, "height": 240 }
   ],
   "source_candidates": {
     "primary": ["debugtest/debug3.mp4", "debugtest/debug2.mp4", "debugtest/debug1.mp4"],
@@ -17,7 +18,7 @@
     { "id": "position-scale", "x": 0.34, "y": 0.62, "width": 0.72, "height": 0.72, "scale": 0.82, "rotation": 0, "opacity": 0.86 },
     { "id": "stretch-rotate", "x": 0.58, "y": 0.43, "width": 0.78, "height": 0.48, "scale": 0.9, "rotation": 18, "opacity": 0.72 }
   ],
-  "transitions": ["fade", "flash", "dip", "zoom", "wipe_l", "wipe_r", "slide_up", "slide_down", "blur", "glitch", "spin"],
+  "transitions": ["fade", "flash", "dip", "zoom", "wipe_l", "wipe_r", "slide_up", "slide_down"],
   "transition_progress": [0.25, 0.5, 0.75],
   "fonts": [
     { "id": "source-han-medium", "family": "思源黑体 Medium", "file": "backend/assets/fonts/NotoSansSC-Medium.ttf", "kind": "builtin" },

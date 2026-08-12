@@ -1,4 +1,4 @@
-"""LiteCut project schema v2 Pydantic models."""
+"""LiteCut project schema v3 Pydantic models."""
 
 from __future__ import annotations
 
@@ -6,10 +6,79 @@ import uuid
 import math
 from typing import Any, Literal, Optional
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+from .text_layout import (
+    TEXT_DEFAULT_FONT_FAMILY,
+    TEXT_FONT_SIZE_DEFAULT,
+    TEXT_FONT_SIZE_MAX,
+    TEXT_FONT_SIZE_MIN,
+    TEXT_FONT_WEIGHT_DEFAULT,
+    TEXT_FONT_WEIGHT_MAX,
+    TEXT_FONT_WEIGHT_MIN,
+    TEXT_LINE_HEIGHT_DEFAULT,
+    TEXT_LINE_HEIGHT_MAX,
+    TEXT_LINE_HEIGHT_MIN,
+)
+from .project_boundaries import (
+    AUDIO_BGM_GAIN_DEFAULT,
+    AUDIO_BGM_GAIN_MAX,
+    AUDIO_BGM_GAIN_MIN,
+    AUDIO_CLIP_GAIN_DEFAULT,
+    AUDIO_CLIP_GAIN_MAX,
+    AUDIO_CLIP_GAIN_MIN,
+    AUDIO_DUCKING_GAIN_DEFAULT,
+    AUDIO_DUCKING_GAIN_MAX,
+    AUDIO_DUCKING_GAIN_MIN,
+    AUDIO_FADE_DURATION_DEFAULT,
+    AUDIO_FADE_DURATION_MAX,
+    AUDIO_FADE_DURATION_MIN,
+    AUDIO_MASTER_GAIN_DEFAULT,
+    AUDIO_MASTER_GAIN_MAX,
+    AUDIO_MASTER_GAIN_MIN,
+    AUDIO_TRACK_GAIN_DEFAULT,
+    AUDIO_TRACK_GAIN_MAX,
+    AUDIO_TRACK_GAIN_MIN,
+    CANVAS_BLUR_DEFAULT,
+    CANVAS_BLUR_MAX,
+    CANVAS_BLUR_MIN,
+    OUTPUT_FPS_DEFAULT,
+    OUTPUT_FPS_MAX,
+    OUTPUT_FPS_MIN,
+    OUTPUT_HEIGHT_DEFAULT,
+    OUTPUT_HEIGHT_MAX,
+    OUTPUT_HEIGHT_MIN,
+    OUTPUT_WIDTH_DEFAULT,
+    OUTPUT_WIDTH_MAX,
+    OUTPUT_WIDTH_MIN,
+    TIMELINE_DURATION_DEFAULT,
+    TIMELINE_DURATION_MAX,
+    TIMELINE_DURATION_MIN_EXCLUSIVE,
+    TIMELINE_TIME_DEFAULT,
+    TIMELINE_TIME_MAX,
+    TIMELINE_TIME_MIN,
+)
+from .scene_transform import OVERLAY_SCENE_DEFAULTS, SCENE_TRANSFORM_LIMITS, VIDEO_SCENE_DEFAULTS
+from .transition_events import TRANSITION_DURATION_DEFAULT, TRANSITION_DURATION_MAX, TRANSITION_DURATION_MIN
+from .visual_material import (
+    VISUAL_COLOR_DEFAULT,
+    VISUAL_COLOR_MAX,
+    VISUAL_COLOR_MIN,
+    VISUAL_CROP_POSITION_MAX,
+    VISUAL_CROP_POSITION_MIN,
+    VISUAL_CROP_SIZE_MAX,
+    VISUAL_CROP_SIZE_MIN,
+    VISUAL_FREEZE_DEFAULT_SEC,
+    VISUAL_FREEZE_MAX_SEC,
+    VISUAL_FREEZE_MIN_SEC,
+    VISUAL_MATERIAL_DEFAULTS,
+    VISUAL_SPEED_DEFAULT,
+    VISUAL_SPEED_MAX,
+    VISUAL_SPEED_MIN,
+)
 
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 PresetKind = Literal[
     "text_style",
@@ -26,18 +95,18 @@ OverlayAnchor = Literal["timeline_start", "clip_start", "clip_end", "each_clip_s
 class OutputConfig(BaseModel):
     dir: str = ""
     filename: str = "lite_cut_export.mp4"
-    width: int = Field(default=1920, ge=16, le=7680)
-    height: int = Field(default=1080, ge=16, le=4320)
-    fps: int = Field(default=60, ge=1, le=1000)
+    width: int = Field(default=OUTPUT_WIDTH_DEFAULT, ge=OUTPUT_WIDTH_MIN, le=OUTPUT_WIDTH_MAX)
+    height: int = Field(default=OUTPUT_HEIGHT_DEFAULT, ge=OUTPUT_HEIGHT_MIN, le=OUTPUT_HEIGHT_MAX)
+    fps: int = Field(default=OUTPUT_FPS_DEFAULT, ge=OUTPUT_FPS_MIN, le=OUTPUT_FPS_MAX)
     encoder: Literal["auto", "h264_nvenc", "h264_qsv", "h264_amf", "libx264"] = "auto"
     encoder_tier: Literal["quality", "fast"] = "quality"
     framemeld_enabled: bool = False
     canvas_fit: Literal["contain", "cover", "blur"] = "contain"
-    background_color: str = "#000000"
-    blur_amount: int = Field(default=24, ge=0, le=100)
+    background_color: str = Field(default="#000000", pattern=r"^#[0-9a-fA-F]{6}$")
+    blur_amount: int = Field(default=CANVAS_BLUR_DEFAULT, ge=CANVAS_BLUR_MIN, le=CANVAS_BLUR_MAX)
     range_mode: Literal["full", "custom"] = "full"
-    range_start_sec: float = Field(default=0.0, ge=0.0, le=86400.0)
-    range_end_sec: Optional[float] = Field(default=None, ge=0.0, le=86400.0)
+    range_start_sec: float = Field(default=TIMELINE_TIME_DEFAULT, ge=TIMELINE_TIME_MIN, le=TIMELINE_TIME_MAX)
+    range_end_sec: Optional[float] = Field(default=None, ge=TIMELINE_TIME_MIN, le=TIMELINE_TIME_MAX)
 
     @model_validator(mode="after")
     def validate_range(self) -> "OutputConfig":
@@ -47,33 +116,60 @@ class OutputConfig(BaseModel):
         return self
 
 
-class Transition(BaseModel):
-    type: str = Field(default="cut", min_length=1, max_length=64)
-    duration_sec: float = Field(default=0.5, ge=0.0, le=10.0)
+class TransitionEndpoint(BaseModel):
+    kind: Literal["clip", "overlay"]
+    track_id: str = Field(default="", max_length=160)
+    id: str = Field(min_length=1, max_length=160)
+
+
+class TransitionEvent(BaseModel):
+    """A transition owned by an edit point, never by either material."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    id: str = Field(min_length=1, max_length=160)
+    type: Literal["fade", "flash", "dip", "zoom", "wipe_l", "wipe_r", "slide_up", "slide_down"]
+    duration_sec: float = Field(default=TRANSITION_DURATION_DEFAULT, ge=TRANSITION_DURATION_MIN, le=TRANSITION_DURATION_MAX)
+    easing: Literal["linear"] = "linear"
+    from_: Optional[TransitionEndpoint] = Field(default=None, alias="from", serialization_alias="from")
+    to: Optional[TransitionEndpoint] = None
+
+    @model_validator(mode="after")
+    def validate_endpoints(self) -> "TransitionEvent":
+        if self.from_ is None and self.to is None:
+            raise ValueError("transition event requires at least one endpoint")
+        return self
 
 
 class ColorGrade(BaseModel):
-    brightness: float = Field(default=0.0, ge=-100.0, le=100.0)
-    contrast: float = Field(default=0.0, ge=-100.0, le=100.0)
-    saturation: float = Field(default=0.0, ge=-100.0, le=100.0)
+    brightness: float = Field(default=VISUAL_COLOR_DEFAULT, ge=VISUAL_COLOR_MIN, le=VISUAL_COLOR_MAX)
+    contrast: float = Field(default=VISUAL_COLOR_DEFAULT, ge=VISUAL_COLOR_MIN, le=VISUAL_COLOR_MAX)
+    saturation: float = Field(default=VISUAL_COLOR_DEFAULT, ge=VISUAL_COLOR_MIN, le=VISUAL_COLOR_MAX)
     filter_preset: Optional[str] = None
 
 
-class ClipTransform(BaseModel):
-    x: float = Field(default=0.5, ge=-10.0, le=10.0)
-    y: float = Field(default=0.5, ge=-10.0, le=10.0)
-    scale: float = Field(default=1.0, gt=0.0, le=20.0)
-    rotation: float = Field(default=0.0, ge=-3600.0, le=3600.0)
-    width: float = Field(default=1.0, gt=0.0, le=20.0)
-    height: float = Field(default=1.0, gt=0.0, le=20.0)
-    opacity: float = Field(default=1.0, ge=0.0, le=1.0)
+class SceneTransform(BaseModel):
+    """One canvas-relative, center-anchored transform for every visual node."""
+
+    x: float = Field(default=VIDEO_SCENE_DEFAULTS["x"], ge=SCENE_TRANSFORM_LIMITS["position_min"], le=SCENE_TRANSFORM_LIMITS["position_max"])
+    y: float = Field(default=VIDEO_SCENE_DEFAULTS["y"], ge=SCENE_TRANSFORM_LIMITS["position_min"], le=SCENE_TRANSFORM_LIMITS["position_max"])
+    width: float = Field(default=VIDEO_SCENE_DEFAULTS["width"], ge=SCENE_TRANSFORM_LIMITS["size_min"], le=SCENE_TRANSFORM_LIMITS["size_max"])
+    height: float = Field(default=VIDEO_SCENE_DEFAULTS["height"], ge=SCENE_TRANSFORM_LIMITS["size_min"], le=SCENE_TRANSFORM_LIMITS["size_max"])
+    scale: float = Field(default=VIDEO_SCENE_DEFAULTS["scale"], ge=SCENE_TRANSFORM_LIMITS["scale_min"], le=SCENE_TRANSFORM_LIMITS["scale_max"])
+    rotation: float = Field(default=VIDEO_SCENE_DEFAULTS["rotation"], ge=SCENE_TRANSFORM_LIMITS["rotation_min"], le=SCENE_TRANSFORM_LIMITS["rotation_max"])
+    opacity: float = Field(default=VIDEO_SCENE_DEFAULTS["opacity"], ge=SCENE_TRANSFORM_LIMITS["opacity_min"], le=SCENE_TRANSFORM_LIMITS["opacity_max"])
+
+
+class SceneKeyframe(BaseModel):
+    time_sec: float = Field(default=TIMELINE_TIME_DEFAULT, ge=TIMELINE_TIME_MIN, le=TIMELINE_TIME_MAX)
+    transform: SceneTransform = Field(default_factory=SceneTransform)
 
 
 class ClipCrop(BaseModel):
-    x: float = Field(default=0.0, ge=0.0, le=1.0)
-    y: float = Field(default=0.0, ge=0.0, le=1.0)
-    width: float = Field(default=1.0, gt=0.0, le=1.0)
-    height: float = Field(default=1.0, gt=0.0, le=1.0)
+    x: float = Field(default=VISUAL_MATERIAL_DEFAULTS["crop"]["x"], ge=VISUAL_CROP_POSITION_MIN, le=VISUAL_CROP_POSITION_MAX)
+    y: float = Field(default=VISUAL_MATERIAL_DEFAULTS["crop"]["y"], ge=VISUAL_CROP_POSITION_MIN, le=VISUAL_CROP_POSITION_MAX)
+    width: float = Field(default=VISUAL_MATERIAL_DEFAULTS["crop"]["width"], ge=VISUAL_CROP_SIZE_MIN, le=VISUAL_CROP_SIZE_MAX)
+    height: float = Field(default=VISUAL_MATERIAL_DEFAULTS["crop"]["height"], ge=VISUAL_CROP_SIZE_MIN, le=VISUAL_CROP_SIZE_MAX)
 
     @model_validator(mode="after")
     def validate_bounds(self) -> "ClipCrop":
@@ -82,33 +178,36 @@ class ClipCrop(BaseModel):
         return self
 
 
-class TimelineClip(BaseModel):
+class VisualMaterialEffects(BaseModel):
+    """Canonical effects shared by every visual material."""
+
+    color: Optional[ColorGrade] = None
+    transform: Optional[SceneTransform] = None
+    keyframes: list[SceneKeyframe] = Field(default_factory=list, max_length=500)
+    crop: Optional[ClipCrop] = None
+    content_fit: Optional[Literal["inherit", "fill", "contain", "cover", "blur"]] = None
+    flip_horizontal: bool = False
+    flip_vertical: bool = False
+
+
+class TimelineClip(VisualMaterialEffects):
     id: str = Field(min_length=1, max_length=160)
     source_type: Literal["recorded_clip", "file", "text", "template_asset"] = "recorded_clip"
     source_id: Optional[int] = None
     file_path: Optional[str] = None
-    timeline_start: float = Field(default=0.0, ge=0.0, le=86400.0)
-    trim_in: float = Field(default=0.0, ge=0.0, le=86400.0)
-    trim_out: Optional[float] = Field(default=None, ge=0.0, le=86400.0)
-    transition_in: Optional[Transition] = None
-    transition_out: Optional[Transition] = None
-    color: Optional[ColorGrade] = None
-    transform: Optional[ClipTransform] = None
-    keyframes: list[dict[str, Any]] = Field(default_factory=list, max_length=500)
-    crop: Optional[ClipCrop] = None
-    canvas_fit: Optional[Literal["inherit", "contain", "cover", "blur"]] = None
-    flip_horizontal: bool = False
-    flip_vertical: bool = False
-    speed: float = Field(default=1.0, ge=0.25, le=4.0)
+    timeline_start: float = Field(default=TIMELINE_TIME_DEFAULT, ge=TIMELINE_TIME_MIN, le=TIMELINE_TIME_MAX)
+    trim_in: float = Field(default=TIMELINE_TIME_DEFAULT, ge=TIMELINE_TIME_MIN, le=TIMELINE_TIME_MAX)
+    trim_out: Optional[float] = Field(default=None, ge=TIMELINE_TIME_MIN, le=TIMELINE_TIME_MAX)
+    speed: float = Field(default=VISUAL_SPEED_DEFAULT, ge=VISUAL_SPEED_MIN, le=VISUAL_SPEED_MAX)
     speed_keyframes: list[dict[str, Any]] = Field(default_factory=list, max_length=500)
     preserve_pitch: bool = True
     reverse: bool = False
-    freeze_frame_sec: float = Field(default=0.0, ge=0.0, le=30.0)
-    volume: float = Field(default=1.0, ge=0.0, le=5.0)
+    freeze_frame_sec: float = Field(default=VISUAL_FREEZE_DEFAULT_SEC, ge=VISUAL_FREEZE_MIN_SEC, le=VISUAL_FREEZE_MAX_SEC)
+    volume: float = Field(default=AUDIO_CLIP_GAIN_DEFAULT, ge=AUDIO_CLIP_GAIN_MIN, le=AUDIO_CLIP_GAIN_MAX)
     audio_keyframes: list[dict[str, Any]] = Field(default_factory=list, max_length=500)
     muted: bool = False
-    fade_in_sec: float = Field(default=0.0, ge=0.0, le=86400.0)
-    fade_out_sec: float = Field(default=0.0, ge=0.0, le=86400.0)
+    fade_in_sec: float = Field(default=AUDIO_FADE_DURATION_DEFAULT, ge=AUDIO_FADE_DURATION_MIN, le=AUDIO_FADE_DURATION_MAX)
+    fade_out_sec: float = Field(default=AUDIO_FADE_DURATION_DEFAULT, ge=AUDIO_FADE_DURATION_MIN, le=AUDIO_FADE_DURATION_MAX)
     meta: Optional[dict[str, Any]] = None
 
     @model_validator(mode="after")
@@ -116,9 +215,9 @@ class TimelineClip(BaseModel):
         if self.trim_out is not None and self.trim_out <= self.trim_in:
             raise ValueError("clip trim_out must be greater than trim_in")
         for keyframe in self.speed_keyframes:
-            _validate_raw_keyframe(keyframe, "source_sec", "speed", 0.25, 4.0)
+            _validate_raw_keyframe(keyframe, "source_sec", "speed", VISUAL_SPEED_MIN, VISUAL_SPEED_MAX)
         for keyframe in self.audio_keyframes:
-            _validate_raw_keyframe(keyframe, "time_sec", "volume", 0.0, 5.0)
+            _validate_raw_keyframe(keyframe, "time_sec", "volume", AUDIO_CLIP_GAIN_MIN, AUDIO_CLIP_GAIN_MAX)
         return self
 
 
@@ -131,84 +230,70 @@ class Track(BaseModel):
     hidden: bool = False
     muted: bool = False
     solo: bool = False
-    volume: float = Field(default=1.0, ge=0.0, le=5.0)
+    volume: float = Field(default=AUDIO_TRACK_GAIN_DEFAULT, ge=AUDIO_TRACK_GAIN_MIN, le=AUDIO_TRACK_GAIN_MAX)
     clips: list[TimelineClip] = Field(default_factory=list, max_length=500)
 
 
 class OverlayText(BaseModel):
     content: str = ""
-    font_family: str = "sans-serif"
+    font_family: str = TEXT_DEFAULT_FONT_FAMILY
     font_file: Optional[str] = None
-    font_size: int = 48
+    font_size: int = Field(default=TEXT_FONT_SIZE_DEFAULT, ge=TEXT_FONT_SIZE_MIN, le=TEXT_FONT_SIZE_MAX)
+    font_weight: int = Field(default=TEXT_FONT_WEIGHT_DEFAULT, ge=TEXT_FONT_WEIGHT_MIN, le=TEXT_FONT_WEIGHT_MAX)
+    line_height: float = Field(default=TEXT_LINE_HEIGHT_DEFAULT, ge=TEXT_LINE_HEIGHT_MIN, le=TEXT_LINE_HEIGHT_MAX)
+    letter_spacing: Literal[0.0] = 0.0
     align: Literal["left", "center", "right"] = "center"
     preset_id: Optional[str] = None
-    anim_in: Optional[str] = None
-    anim_out: Optional[str] = None
+    fill_color: Optional[str] = Field(default=None, pattern=r"^#[0-9a-fA-F]{6}$")
 
 
-class OverlayTransform(BaseModel):
-    x: float = 0.5
-    y: float = 0.5
-    scale: float = Field(default=1.0, gt=0.0, le=20.0)
-    rotation: float = 0.0
-    width: float = Field(default=0.33, gt=0.0, le=20.0)
-    height: float = Field(default=0.33, gt=0.0, le=20.0)
-    opacity: float = Field(default=1.0, ge=0.0, le=1.0)
+OverlayKeyframe = SceneKeyframe
 
 
-class OverlayKeyframe(BaseModel):
-    time_sec: float = Field(default=0.0, ge=0.0, le=86400.0)
-    transform: OverlayTransform = Field(default_factory=OverlayTransform)
-
-
-class OverlayLayer(BaseModel):
+class OverlayLayer(VisualMaterialEffects):
     id: str = Field(min_length=1, max_length=160)
     type: Literal["text", "sticker", "webm", "name_card"]
-    timeline_start: float = Field(default=0.0, ge=0.0, le=86400.0)
-    duration: float = Field(default=3.0, gt=0.0, le=86400.0)
-    fade_in_sec: float = Field(default=0.0, ge=0.0, le=86400.0)
-    fade_out_sec: float = Field(default=0.0, ge=0.0, le=86400.0)
-    transition_in: Optional[Transition] = None
-    transition_out: Optional[Transition] = None
-    transform: OverlayTransform = Field(default_factory=OverlayTransform)
-    keyframes: list[OverlayKeyframe] = Field(default_factory=list, max_length=500)
-    flip_horizontal: bool = False
-    flip_vertical: bool = False
+    timeline_start: float = Field(default=TIMELINE_TIME_DEFAULT, ge=TIMELINE_TIME_MIN, le=TIMELINE_TIME_MAX)
+    duration: float = Field(default=TIMELINE_DURATION_DEFAULT, gt=TIMELINE_DURATION_MIN_EXCLUSIVE, le=TIMELINE_DURATION_MAX)
+    transform: SceneTransform = Field(default_factory=lambda: SceneTransform(**OVERLAY_SCENE_DEFAULTS))
+    content_fit: Optional[Literal["inherit", "fill", "contain", "cover", "blur"]] = "fill"
+    trim_in: float = Field(default=TIMELINE_TIME_DEFAULT, ge=TIMELINE_TIME_MIN, le=TIMELINE_TIME_MAX)
     text: Optional[OverlayText] = None
     asset_path: Optional[str] = None
     meta: Optional[dict[str, Any]] = None
-
 
 class BgmConfig(BaseModel):
     path: str = ""
     name: Optional[str] = None
     asset_id: Optional[int] = None
-    duration_sec: Optional[float] = None
-    volume: float = Field(default=1.0, ge=0.0, le=2.0)
-    start_sec: float = Field(default=0.0, ge=0.0, le=86400.0)
-    fade_in_sec: float = Field(default=0.0, ge=0.0, le=86400.0)
-    fade_out_sec: float = Field(default=0.0, ge=0.0, le=86400.0)
+    duration_sec: Optional[float] = Field(default=None, gt=TIMELINE_DURATION_MIN_EXCLUSIVE, le=TIMELINE_DURATION_MAX)
+    volume: float = Field(default=AUDIO_BGM_GAIN_DEFAULT, ge=AUDIO_BGM_GAIN_MIN, le=AUDIO_BGM_GAIN_MAX)
+    start_sec: float = Field(default=TIMELINE_TIME_DEFAULT, ge=TIMELINE_TIME_MIN, le=TIMELINE_TIME_MAX)
+    fade_in_sec: float = Field(default=AUDIO_FADE_DURATION_DEFAULT, ge=AUDIO_FADE_DURATION_MIN, le=AUDIO_FADE_DURATION_MAX)
+    fade_out_sec: float = Field(default=AUDIO_FADE_DURATION_DEFAULT, ge=AUDIO_FADE_DURATION_MIN, le=AUDIO_FADE_DURATION_MAX)
     ducking_enabled: bool = False
-    ducking_volume: float = Field(default=0.35, ge=0.0, le=1.0)
+    ducking_volume: float = Field(default=AUDIO_DUCKING_GAIN_DEFAULT, ge=AUDIO_DUCKING_GAIN_MIN, le=AUDIO_DUCKING_GAIN_MAX)
 
 
 class AudioConfig(BaseModel):
     bgm: Optional[BgmConfig] = None
-    master_volume: float = Field(default=1.0, ge=0.0, le=5.0)
+    master_volume: float = Field(default=AUDIO_MASTER_GAIN_DEFAULT, ge=AUDIO_MASTER_GAIN_MIN, le=AUDIO_MASTER_GAIN_MAX)
 
 
 class TimelineMarker(BaseModel):
     id: str
-    time_sec: float = 0.0
+    time_sec: float = Field(default=TIMELINE_TIME_DEFAULT, ge=TIMELINE_TIME_MIN, le=TIMELINE_TIME_MAX)
     label: str = ""
     color: str = "#f59e0b"
 
 
 class LiteCutProjectBody(BaseModel):
-    schema_version: Literal[2] = SCHEMA_VERSION
+    schema_version: Literal[3] = SCHEMA_VERSION
     output: OutputConfig = Field(default_factory=OutputConfig)
     tracks: list[Track] = Field(default_factory=list, max_length=32)
     overlays: list[OverlayLayer] = Field(default_factory=list, max_length=32)
+    transition_model_version: Literal[1] = 1
+    transitions: list[TransitionEvent] = Field(default_factory=list, max_length=1000)
     overlay_tracks: list[dict[str, Any]] = Field(default_factory=list, max_length=32)
     markers: list[TimelineMarker] = Field(default_factory=list, max_length=500)
     audio: AudioConfig = Field(default_factory=AudioConfig)
@@ -220,6 +305,7 @@ class LiteCutProjectBody(BaseModel):
         _ensure_unique("track", [track.id for track in self.tracks])
         _ensure_unique("clip", [clip.id for track in self.tracks for clip in track.clips])
         _ensure_unique("overlay", [overlay.id for overlay in self.overlays])
+        _ensure_unique("transition", [transition.id for transition in self.transitions])
         _ensure_unique("marker", [marker.id for marker in self.markers])
         return self
 
@@ -249,7 +335,7 @@ def _validate_raw_keyframe(
         value = float(keyframe[value_key])
     except (KeyError, TypeError, ValueError) as exc:
         raise ValueError(f"keyframe requires numeric {time_key} and {value_key}") from exc
-    if not math.isfinite(time_value) or time_value < 0.0 or time_value > 86400.0:
+    if not math.isfinite(time_value) or time_value < TIMELINE_TIME_MIN or time_value > TIMELINE_TIME_MAX:
         raise ValueError(f"keyframe {time_key} is out of range")
     if not math.isfinite(value) or value < minimum or value > maximum:
         raise ValueError(f"keyframe {value_key} is out of range")
@@ -274,10 +360,10 @@ def empty_project() -> LiteCutProjectBody:
             hidden=False,
             muted=False,
             solo=False,
-            volume=1.0,
+            volume=AUDIO_TRACK_GAIN_DEFAULT,
             clips=[],
         ),
-        Track(id="a1", type="audio", label="A1", volume=1.0, clips=[]),
+        Track(id="a1", type="audio", label="A1", volume=AUDIO_TRACK_GAIN_DEFAULT, clips=[]),
     ]
     return LiteCutProjectBody(tracks=tracks, overlays=[], audio=AudioConfig())
 
@@ -287,29 +373,48 @@ def empty_project() -> LiteCutProjectBody:
 
 class TextStylePresetBody(BaseModel):
     preset_id: Optional[str] = None
-    font_family: str = "sans-serif"
+    font_family: str = TEXT_DEFAULT_FONT_FAMILY
     font_file: Optional[str] = None
-    font_size: int = 48
+    font_size: int = Field(default=TEXT_FONT_SIZE_DEFAULT, ge=TEXT_FONT_SIZE_MIN, le=TEXT_FONT_SIZE_MAX)
+    font_weight: int = Field(default=TEXT_FONT_WEIGHT_DEFAULT, ge=TEXT_FONT_WEIGHT_MIN, le=TEXT_FONT_WEIGHT_MAX)
+    line_height: float = Field(default=TEXT_LINE_HEIGHT_DEFAULT, ge=TEXT_LINE_HEIGHT_MIN, le=TEXT_LINE_HEIGHT_MAX)
+    letter_spacing: Literal[0.0] = 0.0
     align: Literal["left", "center", "right"] = "center"
-    color: Optional[str] = None
+    fill_color: Optional[str] = Field(default=None, pattern=r"^#[0-9a-fA-F]{6}$")
     anim_in: Optional[str] = None
     anim_out: Optional[str] = None
     content_template: str = "{{player_name}}"
 
 
 class ColorGradePresetBody(BaseModel):
-    brightness: float = 0.0
-    contrast: float = 0.0
-    saturation: float = 0.0
+    brightness: float = Field(default=VISUAL_COLOR_DEFAULT, ge=VISUAL_COLOR_MIN, le=VISUAL_COLOR_MAX)
+    contrast: float = Field(default=VISUAL_COLOR_DEFAULT, ge=VISUAL_COLOR_MIN, le=VISUAL_COLOR_MAX)
+    saturation: float = Field(default=VISUAL_COLOR_DEFAULT, ge=VISUAL_COLOR_MIN, le=VISUAL_COLOR_MAX)
     filter_preset: Optional[str] = None
-    apply_to: Literal["selection", "all_video", "v1_main"] = "v1_main"
+    apply_to: Literal["selection", "all_video", "all_visual", "v1_main"] = "v1_main"
 
 
 class TransitionRhythmPresetBody(BaseModel):
-    default_type: str = "fade"
-    default_duration_sec: float = 0.5
-    flash_every_n: Optional[int] = None
-    flash_type: str = "flashwhite"
+    default_type: Literal["cut", "fade", "flash", "dip", "zoom", "wipe_l", "wipe_r", "slide_up", "slide_down"] = "fade"
+    default_duration_sec: float = TRANSITION_DURATION_DEFAULT
+    flash_every_n: Optional[int] = Field(default=None, ge=1)
+    flash_type: Literal["fade", "flash", "dip", "zoom", "wipe_l", "wipe_r", "slide_up", "slide_down"] = "flash"
+
+    @model_validator(mode="after")
+    def validate_default_duration(self) -> "TransitionRhythmPresetBody":
+        if self.default_type == "cut":
+            self.default_duration_sec = 0.0
+            return self
+        if not math.isfinite(self.default_duration_sec) or not TRANSITION_DURATION_MIN <= self.default_duration_sec <= TRANSITION_DURATION_MAX:
+            raise ValueError(
+                f"timed transition duration must be between {TRANSITION_DURATION_MIN} and {TRANSITION_DURATION_MAX} seconds"
+            )
+        return self
+
+
+class AudioMixPresetBody(BaseModel):
+    master_volume: float = Field(default=AUDIO_MASTER_GAIN_DEFAULT, ge=AUDIO_MASTER_GAIN_MIN, le=AUDIO_MASTER_GAIN_MAX)
+    bgm: Optional[BgmConfig] = None
 
 
 class OverlayRecipeLayer(BaseModel):
@@ -331,6 +436,7 @@ class PackagingBundleBody(BaseModel):
     color_grade: Optional[ColorGradePresetBody] = None
     transition_rhythm: Optional[TransitionRhythmPresetBody] = None
     overlay_recipe: Optional[OverlayRecipePresetBody] = None
+    audio_mix: Optional[AudioMixPresetBody] = None
     bgm: Optional[BgmConfig] = None
 
 
@@ -342,6 +448,7 @@ class LiteCutPresetBody(BaseModel):
     color_grade: Optional[ColorGradePresetBody] = None
     transition_rhythm: Optional[TransitionRhythmPresetBody] = None
     overlay_recipe: Optional[OverlayRecipePresetBody] = None
+    audio_mix: Optional[AudioMixPresetBody] = None
     packaging_bundle: Optional[PackagingBundleBody] = None
 
 

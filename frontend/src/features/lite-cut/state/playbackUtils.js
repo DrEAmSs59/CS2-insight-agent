@@ -1,7 +1,6 @@
 import {
   clipLabel,
   audioTracks,
-  getTrack,
   sortClips,
   trackMainVideoClips,
   videoTracks,
@@ -9,6 +8,7 @@ import {
 import {
   clipFreezeFrameSec,
   clipMediaTimelineDuration,
+  clipPreservePitch,
   clipReversePlayback,
   clipSpeedAtTimeline,
   clipSourceDuration,
@@ -17,6 +17,23 @@ import {
   clipTrimmedSourceDuration,
 } from "../domain/timelineMath.js";
 import { clipVolumeAtLocal } from "./audioKeyframeUtils.js";
+import {
+  AUDIO_BGM_GAIN,
+  AUDIO_CLIP_GAIN,
+  AUDIO_DUCKING_GAIN,
+  AUDIO_FADE_DURATION,
+  AUDIO_MASTER_GAIN,
+  AUDIO_TRACK_GAIN,
+  clampAudioGain,
+} from "../domain/audioContract.js";
+import { LITE_CUT_TIMELINE_LIMITS } from "./projectContract.js";
+import { VISUAL_SPEED_DEFAULT } from "../domain/visualMaterial.js";
+import {
+  clipTransitionRef,
+  findVisualTransitionNode,
+  overlayTransitionRef,
+  transitionMarkersForNode,
+} from "./transitionModel.js";
 
 function hitClipAtTime(clip, timelineSec) {
   const start = Number(clip.timeline_start) || 0;
@@ -56,6 +73,21 @@ function hitClipAtEnd(clip) {
     atEnd: true,
     frozen: clipFreezeFrameSec(clip) > 0,
   };
+}
+
+export function resolveTransitionEndpointPlayback(body, ref, timelineSec) {
+  const entry = findVisualTransitionNode(body, ref);
+  if (!entry || ref?.kind !== "clip") return null;
+  const time = Number(timelineSec) || 0;
+  if (time < entry.start) {
+    const hit = hitClipAtTime(entry.node, entry.start + 0.00001);
+    return hit ? { ...hit, trackId: ref.track_id, sourceTime: Number(entry.node.trim_in) || 0, localTime: 0, freezePlayback: true, atStart: true } : null;
+  }
+  if (time >= entry.end - 0.00001) {
+    return { ...hitClipAtEnd(entry.node), trackId: ref.track_id, freezePlayback: true };
+  }
+  const hit = hitClipAtTime(entry.node, time);
+  return hit ? { ...hit, trackId: ref.track_id } : null;
 }
 
 /** 自上而下取最上层有内容的视频轨（预览合成） */
@@ -137,69 +169,6 @@ export function resolveVideoUnderlayPlaybacksAt(body, timelineSec, topPlayback) 
   return layers;
 }
 
-export function resolveIncomingTransitionPlayback(body, playback) {
-  if (!playback?.clip || !playback?.trackId) return null;
-  const track = getTrack(body, playback.trackId);
-  const clips = sortClips(track?.clips || []);
-  const index = clips.findIndex((clip) => clip.id === playback.clip.id);
-  if (index <= 0) return null;
-  const previous = clips[index - 1];
-  // Match the exporter: the incoming clip's transition_in owns the boundary
-  // when present; otherwise fall back to the outgoing clip's transition_out.
-  const incoming = playback.clip?.transition_in;
-  const transition = incoming && typeof incoming === "object" ? incoming : previous?.transition_out;
-  if (!transition || typeof transition !== "object") return null;
-  const type = String(transition.type || "none").toLowerCase();
-  const duration = Math.max(0, Math.min(1.5, Number(transition.duration_sec) || 0));
-  const localTime = Math.max(0, Number(playback.localTime) || 0);
-  const expectedStart = clipTimelineEnd(previous);
-  if (type === "none" || duration < 0.02 || Math.abs((Number(playback.clipStart) || 0) - expectedStart) > 0.05 || localTime >= duration) {
-    return null;
-  }
-  return {
-    ...hitClipAtEnd(previous),
-    trackId: playback.trackId,
-    transitionType: type,
-    transitionDuration: duration,
-    progress: Math.max(0, Math.min(1, localTime / duration)),
-    freezePlayback: true,
-  };
-}
-
-/**
- * Mount the outgoing frame shortly before a contiguous boundary transition.
- * The element remains fully transparent until the next clip starts, so it
- * cannot change the picture before the cut but is decoded and ready beneath
- * an incoming fade at frame zero.
- */
-export function resolveOutgoingTransitionPreload(body, playback, preloadLeadSec = 2) {
-  if (!playback?.clip || !playback?.trackId) return null;
-  const track = getTrack(body, playback.trackId);
-  const clips = sortClips(track?.clips || []);
-  const index = clips.findIndex((clip) => clip.id === playback.clip.id);
-  if (index < 0 || index >= clips.length - 1) return null;
-  const next = clips[index + 1];
-  const expectedStart = clipTimelineEnd(playback.clip);
-  if (Math.abs((Number(next.timeline_start) || 0) - expectedStart) > 0.05) return null;
-  const incoming = next.transition_in;
-  const transition = incoming && typeof incoming === "object" ? incoming : playback.clip.transition_out;
-  if (!transition || typeof transition !== "object") return null;
-  const type = String(transition.type || "none").toLowerCase();
-  const duration = Math.max(0, Math.min(1.5, Number(transition.duration_sec) || 0));
-  const localTime = Math.max(0, Number(playback.localTime) || 0);
-  const clipDuration = Math.max(0, Number(playback.clipEnd) - Number(playback.clipStart));
-  const lead = Math.max(duration, Math.min(2, Math.max(0.25, Number(preloadLeadSec) || 2)));
-  if (type === "none" || duration < 0.02 || localTime < Math.max(0, clipDuration - lead)) return null;
-  return {
-    ...hitClipAtEnd(playback.clip),
-    trackId: playback.trackId,
-    transitionType: type,
-    transitionDuration: duration,
-    preloadOnly: true,
-    freezePlayback: true,
-  };
-}
-
 export function nextTopVideoPlaybackAfter(body, currentPlayback) {
   if (!currentPlayback?.clip) return null;
   const clipEnd = Number(currentPlayback.clipEnd) || 0;
@@ -226,9 +195,9 @@ export function nextTopVideoPlaybackAfter(body, currentPlayback) {
 
 export function previewAudioState({
   clip = null,
-  masterVolume = 1,
+  masterVolume = AUDIO_MASTER_GAIN.default,
   forceMuted = false,
-  trackVolume = 1,
+  trackVolume = AUDIO_TRACK_GAIN.default,
   localTime = 0,
   visibleDuration = null,
 } = {}) {
@@ -236,16 +205,16 @@ export function previewAudioState({
   const rawClipVolume = Number(clip?.volume);
   const rawMasterVolume = Number(masterVolume);
   const rawTrackVolume = Number(trackVolume);
-  const clipVolume = clipVolumeAtLocal(clip, localTime, visibleDuration ?? undefined, Number.isFinite(rawClipVolume) ? rawClipVolume : 1);
-  const projectVolume = Number.isFinite(rawMasterVolume) ? rawMasterVolume : 1;
-  const normalizedTrackVolume = Number.isFinite(rawTrackVolume) ? Math.max(0, Math.min(2, rawTrackVolume)) : 1;
-  const fadeIn = Math.max(0, Number(clip?.fade_in_sec) || 0);
-  const fadeOut = Math.max(0, Number(clip?.fade_out_sec) || 0);
+  const clipVolume = clipVolumeAtLocal(clip, localTime, visibleDuration ?? undefined, Number.isFinite(rawClipVolume) ? rawClipVolume : AUDIO_CLIP_GAIN.default);
+  const projectVolume = Number.isFinite(rawMasterVolume) ? rawMasterVolume : AUDIO_MASTER_GAIN.default;
+  const normalizedTrackVolume = clampAudioGain(rawTrackVolume, AUDIO_TRACK_GAIN);
+  const fadeIn = Math.max(AUDIO_FADE_DURATION.min, Number(clip?.fade_in_sec) || AUDIO_FADE_DURATION.default);
+  const fadeOut = Math.max(AUDIO_FADE_DURATION.min, Number(clip?.fade_out_sec) || AUDIO_FADE_DURATION.default);
   const local = Math.max(0, Number(localTime) || 0);
   const duration = Number.isFinite(Number(visibleDuration)) ? Math.max(0, Number(visibleDuration)) : clip ? clipSourceDuration(clip) : 0;
   const fadeInFactor = fadeIn > 0 ? Math.min(1, local / fadeIn) : 1;
   const fadeOutFactor = fadeOut > 0 && duration > 0 ? Math.min(1, Math.max(0, (duration - local) / fadeOut)) : 1;
-  const volume = Math.max(0, Math.min(1, clipVolume * normalizedTrackVolume * projectVolume * Math.min(fadeInFactor, fadeOutFactor)));
+  const volume = Math.max(0, clipVolume * normalizedTrackVolume * clampAudioGain(projectVolume, AUDIO_MASTER_GAIN) * fadeInFactor * fadeOutFactor);
   return { muted: volume <= 0, volume };
 }
 
@@ -257,19 +226,22 @@ export function projectBgmPreviewClip(body) {
     id: "project-bgm",
     source_type: "file",
     file_path: bgm.path,
-    timeline_start: Math.max(0, Number(bgm.start_sec) || 0),
-    trim_in: 0,
-    volume: Number.isFinite(Number(bgm.volume)) ? Number(bgm.volume) : 1,
+    timeline_start: Math.max(LITE_CUT_TIMELINE_LIMITS.time.min, Number(bgm.start_sec) || LITE_CUT_TIMELINE_LIMITS.time.default),
+    trim_in: LITE_CUT_TIMELINE_LIMITS.time.default,
+    volume: Number.isFinite(Number(bgm.volume)) ? Number(bgm.volume) : AUDIO_BGM_GAIN.default,
     muted: false,
-    fade_in_sec: Number(bgm.fade_in_sec) || 0,
-    fade_out_sec: Number(bgm.fade_out_sec) || 0,
-    speed: 1,
+    fade_in_sec: Number(bgm.fade_in_sec) || AUDIO_FADE_DURATION.default,
+    fade_out_sec: Number(bgm.fade_out_sec) || AUDIO_FADE_DURATION.default,
+    speed: VISUAL_SPEED_DEFAULT,
     preserve_pitch: true,
     reverse: false,
     meta: {
       kind: "audio",
       asset_id: bgm.asset_id,
       name: bgm.name || "BGM",
+      project_bgm: true,
+      ducking_enabled: Boolean(bgm.ducking_enabled),
+      ducking_volume: clampAudioGain(bgm.ducking_volume, AUDIO_DUCKING_GAIN),
     },
   };
   if (Number.isFinite(duration) && duration > 0) {
@@ -283,11 +255,11 @@ export function hasSoloAudioTracks(body) {
   return audioTracks(body).some((track) => Boolean(track?.solo));
 }
 
-export function resolveAudioPreviewItems(body, timelineSec, masterVolume = 1) {
+export function resolveAudioPreviewItems(body, timelineSec, masterVolume = AUDIO_MASTER_GAIN.default) {
   const t = Math.max(0, Number(timelineSec) || 0);
   const out = [];
   const soloActive = hasSoloAudioTracks(body);
-  const pushClip = (clip, trackId, trackVolume = 1) => {
+  const pushClip = (clip, trackId, trackVolume = AUDIO_TRACK_GAIN.default) => {
     const hit = hitClipAtTime(clip, t);
     if (!hit) return;
     const audio = previewAudioState({
@@ -304,6 +276,7 @@ export function resolveAudioPreviewItems(body, timelineSec, masterVolume = 1) {
       sourceTime: hit.sourceTime,
       localTime: hit.localTime,
       playbackRate: clipSpeedAtTimeline(clip, hit.localTime),
+      preservePitch: clipPreservePitch(clip),
       reversePlayback: clipReversePlayback(clip),
       muted: audio.muted,
       volume: audio.volume,
@@ -315,47 +288,13 @@ export function resolveAudioPreviewItems(body, timelineSec, masterVolume = 1) {
       pushClip(clip, track.id, track.volume);
     }
   }
-  // Native <video> audio can only represent the currently selected visual
-  // layer.  Export mixes every visible video layer, so mirror that mix through
-  // dedicated audio elements during timeline preview.
-  if (!soloActive) {
-    for (const track of videoTracks(body)) {
-      if (track.hidden || track.muted) continue;
-      for (const clip of sortClips(track.clips)) {
-        pushClip(clip, track.id, track.volume);
-      }
-    }
-  }
   const bgmClip = projectBgmPreviewClip(body);
-  if (bgmClip && !soloActive) pushClip(bgmClip, "bgm");
-  return out;
-}
-
-/**
- * Let the visible main <video> provide its own audio instead of opening the
- * same large MP4 a second time through a dedicated <audio> element.
- */
-export function partitionMainVideoAudioPreview(
-  items,
-  { clipId = null, trackId = null, allowMainAudio = true } = {},
-) {
-  const audioItems = Array.isArray(items) ? items : [];
-  if (!allowMainAudio || clipId == null || trackId == null) {
-    return { mainAudioItem: null, audioItems };
+  if (bgmClip && !soloActive) {
+    const foregroundActive = out.some((item) => !item.muted && item.volume > 0);
+    const duckGain = foregroundActive && bgmClip.meta?.ducking_enabled ? bgmClip.meta.ducking_volume : AUDIO_TRACK_GAIN.default;
+    pushClip(bgmClip, "bgm", duckGain);
   }
-  const index = audioItems.findIndex((item) => (
-    String(item?.id) === String(clipId)
-    && String(item?.trackId) === String(trackId)
-    && !item?.preloadOnly
-    && !item?.reversePlayback
-    && !item?.muted
-    && Number(item?.volume) > 0
-  ));
-  if (index < 0) return { mainAudioItem: null, audioItems };
-  return {
-    mainAudioItem: audioItems[index],
-    audioItems: audioItems.filter((_item, itemIndex) => itemIndex !== index),
-  };
+  return out;
 }
 
 /**
@@ -363,12 +302,12 @@ export function partitionMainVideoAudioPreview(
  * cut.  The actual preview item reuses this DOM node at the boundary, which
  * avoids an audio decoder/network startup in the audible frame.
  */
-export function resolveAudioPreviewPreloadItems(body, timelineSec, masterVolume = 1, leadSec = 1.5) {
+export function resolveAudioPreviewPreloadItems(body, timelineSec, masterVolume = AUDIO_MASTER_GAIN.default, leadSec = 1.5) {
   const now = Math.max(0, Number(timelineSec) || 0);
   const horizon = now + Math.max(0, Number(leadSec) || 0);
   const out = [];
   const soloActive = hasSoloAudioTracks(body);
-  const pushUpcoming = (clip, trackId, trackVolume = 1) => {
+  const pushUpcoming = (clip, trackId, trackVolume = AUDIO_TRACK_GAIN.default) => {
     const start = Math.max(0, Number(clip?.timeline_start) || 0);
     if (start <= now + 1e-4 || start > horizon + 1e-4) return;
     // Use the timeline-facing first frame, including trimmed or reversed clips.
@@ -388,6 +327,7 @@ export function resolveAudioPreviewPreloadItems(body, timelineSec, masterVolume 
       sourceTime: hit.sourceTime,
       localTime: 0,
       playbackRate: clipSpeedAtTimeline(clip, 0),
+      preservePitch: clipPreservePitch(clip),
       reversePlayback: clipReversePlayback(clip),
       muted: audio.muted,
       volume: audio.volume,
@@ -399,10 +339,6 @@ export function resolveAudioPreviewPreloadItems(body, timelineSec, masterVolume 
     for (const clip of sortClips(track.clips)) pushUpcoming(clip, track.id, track.volume);
   }
   if (!soloActive) {
-    for (const track of videoTracks(body)) {
-      if (track.hidden || track.muted) continue;
-      for (const clip of sortClips(track.clips)) pushUpcoming(clip, track.id, track.volume);
-    }
     const bgmClip = projectBgmPreviewClip(body);
     if (bgmClip) pushUpcoming(bgmClip, "bgm");
   }
@@ -417,6 +353,7 @@ export function overlayBlocks(body, totalSec) {
     width: Number(ov.duration) || 3,
     color: ov.type === "webm" ? "bg-cyan-600/85" : "bg-violet-600/85",
     _overlay: ov,
+    _transitionMarkers: transitionMarkersForNode(body, overlayTransitionRef(ov)),
   }));
 }
 
@@ -429,6 +366,7 @@ export function trackBlocks(body, trackId, selectedClipId, selectedTrackId = nul
     label: clipLabel(clip).slice(0, 18),
     start: Number(clip.timeline_start) || 0,
     width: clipSourceDuration(clip),
+    _transitionMarkers: transitionMarkersForNode(body, clipTransitionRef(trackId, clip.id)),
     thumb: trackId === "v2" ? "from-cyan-900 via-slate-800 to-zinc-900" : "from-orange-900 via-stone-800 to-zinc-900",
     selected: isTrackSelected && clip.id === selectedClipId,
     _clip: clip,

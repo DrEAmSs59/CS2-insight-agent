@@ -4,6 +4,14 @@ import { describe, expect, it, vi } from "vitest";
 import { ClipPane } from "./LiteCutPropertyPanel.jsx";
 
 describe("LiteCut clip keyframe inspector", () => {
+  it("shows hard cut as the default when no transition event exists", () => {
+    render(<ClipPane media={{ id: "clip-cut", title: "demo.mp4", kind: "video", duration: 5 }} isVideoLayer />);
+
+    fireEvent.click(screen.getByRole("button", { name: "素材过渡" }));
+    expect(screen.getByRole("button", { name: /硬切/ }).className).toContain("text-cs2-accent");
+    expect(screen.getByRole("button", { name: /淡化/ }).className).not.toContain("text-cs2-accent");
+  });
+
   it("shows editable transform keyframes beside their parameters", () => {
     const onAdd = vi.fn();
     render(
@@ -19,7 +27,7 @@ describe("LiteCut clip keyframe inspector", () => {
     expect(screen.getByText("变换与画面关键帧")).toBeTruthy();
     expect(screen.getByText("画面关键帧")).toBeTruthy();
     expect(screen.getByText(/位置、大小、缩放、旋转或透明度/)).toBeTruthy();
-    expect(screen.getByText("位置")).toBeTruthy();
+    expect(screen.getByText("位置(px)")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "在播放头添加画面关键帧" }));
     expect(onAdd).toHaveBeenCalledTimes(1);
   });

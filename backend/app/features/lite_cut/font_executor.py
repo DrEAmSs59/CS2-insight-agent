@@ -55,4 +55,3 @@ def _stage_custom_font_for_ffmpeg(font_file: str, *, cache_dir: Path | None = No
         target.unlink(missing_ok=True)
         raise
     return target
-

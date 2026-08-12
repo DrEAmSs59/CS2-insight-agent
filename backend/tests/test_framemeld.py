@@ -4,6 +4,7 @@ import json
 import sys
 import tempfile
 import unittest
+from fastapi import HTTPException
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -490,21 +491,18 @@ class TestFrameMeld(unittest.TestCase):
     def test_lite_cut_schema_keeps_only_new_framemeld_switch(self):
         body = normalize_project_body(
             {
-                "schema_version": 2,
+                "schema_version": 3,
                 "output": {
                     "fps": 120,
                     "framemeld_enabled": True,
-                    "frame_blend_enabled": True,
-                    "frame_blend_frames": 7,
-                    "delivery_fps": 120,
                 },
                 "tracks": [],
             }
         )
         self.assertTrue(body["output"]["framemeld_enabled"])
-        self.assertNotIn("frame_blend_enabled", body["output"])
-        self.assertNotIn("frame_blend_frames", body["output"])
-        self.assertNotIn("delivery_fps", body["output"])
+        with self.assertRaises(HTTPException) as raised:
+            normalize_project_body({"schema_version": 3, "output": {"frame_blend_enabled": True}})
+        self.assertEqual(raised.exception.detail["code"], "LITECUT_LEGACY_PROJECT_FIELDS_UNSUPPORTED")
 
 
 if __name__ == "__main__":

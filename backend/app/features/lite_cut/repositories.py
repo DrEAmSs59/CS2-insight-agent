@@ -37,6 +37,8 @@ class AssetRepository(Protocol):
     async def update_kind(self, asset_id: int, kind: str, mime_type: str | None = None) -> None: ...
     async def update_dimensions(self, asset_id: int, width: int, height: int) -> None: ...
     async def update_file_path(self, asset_id: int, file_path: str) -> None: ...
+    async def update_source(self, asset_id: int, **values: Any) -> None: ...
+    async def update_media_metadata(self, asset_id: int, **values: Any) -> None: ...
     async def delete(self, asset_id: int) -> bool: ...
 
 
@@ -139,6 +141,12 @@ class DbAssetRepository:
 
     async def update_file_path(self, asset_id: int, file_path: str) -> None:
         await self.db.update_asset_file_path(asset_id, file_path)
+
+    async def update_source(self, asset_id: int, **values: Any) -> None:
+        await self.db.update_asset_source(asset_id, **values)
+
+    async def update_media_metadata(self, asset_id: int, **values: Any) -> None:
+        await self.db.update_asset_media_metadata(asset_id, **values)
 
     async def delete(self, asset_id: int) -> bool:
         return await self.db.delete_asset(asset_id)

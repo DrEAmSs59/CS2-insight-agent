@@ -2,6 +2,7 @@ import { create } from "zustand";
 import { liteCutClient } from "../api/liteCutClient.js";
 import { useLiteCutHistoryStore } from "./historyStore.js";
 import { normalizeLiteCutBody } from "./projectCodec.js";
+import { AUDIO_MASTER_GAIN } from "../domain/audioContract.js";
 import {
   clearLiteCutRecoveryDraft,
   forgetRememberedLiteCutProject,
@@ -16,6 +17,10 @@ const SESSION_PROJECT_KEY = "liteCut:projectId";
 const activeSavePromises = new Map();
 
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+function projectErrorCode(error, fallback) {
+  return error?.response?.data?.detail?.code || error?.code || error?.message || fallback;
+}
 
 async function patchProjectWithRetry(projectId, payload) {
   const delays = [0, 350, 900];
@@ -87,6 +92,7 @@ export const useLiteCutEditorStore = create((set, get) => ({
       const rememberedHasDraft = rememberedId ? Boolean(readLiteCutRecoveryDraft(rememberedId)) : false;
       if (rememberedId && !rememberedHasDraft) forgetRememberedLiteCutProject(rememberedId);
       const storedId = stored ? Number(stored) : rememberedHasDraft ? rememberedId : null;
+      let startupError = null;
       if (Number.isFinite(storedId) && storedId > 0) {
         try {
           const data = await liteCutClient.getProject(storedId);
@@ -103,7 +109,8 @@ export const useLiteCutEditorStore = create((set, get) => ({
           });
           void get().listProjects();
           return;
-        } catch {
+        } catch (error) {
+          startupError = projectErrorCode(error, "open_failed");
           sessionStorage.removeItem(SESSION_PROJECT_KEY);
           forgetRememberedLiteCutProject(storedId);
         }
@@ -120,11 +127,12 @@ export const useLiteCutEditorStore = create((set, get) => ({
         projectListLoading: false,
         projectUpdatedAt: null,
         recoveryCandidate: null,
+        error: startupError,
       });
     } catch (e) {
       set({
         loading: false,
-        error: e?.response?.data?.detail?.code || e?.message || "load_failed",
+        error: projectErrorCode(e, "load_failed"),
       });
     }
   },
@@ -171,7 +179,7 @@ export const useLiteCutEditorStore = create((set, get) => ({
             set({
               saving: false,
               dirty: true,
-              error: e?.response?.data?.detail?.code || e?.message || "save_failed",
+              error: projectErrorCode(e, "save_failed"),
             });
           }
           return { ok: false };
@@ -212,7 +220,7 @@ export const useLiteCutEditorStore = create((set, get) => ({
     } catch (e) {
       set({
         loading: false,
-        error: e?.response?.data?.detail?.code || e?.message || "open_failed",
+        error: projectErrorCode(e, "open_failed"),
       });
       return { ok: false };
     }
@@ -242,38 +250,9 @@ export const useLiteCutEditorStore = create((set, get) => ({
     } catch (e) {
       set({
         loading: false,
-        error: e?.response?.data?.detail?.code || e?.message || "create_failed",
+        error: projectErrorCode(e, "create_failed"),
       });
       return { ok: false };
-    }
-  },
-
-  importProject: async ({ name, body } = {}) => {
-    if (!body || typeof body !== "object") return { ok: false, error: "invalid_project" };
-    set({ loading: true, error: null });
-    useLiteCutHistoryStore.getState().clear();
-    try {
-      const normalized = normalizeLiteCutBody(body).body;
-      const importName = String(name || "Imported LiteCut Project").trim().slice(0, 240) || "Imported LiteCut Project";
-      const data = await liteCutClient.createProject({ name: importName, body: normalized });
-      sessionStorage.setItem(SESSION_PROJECT_KEY, String(data.id));
-      rememberLiteCutProject(data.id);
-      clearLiteCutRecoveryDraft(data.id);
-      set({
-        projectId: data.id,
-        projectName: data.name || importName,
-        body: normalizeLiteCutBody(data.body).body,
-        dirty: false,
-        loading: false,
-        projectUpdatedAt: data.updated_at || null,
-        recoveryCandidate: null,
-      });
-      void get().listProjects();
-      return { ok: true, project: data };
-    } catch (e) {
-      const error = e?.response?.data?.detail?.code || e?.message || "import_failed";
-      set({ loading: false, error });
-      return { ok: false, error };
     }
   },
 
@@ -312,7 +291,7 @@ export const useLiteCutEditorStore = create((set, get) => ({
     } catch (e) {
       set({
         loading: false,
-        error: e?.response?.data?.detail?.code || e?.message || "duplicate_failed",
+        error: projectErrorCode(e, "duplicate_failed"),
       });
       return { ok: false };
     }
@@ -356,7 +335,7 @@ export const useLiteCutEditorStore = create((set, get) => ({
       set({
         ...(currentSnapshot || {}),
         loading: false,
-        error: e?.response?.data?.detail?.code || e?.message || "delete_failed",
+        error: projectErrorCode(e, "delete_failed"),
       });
       return { ok: false };
     }
@@ -400,7 +379,7 @@ export const useLiteCutEditorStore = create((set, get) => ({
       set({
         ...(currentSnapshot || {}),
         loading: false,
-        error: e?.response?.data?.detail?.code || e?.message || "batch_delete_failed",
+        error: projectErrorCode(e, "batch_delete_failed"),
       });
       return { ok: false, deleted: 0 };
     }
@@ -439,16 +418,6 @@ export const useLiteCutEditorStore = create((set, get) => ({
     const { body } = get();
     if (!body) return;
     const nextOutput = { ...(body.output || {}), ...patch };
-    const nextWorkingFps = Number(nextOutput.fps);
-    const nextDeliveryFps = Number(nextOutput.delivery_fps);
-    if (
-      nextOutput.high_frame_downsample_enabled === true
-      && Number.isFinite(nextWorkingFps)
-      && Number.isFinite(nextDeliveryFps)
-      && nextDeliveryFps >= nextWorkingFps
-    ) {
-      nextOutput.high_frame_downsample_enabled = false;
-    }
     set({
       body: { ...body, output: nextOutput },
       dirty: true,
@@ -459,7 +428,7 @@ export const useLiteCutEditorStore = create((set, get) => ({
     const { body } = get();
     if (!body) return;
     set({
-      body: { ...body, audio: { ...(body.audio || { master_volume: 1 }), ...patch } },
+      body: { ...body, audio: { ...(body.audio || { master_volume: AUDIO_MASTER_GAIN.default }), ...patch } },
       dirty: true,
     });
   },

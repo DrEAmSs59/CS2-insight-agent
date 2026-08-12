@@ -15,7 +15,7 @@ from pydantic import ValidationError
 from ...env_utils import resolve_config_path
 from ...montage_db import MontageDB
 from .db import LiteCutDB
-from .project_codec import serialize_project_body
+from .project_codec import LiteCutProjectCompatibilityError, serialize_project_body
 from .job_runtime import JobRegistry
 
 LITE_CUT_ENCODERS = {"auto", "h264_nvenc", "h264_qsv", "h264_amf", "libx264"}
@@ -55,6 +55,22 @@ class LiteCutPreviewProxyJob:
 
 
 @dataclass
+class LiteCutSegmentPreviewJob:
+    asset_id: int
+    request_id: str
+    segment_indexes: tuple[int, ...]
+    cache_directory: Path
+    priority: str = "interactive"
+    status: str = "queued"
+    active_segment: int | None = None
+    ready_segments: list[int] = field(default_factory=list)
+    encoder: str = ""
+    error: str = ""
+    cancel_event: threading.Event = field(default_factory=threading.Event)
+    task: asyncio.Task | None = None
+
+
+@dataclass
 class LiteCutStorageMigrationJob:
     job_id: str
     source: Path
@@ -75,33 +91,13 @@ class LiteCutStorageMigrationJob:
     task: asyncio.Task | None = None
 
 
-@dataclass
-class LiteCutPortablePackageJob:
-    job_id: str
-    project_id: int
-    filename: str
-    destination: Path | None = None
-    status: str = "queued"
-    stage: str = "queued"
-    progress: float = 0.0
-    total_bytes: int = 0
-    completed_bytes: int = 0
-    total_files: int = 0
-    completed_files: int = 0
-    package_path: str = ""
-    saved_path: str = ""
-    error: str = ""
-    cancel_event: threading.Event = field(default_factory=threading.Event)
-    task: asyncio.Task | None = None
-
-
 lite_cut_db: Optional[LiteCutDB] = None
 montage_db: Optional[MontageDB] = None
 job_registry = JobRegistry()
 export_jobs: dict[int, LiteCutExportJob] = job_registry.bucket("export")  # type: ignore[assignment]
 preview_proxy_jobs: dict[int, LiteCutPreviewProxyJob] = job_registry.bucket("preview_proxy")  # type: ignore[assignment]
+segment_preview_jobs: dict[int, LiteCutSegmentPreviewJob] = job_registry.bucket("preview_segment")  # type: ignore[assignment]
 storage_migration_jobs: dict[str, LiteCutStorageMigrationJob] = job_registry.bucket("storage_migration")  # type: ignore[assignment]
-portable_package_jobs: dict[str, LiteCutPortablePackageJob] = job_registry.bucket("portable_package")  # type: ignore[assignment]
 preview_proxy_slots: asyncio.Semaphore | None = None
 preview_proxy_slots_loop: asyncio.AbstractEventLoop | None = None
 
@@ -130,6 +126,10 @@ def get_preview_proxy_slots() -> asyncio.Semaphore:
     return preview_proxy_slots
 
 
+def get_segment_preview_slots() -> asyncio.Semaphore:
+    return job_registry.semaphore("preview_segment", 2)
+
+
 async def shutdown_lite_cut_jobs(timeout_sec: float = 10.0) -> bool:
     """Cancel all owned jobs and wait briefly for cooperative cleanup."""
     return await job_registry.shutdown(timeout_sec)
@@ -149,6 +149,11 @@ def resolve_lite_cut_encoder(
 def normalize_project_body(raw: dict[str, Any] | None) -> dict[str, Any]:
     try:
         return serialize_project_body(raw)
+    except LiteCutProjectCompatibilityError as exc:
+        raise HTTPException(
+            422,
+            {"code": exc.code, "message": str(exc)},
+        ) from exc
     except ValidationError as exc:
         raise HTTPException(
             422,

@@ -13,15 +13,14 @@ from app.features.lite_cut.timeline import (
     _all_overlay_clips_for_export,
     _audio_track_clips_for_export,
     _base_video_track_for_export,
-    _build_positional_transitions,
     _recorded_source_ids_for_export,
-    _video_layer_audio_clips_for_export,
 )
+from app.features.lite_cut.transition_events import project_events_to_render_nodes
 
 
 def _project():
     return {
-        "schema_version": 2,
+        "schema_version": 3,
         "output": {
             "width": 1280,
             "height": 720,
@@ -46,7 +45,7 @@ def _project():
                 "id": "v1",
                 "type": "video",
                 "clips": [
-                    {"id": "one", "source_type": "recorded_clip", "source_id": 4, "timeline_start": 0, "trim_in": 0, "trim_out": 2, "transition_out": {"type": "fade", "duration_sec": 0.3}},
+                    {"id": "one", "source_type": "recorded_clip", "source_id": 4, "timeline_start": 0, "trim_in": 0, "trim_out": 2},
                     {"id": "two", "source_type": "file", "file_path": "two.mp4", "timeline_start": 2, "trim_in": 0, "trim_out": 4},
                 ],
             },
@@ -57,24 +56,24 @@ def _project():
             },
         ],
         "overlays": [{"id": "title", "type": "text", "timeline_start": 0, "duration": 2, "text": {"content": "Hello"}}],
+        "transitions": [{"id": "edge", "type": "fade", "duration_sec": 0.3, "from": {"kind": "clip", "track_id": "v1", "id": "one"}, "to": {"kind": "clip", "track_id": "v1", "id": "two"}}],
     }
 
 
-def test_export_plan_is_equivalent_to_legacy_projection_helpers():
+def test_export_plan_matches_projection_helpers():
     body = _project()
     plan = build_lite_cut_export_plan(body, {"width": 1920, "height": 1080, "fps": 30})
-    base_track_id, base_clips = _base_video_track_for_export(body)
-    expected_layers = _all_overlay_clips_for_export(body, base_track_id=base_track_id)
-    expected_audio = [
-        *_audio_track_clips_for_export(body),
-        *_video_layer_audio_clips_for_export(body, base_track_id=base_track_id),
-    ]
+    projected = project_events_to_render_nodes(body)
+    base_track_id, base_clips = _base_video_track_for_export(projected)
+    expected_layers = _all_overlay_clips_for_export(projected, base_track_id=base_track_id)
+    expected_audio = list(_audio_track_clips_for_export(projected))
 
     assert plan.base_track_id == base_track_id
     assert list(plan.base_clips) == base_clips
     assert list(plan.video_layers) == expected_layers
     assert list(plan.audio_events) == expected_audio
-    assert plan.transitions == _build_positional_transitions(base_clips)
+    assert plan.transitions == {"0": {"id": "edge", "type": "fade", "duration": 0.3, "alignment": "center"}}
+    assert plan.transition_layers == ()
     assert list(plan.recorded_source_ids) == _recorded_source_ids_for_export(body)
     assert (plan.output_width, plan.output_height, plan.output_fps) == (1280, 720, 60)
     assert (plan.canvas_fit, plan.canvas_color, plan.canvas_blur_amount) == ("blur", "0x123456", 18)
@@ -91,3 +90,33 @@ def test_graph_builder_public_boundary_uses_concern_specific_owners_and_facade_a
     assert build_clip_video_filter_chain.__module__.endswith(".graph_clip")
     assert build_overlay_graph.__module__.endswith(".graph_overlay")
     assert build_audio_mix_graph.__module__.endswith(".graph_audio")
+
+
+def test_cross_track_event_projects_the_base_endpoint_without_becoming_a_base_xfade():
+    body = _project()
+    body["transitions"] = [{
+        "id": "cross",
+        "type": "fade",
+        "duration_sec": 1,
+        "from": {"kind": "clip", "track_id": "v1", "id": "one"},
+        "to": {"kind": "clip", "track_id": "v2", "id": "layer"},
+    }]
+    body["tracks"][0]["clips"][0]["timeline_start"] = 2
+    plan = build_lite_cut_export_plan(body)
+
+    assert plan.transitions == {}
+    assert len(plan.transition_layers) == 1
+    projection = plan.transition_layers[0]
+    assert projection["source_id"] == 4
+    assert projection["_transition_projection_only"] is True
+    assert projection["_transition_events"] == [{
+        "id": "cross",
+        "type": "fade",
+        "role": "from",
+        "mode": "boundary",
+        "duration_sec": 1.0,
+        "start_sec": 1.5,
+        "end_sec": 2.5,
+        "cut_sec": 2.0,
+        "stack": "lower",
+    }]

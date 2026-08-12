@@ -22,26 +22,23 @@ from .graph_clip import (
     _eq_filter,
     _user_eq_filter,
 )
-from .graph_overlay import (
-    _ffmpeg_expr_time_variable,
-    _overlay_filter_complex,
-    _overlay_height_from_transform,
-    _overlay_keyframe_expr,
-    _overlay_layout_from_transform,
-    _overlay_opacity_from_transform,
-)
+from .graph_overlay import _overlay_filter_complex
+from .graph_scene import _scene_composite_filter_complex
 from .graph_text import (
     _builtin_text_font_file,
     _default_text_font_file,
-    _drawtext_alpha_expr,
     _drawtext_filter_complex,
-    _drawtext_position_expr,
     _escape_drawtext_value,
     _ffmpeg_filter_path,
     _text_style_drawtext_options,
 )
+from .scene_transform import (
+    ffmpeg_expr_time_variable as _ffmpeg_expr_time_variable,
+    normalize_scene_transform,
+    scene_keyframe_expr,
+    scene_transform_expressions,
+)
 from .graph_transition import (
-    _background_boundary_transition_parts,
     _boundary_transition_filter_complex,
 )
 

@@ -4,6 +4,16 @@ from __future__ import annotations
 
 from typing import Any
 
+from .visual_material import (
+    VISUAL_CONTENT_FIT_VALUES,
+    VISUAL_FREEZE_DEFAULT_SEC,
+    VISUAL_FREEZE_MAX_SEC,
+    VISUAL_FREEZE_MIN_SEC,
+    VISUAL_SPEED_DEFAULT,
+    VISUAL_SPEED_MAX,
+    VISUAL_SPEED_MIN,
+)
+
 MIN_CLIP_VISIBLE_SEC = 0.1
 
 
@@ -22,10 +32,10 @@ def clip_duration_sec(clip: dict[str, Any]) -> float:
 
 def clip_speed(clip: dict[str, Any]) -> float:
     try:
-        speed = float(clip.get("speed") or 1.0)
+        speed = float(clip.get("speed") or VISUAL_SPEED_DEFAULT)
     except (TypeError, ValueError):
-        speed = 1.0
-    return max(0.25, min(4.0, speed))
+        speed = VISUAL_SPEED_DEFAULT
+    return max(VISUAL_SPEED_MIN, min(VISUAL_SPEED_MAX, speed))
 
 
 def clip_speed_keyframes(clip: dict[str, Any]) -> list[tuple[float, float]]:
@@ -37,7 +47,7 @@ def clip_speed_keyframes(clip: dict[str, Any]) -> list[tuple[float, float]]:
             continue
         try:
             source_sec = max(trim_in, min(trim_out, float(raw.get("source_sec"))))
-            speed = max(0.25, min(4.0, float(raw.get("speed"))))
+            speed = max(VISUAL_SPEED_MIN, min(VISUAL_SPEED_MAX, float(raw.get("speed"))))
         except (TypeError, ValueError):
             continue
         points.append((source_sec, speed))
@@ -105,10 +115,10 @@ def clip_reverse(clip: dict[str, Any]) -> bool:
 
 def clip_freeze_frame_sec(clip: dict[str, Any]) -> float:
     try:
-        freeze = float(clip.get("freeze_frame_sec") or 0.0)
+        freeze = float(clip.get("freeze_frame_sec") or VISUAL_FREEZE_DEFAULT_SEC)
     except (TypeError, ValueError):
-        freeze = 0.0
-    return max(0.0, min(30.0, freeze))
+        freeze = VISUAL_FREEZE_DEFAULT_SEC
+    return max(VISUAL_FREEZE_MIN_SEC, min(VISUAL_FREEZE_MAX_SEC, freeze))
 
 
 def clip_preserve_pitch(clip: dict[str, Any]) -> bool:
@@ -116,11 +126,11 @@ def clip_preserve_pitch(clip: dict[str, Any]) -> bool:
 
 
 def clip_canvas_fit(clip: dict[str, Any], fallback: str = "contain") -> str:
-    raw = str(clip.get("canvas_fit") or "").strip().lower()
-    if raw in {"contain", "cover", "blur"}:
+    raw = str(clip.get("content_fit") or "").strip().lower()
+    if raw in VISUAL_CONTENT_FIT_VALUES and raw != "inherit":
         return raw
     fit = str(fallback or "contain").strip().lower()
-    return fit if fit in {"contain", "cover", "blur"} else "contain"
+    return fit if fit in VISUAL_CONTENT_FIT_VALUES and fit != "inherit" else "contain"
 
 
 def clip_timeline_duration_sec(clip: dict[str, Any]) -> float:

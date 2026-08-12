@@ -1,6 +1,8 @@
 import { useState } from "react";
-import { ChevronDown, Link2, RotateCcw, Unlink2 } from "lucide-react";
+import { ChevronDown, FlipHorizontal, FlipVertical, Link2, RotateCcw, Unlink2 } from "lucide-react";
 import { useLiteCutTimelineStore } from "../state/timelineStore.js";
+import { LITE_CUT_OUTPUT_DEFAULTS } from "../state/projectContract.js";
+import { normalizeSceneTransform, SCENE_TRANSFORM_DEFAULTS, SCENE_TRANSFORM_LIMITS, sceneTransformPixels } from "../state/sceneTransform.js";
 
 function finiteValue(value, fallback = 0) {
   const number = Number(value);
@@ -29,15 +31,18 @@ function NumberInput({ value, min, max, step, onChange, onFocus, onBlur, classNa
 
 export function snapRotation(value) {
   const points = [-180, -120, -90, -60, -30, 0, 30, 60, 90, 120, 180];
-  const normalized = Math.max(-180, Math.min(180, Number(value) || 0));
+  const normalized = Math.max(
+    SCENE_TRANSFORM_LIMITS.rotation_min,
+    Math.min(SCENE_TRANSFORM_LIMITS.rotation_max, Number(value) || 0),
+  );
   const nearest = points.reduce((best, point) => Math.abs(point - normalized) < Math.abs(best - normalized) ? point : best, 0);
   return Math.abs(nearest - normalized) <= 3 ? nearest : normalized;
 }
 
 export function useTransformControls(transform, onChange, defaultSize = 1) {
   const [sizeLinked, setSizeLinked] = useState(true);
-  const width = Math.max(0.01, Number(transform?.width) || defaultSize);
-  const height = Math.max(0.01, Number(transform?.height) || defaultSize);
+  const width = Math.max(SCENE_TRANSFORM_LIMITS.size_min, Number(transform?.width) || defaultSize);
+  const height = Math.max(SCENE_TRANSFORM_LIMITS.size_min, Number(transform?.height) || defaultSize);
   return {
     sizeLinked,
     toggleSizeLinked: () => setSizeLinked((value) => !value),
@@ -108,16 +113,98 @@ export function ScopeActionButton({ children, icon: Icon, disabled, onClick }) {
   return <button type="button" disabled={disabled} onClick={onClick} className="inline-flex h-8 items-center justify-center gap-1.5 rounded-md border border-cs2-border/70 bg-cs2-bg-input px-2.5 text-[10px] font-semibold text-cs2-text-secondary transition-colors hover:border-cs2-accent/45 hover:bg-cs2-accent-soft hover:text-cs2-accent disabled:cursor-not-allowed disabled:opacity-40"><Icon className="h-3.5 w-3.5" />{children}</button>;
 }
 
-export function NumericPairCard({ title, firstLabel, firstValue, onFirstChange, secondLabel, secondValue, onSecondChange, min = 0, max = 100, linked, onToggleLinked }) {
+export function NumericPairCard({ title, firstLabel, firstValue, onFirstChange, secondLabel, secondValue, onSecondChange, min = 0, max = 100, step = 1, linked, onToggleLinked }) {
   return (
     <div className="group flex min-h-9 items-center gap-2 rounded-md px-1 py-1 transition-colors hover:bg-cs2-bg-hover/35">
       <p className="w-[44px] shrink-0 text-[10px] font-medium text-cs2-text-muted">{title}</p>
       <div className="grid min-w-0 flex-1 grid-cols-2 gap-2">
-        <label className="flex items-center gap-1 text-[10px] text-cs2-text-muted"><span>{firstLabel}</span><NumberInput min={min} max={max} value={firstValue} onChange={onFirstChange} className="min-w-0 flex-1" /></label>
-        <label className="flex items-center gap-1 text-[10px] text-cs2-text-muted"><span>{secondLabel}</span><NumberInput min={min} max={max} value={secondValue} onChange={onSecondChange} className="min-w-0 flex-1" /></label>
+        <label className="flex items-center gap-1 text-[10px] text-cs2-text-muted"><span>{firstLabel}</span><NumberInput min={min} max={max} step={step} value={firstValue} onChange={onFirstChange} className="min-w-0 flex-1" /></label>
+        <label className="flex items-center gap-1 text-[10px] text-cs2-text-muted"><span>{secondLabel}</span><NumberInput min={min} max={max} step={step} value={secondValue} onChange={onSecondChange} className="min-w-0 flex-1" /></label>
       </div>
       {onToggleLinked ? <button type="button" aria-label={linked ? "解锁宽高比例" : "锁定宽高比例"} title={linked ? "解锁宽高比例" : "锁定宽高比例"} onClick={onToggleLinked} className={`inline-flex h-7 w-6 shrink-0 items-center justify-center rounded-md transition-colors hover:bg-cs2-accent-soft hover:text-cs2-accent ${linked ? "text-cs2-accent" : "text-cs2-text-muted"}`}>{linked ? <Link2 className="h-3.5 w-3.5" /> : <Unlink2 className="h-3.5 w-3.5" />}</button> : <span className="w-6 shrink-0" />}
     </div>
+  );
+}
+
+export function SceneTransformControls({
+  transform,
+  onChange,
+  outputWidth = LITE_CUT_OUTPUT_DEFAULTS.width,
+  outputHeight = LITE_CUT_OUTPUT_DEFAULTS.height,
+  flipHorizontal = false,
+  flipVertical = false,
+  onFlipHorizontal,
+  onFlipVertical,
+}) {
+  const normalized = normalizeSceneTransform(transform);
+  const pixels = sceneTransformPixels(normalized, outputWidth, outputHeight);
+  const controls = useTransformControls(normalized, onChange, normalized.width);
+  const canvasWidth = Math.max(1, Number(outputWidth) || LITE_CUT_OUTPUT_DEFAULTS.width);
+  const canvasHeight = Math.max(1, Number(outputHeight) || LITE_CUT_OUTPUT_DEFAULTS.height);
+  const positionPixelLimit = Math.max(canvasWidth, canvasHeight)
+    * Math.max(Math.abs(SCENE_TRANSFORM_LIMITS.position_min), Math.abs(SCENE_TRANSFORM_LIMITS.position_max));
+  const renderedPixelLimit = Math.max(canvasWidth, canvasHeight)
+    * SCENE_TRANSFORM_LIMITS.size_max
+    * SCENE_TRANSFORM_LIMITS.scale_max;
+  const renderedPixelMinimum = Math.min(canvasWidth, canvasHeight)
+    * SCENE_TRANSFORM_LIMITS.size_min
+    * SCENE_TRANSFORM_LIMITS.scale_min;
+  const setWidthPx = (value) => {
+    const width = Math.max(SCENE_TRANSFORM_LIMITS.size_min, Math.min(
+      SCENE_TRANSFORM_LIMITS.size_max,
+      finiteValue(value, renderedPixelMinimum) / (canvasWidth * normalized.scale),
+    ));
+    onChange?.(controls.sizeLinked
+      ? { width, height: normalized.height * width / normalized.width }
+      : { width });
+  };
+  const setHeightPx = (value) => {
+    const height = Math.max(SCENE_TRANSFORM_LIMITS.size_min, Math.min(
+      SCENE_TRANSFORM_LIMITS.size_max,
+      finiteValue(value, renderedPixelMinimum) / (canvasHeight * normalized.scale),
+    ));
+    onChange?.(controls.sizeLinked
+      ? { height, width: normalized.width * height / normalized.height }
+      : { height });
+  };
+  return (
+    <>
+      <div className="grid grid-cols-1 gap-1">
+        <NumericPairCard
+          title="位置(px)"
+          firstLabel="X"
+          firstValue={Number(pixels.x.toFixed(3))}
+          onFirstChange={(value) => onChange?.({ x: value / canvasWidth })}
+          secondLabel="Y"
+          secondValue={Number(pixels.y.toFixed(3))}
+          onSecondChange={(value) => onChange?.({ y: value / canvasHeight })}
+          min={-positionPixelLimit}
+          max={positionPixelLimit}
+          step={0.001}
+        />
+        <NumericPairCard
+          title="实际(px)"
+          firstLabel="W"
+          firstValue={Number(pixels.renderedWidth.toFixed(3))}
+          onFirstChange={setWidthPx}
+          secondLabel="H"
+          secondValue={Number(pixels.renderedHeight.toFixed(3))}
+          onSecondChange={setHeightPx}
+          min={renderedPixelMinimum}
+          max={renderedPixelLimit}
+          step={0.001}
+          linked={controls.sizeLinked}
+          onToggleLinked={controls.toggleSizeLinked}
+        />
+      </div>
+      <ProSlider label="整体缩放 %" value={normalized.scale * 100} onChange={(value) => onChange?.({ scale: value / 100 })} min={SCENE_TRANSFORM_LIMITS.scale_min * 100} max={SCENE_TRANSFORM_LIMITS.scale_max * 100} resetValue={SCENE_TRANSFORM_DEFAULTS.scale * 100} step={0.1} />
+      <ProSlider label="旋转 °" value={normalized.rotation} onChange={controls.setRotation} min={SCENE_TRANSFORM_LIMITS.rotation_min} max={SCENE_TRANSFORM_LIMITS.rotation_max} resetValue={SCENE_TRANSFORM_DEFAULTS.rotation} step={0.1} />
+      <div className="grid grid-cols-2 gap-1.5">
+        <button type="button" onClick={() => onFlipHorizontal?.(!flipHorizontal)} className={`inline-flex h-8 items-center justify-center gap-1.5 rounded-md border text-[10px] font-semibold ${flipHorizontal ? "border-cs2-accent/70 bg-cs2-accent-soft text-cs2-accent" : "border-cs2-border/60 text-cs2-text-muted"}`}><FlipHorizontal className="h-4 w-4" />左右镜像</button>
+        <button type="button" onClick={() => onFlipVertical?.(!flipVertical)} className={`inline-flex h-8 items-center justify-center gap-1.5 rounded-md border text-[10px] font-semibold ${flipVertical ? "border-cs2-accent/70 bg-cs2-accent-soft text-cs2-accent" : "border-cs2-border/60 text-cs2-text-muted"}`}><FlipVertical className="h-4 w-4" />上下镜像</button>
+      </div>
+      <ProSlider label="透明度 %" value={normalized.opacity * 100} onChange={(value) => onChange?.({ opacity: value / 100 })} min={SCENE_TRANSFORM_LIMITS.opacity_min * 100} max={SCENE_TRANSFORM_LIMITS.opacity_max * 100} resetValue={SCENE_TRANSFORM_DEFAULTS.opacity * 100} step={0.1} />
+    </>
   );
 }
 

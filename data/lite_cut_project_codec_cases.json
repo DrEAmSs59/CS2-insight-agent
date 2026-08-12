@@ -2,10 +2,12 @@
   "schema_version": 1,
   "cases": [
     {
-      "name": "preserve-supported-schema-v2-data",
+      "name": "preserve-supported-schema-v3-data",
       "changed": false,
       "input": {
-        "schema_version": 2,
+        "schema_version": 3,
+        "transition_model_version": 1,
+        "transitions": [],
         "output": {
           "width": 2560,
           "height": 1440,
@@ -13,6 +15,9 @@
           "encoder": "h264_amf",
           "encoder_tier": "fast",
           "framemeld_enabled": true,
+          "canvas_fit": "contain",
+          "background_color": "#000000",
+          "blur_amount": 24,
           "range_mode": "custom",
           "range_start_sec": 1.25,
           "range_end_sec": 8.5
@@ -66,20 +71,16 @@
       }
     },
     {
-      "name": "repair-legacy-editor-data",
+      "name": "repair-current-editor-data",
       "changed": true,
       "input": {
-        "schema_version": 2,
+        "schema_version": 3,
         "output": {
           "width": 0,
           "height": "invalid",
           "fps": 1001,
           "encoder": "h264_av1",
           "framemeld_enabled": "yes",
-          "frame_blend_enabled": true,
-          "frame_blend_frames": 7,
-          "high_frame_downsample_enabled": true,
-          "delivery_fps": 60,
           "range_mode": "selection",
           "range_start_sec": -3
         },
@@ -88,9 +89,9 @@
         ],
         "overlays": [
           {
-            "id": "legacy-title",
+            "id": "title",
             "type": "text",
-            "text": { "content": "Legacy", "font_family": "Rajdhani Bold", "font_file": "Rajdhani.ttf" }
+            "text": { "content": "Current", "font_family": "Inter", "font_file": null }
           }
         ],
         "markers": [
@@ -100,13 +101,19 @@
         "audio": { "master_volume": 9 }
       },
       "expected": {
-        "schema_version": 2,
+        "schema_version": 3,
+        "transition_model_version": 1,
+        "transitions": [],
         "output": {
-          "width": 1920,
+          "width": 320,
           "height": 1080,
-          "fps": 60,
+          "fps": 1000,
           "encoder": "auto",
+          "encoder_tier": "quality",
           "framemeld_enabled": false,
+          "canvas_fit": "contain",
+          "background_color": "#000000",
+          "blur_amount": 24,
           "range_mode": "full",
           "range_start_sec": 0
         },
@@ -125,9 +132,9 @@
         ],
         "overlays": [
           {
-            "id": "legacy-title",
+            "id": "title",
             "type": "text",
-            "text": { "content": "Legacy", "font_family": "微软雅黑", "font_file": null }
+            "text": { "content": "Current", "font_family": "Inter", "font_file": null }
           }
         ],
         "markers": [

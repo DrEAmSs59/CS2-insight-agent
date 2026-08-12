@@ -1,4 +1,4 @@
-"""Pure selectors over schema-v2 LiteCut timeline dictionaries."""
+"""Pure selectors over schema-v3 LiteCut timeline dictionaries."""
 
 from __future__ import annotations
 

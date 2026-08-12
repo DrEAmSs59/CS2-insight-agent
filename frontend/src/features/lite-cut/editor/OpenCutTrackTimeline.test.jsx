@@ -60,7 +60,7 @@ describe("OpenCutTrackTimeline", () => {
       { source_sec: 2, speed: 2 },
       { source_sec: 4, speed: 2 },
     ];
-    nextBody.tracks[1].clips[0].transition_in = { type: "fade", duration_sec: 0.25 };
+    nextBody.transitions = [{ id: "speed-enter", type: "fade", duration_sec: 0.25, from: null, to: { kind: "clip", track_id: "v2", id: "clip-v2" } }];
     useLiteCutEditorStore.setState({ body: nextBody });
 
     render(<OpenCutTrackTimeline body={nextBody} />);
@@ -180,7 +180,7 @@ describe("OpenCutTrackTimeline", () => {
     expect(document.querySelector("[data-timeline-track-header]")?.className).toContain("litecut-timeline-track-header");
   });
 
-  it("supports continuous zoom down to 8 percent", () => {
+  it("supports continuous zoom from 4 to 800 percent", () => {
     render(<OpenCutTrackTimeline body={useLiteCutEditorStore.getState().body} />);
 
     const slider = screen.getByRole("slider", { name: "时间轴无级缩放" });
@@ -188,8 +188,13 @@ describe("OpenCutTrackTimeline", () => {
     expect(slider.style.getPropertyValue("--cs2-range-progress")).not.toBe("");
     fireEvent.change(slider, { target: { value: "0" } });
 
-    expect(useLiteCutTimelineStore.getState().timelineZoom).toBeCloseTo(0.08);
-    expect(screen.getByText("8%")).toBeTruthy();
+    expect(useLiteCutTimelineStore.getState().timelineZoom).toBeCloseTo(0.04);
+    expect(screen.getByText("4%")).toBeTruthy();
+
+    fireEvent.change(slider, { target: { value: "100" } });
+
+    expect(useLiteCutTimelineStore.getState().timelineZoom).toBeCloseTo(8);
+    expect(screen.getByText("800%")).toBeTruthy();
   });
 
   it("supports fast pointer-centered zoom with Ctrl plus mouse wheel", () => {
@@ -218,6 +223,7 @@ describe("OpenCutTrackTimeline", () => {
     const nextBody = useLiteCutEditorStore.getState().body;
     expect(nextBody.tracks.find((track) => track.id === "v1").clips.map((item) => item.id)).toEqual(["clip-v2"]);
     expect(nextBody.tracks.find((track) => track.id === "v2").clips).toEqual([]);
+    expect(useLiteCutHistoryStore.getState().past).toHaveLength(1);
   });
 
   it("moves every member when dragging one clip from a selected group", () => {
@@ -234,6 +240,7 @@ describe("OpenCutTrackTimeline", () => {
     const lane = document.querySelector("[data-oc-lane][data-oc-track-id='v2']");
     const clipNode = document.querySelector("[data-oc-clip-id='group-a']");
     vi.spyOn(lane, "getBoundingClientRect").mockReturnValue({ left: 0, right: 900, top: 0, bottom: 58, width: 900, height: 58 });
+    Object.defineProperty(document, "elementFromPoint", { configurable: true, value: () => lane });
     fireEvent(clipNode, new MouseEvent("pointerdown", { bubbles: true, button: 0, clientX: 180, clientY: 120 }));
     fireEvent(document, new MouseEvent("pointermove", { bubbles: true, clientX: 224, clientY: 120 }));
     fireEvent(document, new MouseEvent("pointerup", { bubbles: true, clientX: 224, clientY: 120 }));
@@ -275,6 +282,34 @@ describe("OpenCutTrackTimeline", () => {
     expect(onDropMedia).toHaveBeenCalledWith(media, "v2", expect.any(Number), { createNewTrack: true, createBelow: true });
   });
 
+  it("drops an audio-bearing video directly on A track as source audio only", () => {
+    const onDropMedia = vi.fn();
+    render(<OpenCutTrackTimeline body={useLiteCutEditorStore.getState().body} onDropMedia={onDropMedia} />);
+    const lane = document.querySelector("[data-oc-lane][data-oc-track-id='a1']");
+    vi.spyOn(lane, "getBoundingClientRect").mockReturnValue({ left: 128, right: 1028, top: 0, bottom: 42, width: 900, height: 42 });
+    const media = { mediaKind: "asset", kind: "video", name: "match.mp4", duration_sec: 12, audio_codec_name: "aac", has_audio: true };
+    liteCutMediaDragSource.begin(media);
+
+    fireEvent.dragOver(lane, { clientX: 216, clientY: 20 });
+    fireEvent.drop(lane, { clientX: 216, clientY: 20 });
+
+    expect(onDropMedia).toHaveBeenCalledWith(media, "a1", expect.any(Number), { audioOnly: true });
+  });
+
+  it("rejects a video without audio when it is dragged over A track", () => {
+    const onDropMedia = vi.fn();
+    render(<OpenCutTrackTimeline body={useLiteCutEditorStore.getState().body} onDropMedia={onDropMedia} />);
+    const lane = document.querySelector("[data-oc-lane][data-oc-track-id='a1']");
+    vi.spyOn(lane, "getBoundingClientRect").mockReturnValue({ left: 128, right: 1028, top: 0, bottom: 42, width: 900, height: 42 });
+    const media = { mediaKind: "asset", kind: "video", name: "transparent.mov", duration_sec: 3, has_audio: false };
+    liteCutMediaDragSource.begin(media);
+
+    fireEvent.dragOver(lane, { clientX: 216, clientY: 20 });
+    fireEvent.drop(lane, { clientX: 216, clientY: 20 });
+
+    expect(onDropMedia).not.toHaveBeenCalled();
+  });
+
   it("moves an existing video clip into a newly created track through the +V zone", () => {
     render(<OpenCutTrackTimeline body={useLiteCutEditorStore.getState().body} />);
     const clip = document.querySelector("[data-oc-clip-id='clip-v2']");
@@ -293,6 +328,47 @@ describe("OpenCutTrackTimeline", () => {
     expect(videoTracks).toHaveLength(3);
     expect(videoTracks[2].clips.map((item) => item.id)).toEqual(["clip-v2"]);
     expect(videoTracks[1].clips).toEqual([]);
+  });
+
+  it("moves linked source audio between A tracks without moving or unlinking its video", () => {
+    const linkedBody = {
+      tracks: [
+        {
+          id: "v1",
+          type: "video",
+          label: "V1",
+          clips: [{ id: "video", timeline_start: 4, trim_in: 0, trim_out: 8, muted: true, meta: { linked_audio_clip_id: "audio" } }],
+        },
+        { id: "a1", type: "audio", label: "A1", clips: [] },
+        {
+          id: "a2",
+          type: "audio",
+          label: "A2",
+          clips: [{ id: "audio", timeline_start: 4, trim_in: 0, trim_out: 8, muted: false, meta: { kind: "audio", source_clip_id: "video", linked_from_video: true } }],
+        },
+      ],
+      overlays: [],
+    };
+    useLiteCutEditorStore.setState({ body: structuredClone(linkedBody), dirty: false });
+    render(<OpenCutTrackTimeline body={useLiteCutEditorStore.getState().body} />);
+    const audio = document.querySelector("[data-oc-clip-id='audio']");
+    const sourceLane = document.querySelector("[data-oc-lane][data-oc-track-id='a2']");
+    const targetLane = document.querySelector("[data-oc-lane][data-oc-track-id='a1']");
+    Object.defineProperty(document, "elementFromPoint", { configurable: true, value: () => targetLane });
+    vi.spyOn(sourceLane, "getBoundingClientRect").mockReturnValue({ left: 128, right: 1028, top: 0, bottom: 42, width: 900, height: 42 });
+    vi.spyOn(targetLane, "getBoundingClientRect").mockReturnValue({ left: 128, right: 1028, top: 0, bottom: 42, width: 900, height: 42 });
+
+    fireEvent(audio, new MouseEvent("pointerdown", { bubbles: true, button: 0, clientX: 310, clientY: 120 }));
+    fireEvent(document, new MouseEvent("pointermove", { bubbles: true, clientX: 310, clientY: 80 }));
+    fireEvent(document, new MouseEvent("pointerup", { bubbles: true, clientX: 310, clientY: 80 }));
+
+    const nextBody = useLiteCutEditorStore.getState().body;
+    const video = nextBody.tracks.find((track) => track.id === "v1").clips[0];
+    const movedAudio = nextBody.tracks.find((track) => track.id === "a1").clips[0];
+    expect(nextBody.tracks.find((track) => track.id === "a2").clips).toEqual([]);
+    expect(video).toMatchObject({ id: "video", timeline_start: 4, meta: { linked_audio_clip_id: "audio" } });
+    expect(movedAudio).toMatchObject({ id: "audio", timeline_start: 4, meta: { source_clip_id: "video", linked_from_video: true } });
+    expect(useLiteCutTimelineStore.getState().selectedClipIds).toEqual(["video", "audio"]);
   });
 
   it("moves an existing text or image overlay into a newly created track through the +T zone", () => {
@@ -328,9 +404,11 @@ describe("OpenCutTrackTimeline", () => {
     const transitionBody = structuredClone(body);
     transitionBody.tracks.find((track) => track.id === "v2").clips[0] = {
       ...transitionBody.tracks.find((track) => track.id === "v2").clips[0],
-      transition_in: { type: "fade", duration_sec: 0.25 },
-      transition_out: { type: "zoom", duration_sec: 0.25 },
     };
+    transitionBody.transitions = [
+      { id: "clip-enter", type: "fade", duration_sec: 0.25, from: null, to: { kind: "clip", track_id: "v2", id: "clip-v2" } },
+      { id: "clip-exit", type: "zoom", duration_sec: 0.25, from: { kind: "clip", track_id: "v2", id: "clip-v2" }, to: null },
+    ];
     useLiteCutEditorStore.setState({ body: transitionBody, dirty: false });
 
     render(<OpenCutTrackTimeline body={transitionBody} />);
@@ -351,19 +429,24 @@ describe("OpenCutTrackTimeline", () => {
     expect(compactLayout.querySelector("[data-transition-compact-label='out']").title).toContain("0.25s");
   });
 
-  it("renders one boundary transition when the incoming clip owns it", () => {
+  it("renders one edit-point event as half-width markers on both clips", () => {
     const transitionBody = structuredClone(body);
     const track = transitionBody.tracks.find((item) => item.id === "v2");
     track.clips = [
-      { ...track.clips[0], id: "first", timeline_start: 0, trim_out: 4, transition_out: { type: "fade", duration_sec: 0.4 } },
-      { ...track.clips[0], id: "second", timeline_start: 4, trim_out: 4, transition_in: { type: "zoom", duration_sec: 0.6 } },
+      { ...track.clips[0], id: "first", timeline_start: 0, trim_out: 4 },
+      { ...track.clips[0], id: "second", timeline_start: 4, trim_out: 4 },
     ];
+    transitionBody.transitions = [{ id: "boundary", type: "zoom", duration_sec: 0.6, from: { kind: "clip", track_id: "v2", id: "first" }, to: { kind: "clip", track_id: "v2", id: "second" } }];
     useLiteCutEditorStore.setState({ body: transitionBody, dirty: false });
 
     render(<OpenCutTrackTimeline body={transitionBody} />);
 
-    expect(document.querySelector("[data-oc-clip-id='first'] [data-transition-marker='out']")).toBeNull();
-    expect(document.querySelector("[data-oc-clip-id='second'] [data-transition-marker='in']")?.title).toContain("0.60s");
+    const outgoing = document.querySelector("[data-oc-clip-id='first'] [data-transition-marker='out']");
+    const incoming = document.querySelector("[data-oc-clip-id='second'] [data-transition-marker='in']");
+    expect(outgoing?.dataset.transitionDurationSec).toBe("0.3");
+    expect(incoming?.dataset.transitionDurationSec).toBe("0.3");
+    expect(outgoing?.title).toContain("0.60s");
+    expect(incoming?.title).toContain("0.60s");
   });
 
   it("uses distinct tones for video, audio, text, and image materials", () => {
@@ -372,8 +455,14 @@ describe("OpenCutTrackTimeline", () => {
     toneBody.tracks.find((track) => track.id === "a1").clips = [{ id: "audio-1", timeline_start: 0, trim_in: 0, trim_out: 3, meta: { kind: "audio", name: "music.mp3" } }];
     toneBody.overlay_tracks = [{ id: "ot1", label: "文字轨1" }, { id: "ot2", label: "图片轨1" }];
     toneBody.overlays = [
-      { id: "text-1", type: "text", timeline_start: 0, duration: 3, fade_in_sec: 0.3, fade_out_sec: 0.4, text: { content: "TITLE", anim_in: "slide_up", anim_out: "fade" }, meta: { overlay_track_id: "ot1" } },
-      { id: "image-1", type: "sticker", timeline_start: 3, duration: 3, transition_in: { type: "fade", duration_sec: 0.25 }, transition_out: { type: "zoom", duration_sec: 0.35 }, meta: { kind: "image", overlay_track_id: "ot2" } },
+      { id: "text-1", type: "text", timeline_start: 0, duration: 3, text: { content: "TITLE" }, meta: { overlay_track_id: "ot1" } },
+      { id: "image-1", type: "sticker", timeline_start: 3, duration: 3, meta: { kind: "image", overlay_track_id: "ot2" } },
+    ];
+    toneBody.transitions = [
+      { id: "text-enter", type: "slide_up", duration_sec: 0.3, from: null, to: { kind: "overlay", track_id: "ot1", id: "text-1" } },
+      { id: "text-exit", type: "fade", duration_sec: 0.4, from: { kind: "overlay", track_id: "ot1", id: "text-1" }, to: null },
+      { id: "image-enter", type: "fade", duration_sec: 0.25, from: null, to: { kind: "overlay", track_id: "ot2", id: "image-1" } },
+      { id: "image-exit", type: "zoom", duration_sec: 0.35, from: { kind: "overlay", track_id: "ot2", id: "image-1" }, to: null },
     ];
     useLiteCutEditorStore.setState({ body: toneBody, dirty: false });
 

@@ -13,17 +13,21 @@ export function usePreviewFrameClock({
   inputLocalTime,
   inputTimelineTime,
   isPlaying,
+  mediaTimeOffset = 0,
   mediaIdentity,
   onPlayheadChange,
   playheadSec,
+  preventBackwardHandoff = false,
   previewClipId,
   reversePlayback,
   safePlaybackRate,
   setHeldSwitchFrame,
   streamUrl,
+  handoffToleranceSec,
   underlayVideoRefs,
   videoRef,
 }) {
+  const sourceOffset = Math.max(0, Number(mediaTimeOffset) || 0);
   const [previewClock, setPreviewClock] = useState(() => ({
     sourceTime: Math.max(0, Number(playheadSec) || 0),
     timelineTime: inputTimelineTime,
@@ -56,7 +60,7 @@ export function usePreviewFrameClock({
     const promoted = retainedPromotionLayerRef.current;
     const promotedElement = promoted ? underlayVideoRefs.current.get(String(promoted.id)) : null;
     return promotedElement?.readyState >= 2 && Number.isFinite(promotedElement.currentTime)
-      ? promotedElement.currentTime
+      ? promotedElement.currentTime + Math.max(0, Number(promoted?.mediaTimeOffset) || 0)
       : fallback;
   }, [underlayVideoRefs]);
 
@@ -84,16 +88,19 @@ export function usePreviewFrameClock({
 
     const publishFrame = (now, mediaTime) => {
       if (cancelled || !Number.isFinite(mediaTime) || element.readyState < 2) return;
+      const sourceMediaTime = mediaTime + sourceOffset;
       const hasPromotedLayer = Boolean(retainedPromotionLayerRef.current);
       const action = handoffFrameAction({
-        mediaTime,
+        mediaTime: sourceMediaTime,
         expectedMediaTime: promotedPlaybackTime(frameAnchorRef.current.sourceTime),
         awaitingHandoff: hasPromotedLayer || presentedStreamRef.current !== mediaIdentity,
         hasPromotedLayer,
         keepPromotedFrameUntilCaughtUp: Boolean(retainedPromotionLayerRef.current?.prewarm),
         handoffStartedAt: handoffStartedAtRef.current,
         lastCorrectiveSeekAt: handoffSeekAtRef.current,
+        preventBackwardPresentation: preventBackwardHandoff,
         seeking: Boolean(element.seeking),
+        toleranceSec: handoffToleranceSec,
         now,
       });
       if (action.type !== "present") {
@@ -101,7 +108,7 @@ export function usePreviewFrameClock({
         if (action.type === "seek") {
           handoffSeekAtRef.current = now;
           try {
-            element.currentTime = action.target;
+            element.currentTime = Math.max(0, action.target - sourceOffset);
           } catch {
             // A transient decoder failure is retried on the next frame.
           }
@@ -109,7 +116,7 @@ export function usePreviewFrameClock({
         return;
       }
       handoffStartedAtRef.current = 0;
-      const frame = previewFrameTimes(frameAnchorRef.current, mediaTime);
+      const frame = previewFrameTimes(frameAnchorRef.current, sourceMediaTime);
       if (shouldPublishPreviewClock(now, lastPreviewClockAtRef.current)) {
         lastPreviewClockAtRef.current = now;
         setPreviewClock((previous) => (
@@ -126,7 +133,7 @@ export function usePreviewFrameClock({
       }
       if (now - lastGlobalClockAtRef.current >= 45) {
         lastGlobalClockAtRef.current = now;
-        onPlayheadChangeRef.current?.(mediaTime, {
+        onPlayheadChangeRef.current?.(sourceMediaTime, {
           clipId: previewClipIdRef.current,
           timelineSec: frame.timelineTime,
         });
@@ -153,7 +160,7 @@ export function usePreviewFrameClock({
       if (videoFrameId != null && typeof element.cancelVideoFrameCallback === "function") element.cancelVideoFrameCallback(videoFrameId);
       if (animationFrameId != null) window.cancelAnimationFrame(animationFrameId);
     };
-  }, [freezePlayback, hasStream, isPlaying, mediaIdentity, previewClipId, promotedPlaybackTime, releasePromotedUnderlay, reversePlayback, setHeldSwitchFrame, streamUrl, videoRef]);
+  }, [freezePlayback, handoffToleranceSec, hasStream, isPlaying, mediaIdentity, preventBackwardHandoff, previewClipId, promotedPlaybackTime, releasePromotedUnderlay, reversePlayback, setHeldSwitchFrame, sourceOffset, streamUrl, videoRef]);
 
   return {
     previewClock,
@@ -176,6 +183,7 @@ export function usePreviewSeekGuard({
   hasStream,
   isPlaying,
   mainReverse,
+  mediaTimeOffset = 0,
   mediaIdentity,
   playheadSec,
   promotedPlaybackTime,
@@ -187,6 +195,7 @@ export function usePreviewSeekGuard({
   userSeekToken,
   videoRef,
 }) {
+  const sourceOffset = Math.max(0, Number(mediaTimeOffset) || 0);
   const appliedUserSeekTokenRef = useRef(0);
   const reverseSeekTargetRef = useRef(null);
 
@@ -203,7 +212,8 @@ export function usePreviewSeekGuard({
     const applySeek = (element) => {
       try {
         const fallback = Math.max(0, playheadSec);
-        const seekTo = element === videoRef.current ? promotedPlaybackTime(fallback) : fallback;
+        const sourceSeekTo = element === videoRef.current ? promotedPlaybackTime(fallback) : fallback;
+        const seekTo = Math.max(0, sourceSeekTo - sourceOffset);
         const tolerance = element === videoRef.current && retainedPromotionLayerRef.current ? 0.04 : 0.15;
         if (Math.abs(element.currentTime - seekTo) > tolerance) element.currentTime = seekTo;
       } catch {
@@ -224,7 +234,7 @@ export function usePreviewSeekGuard({
     }
     if (pendingUserSeek && seekScheduled) appliedUserSeekTokenRef.current = userSeekToken;
     return () => cleanup.forEach((release) => release());
-  }, [backgroundVideoRef, fitMode, freezePlayback, hasStream, isPlaying, mainReverse, mediaIdentity, playheadSec, promotedPlaybackTime, retainedPromotionLayerRef, userSeekToken, videoRef]);
+  }, [backgroundVideoRef, fitMode, freezePlayback, hasStream, isPlaying, mainReverse, mediaIdentity, playheadSec, promotedPlaybackTime, retainedPromotionLayerRef, sourceOffset, userSeekToken, videoRef]);
 
   useEffect(() => {
     if (!hasStream || !isPlaying || !mainReverse || freezePlayback) {
@@ -232,7 +242,7 @@ export function usePreviewSeekGuard({
       return;
     }
     const element = videoRef.current;
-    const target = Math.max(0, Number(playheadSec) || 0);
+    const target = Math.max(0, (Number(playheadSec) || 0) - sourceOffset);
     reverseSeekTargetRef.current = target;
     if (!element || element.readyState < 1 || element.seeking || Math.abs(element.currentTime - target) <= 0.012) return;
     try {
@@ -240,14 +250,17 @@ export function usePreviewSeekGuard({
     } catch {
       // The latest target stays queued and handleVideoSeeked retries it.
     }
-  }, [freezePlayback, hasStream, isPlaying, mainReverse, mediaIdentity, playheadSec, videoRef]);
+  }, [freezePlayback, hasStream, isPlaying, mainReverse, mediaIdentity, playheadSec, sourceOffset, videoRef]);
 
   useEffect(() => {
     const cleanup = [];
     for (const layer of resolvedUnderlayLayers) {
       const element = underlayVideoRefs.current.get(String(layer.id));
       if (!element) continue;
-      const seekTo = Math.max(0, Number(layer.sourceTime) || 0);
+      const seekTo = Math.max(
+        0,
+        (Number(layer.sourceTime) || 0) - Math.max(0, Number(layer.mediaTimeOffset) || 0),
+      );
       const applySeek = () => {
         try {
           if (Math.abs(element.currentTime - seekTo) > 0.15) element.currentTime = seekTo;
@@ -262,7 +275,7 @@ export function usePreviewSeekGuard({
       }
     }
     return () => cleanup.forEach((release) => release());
-  }, [isPlaying, underlayLayerSignature, underlaySeekSignature, underlayVideoRefs]);
+  }, [isPlaying, underlayLayerSignature, underlaySeekSignature, underlayVideoRefs, userSeekToken]);
 
   return { reverseSeekTargetRef };
 }

@@ -438,6 +438,7 @@ def probe_video_audio_summary(
     audio_codec_name = ""
     pixel_format = ""
     codec_name = ""
+    video_alpha_tag = False
     for st in streams:
         if not isinstance(st, dict):
             continue
@@ -451,11 +452,13 @@ def probe_video_audio_summary(
             fps = _resolve_video_fps(st, dur_s)
             pixel_format = str(st.get("pix_fmt") or "").strip().lower()
             codec_name = str(st.get("codec_name") or "").strip().lower()
+            tags = st.get("tags") if isinstance(st.get("tags"), dict) else {}
+            video_alpha_tag = str(tags.get("alpha_mode") or tags.get("ALPHA_MODE") or "").strip() == "1"
         elif ct == "audio":
             has_audio = True
             if not audio_codec_name:
                 audio_codec_name = str(st.get("codec_name") or "").strip().lower()
-    has_alpha = pixel_format.startswith("yuva") or pixel_format in {"rgba", "argb", "bgra", "abgr", "gbrap", "gbrap10le", "gbrap12le", "gbrap16le"}
+    has_alpha = video_alpha_tag or pixel_format.startswith("yuva") or pixel_format in {"rgba", "argb", "bgra", "abgr", "gbrap", "gbrap10le", "gbrap12le", "gbrap16le"}
     return {
         "width": vw,
         "height": vh,

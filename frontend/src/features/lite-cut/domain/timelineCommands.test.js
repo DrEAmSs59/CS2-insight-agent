@@ -113,6 +113,18 @@ describe("pure timeline commands", () => {
     expect(body).toEqual(original);
   });
 
+  it("moves an exit transition endpoint to the right half after a split", () => {
+    const source = {
+      ...structuredClone(body),
+      transitions: [{ id: "a-exit", type: "fade", duration_sec: 0.5, from: { kind: "clip", track_id: "v1", id: "a" }, to: null }],
+    };
+    const split = splitTimelineSelection(source, ["a"], 2);
+    expect(split.changed).toBe(true);
+    expect(split.body.transitions[0].from.id).toBe(split.selectedClipId);
+    expect(split.body.transitions[0].from.id).not.toBe("a");
+    expect(source.transitions[0].from.id).toBe("a");
+  });
+
   it("applies transform keyframes as immutable domain edits", () => {
     const result = upsertTimelineTransformKeyframe(body, {
       kind: "overlay",

@@ -14,7 +14,7 @@ from .assets_api import (
     validate_lite_cut_assets,
 )
 from .export_api import router as export_router
-from .portable_api import import_lite_cut_portable_package, router as portable_router
+from .project_file_api import router as project_file_router
 from .presets_api import router as presets_router
 from .projects_api import (
     _delete_project_asset_files,
@@ -24,17 +24,14 @@ from .projects_api import (
 from .proxy_api import (
     _create_preview_proxy_sync,
     _decorate_asset_preview_state,
-    router as proxy_router,
 )
 from .runtime import (
     LiteCutExportJob,
-    LiteCutPortablePackageJob,
     LiteCutPreviewProxyJob,
     LiteCutStorageMigrationJob,
     export_jobs as _export_jobs,
     get_lite_cut_db as _get_lite_cut_db,
     get_montage_db as _get_montage_db,
-    portable_package_jobs as _portable_package_jobs,
     preview_proxy_jobs as _preview_proxy_jobs,
     resolve_lite_cut_encoder as _resolve_lite_cut_encoder,
     shutdown_lite_cut_jobs,
@@ -51,10 +48,9 @@ from .storage_api import (
 )
 
 router = APIRouter()
-router.include_router(proxy_router)
 router.include_router(storage_router)
 router.include_router(projects_router)
-router.include_router(portable_router)
+router.include_router(project_file_router)
 router.include_router(presets_router)
 router.include_router(export_router)
 router.include_router(assets_router)

@@ -1,8 +1,18 @@
+import {
+  VISUAL_FREEZE_DEFAULT_SEC,
+  VISUAL_FREEZE_MAX_SEC,
+  VISUAL_FREEZE_MIN_SEC,
+  VISUAL_SPEED_DEFAULT,
+  VISUAL_SPEED_MAX,
+  VISUAL_SPEED_MIN,
+  visualContentFit,
+} from "./visualMaterial.js";
+
 export const MIN_CLIP_VISIBLE_SEC = 0.1;
 
 export function clipPlaybackSpeed(clip) {
   const speed = Number(clip?.speed);
-  return Number.isFinite(speed) && speed > 0 ? Math.max(0.25, Math.min(4, speed)) : 1;
+  return Number.isFinite(speed) && speed > 0 ? Math.max(VISUAL_SPEED_MIN, Math.min(VISUAL_SPEED_MAX, speed)) : VISUAL_SPEED_DEFAULT;
 }
 
 export function clipTrimmedSourceDuration(clip) {
@@ -31,7 +41,7 @@ export function normalizedClipSpeedKeyframes(clip) {
     if (!Number.isFinite(sourceSec) || !Number.isFinite(speed)) continue;
     points.push({
       source_sec: Math.max(trimIn, Math.min(trimOut, sourceSec)),
-      speed: Math.max(0.25, Math.min(4, speed)),
+      speed: Math.max(VISUAL_SPEED_MIN, Math.min(VISUAL_SPEED_MAX, speed)),
     });
   }
   points.sort((a, b) => a.source_sec - b.source_sec);
@@ -96,7 +106,7 @@ export function clipSpeedAtTimeline(clip, timelineSec) {
 
 export function clipFreezeFrameSec(clip) {
   const freeze = Number(clip?.freeze_frame_sec);
-  return Number.isFinite(freeze) ? Math.max(0, Math.min(30, freeze)) : 0;
+  return Number.isFinite(freeze) ? Math.max(VISUAL_FREEZE_MIN_SEC, Math.min(VISUAL_FREEZE_MAX_SEC, freeze)) : VISUAL_FREEZE_DEFAULT_SEC;
 }
 
 export function clipReversePlayback(clip) {
@@ -108,9 +118,7 @@ export function clipPreservePitch(clip) {
 }
 
 export function clipCanvasFit(clip, fallback = "contain") {
-  const raw = String(clip?.canvas_fit || "").toLowerCase();
-  if (["contain", "cover", "blur"].includes(raw)) return raw;
-  return ["contain", "cover", "blur"].includes(fallback) ? fallback : "contain";
+  return visualContentFit(clip, fallback);
 }
 
 export function clipTimelineDuration(clip) {

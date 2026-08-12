@@ -11,7 +11,7 @@ from pydantic import ValidationError
 from ...file_quarantine import QuarantineBatch, quarantine_files
 from .models import LiteCutPresetCreate, LiteCutPresetPatch, PresetApplyRequest, empty_project
 from .preset_apply import apply_preset_to_project
-from .project_codec import serialize_project_body
+from .project_codec import LiteCutProjectCompatibilityError, serialize_project_body
 from .repositories import AssetRepository, ExportRepository, PresetRepository, ProjectRepository, SnapshotRepository
 
 
@@ -26,6 +26,12 @@ class LiteCutServiceError(Exception):
 def _normalized_project(raw: dict[str, Any] | None) -> dict[str, Any]:
     try:
         return serialize_project_body(raw)
+    except LiteCutProjectCompatibilityError as exc:
+        raise LiteCutServiceError(
+            422,
+            {"code": exc.code, "message": str(exc)},
+            code=False,
+        ) from exc
     except ValidationError as exc:
         raise LiteCutServiceError(
             422,
@@ -59,19 +65,18 @@ class ProjectAssetStorage:
         self.stop_proxy_job = stop_proxy_job
 
     async def delete(self, project_id: int) -> None:
-        from .assets import delete_asset_file_bundle
+        from .assets import delete_asset_row_bundle
 
         assets = await self.projects.list_assets(project_id)
         for asset in assets:
             await self.stop_proxy_job(int(asset["id"]))
         await asyncio.gather(*[
-            asyncio.to_thread(delete_asset_file_bundle, str(asset.get("file_path") or ""))
+            asyncio.to_thread(delete_asset_row_bundle, asset)
             for asset in assets
-            if asset.get("file_path")
         ])
 
     async def quarantine(self, project_ids: list[int]) -> QuarantineBatch:
-        from .assets import asset_file_bundle_paths
+        from .assets import asset_row_bundle_paths
 
         assets: list[dict[str, Any]] = []
         for project_id in project_ids:
@@ -80,9 +85,7 @@ class ProjectAssetStorage:
             await self.stop_proxy_job(int(asset["id"]))
         bundle_paths: list[Path] = []
         for asset in assets:
-            raw_path = str(asset.get("file_path") or "")
-            if raw_path:
-                bundle_paths.extend(await asyncio.to_thread(asset_file_bundle_paths, raw_path))
+            bundle_paths.extend(await asyncio.to_thread(asset_row_bundle_paths, asset))
         return await asyncio.to_thread(quarantine_files, bundle_paths, "lite-cut")
 
 
@@ -243,7 +246,7 @@ class PresetService:
             )
         except ValueError as exc:
             raise LiteCutServiceError(400, {"code": "LITECUT_PRESET_APPLY_FAILED", "reason": str(exc)}, code=False) from exc
-        output_body = updated.model_dump(mode="json")
+        output_body = updated.model_dump(mode="json", by_alias=True)
         if body.project_id is not None:
             await self.projects.update(int(body.project_id), body=output_body)
             await self.presets.touch_applied(preset_id)
@@ -284,6 +287,14 @@ class AssetService:
 
     async def update_file_path(self, asset_id: int, file_path: str) -> None:
         await self.assets.update_file_path(asset_id, file_path)
+
+    async def update_source(self, asset_id: int, **values: Any) -> dict[str, Any]:
+        await self.get(asset_id)
+        await self.assets.update_source(asset_id, **values)
+        return await self.get(asset_id)
+
+    async def update_media_metadata(self, asset_id: int, **values: Any) -> None:
+        await self.assets.update_media_metadata(asset_id, **values)
 
     async def delete_record(self, asset_id: int) -> dict[str, Any]:
         await self.get(asset_id)
@@ -338,15 +349,5 @@ class ExportHistoryService:
         await self.exports.update(export_id, **values)
 
 
-class PortableService:
-    """Project/asset query boundary used by portable package executors."""
-
-    def __init__(self, projects: ProjectRepository, assets: AssetRepository):
-        self.projects = projects
-        self.assets = assets
-
-    async def package_inputs(self, project_id: int) -> tuple[dict[str, Any], list[dict[str, Any]]]:
-        project = await self.projects.get(project_id)
-        if not project:
-            raise LiteCutServiceError(404, "LITECUT_PROJECT_NOT_FOUND")
-        return project, await self.assets.list_for_project(project_id)
+# Linked project-file orchestration lives in project_file.py because it also
+# resolves Insight recording metadata and filesystem identities.

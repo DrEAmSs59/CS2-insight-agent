@@ -1,35 +1,46 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { getLiteCutAssetStreamUrl, getLiteCutBuiltinFontUrl } from "../../../api/api.js";
-import { TEXT_STYLE_CARDS } from "./editorPresets.js";
 import { startPendingDrag } from "./timelineInteraction.js";
-import { overlayTransformAt } from "../state/overlayKeyframeUtils.js";
-import { textTransitionPreviewVisual, transitionPreviewVisual } from "./transitionPreviewUtils.js";
+import { sceneMaterialLayout, sceneResolvedContentFit, sceneTransformAt, sceneTransformStyle } from "../state/sceneTransform.js";
+import { filterStyleFromColor } from "./editorPresets.js";
+import { transitionNodePreviewVisual } from "./transitionPreviewUtils.js";
+import {
+  normalizeTextLayout,
+  previewFontFamilyForFace,
+  resolveBuiltinTextFontFace,
+  textBlockJustifyContent,
+  textOutlineCss,
+  textStylePreset,
+} from "./textLayout.js";
 import PreviewAudioItem from "./PreviewAudioItem.jsx";
 import { releaseMediaElement } from "./previewMediaElementUtils.js";
+import { useSegmentedPreviewSource } from "./useSegmentedPreviewSource.js";
+import {
+  clampSceneScale,
+  clampSceneSize,
+  scenePositionForCanvasDrag,
+  snapCanvasRotation,
+} from "./sceneCanvasInteraction.js";
 
-const ROTATION_SNAP_POINTS = [-180, -120, -90, -60, -30, 0, 30, 60, 90, 120, 180];
-const BUILTIN_FONT_FILES = {
-  "思源黑体 Medium": "NotoSansSC-Medium.ttf",
-  "Noto Sans SC": "NotoSansSC-Bold.ttf",
-};
 const previewFontLoadPromises = new Map();
 
 function cssString(value) {
   return JSON.stringify(String(value || ""));
 }
 
-function ensurePreviewFontLoaded(family, url, sample = "") {
+function ensurePreviewFontLoaded(family, url, sample = "", weight = 700) {
   if (!family || !url) return Promise.resolve();
-  const key = `${family}\n${url}`;
+  const safeWeight = Math.max(100, Math.min(900, Number(weight) || 700));
+  const key = `${family}\n${url}\n${safeWeight}`;
   if (previewFontLoadPromises.has(key)) return previewFontLoadPromises.get(key);
   let promise;
   if (document.fonts?.load) {
     // The matching @font-face rule is rendered with the overlay. FontFaceSet.load
     // works in desktop WebView builds where the global FontFace constructor is
     // unavailable, and also gives us a reliable point at which to repaint text.
-    promise = document.fonts.load(`700 64px ${cssString(family)}`, String(sample || ""));
+    promise = document.fonts.load(`${safeWeight} 64px ${cssString(family)}`, String(sample || ""));
   } else if (typeof FontFace !== "undefined") {
-    promise = new FontFace(family, `url(${cssString(url)})`, { weight: "100 900" })
+    promise = new FontFace(family, `url(${cssString(url)})`, { weight: String(safeWeight) })
       .load()
       .then((loaded) => document.fonts?.add?.(loaded));
   } else {
@@ -43,31 +54,12 @@ function ensurePreviewFontLoaded(family, url, sample = "") {
   return promise;
 }
 
-function previewFontFamily(ov, fontAssetSources = {}) {
-  const raw = String(ov?.text?.font_family || "微软雅黑");
-  const requested = /^rajdhani(?:\s+bold)?$/i.test(raw) ? "微软雅黑" : raw;
-  const custom = fontAssetSources[String(ov?.text?.font_file || "")];
-  if (custom?.family) return custom.family;
-  return BUILTIN_FONT_FILES[requested] ? `LiteCut ${requested}` : requested;
-}
-
-function snapCanvasValue(value) {
-  const points = [0, 0.25, 0.5, 0.75, 1];
-  const nearest = points.reduce((best, point) => Math.abs(point - value) < Math.abs(best - value) ? point : best, points[0]);
-  return Math.abs(nearest - value) <= 0.012 ? { value: nearest, guide: nearest } : { value, guide: null };
-}
-
-function snapRotation(value) {
-  const normalized = Math.max(-180, Math.min(180, value));
-  const nearest = ROTATION_SNAP_POINTS.reduce((best, point) => Math.abs(point - normalized) < Math.abs(best - normalized) ? point : best, 0);
-  return Math.abs(nearest - normalized) <= 3 ? nearest : normalized;
-}
-
-function PreviewOverlayItem({ ov, assetPreviewVersion = "", playheadSec = 0, mediaPlayheadSec = playheadSec, isPlaying = false, selected, onSelect, onDragStart, onTransform, onGuides, canvasHeight = 1080, fontAssetSources = {} }) {
+function PreviewOverlayItem({ ov, assetPreviewVersion = "", playheadSec = 0, mediaPlayheadSec = playheadSec, isPlaying = false, selected, onSelect, onDragStart, onTransform, onGuides, canvasWidth = 1920, canvasHeight = 1080, blurAmount = 24, fontAssetSources = {} }) {
   const videoRef = useRef(null);
+  const backgroundVideoRef = useRef(null);
   const [live, setLive] = useState(null);
   const [isDragging, setIsDragging] = useState(false);
-  const animatedTransform = overlayTransformAt(ov, playheadSec);
+  const animatedTransform = sceneTransformAt(ov, playheadSec);
   const tx = live?.x ?? animatedTransform.x;
   const ty = live?.y ?? animatedTransform.y;
   const scale = live?.scale ?? animatedTransform.scale;
@@ -76,104 +68,105 @@ function PreviewOverlayItem({ ov, assetPreviewVersion = "", playheadSec = 0, med
   const boxH = live?.height ?? animatedTransform.height;
   const flipHorizontal = Boolean(ov.flip_horizontal);
   const flipVertical = Boolean(ov.flip_vertical);
-  const boxObjectFit = Math.abs(boxW - boxH) > 0.001 ? "object-fill" : "object-contain";
-  const baseOpacity = animatedTransform.opacity;
+  const resolvedContentFit = sceneResolvedContentFit(ov, ov.content_fit || "fill");
+  const materialLayout = sceneMaterialLayout({
+    transform: { ...animatedTransform, ...(live || {}), width: boxW, height: boxH },
+    crop: ov.crop,
+    contentFit: resolvedContentFit === "blur" ? "contain" : resolvedContentFit,
+    canvasWidth,
+    canvasHeight,
+    sourceWidth: Number(ov.meta?.source_width) || canvasWidth,
+    sourceHeight: Number(ov.meta?.source_height) || canvasHeight,
+  });
+  const blurLayout = sceneMaterialLayout({
+    transform: { ...animatedTransform, ...(live || {}), width: boxW, height: boxH },
+    crop: ov.crop,
+    contentFit: "cover",
+    canvasWidth,
+    canvasHeight,
+    sourceWidth: Number(ov.meta?.source_width) || canvasWidth,
+    sourceHeight: Number(ov.meta?.source_height) || canvasHeight,
+  });
+  const blurFilter = `blur(${(Math.max(4, Math.min(80, Number(blurAmount) || 24)) / Math.max(1, Number(canvasHeight) || 1080)) * 100}cqh)`;
+  const color = ov.color || {};
+  const colorFilter = filterStyleFromColor({
+    brightness: color.brightness ?? 0,
+    contrast: color.contrast ?? 0,
+    saturation: color.saturation ?? 0,
+    preset: color.filter_preset || "none",
+  }).filter;
   const start = Math.max(0, Number(ov.timeline_start) || 0);
   const duration = Math.max(0, Number(ov.duration) || 0);
   const elapsed = Math.max(0, Number(playheadSec) - start);
-  const fadeIn = Math.max(0, Number(ov.fade_in_sec) || 0);
-  const fadeOut = Math.max(0, Number(ov.fade_out_sec) || 0);
-  const fadeInFactor = fadeIn > 0 ? Math.min(1, elapsed / fadeIn) : 1;
-  const fadeOutFactor = fadeOut > 0 && duration > 0 ? Math.min(1, Math.max(0, (duration - elapsed) / fadeOut)) : 1;
-  let opacity = baseOpacity * Math.min(fadeInFactor, fadeOutFactor);
+  let opacity = 1;
   const aid = ov.meta?.asset_id;
-  const src = aid ? getLiteCutAssetStreamUrl(aid, assetPreviewVersion || ov.meta?.preview_proxy_version) : null;
+  const directSrc = aid ? getLiteCutAssetStreamUrl(aid, assetPreviewVersion || ov.meta?.preview_proxy_version) : null;
   const isVideo = ov.type === "webm" || ov.meta?.kind === "webm" || ov.meta?.kind === "video";
-  const isLoopingAnimation = Boolean(ov.meta?.is_looping_animation) || /\.gif$/i.test(String(ov.meta?.name || ov.asset_path || ""));
+  const isLoopingAnimation = Boolean(ov.meta?.is_looping_animation) || /\.(gif|webp)$/i.test(String(ov.meta?.name || ov.asset_path || ""));
+  const mediaElapsed = Math.max(0, Number(mediaPlayheadSec) - start);
+  const rawOverlaySourceTime = Math.max(0, (Number(ov.trim_in) || 0) + mediaElapsed);
+  const sourceDuration = Math.max(0, Number(ov.meta?.duration_sec) || 0);
+  const segmentStepSec = Number(ov.meta?.preview_segment_step_sec) || 4;
+  const overlaySourceTime = isLoopingAnimation && sourceDuration > 0
+    ? rawOverlaySourceTime % sourceDuration
+    : rawOverlaySourceTime;
+  const segmentedSource = useSegmentedPreviewSource({
+    assetId: aid,
+    directStreamUrl: directSrc,
+    enabled: Boolean(isVideo && aid && ov.meta?.preview_proxy_required && ov.meta?.preview_proxy_mode === "segmented"),
+    isPlaying,
+    segmentStepSec,
+    sourceDurationSec: sourceDuration,
+    sourceTime: overlaySourceTime,
+  });
+  const src = segmentedSource.streamUrl;
+  const overlayVideoTime = Math.max(0, overlaySourceTime - Math.max(0, Number(segmentedSource.mediaTimeOffset) || 0));
+  const loopMediaElement = isLoopingAnimation && (
+    !segmentedSource.segmented || (sourceDuration > 0 && sourceDuration <= segmentStepSec + 0.05)
+  );
 
   useLayoutEffect(() => {
-    const element = videoRef.current;
-    return () => releaseMediaElement(element);
+    const elements = [videoRef.current, backgroundVideoRef.current];
+    return () => elements.forEach((element) => releaseMediaElement(element));
   }, [src]);
-  const mediaElapsed = Math.max(0, Number(mediaPlayheadSec) - start);
-  const overlayVideoTime = Math.max(0, (Number(ov.trim_in) || 0) + mediaElapsed);
   const overlayVideoTimeRef = useRef(overlayVideoTime);
   overlayVideoTimeRef.current = overlayVideoTime;
   const isText = ov.type === "text";
-  // Text scaling follows the export path: it enlarges glyphs but keeps the
-  // authored alignment box anchored in place. File overlays still scale their
-  // full box as before.
-  const visualScale = isText ? 1 : scale;
-  const textCard = TEXT_STYLE_CARDS.find((c) => c.id === (ov.text?.preset_id || ov.meta?.textStyleId)) || TEXT_STYLE_CARDS.find((c) => c.id === "plain");
-  const textContent = ov.text?.content || ov.meta?.name || "Text";
-  const textAlign = ["left", "center", "right"].includes(ov.text?.align) ? ov.text.align : "center";
-  const customFont = fontAssetSources[String(ov.text?.font_file || "")];
-  const resolvedFontFamily = previewFontFamily(ov, fontAssetSources);
-  const requestedFont = String(ov.text?.font_family || "微软雅黑");
-  const builtinFontFile = BUILTIN_FONT_FILES[requestedFont];
-  const previewFontUrl = customFont?.url || (builtinFontFile ? getLiteCutBuiltinFontUrl(builtinFontFile) : "");
-  const previewFontFaceRule = previewFontUrl
-    ? `@font-face{font-family:${cssString(resolvedFontFamily)};src:url(${cssString(previewFontUrl)});font-style:normal;font-weight:100 900;font-display:swap;}`
+  const textContent = isText ? (ov.text?.content || ov.meta?.name || "Text") : "";
+  const textLayout = isText ? normalizeTextLayout(ov.text) : null;
+  const textAlign = textLayout?.align || "center";
+  const textFontWeight = textLayout?.fontWeight;
+  const textPreset = isText ? textStylePreset(ov.text?.preset_id || ov.meta?.textStyleId) : null;
+  const customFont = isText ? fontAssetSources[String(ov.text?.font_file || "")] : null;
+  const builtinFontFace = isText ? resolveBuiltinTextFontFace(ov.text?.font_family, textFontWeight) : null;
+  const resolvedFontFamily = isText ? (customFont?.family || previewFontFamilyForFace(builtinFontFace)) : "";
+  const previewFontUrl = isText ? (customFont?.url || getLiteCutBuiltinFontUrl(builtinFontFace.file)) : "";
+  const previewFontFaceRule = isText && previewFontUrl
+    ? `@font-face{font-family:${cssString(resolvedFontFamily)};src:url(${cssString(previewFontUrl)});font-style:normal;font-weight:${textFontWeight};font-display:swap;}`
     : "";
   const [fontLoadRevision, setFontLoadRevision] = useState(0);
-  const animDur = Math.min(0.45, duration || 0.45);
-  const animIn = String(ov.text?.anim_in || "");
-  const animOut = String(ov.text?.anim_out || "");
-  const inProgress = animDur > 0 ? Math.min(1, elapsed / animDur) : 1;
-  const outProgress = animDur > 0 && duration > 0 && elapsed > duration - animDur ? Math.min(1, (elapsed - (duration - animDur)) / animDur) : 0;
-  let motionX = 0;
-  let motionY = 0;
-  const applyAnim = (name, progress, entering) => {
-    const amount = entering ? 1 - progress : progress;
-    if (name === "fade") opacity *= entering ? progress : 1 - progress;
-    // Use output-canvas fractions instead of a percentage of the text box.
-    // FFmpeg uses these same 12% / 10% offsets when exporting drawtext.
-    if (name === "slide_left") motionX += entering ? 0.12 * amount : -0.12 * amount;
-    if (name === "slide_right") motionX += entering ? -0.12 * amount : 0.12 * amount;
-    if (name === "slide_up") motionY += entering ? 0.1 * amount : -0.1 * amount;
-    if (name === "slide_down") motionY += entering ? -0.1 * amount : 0.1 * amount;
-  };
-  if (isText) {
-    applyAnim(animIn, inProgress, true);
-    if (outProgress > 0) applyAnim(animOut, outProgress, false);
-  }
-  const transitionIn = ov.transition_in && typeof ov.transition_in === "object" ? ov.transition_in : null;
-  const transitionOut = ov.transition_out && typeof ov.transition_out === "object" ? ov.transition_out : null;
-  const transitionInDuration = Math.max(0, Number(transitionIn?.duration_sec) || 0);
-  const transitionOutDuration = Math.max(0, Number(transitionOut?.duration_sec) || 0);
-  let transitionVisual = transitionPreviewVisual("none", 1);
-  if (transitionIn?.type && transitionIn.type !== "cut" && transitionInDuration > 0 && elapsed < transitionInDuration) {
-    transitionVisual = transitionPreviewVisual(transitionIn.type, elapsed / transitionInDuration);
-    if (isText) {
-      const textVisual = textTransitionPreviewVisual(transitionIn.type, elapsed / transitionInDuration, "in");
-      transitionVisual = { ...transitionPreviewVisual("none", 1), mainOpacity: textVisual.opacity };
-      motionX += textVisual.offsetX;
-      motionY += textVisual.offsetY;
-    }
-  } else if (transitionOut?.type && transitionOut.type !== "cut" && transitionOutDuration > 0 && elapsed > duration - transitionOutDuration) {
-    const progress = 1 - ((elapsed - (duration - transitionOutDuration)) / transitionOutDuration);
-    transitionVisual = transitionPreviewVisual(transitionOut.type, progress);
-    if (isText) {
-      const textVisual = textTransitionPreviewVisual(transitionOut.type, progress, "out");
-      transitionVisual = { ...transitionPreviewVisual("none", 1), mainOpacity: textVisual.opacity };
-      motionX += textVisual.offsetX;
-      motionY += textVisual.offsetY;
-    }
-  }
+  const transitionState = ov._transition_state && typeof ov._transition_state === "object" ? ov._transition_state : null;
+  const transitionVisual = transitionState
+    ? transitionNodePreviewVisual(transitionState.type, transitionState.role, transitionState.progress, transitionState)
+    : transitionNodePreviewVisual("none", "to", 1);
   opacity *= transitionVisual.mainOpacity;
+  const materialFilter = [colorFilter, transitionVisual.materialFilter].filter(Boolean).join(" ") || undefined;
 
-  useLayoutEffect(() => () => releaseMediaElement(videoRef.current), []);
+  useLayoutEffect(() => () => {
+    releaseMediaElement(videoRef.current);
+    releaseMediaElement(backgroundVideoRef.current);
+  }, []);
 
   useEffect(() => {
     if (!isText || !previewFontUrl) return undefined;
     let cancelled = false;
-    void ensurePreviewFontLoaded(resolvedFontFamily, previewFontUrl, textContent)
+    void ensurePreviewFontLoaded(resolvedFontFamily, previewFontUrl, textContent, textFontWeight)
       .then(() => {
         if (!cancelled) setFontLoadRevision((value) => value + 1);
       })
       .catch(() => {});
     return () => { cancelled = true; };
-  }, [isText, previewFontUrl, resolvedFontFamily, textContent]);
+  }, [isText, previewFontUrl, resolvedFontFamily, textContent, textFontWeight]);
 
   useEffect(() => {
     const el = videoRef.current;
@@ -181,7 +174,7 @@ function PreviewOverlayItem({ ov, assetPreviewVersion = "", playheadSec = 0, med
     const applySeek = () => {
       try {
         const maxTime = Number.isFinite(el.duration) && el.duration > 0 ? Math.max(0, el.duration - 0.05) : overlayVideoTime;
-        const target = isLoopingAnimation && maxTime > 0
+        const target = loopMediaElement && maxTime > 0
           ? overlayVideoTime % Math.max(0.05, maxTime)
           : Math.min(overlayVideoTime, maxTime);
         if (Math.abs(el.currentTime - target) > 0.18) el.currentTime = target;
@@ -204,21 +197,40 @@ function PreviewOverlayItem({ ov, assetPreviewVersion = "", playheadSec = 0, med
     return () => {
       if (waitingForMetadata) el.removeEventListener("loadedmetadata", applySeek);
     };
-  }, [isVideo, src, isLoopingAnimation, isPlaying]);
+  }, [isVideo, src, loopMediaElement, isPlaying]);
+
+  useEffect(() => {
+    const foreground = videoRef.current;
+    const background = backgroundVideoRef.current;
+    if (!foreground || !background || resolvedContentFit !== "blur" || !isVideo || !src) return undefined;
+    const synchronize = () => {
+      try {
+        if (Math.abs(background.currentTime - foreground.currentTime) > 0.04) background.currentTime = foreground.currentTime;
+        background.playbackRate = foreground.playbackRate;
+        if (isPlaying && !foreground.paused) void background.play().catch(() => {});
+        else background.pause();
+      } catch {
+        // The background is cosmetic; a transient seek failure must not block playback.
+      }
+    };
+    synchronize();
+    const id = window.setInterval(synchronize, 100);
+    return () => window.clearInterval(id);
+  }, [isPlaying, isVideo, resolvedContentFit, src]);
 
   useEffect(() => {
     const el = videoRef.current;
     if (!el || !isVideo || !src || isPlaying) return;
     try {
       const maxTime = Number.isFinite(el.duration) && el.duration > 0 ? Math.max(0, el.duration - 0.05) : overlayVideoTime;
-      const target = isLoopingAnimation && maxTime > 0
+      const target = loopMediaElement && maxTime > 0
         ? overlayVideoTime % Math.max(0.05, maxTime)
         : Math.min(overlayVideoTime, maxTime);
       if (Math.abs(el.currentTime - target) > 0.04) el.currentTime = target;
     } catch {
       // ignore seek before metadata
     }
-  }, [isVideo, src, isLoopingAnimation, isPlaying, overlayVideoTime]);
+  }, [isVideo, src, loopMediaElement, isPlaying, overlayVideoTime]);
 
   useEffect(() => {
     const el = videoRef.current;
@@ -226,7 +238,7 @@ function PreviewOverlayItem({ ov, assetPreviewVersion = "", playheadSec = 0, med
     const id = window.setInterval(() => {
       const rawTarget = overlayVideoTimeRef.current;
       const maxTime = Number.isFinite(el.duration) && el.duration > 0 ? Math.max(0, el.duration - 0.05) : rawTarget;
-      const target = isLoopingAnimation && maxTime > 0
+      const target = loopMediaElement && maxTime > 0
         ? rawTarget % Math.max(0.05, maxTime)
         : Math.min(rawTarget, maxTime);
       if (Math.abs(el.currentTime - target) <= 0.22) return;
@@ -237,7 +249,7 @@ function PreviewOverlayItem({ ov, assetPreviewVersion = "", playheadSec = 0, med
       }
     }, 250);
     return () => window.clearInterval(id);
-  }, [isVideo, src, isLoopingAnimation, isPlaying]);
+  }, [isVideo, src, loopMediaElement, isPlaying]);
 
   const applyTransform = (patch) => {
     onTransform?.(ov.id, patch);
@@ -263,11 +275,17 @@ function PreviewOverlayItem({ ov, assetPreviewVersion = "", playheadSec = 0, med
         setIsDragging(true);
       },
       onDragMove: (ev) => {
-        const sx = snapCanvasValue(Math.max(0, Math.min(1, ox + (ev.clientX - origin.x) / rect.width)));
-        const sy = snapCanvasValue(Math.max(0, Math.min(1, oy + (ev.clientY - origin.y) / rect.height)));
-        setLive({ x: sx.value, y: sy.value, scale, rotation, width: boxW, height: boxH });
-        onGuides?.({ x: sx.guide, y: sy.guide });
-        applyTransform({ x: sx.value, y: sy.value });
+        const position = scenePositionForCanvasDrag({
+          x: ox,
+          y: oy,
+          deltaX: ev.clientX - origin.x,
+          deltaY: ev.clientY - origin.y,
+          canvasWidth: rect.width,
+          canvasHeight: rect.height,
+        });
+        setLive({ x: position.x, y: position.y, scale, rotation, width: boxW, height: boxH });
+        onGuides?.(position.guides);
+        applyTransform({ x: position.x, y: position.y });
       },
       onDragEnd: () => {
         setLive(null);
@@ -294,7 +312,7 @@ function PreviewOverlayItem({ ov, assetPreviewVersion = "", playheadSec = 0, med
       },
       onDragMove: (ev) => {
         const dist = Math.hypot(ev.clientX - rect.left - tx * rect.width, ev.clientY - rect.top - ty * rect.height);
-        const next = Math.max(0.01, Math.min(5, originScale * (dist / originDist)));
+        const next = clampSceneScale(originScale * (dist / originDist));
         setLive({ x: tx, y: ty, scale: next, rotation });
         applyTransform({ scale: next });
       },
@@ -323,7 +341,7 @@ function PreviewOverlayItem({ ov, assetPreviewVersion = "", playheadSec = 0, med
       },
       onDragMove: (ev) => {
         const angle = Math.atan2(ev.clientY - cy, ev.clientX - cx);
-        const deg = snapRotation(originRot + ((angle - startAngle) * 180) / Math.PI);
+        const deg = snapCanvasRotation(originRot + ((angle - startAngle) * 180) / Math.PI);
         setLive({ x: tx, y: ty, scale, rotation: deg });
         applyTransform({ rotation: deg });
       },
@@ -348,8 +366,8 @@ function PreviewOverlayItem({ ov, assetPreviewVersion = "", playheadSec = 0, med
       onDragStart: () => { onDragStart?.(); setIsDragging(true); },
       onDragMove: (ev) => {
         const patch = {};
-        if (axis === "x") patch.width = Math.max(0.05, Math.min(10, originW + direction * ((ev.clientX - origin.x) * 2) / rect.width));
-        if (axis === "y") patch.height = Math.max(0.05, Math.min(10, originH + direction * ((ev.clientY - origin.y) * 2) / rect.height));
+        if (axis === "x") patch.width = clampSceneSize(originW + direction * ((ev.clientX - origin.x) * 2) / rect.width);
+        if (axis === "y") patch.height = clampSceneSize(originH + direction * ((ev.clientY - origin.y) * 2) / rect.height);
         setLive({ x: tx, y: ty, scale, rotation, width: patch.width ?? originW, height: patch.height ?? originH });
         applyTransform(patch);
       },
@@ -359,7 +377,7 @@ function PreviewOverlayItem({ ov, assetPreviewVersion = "", playheadSec = 0, med
 
   const handleCls =
     "absolute z-[8] h-3.5 w-3.5 rounded-full border-2 border-white bg-cs2-accent shadow pointer-events-auto touch-none";
-  const handleInverseScale = 1 / Math.max(0.01, Math.abs(visualScale));
+  const handleInverseScale = 1 / Math.max(0.01, Math.abs(scale));
   const cornerHandleStyle = { transform: `scale(${handleInverseScale})` };
   const horizontalHandleStyle = { transform: `translateY(-50%) scale(${handleInverseScale})` };
   const verticalHandleStyle = { transform: `translateX(-50%) scale(${handleInverseScale})` };
@@ -374,46 +392,83 @@ function PreviewOverlayItem({ ov, assetPreviewVersion = "", playheadSec = 0, med
         isDragging ? "z-[6] cursor-grabbing" : selected ? "z-[5] cursor-grab" : "cursor-pointer"
       }`}
       style={{
-        left: `${((tx + motionX) * 100).toFixed(2)}%`,
-        top: `${((ty + motionY) * 100).toFixed(2)}%`,
-        width: `${(boxW * 100).toFixed(2)}%`,
-        height: `${(boxH * 100).toFixed(2)}%`,
-        opacity,
+        ...sceneTransformStyle(
+          { ...animatedTransform, ...(live || {}), x: tx, y: ty, width: boxW, height: boxH, scale, rotation },
+          { flipHorizontal, flipVertical, opacity, prefixTransform: transitionVisual.mainTransform },
+        ),
         clipPath: transitionVisual.mainClipPath || undefined,
-        transform: `${transitionVisual.mainTransform || ""} translate(-50%, -50%) scale(${visualScale * (flipHorizontal ? -1 : 1)}, ${visualScale * (flipVertical ? -1 : 1)}) rotate(${rotation}deg)`.trim(),
         transition: isDragging || isPlaying ? "none" : "transform 0.12s ease",
         willChange: isPlaying ? "transform, opacity, clip-path" : undefined,
       }}
     >
       {isText && previewFontFaceRule ? <style>{previewFontFaceRule}</style> : null}
       <div className={`relative h-full w-full ${selected ? "ring-2 ring-cs2-accent ring-offset-1 ring-offset-transparent" : ""}`}>
-        {transitionVisual.flashOpacity > 0 ? <span className="pointer-events-none absolute inset-0 z-20 bg-white" style={{ opacity: transitionVisual.flashOpacity }} /> : null}
-        {transitionVisual.blackOpacity > 0 ? <span className="pointer-events-none absolute inset-0 z-20 bg-black" style={{ opacity: transitionVisual.blackOpacity }} /> : null}
         {isText ? (
           <div
             data-font-load-revision={fontLoadRevision}
-            className={`pointer-events-none flex h-full min-h-8 w-full items-center justify-center overflow-hidden leading-tight whitespace-pre-wrap break-words ${textCard?.className || "font-bold text-white"}`}
+            className="pointer-events-none flex h-full min-h-8 w-full items-center overflow-hidden"
             style={{
               fontFamily: resolvedFontFamily,
-              fontSize: `${(Math.max(1, Number(ov.text?.font_size) || 48) * Math.max(0.1, Number(scale) || 1) / Math.max(1, Number(canvasHeight) || 1080)) * 100}cqh`,
-              textAlign,
-              textShadow: "0 2px 12px rgba(0,0,0,0.72)",
+              fontSize: `${(textLayout.fontSize / Math.max(1, Number(canvasHeight) || 1080)) * 100}cqh`,
+              fontWeight: textFontWeight,
+              fontSynthesis: "none",
+              lineHeight: textLayout.lineHeight,
+              justifyContent: textBlockJustifyContent(textAlign),
+              color: textLayout.fillColor || textPreset.fill_color || "#ffffff",
+              WebkitTextStroke: textOutlineCss(canvasHeight),
+              paintOrder: "stroke fill",
+              filter: transitionVisual.materialFilter || undefined,
             }}
           >
-            {textContent}
+            <span
+              data-preview-text-block
+              style={{
+                flex: "0 0 auto",
+                letterSpacing: "0px",
+                textAlign,
+                whiteSpace: "pre",
+              }}
+            >
+              {textContent}
+            </span>
           </div>
-        ) : src && isVideo ? (
-          <video
-            ref={videoRef}
-            src={src}
-            className={`pointer-events-none h-full w-full ${boxObjectFit} drop-shadow-lg`}
-            muted
-            playsInline
-            loop={isLoopingAnimation}
-            preload="auto"
-          />
         ) : src ? (
-          <img src={src} alt="" draggable={false} className={`pointer-events-none h-full w-full ${boxObjectFit} drop-shadow-lg`} />
+          <div className="pointer-events-none absolute inset-0 overflow-hidden">
+            {resolvedContentFit === "blur" ? (
+              <div style={blurLayout.viewportStyle}>
+                {isVideo ? (
+                  <video
+                    ref={backgroundVideoRef}
+                    src={src}
+                    className="pointer-events-none absolute max-w-none"
+                    muted
+                    playsInline
+                    loop={loopMediaElement}
+                    preload="auto"
+                    style={{ ...blurLayout.mediaStyle, filter: [materialFilter, blurFilter].filter(Boolean).join(" ") }}
+                  />
+                ) : (
+                  <img src={src} alt="" draggable={false} className="pointer-events-none absolute max-w-none" style={{ ...blurLayout.mediaStyle, filter: [materialFilter, blurFilter].filter(Boolean).join(" ") }} />
+                )}
+              </div>
+            ) : null}
+            <div style={materialLayout.viewportStyle}>
+              {isVideo ? (
+                <video
+                  ref={videoRef}
+                  src={src}
+                  className="pointer-events-none absolute max-w-none drop-shadow-lg"
+                  muted
+                  playsInline
+                  loop={loopMediaElement}
+                  preload="auto"
+                  style={{ ...materialLayout.mediaStyle, filter: materialFilter }}
+                />
+              ) : (
+                <img src={src} alt="" draggable={false} className="pointer-events-none absolute max-w-none drop-shadow-lg" style={{ ...materialLayout.mediaStyle, filter: materialFilter }} />
+              )}
+            </div>
+          </div>
         ) : null}
         {selected ? (
           <>

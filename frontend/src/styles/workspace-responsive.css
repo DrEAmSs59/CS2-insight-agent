@@ -154,7 +154,7 @@
   overflow: hidden;
   border: 1px solid var(--cs2-border-subtle);
   border-radius: var(--cs2-radius-panel);
-  background: color-mix(in srgb, var(--cs2-bg-card) 92%, var(--cs2-bg-page));
+  background: var(--cs2-bg-card);
 }
 
 .analysis-view-nav {
@@ -184,47 +184,24 @@
   justify-content: center;
   gap: 6px;
   padding: 0 10px;
-  border-radius: calc(var(--cs2-radius-panel) - 3px);
-  color: var(--cs2-text-muted);
+  border: 1px solid transparent;
+  border-radius: var(--cs2-radius-control);
+  color: var(--cs2-text-secondary);
   font-size: 10px;
   font-weight: 700;
-  isolation: isolate;
-  transition: color 140ms ease, background-color 140ms ease, box-shadow 140ms ease;
-}
-
-.analysis-view-nav > button > * {
-  position: relative;
-  z-index: 1;
+  transition: color 140ms ease, border-color 140ms ease, background-color 140ms ease;
 }
 
 .analysis-view-nav > button:hover {
+  border-color: var(--cs2-border);
   color: var(--cs2-text-primary);
   background: var(--cs2-bg-hover);
 }
 
 .analysis-view-nav > button[data-active="true"] {
+  border-color: color-mix(in srgb, var(--cs2-accent) 25%, transparent);
   color: var(--cs2-accent);
-  background: transparent;
-}
-
-.analysis-view-nav > button[data-active="true"]::before {
-  position: absolute;
-  inset: 0 7px;
-  z-index: 0;
-  border-radius: calc(var(--cs2-radius-panel) - 3px);
-  background: linear-gradient(to bottom, transparent 5%, var(--cs2-accent-soft));
-  content: "";
-}
-
-.analysis-view-nav > button[data-active="true"]::after {
-  position: absolute;
-  right: 7px;
-  bottom: 0;
-  left: 7px;
-  height: 2px;
-  border-radius: 999px;
-  background: var(--cs2-accent);
-  content: "";
+  background: var(--cs2-accent-soft);
 }
 
 .analysis-rail-action {
@@ -540,10 +517,13 @@
   background: var(--cs2-bg-input);
 }
 
-.light .replay-roster-surface,
+.light .replay-roster-surface {
+  background: var(--sand-4);
+}
+
 .light .replay-radar-surface,
 .light .heatmap-map-surface {
-  background: var(--sand-4);
+  background: color-mix(in srgb, var(--sand-4) 80%, var(--sand-8));
 }
 
 .replay-roster-slot {
@@ -553,16 +533,11 @@
 }
 
 .replay-roster-slot-grid {
-  grid-template-rows: 34px 26px;
+  grid-template-rows: 16px 14px 15px 18px;
   margin-top: 0;
-  row-gap: 2px;
+  row-gap: 0;
   padding-top: 2px;
   padding-bottom: 4px;
-}
-
-.replay-roster-slot-name > span,
-.replay-roster-slot-health {
-  padding-top: 8px;
 }
 
 .replay-roster-health-fill {
@@ -627,6 +602,10 @@
   }
 
   .replay-roster-slot-stats,
+  .replay-roster-slot-kills,
+  .replay-roster-slot-number,
+  .replay-roster-slot-money,
+  .replay-roster-slot-objective,
   .replay-roster-slot-weapon,
   .replay-roster-slot-gear,
   .replay-roster-slot-armor {

@@ -20,7 +20,8 @@ def _project_service() -> ProjectService:
     return ProjectService(projects, ProjectAssetStorage(projects, _stop_preview_proxy_job))
 
 
-# Compatibility facades for portable import and existing backend tests.
+# Project CRUD endpoints intentionally stay independent from the linked
+# project-file serializer so saving in the editor never performs file I/O.
 _preset_asset_warnings = preset_asset_warnings
 
 
