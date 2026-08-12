@@ -22,7 +22,7 @@ ROOT = Path(__file__).resolve().parents[1]
 FRONTEND = ROOT / "frontend"
 PUBLIC_TMP = FRONTEND / "public" / "__litecut_visual_tmp"
 DEFAULT_REPORT_DIR = ROOT / "artifacts" / "litecut-visual-regression"
-MATRIX_PATH = ROOT / "data" / "lite_cut_visual_acceptance.json"
+MATRIX_PATH = ROOT / "backend" / "tests" / "fixtures" / "lite_cut" / "lite_cut_visual_acceptance.json"
 EFFECT_CONTRACT_PATH = ROOT / "backend" / "app" / "features" / "lite_cut" / "contracts" / "lite_cut_effect_contract.json"
 VITE_PORT = 4174
 

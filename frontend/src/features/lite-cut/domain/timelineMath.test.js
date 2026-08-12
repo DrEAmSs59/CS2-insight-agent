@@ -1,6 +1,6 @@
 /** @vitest-environment node */
 import { describe, expect, it } from "vitest";
-import semantics from "../../../../../data/lite_cut_timeline_semantics.json";
+import semantics from "../../../../../backend/tests/fixtures/lite_cut/lite_cut_timeline_semantics.json";
 import {
   clipCanvasFit,
   clipMediaTimelineDuration,

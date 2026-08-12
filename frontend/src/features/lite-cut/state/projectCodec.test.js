@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import codecCases from "../../../../../data/lite_cut_project_codec_cases.json";
+import codecCases from "../../../../../backend/tests/fixtures/lite_cut/lite_cut_project_codec_cases.json";
 import projectContract from "../../../../../backend/app/features/lite_cut/contracts/lite_cut_project_contract.json";
 import { normalizeLiteCutBody as normalizeFromStore } from "./editorStore.js";
 import { diagnoseLiteCutProjectReferences, normalizeLiteCutBody } from "./projectCodec.js";

@@ -9,7 +9,7 @@ import {
   sceneTransformPixels,
   sceneTransformStyle,
 } from "./sceneTransform.js";
-import transformCases from "../../../../../data/lite_cut_scene_transform_cases.json";
+import transformCases from "../../../../../backend/tests/fixtures/lite_cut/lite_cut_scene_transform_cases.json";
 
 describe("canonical scene transform", () => {
   const node = {

@@ -18,7 +18,7 @@ from app.features.lite_cut import timeline as legacy_timeline
 
 
 def timeline_semantics_path():
-    return Path(__file__).resolve().parents[2] / "data" / "lite_cut_timeline_semantics.json"
+    return Path(__file__).resolve().parent / "fixtures" / "lite_cut" / "lite_cut_timeline_semantics.json"
 
 
 @pytest.mark.parametrize("fixture", json.loads(timeline_semantics_path().read_text(encoding="utf-8"))["clip_time_cases"])
