@@ -111,6 +111,10 @@ describe("LiteCut local asset picker and drop zone", () => {
       paths: ["C:\\media\\one.mp4", "D:\\audio\\two.wav"],
       projectId: 7,
     }));
+    await waitFor(() => expect(
+      screen.getByRole("button", { name: /liteCut\.media\.selectOrDrop/ }).disabled,
+    ).toBe(false));
+    expect(screen.queryByText("liteCut.media.linkFailed")).toBeNull();
     expect(desktopBridgeMock.showOpenDialog.mock.calls[0][0].properties)
       .toEqual(["openFile", "multiSelections"]);
   });

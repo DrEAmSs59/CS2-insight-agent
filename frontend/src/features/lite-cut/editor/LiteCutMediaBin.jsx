@@ -517,7 +517,7 @@ export default function LiteCutMediaBin({
     try {
       await liteCutClient.linkAssets({ paths, projectId: projectId || null });
       await loadAssets();
-      setTab(existingAsset?.origin_type === "insight_recording" ? "recorded" : "local");
+      setTab("local");
     } catch {
       setUploadError(t("liteCut.media.linkFailed"));
     } finally {
