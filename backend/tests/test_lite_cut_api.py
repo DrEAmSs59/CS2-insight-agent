@@ -31,6 +31,10 @@ def test_lite_cut_router_exposes_linked_project_files_without_portable_package_r
     assert "/api/lite-cut/projects/{project_id}/project-file/export" in paths
     assert "/api/lite-cut/projects/{project_id}/project-file" in paths
     assert "/api/lite-cut/projects/project-file/import" in paths
+    assert "/api/lite-cut/proxy-cache" in paths
+    assert "/api/lite-cut/proxy-cache/settings" in paths
+    assert "/api/lite-cut/proxy-cache/regenerate" in paths
+    assert "/api/lite-cut/proxy-cache/cleanup" in paths
     assert not any("portable-package" in path for path in paths)
     assert not any("portable/jobs" in path for path in paths)
 

@@ -29,6 +29,17 @@ from .media_policy import (
 
 logger = logging.getLogger(__name__)
 
+_SEGMENT_FILE_PATTERN = re.compile(r"^segment-\d{8}\.(?:mp4|webm)$", re.IGNORECASE)
+_LEGACY_PREVIEW_BASENAMES = frozenset({"preview60-v3.mp4", "preview-alpha-v3.webm"})
+_LEGACY_PREVIEW_SUFFIXES = (
+    ".preview60-v3.mp4",
+    ".preview60.mp4",
+    ".preview.mp4",
+    ".preview-alpha-v3.webm",
+    ".preview-alpha-v2.webm",
+    ".preview.webm",
+)
+
 
 def preview_segment_index(time_sec: float) -> int:
     return max(0, int(max(0.0, float(time_sec or 0.0)) // SEGMENT_PREVIEW_STEP_SEC))
@@ -168,51 +179,108 @@ def _row_requires_or_has_preview_proxy(row: dict[str, Any]) -> bool:
     return asset_needs_browser_proxy(source, duration_sec=row.get("duration_sec"))
 
 
-def proxy_cache_inventory(asset_rows: list[dict[str, Any]]) -> dict[str, Any]:
-    from .assets import (
-        asset_preview_paths,
-        lite_cut_assets_dir,
+def _row_needs_segmented_preview(row: dict[str, Any]) -> bool:
+    from .media_policy import asset_needs_segmented_preview
+
+    if str(row.get("source_status") or "").lower() in {"missing", "changed"}:
+        return False
+    source = Path(str(row.get("original_path") or row.get("file_path") or ""))
+    if not source.is_file():
+        return False
+    return asset_needs_segmented_preview(
+        source,
+        kind=str(row.get("kind") or ""),
+        storage_mode=str(row.get("storage_mode") or ""),
+        size_bytes=row.get("size_bytes"),
+        video_codec=str(row.get("codec_name") or row.get("video_codec") or ""),
+        duration_sec=row.get("duration_sec"),
+        fps=row.get("fps") or row.get("source_fps"),
     )
 
-    used = 0
-    files = 0
-    ready = 0
-    for row in asset_rows:
-        source = Path(str(row.get("file_path") or ""))
-        for candidate in asset_preview_paths(row):
-            try:
-                if candidate.is_file():
-                    used += candidate.stat().st_size
-                    files += 1
-                    ready += 1
-            except OSError:
-                pass
-    source_requirements = {
-        (source.parent, source.stem): _row_requires_or_has_preview_proxy(row)
-        for row in asset_rows
-        if row.get("file_path")
-        for source in [Path(str(row["file_path"])).resolve()]
+
+def _segment_cache_key(row: dict[str, Any], *, max_edge: int) -> tuple[str, str]:
+    fingerprint = re.sub(r"[^a-zA-Z0-9_-]+", "", str(row.get("fingerprint") or "source"))[:20] or "source"
+    asset_id = max(0, int(row.get("id") or 0))
+    edge = max(360, min(2160, int(max_edge or 720)))
+    schema = SEGMENT_PREVIEW_ALPHA_SCHEMA if bool(row.get("has_alpha")) else SEGMENT_PREVIEW_SCHEMA
+    return f"asset-{asset_id}-{fingerprint}", f"{schema}-{edge}p"
+
+
+def _is_legacy_preview_file(path: Path) -> bool:
+    name = path.name.lower()
+    return name in _LEGACY_PREVIEW_BASENAMES or name.endswith(_LEGACY_PREVIEW_SUFFIXES)
+
+
+def _classify_preview_cache_files(
+    asset_rows: list[dict[str, Any]],
+    *,
+    max_edge: int,
+) -> tuple[list[Path], list[Path], set[int], int]:
+    from .assets import lite_cut_assets_dir
+
+    root = lite_cut_assets_dir().resolve()
+    required_rows = [row for row in asset_rows if _row_needs_segmented_preview(row)]
+    valid_keys = {
+        _segment_cache_key(row, max_edge=max_edge): int(row.get("id") or 0)
+        for row in required_rows
     }
-    orphan_bytes = 0
-    orphan_files = 0
-    for candidate in lite_cut_assets_dir().resolve().rglob("*.preview*"):
+    valid_files: list[Path] = []
+    orphan_files: list[Path] = []
+    ready_assets: set[int] = set()
+    for candidate in root.rglob("*"):
         if not candidate.is_file():
             continue
-        stem = candidate.name.split(".preview", 1)[0]
-        if source_requirements.get((candidate.parent, stem)) is not True:
+        try:
+            relative_parts = candidate.resolve().relative_to(root).parts
+        except (OSError, ValueError):
+            continue
+        if _is_legacy_preview_file(candidate):
+            # Full-file proxies are no longer selected by the current preview
+            # stream, so every one of them is reclaimable legacy cache.
+            orphan_files.append(candidate)
+            continue
+        try:
+            preview_index = relative_parts.index(".preview")
+        except ValueError:
+            continue
+        if len(relative_parts) < preview_index + 4:
+            continue
+        key = (relative_parts[preview_index + 1], relative_parts[preview_index + 2])
+        asset_id = valid_keys.get(key)
+        if asset_id is not None and _SEGMENT_FILE_PATTERN.fullmatch(candidate.name):
+            valid_files.append(candidate)
+            ready_assets.add(asset_id)
+        elif key not in valid_keys:
+            # Old resolution/schema/fingerprint directories are safe to
+            # reclaim. Unknown files in the active directory may be a running
+            # encoder's temporary output, so leave those alone.
+            orphan_files.append(candidate)
+    return valid_files, orphan_files, ready_assets, len(required_rows)
+
+
+def proxy_cache_inventory(asset_rows: list[dict[str, Any]], *, max_edge: int = 720) -> dict[str, Any]:
+    valid_files, orphan_files, ready_assets, required_count = _classify_preview_cache_files(
+        asset_rows,
+        max_edge=max_edge,
+    )
+
+    def total_size(paths: list[Path]) -> int:
+        size = 0
+        for candidate in paths:
             try:
-                orphan_bytes += candidate.stat().st_size
-                orphan_files += 1
+                size += candidate.stat().st_size
             except OSError:
                 pass
+        return size
+
     return {
-        "proxy_bytes": used,
-        "proxy_files": files,
-        "ready_assets": ready,
+        "proxy_bytes": total_size(valid_files),
+        "proxy_files": len(valid_files),
+        "ready_assets": len(ready_assets),
         "asset_count": len(asset_rows),
-        "proxy_required_assets": sum(1 for row in asset_rows if _row_requires_or_has_preview_proxy(row)),
-        "orphan_bytes": orphan_bytes,
-        "orphan_files": orphan_files,
+        "proxy_required_assets": required_count,
+        "orphan_bytes": total_size(orphan_files),
+        "orphan_files": len(orphan_files),
     }
 
 
@@ -223,57 +291,74 @@ def remove_asset_preview_files(row: dict[str, Any]) -> None:
         candidate.unlink(missing_ok=True)
 
 
-def remove_segment_preview_files(row: dict[str, Any]) -> None:
+def remove_segment_preview_files(row: dict[str, Any]) -> dict[str, int]:
     """Remove only project-owned segmented derivatives, never the linked source."""
     from .assets import lite_cut_assets_dir
 
     root = lite_cut_assets_dir().resolve()
     asset_id = max(0, int(row.get("id") or 0))
-    for directory in root.glob(f"*/.preview/asset-{asset_id}-*"):
-        try:
-            directory.resolve().relative_to(root)
-        except (OSError, ValueError):
-            continue
-        files = sorted(
-            (candidate for candidate in directory.rglob("*") if candidate.is_file()),
-            key=lambda candidate: len(candidate.parts),
-            reverse=True,
-        )
-        for candidate in files:
-            candidate.unlink(missing_ok=True)
-        directories = sorted(
-            (candidate for candidate in directory.rglob("*") if candidate.is_dir()),
-            key=lambda candidate: len(candidate.parts),
-            reverse=True,
-        )
-        for candidate in [*directories, directory]:
+    removed_files = 0
+    removed_bytes = 0
+    for preview_root in root.rglob(".preview"):
+        directory_matches = preview_root.glob(f"asset-{asset_id}-*") if preview_root.is_dir() else ()
+        for directory in directory_matches:
             try:
-                candidate.rmdir()
-            except OSError:
-                pass
+                directory.resolve().relative_to(root)
+            except (OSError, ValueError):
+                continue
+            files = sorted(
+                (candidate for candidate in directory.rglob("*") if candidate.is_file()),
+                key=lambda candidate: len(candidate.parts),
+                reverse=True,
+            )
+            for candidate in files:
+                try:
+                    removed_bytes += candidate.stat().st_size
+                    candidate.unlink(missing_ok=True)
+                    removed_files += 1
+                except OSError:
+                    pass
+            directories = sorted(
+                (candidate for candidate in directory.rglob("*") if candidate.is_dir()),
+                key=lambda candidate: len(candidate.parts),
+                reverse=True,
+            )
+            for candidate in [*directories, directory]:
+                try:
+                    candidate.rmdir()
+                except OSError:
+                    pass
+    return {"removed_files": removed_files, "removed_bytes": removed_bytes}
 
 
-def cleanup_orphan_preview_files(asset_rows: list[dict[str, Any]]) -> dict[str, int]:
+def cleanup_orphan_preview_files(asset_rows: list[dict[str, Any]], *, max_edge: int = 720) -> dict[str, int]:
     from .assets import lite_cut_assets_dir
 
-    source_requirements = {
-        (source.parent, source.stem): _row_requires_or_has_preview_proxy(row)
-        for row in asset_rows
-        if row.get("file_path")
-        for source in [Path(str(row["file_path"])).resolve()]
-    }
+    root = lite_cut_assets_dir().resolve()
+    _valid_files, orphan_files, _ready_assets, _required_count = _classify_preview_cache_files(
+        asset_rows,
+        max_edge=max_edge,
+    )
     removed_bytes = 0
     removed_files = 0
-    for candidate in lite_cut_assets_dir().resolve().rglob("*.preview*"):
-        if not candidate.is_file():
-            continue
-        base = candidate.name.split(".preview", 1)[0]
-        if source_requirements.get((candidate.parent, base)) is True:
-            continue
+    parent_directories: set[Path] = set()
+    for candidate in orphan_files:
         try:
             removed_bytes += candidate.stat().st_size
             candidate.unlink()
             removed_files += 1
+            parent = candidate.parent
+            while parent != root:
+                relative_parts = parent.relative_to(root).parts
+                if ".preview" not in relative_parts and ".derived" not in relative_parts:
+                    break
+                parent_directories.add(parent)
+                parent = parent.parent
+        except OSError:
+            pass
+    for directory in sorted(parent_directories, key=lambda item: len(item.parts), reverse=True):
+        try:
+            directory.rmdir()
         except OSError:
             pass
     return {"removed_files": removed_files, "removed_bytes": removed_bytes}

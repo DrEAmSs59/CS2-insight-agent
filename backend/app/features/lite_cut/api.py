@@ -24,6 +24,7 @@ from .projects_api import (
 from .proxy_api import (
     _create_preview_proxy_sync,
     _decorate_asset_preview_state,
+    router as proxy_router,
 )
 from .runtime import (
     LiteCutExportJob,
@@ -54,3 +55,4 @@ router.include_router(project_file_router)
 router.include_router(presets_router)
 router.include_router(export_router)
 router.include_router(assets_router)
+router.include_router(proxy_router)

@@ -637,6 +637,143 @@ def test_alpha_preview_segments_use_separate_schema_and_webm_extension(tmp_path,
     assert preview_segment_path(directory, 9).name == "segment-00000009.webm"
 
 
+def test_proxy_cache_inventory_tracks_current_segments_and_marks_old_cache_reclaimable(tmp_path, monkeypatch):
+    from app.features.lite_cut import assets as assets_mod
+    from app.features.lite_cut.proxy_executor import (
+        cleanup_orphan_preview_files,
+        proxy_cache_inventory,
+    )
+
+    storage = tmp_path / "assets"
+    storage.mkdir()
+    monkeypatch.setattr(assets_mod, "lite_cut_assets_dir", lambda: storage)
+    source = tmp_path / "large-linked.mp4"
+    source.write_bytes(b"source")
+    row = {
+        "id": 12,
+        "kind": "video",
+        "storage_mode": "link",
+        "original_path": str(source),
+        "file_path": str(source),
+        "size_bytes": 256 * 1024 * 1024,
+        "duration_sec": 120,
+        "fps": 60,
+        "codec_name": "h264",
+        "fingerprint": "abc:def/123",
+        "source_status": "available",
+        "has_alpha": False,
+    }
+    cache_root = storage / "12_Project" / ".preview" / "asset-12-abcdef123"
+    current = cache_root / "segment-v1-720p" / "segment-00000000.mp4"
+    stale_resolution = cache_root / "segment-v1-1080p" / "segment-00000000.mp4"
+    legacy = storage / ".derived" / "asset-12-abcdef123" / "preview60-v3.mp4"
+    for path, content in ((current, b"current"), (stale_resolution, b"stale-cache"), (legacy, b"legacy-cache")):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(content)
+
+    inventory = proxy_cache_inventory([row], max_edge=720)
+
+    assert inventory == {
+        "proxy_bytes": len(b"current"),
+        "proxy_files": 1,
+        "ready_assets": 1,
+        "asset_count": 1,
+        "proxy_required_assets": 1,
+        "orphan_bytes": len(b"stale-cache") + len(b"legacy-cache"),
+        "orphan_files": 2,
+    }
+
+    removed = cleanup_orphan_preview_files([row], max_edge=720)
+
+    assert removed == {
+        "removed_files": 2,
+        "removed_bytes": len(b"stale-cache") + len(b"legacy-cache"),
+    }
+    assert current.is_file()
+    assert not stale_resolution.exists()
+    assert not legacy.exists()
+
+
+@pytest.mark.anyio
+async def test_regenerate_proxy_cache_invalidates_segments_without_building_legacy_full_file(monkeypatch):
+    from app.features.lite_cut import proxy_api as api_mod
+
+    row = {"id": 12, "file_path": "unused.mp4"}
+    stopped = []
+    legacy_removed = []
+
+    async def all_rows():
+        return [row]
+
+    async def stop(asset_id):
+        stopped.append(asset_id)
+
+    monkeypatch.setattr(api_mod, "_all_asset_rows", all_rows)
+    monkeypatch.setattr(api_mod, "_row_needs_segmented_preview", lambda _row: True)
+    monkeypatch.setattr(api_mod, "_stop_preview_proxy_job", stop)
+    monkeypatch.setattr(
+        api_mod,
+        "remove_segment_preview_files",
+        lambda _row: {"removed_files": 3, "removed_bytes": 99},
+    )
+    monkeypatch.setattr(api_mod, "remove_asset_preview_files", lambda item: legacy_removed.append(item["id"]))
+    monkeypatch.setattr(
+        api_mod,
+        "_start_preview_proxy_job",
+        lambda *_args, **_kwargs: pytest.fail("legacy full-file proxy must not be regenerated"),
+    )
+
+    result = await api_mod.regenerate_lite_cut_proxies(api_mod.LiteCutProxyRegenerateBody())
+
+    assert result == {
+        "queued": 0,
+        "invalidated": 1,
+        "removed_files": 3,
+        "removed_bytes": 99,
+        "asset_ids": [12],
+        "mode": "segmented_on_demand",
+    }
+    assert stopped == [12]
+    assert legacy_removed == [12]
+
+
+@pytest.mark.anyio
+async def test_proxy_resolution_change_invalidates_existing_segment_directories(monkeypatch):
+    from app.features.lite_cut import proxy_api as api_mod
+
+    config = SimpleNamespace(lite_cut_proxy_resolution=720)
+    rows = [{"id": 3}, {"id": 4}]
+    stopped = []
+    saved = []
+
+    async def all_rows():
+        return rows
+
+    async def stop(asset_id):
+        stopped.append(asset_id)
+
+    monkeypatch.setattr(api_mod, "load_config", lambda: config)
+    monkeypatch.setattr(api_mod, "save_config", lambda value: saved.append(value.lite_cut_proxy_resolution))
+    monkeypatch.setattr(api_mod, "_all_asset_rows", all_rows)
+    monkeypatch.setattr(api_mod, "_stop_preview_proxy_job", stop)
+    monkeypatch.setattr(
+        api_mod,
+        "remove_segment_preview_files",
+        lambda row: {"removed_files": row["id"], "removed_bytes": row["id"] * 10},
+    )
+
+    result = await api_mod.patch_lite_cut_proxy_settings(api_mod.LiteCutProxySettingsBody(resolution=1080))
+
+    assert result == {
+        "resolution": 1080,
+        "invalidated": 2,
+        "removed_files": 7,
+        "removed_bytes": 70,
+    }
+    assert saved == [1080]
+    assert stopped == [3, 4]
+
+
 def test_deleting_legacy_managed_video_also_removes_segment_cache(tmp_path, monkeypatch):
     from app.features.lite_cut import assets as assets_mod
 

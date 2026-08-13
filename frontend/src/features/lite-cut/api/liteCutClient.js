@@ -93,6 +93,15 @@ export function createLiteCutClient(transport = API) {
       return transport.get("/lite-cut/exports", { params }).then(responseData);
     },
 
+    getProxyCache: () =>
+      transport.get("/lite-cut/proxy-cache").then(responseData),
+    updateProxySettings: (resolution) =>
+      transport.patch("/lite-cut/proxy-cache/settings", { resolution }).then(responseData),
+    regenerateProxyCache: () =>
+      transport.post("/lite-cut/proxy-cache/regenerate", {}).then(responseData),
+    cleanupProxyCache: () =>
+      transport.post("/lite-cut/proxy-cache/cleanup").then(responseData),
+
     listSnapshots: (projectId) =>
       transport.get(`/lite-cut/projects/${idPart(projectId)}/snapshots`).then(responseData),
     restoreSnapshot: (projectId, snapshotId) =>

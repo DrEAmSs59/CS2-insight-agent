@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field
 from ...env_utils import load_config, save_config
 from .dependencies import build_lite_cut_services
 from .proxy_executor import (
+    _row_needs_segmented_preview,
     _row_requires_or_has_preview_proxy,
     cleanup_orphan_preview_files,
     execute_preview_segment,
@@ -22,6 +23,7 @@ from .proxy_executor import (
     preview_segment_path,
     proxy_cache_inventory,
     remove_asset_preview_files,
+    remove_segment_preview_files,
 )
 from .media_policy import SEGMENT_PREVIEW_STEP_SEC
 from .runtime import (
@@ -40,6 +42,20 @@ logger = logging.getLogger(__name__)
 
 def _services():
     return build_lite_cut_services(get_lite_cut_db())
+
+
+async def _all_asset_rows() -> list[dict[str, Any]]:
+    assets = _services().assets
+    rows: list[dict[str, Any]] = []
+    offset = 0
+    page_size = 500
+    while True:
+        page = await assets.list(project_id=None, limit=page_size, offset=offset)
+        batch = list(page.get("items") or [])
+        rows.extend(batch)
+        if len(batch) < page_size:
+            return rows
+        offset += len(batch)
 
 
 def _segment_preview_snapshot(
@@ -355,12 +371,14 @@ class LiteCutProxyRegenerateBody(BaseModel):
 
 @router.get("/proxy-cache")
 async def get_lite_cut_proxy_cache():
-    assets = (await _services().assets.list(project_id=None, limit=1000, offset=0))["items"]
-    snapshot = await asyncio.to_thread(proxy_cache_inventory, assets)
     cfg = load_config()
+    resolution = max(360, min(2160, int(getattr(cfg, "lite_cut_proxy_resolution", 720) or 720)))
+    assets = await _all_asset_rows()
+    snapshot = await asyncio.to_thread(proxy_cache_inventory, assets, max_edge=resolution)
     return {
         **snapshot,
-        "resolution": max(360, min(2160, int(getattr(cfg, "lite_cut_proxy_resolution", 720) or 720))),
+        "resolution": resolution,
+        "mode": "segmented_on_demand",
     }
 
 
@@ -369,29 +387,59 @@ async def patch_lite_cut_proxy_settings(body: LiteCutProxySettingsBody):
     # Keep values codec-friendly: FFmpeg will make the computed other edge even.
     resolution = int(round(body.resolution / 2) * 2)
     cfg = load_config()
+    previous_resolution = max(360, min(2160, int(getattr(cfg, "lite_cut_proxy_resolution", 720) or 720)))
     cfg.lite_cut_proxy_resolution = resolution
     save_config(cfg)
-    return {"resolution": resolution}
+    if resolution == previous_resolution:
+        return {"resolution": resolution, "invalidated": 0, "removed_files": 0, "removed_bytes": 0}
+    rows = await _all_asset_rows()
+    removed_files = 0
+    removed_bytes = 0
+    for row in rows:
+        await _stop_preview_proxy_job(int(row["id"]))
+        removed = await asyncio.to_thread(remove_segment_preview_files, row)
+        removed_files += int(removed.get("removed_files") or 0)
+        removed_bytes += int(removed.get("removed_bytes") or 0)
+    return {
+        "resolution": resolution,
+        "invalidated": len(rows),
+        "removed_files": removed_files,
+        "removed_bytes": removed_bytes,
+    }
 
 
 @router.post("/proxy-cache/regenerate")
 async def regenerate_lite_cut_proxies(body: LiteCutProxyRegenerateBody):
-    all_assets = (await _services().assets.list(project_id=None, limit=1000, offset=0))["items"]
+    all_assets = await _all_asset_rows()
     wanted = {int(asset_id) for asset_id in body.asset_ids if int(asset_id) > 0}
     targets = [
         row
         for row in all_assets
-        if (not wanted or int(row["id"]) in wanted)
-        and _row_requires_or_has_preview_proxy(row)
+        if (int(row["id"]) in wanted if wanted else _row_needs_segmented_preview(row))
     ]
+    removed_files = 0
+    removed_bytes = 0
     for row in targets:
         await _stop_preview_proxy_job(int(row["id"]))
+        removed = await asyncio.to_thread(remove_segment_preview_files, row)
+        removed_files += int(removed.get("removed_files") or 0)
+        removed_bytes += int(removed.get("removed_bytes") or 0)
+        # Full-file derivatives are legacy and never selected by the current
+        # stream. Remove them while resetting this asset's preview cache.
         await asyncio.to_thread(remove_asset_preview_files, row)
-        _start_preview_proxy_job(row, force=True)
-    return {"queued": len(targets), "asset_ids": [int(row["id"]) for row in targets]}
+    return {
+        "queued": 0,
+        "invalidated": len(targets),
+        "removed_files": removed_files,
+        "removed_bytes": removed_bytes,
+        "asset_ids": [int(row["id"]) for row in targets],
+        "mode": "segmented_on_demand",
+    }
 
 
 @router.post("/proxy-cache/cleanup")
 async def cleanup_lite_cut_proxy_cache():
-    assets = (await _services().assets.list(project_id=None, limit=1000, offset=0))["items"]
-    return await asyncio.to_thread(cleanup_orphan_preview_files, assets)
+    assets = await _all_asset_rows()
+    cfg = load_config()
+    resolution = max(360, min(2160, int(getattr(cfg, "lite_cut_proxy_resolution", 720) or 720)))
+    return await asyncio.to_thread(cleanup_orphan_preview_files, assets, max_edge=resolution)

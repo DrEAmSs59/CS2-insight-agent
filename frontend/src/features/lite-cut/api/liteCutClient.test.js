@@ -118,4 +118,36 @@ describe("liteCutClient", () => {
       { signal: controller.signal },
     );
   });
+
+  it("owns proxy-cache management endpoints", async () => {
+    const transport = {
+      get: vi.fn().mockResolvedValue({ data: { resolution: 720 } }),
+      patch: vi.fn().mockResolvedValue({ data: { resolution: 1080 } }),
+      post: vi
+        .fn()
+        .mockResolvedValueOnce({ data: { queued: 2 } })
+        .mockResolvedValueOnce({ data: { removed_files: 1 } }),
+    };
+    const client = createLiteCutClient(transport);
+
+    await expect(client.getProxyCache()).resolves.toEqual({ resolution: 720 });
+    await expect(client.updateProxySettings(1080)).resolves.toEqual({ resolution: 1080 });
+    await expect(client.regenerateProxyCache()).resolves.toEqual({ queued: 2 });
+    await expect(client.cleanupProxyCache()).resolves.toEqual({ removed_files: 1 });
+
+    expect(transport.get).toHaveBeenCalledWith("/lite-cut/proxy-cache");
+    expect(transport.patch).toHaveBeenCalledWith(
+      "/lite-cut/proxy-cache/settings",
+      { resolution: 1080 },
+    );
+    expect(transport.post).toHaveBeenNthCalledWith(
+      1,
+      "/lite-cut/proxy-cache/regenerate",
+      {},
+    );
+    expect(transport.post).toHaveBeenNthCalledWith(
+      2,
+      "/lite-cut/proxy-cache/cleanup",
+    );
+  });
 });
