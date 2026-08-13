@@ -562,6 +562,17 @@ export default function LiteCutMediaBin({
       void registerLinkedAssets(paths);
       return;
     }
+    if (event.dataTransfer?.files?.length && desktopBridge?.resolveDroppedFilePaths) {
+      setUploadError(null);
+      void desktopBridge.resolveDroppedFilePaths(event.dataTransfer.files)
+        .then((resolvedPaths) => {
+          if (resolvedPaths.length) return registerLinkedAssets(resolvedPaths);
+          setUploadError(t("liteCut.media.dropPathUnavailable"));
+          return undefined;
+        })
+        .catch(() => setUploadError(t("liteCut.media.dropPathUnavailable")));
+      return;
+    }
     if (event.dataTransfer?.files?.length || event.dataTransfer?.types?.includes?.("Files")) {
       setUploadError(t("liteCut.media.dropPathUnavailable"));
     }

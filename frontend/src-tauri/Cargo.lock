@@ -648,6 +648,7 @@ dependencies = [
  "tauri-plugin-process",
  "tauri-plugin-single-instance",
  "tauri-plugin-updater",
+ "webview2-com",
 ]
 
 [[package]]

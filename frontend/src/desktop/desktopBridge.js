@@ -10,6 +10,7 @@ import { check } from "@tauri-apps/plugin-updater";
 export const isDesktopApp = Boolean(window.__TAURI_INTERNALS__);
 
 const currentWindow = isDesktopApp ? getCurrentWindow() : null;
+let fileDropSequence = 0;
 
 export const desktopBridge = isDesktopApp
   ? {
@@ -32,6 +33,19 @@ export const desktopBridge = isDesktopApp
       checkForUpdate: () => check(),
       relaunch: () => relaunch(),
       readLegacyUiState: () => invoke("read_legacy_ui_state"),
+      resolveDroppedFilePaths(files) {
+        const droppedFiles = Array.from(files || []);
+        if (!droppedFiles.length) return Promise.resolve([]);
+        const token = `${Date.now().toString(36)}_${(++fileDropSequence).toString(36)}`;
+        const registry = window.__LITECUT_DROPPED_FILES__
+          || (window.__LITECUT_DROPPED_FILES__ = Object.create(null));
+        registry[token] = droppedFiles;
+        return invoke("resolve_dropped_file_paths", { token })
+          .then((paths) => (Array.isArray(paths) ? paths : []))
+          .finally(() => {
+            delete registry[token];
+          });
+      },
       writeClipboardText: (text) => writeText(String(text ?? "")),
       async showOpenDialog(options = {}) {
         const properties = Array.isArray(options.properties) ? options.properties : [];

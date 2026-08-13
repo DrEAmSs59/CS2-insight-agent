@@ -14,6 +14,7 @@ const liteCutClientMock = vi.hoisted(() => ({
 
 const desktopBridgeMock = vi.hoisted(() => ({
   onFileDragDrop: vi.fn(() => vi.fn()),
+  resolveDroppedFilePaths: vi.fn(),
   showOpenDialog: vi.fn(),
 }));
 
@@ -34,6 +35,7 @@ vi.mock("../../../desktop/desktopBridge.js", () => ({
 beforeEach(() => {
   vi.clearAllMocks();
   desktopBridgeMock.onFileDragDrop.mockImplementation(() => vi.fn());
+  desktopBridgeMock.resolveDroppedFilePaths.mockResolvedValue([]);
   desktopBridgeMock.showOpenDialog.mockResolvedValue({ canceled: true, filePaths: [] });
   liteCutClientMock.linkAssets.mockResolvedValue({ items: [] });
   liteCutClientMock.listAssets.mockResolvedValue({ items: [] });
@@ -134,6 +136,30 @@ describe("LiteCut local asset picker and drop zone", () => {
 
     await waitFor(() => expect(liteCutClientMock.linkAssets).toHaveBeenCalledWith({
       paths: ["C:\\captures\\match.mkv"],
+      projectId: 7,
+    }));
+  });
+
+  it("resolves WebView-hidden drop paths and links the original files", async () => {
+    const hiddenFile = new File(["video"], "hidden.mp4", { type: "video/mp4" });
+    desktopBridgeMock.resolveDroppedFilePaths.mockResolvedValue([
+      "E:\\captures\\hidden.mp4",
+    ]);
+    renderMediaBin();
+    fireEvent.click(screen.getByRole("button", { name: "liteCut.media.localUpload" }));
+    const dropZone = await screen.findByRole("button", { name: /liteCut\.media\.selectOrDrop/ });
+
+    fireEvent.drop(dropZone, {
+      dataTransfer: {
+        files: [hiddenFile],
+        getData: () => "",
+        types: ["Files"],
+      },
+    });
+
+    expect(desktopBridgeMock.resolveDroppedFilePaths).toHaveBeenCalledWith([hiddenFile]);
+    await waitFor(() => expect(liteCutClientMock.linkAssets).toHaveBeenCalledWith({
+      paths: ["E:\\captures\\hidden.mp4"],
       projectId: 7,
     }));
   });
