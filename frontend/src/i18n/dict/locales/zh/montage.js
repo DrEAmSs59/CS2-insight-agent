@@ -306,6 +306,7 @@ export default {
   "montage.toastAddedBatch": "已将 {n} 条素材加入中间编排时间线",
   "montage.toastAllBatchAlready": "所选素材已在编排时间线中",
   "montage.exportErrorGeneric": "导出失败，请稍后重试。",
+  "montage.err.commandLineTooLong": "当前项目中的片段或声音太多，超出了 Windows 一次处理的限制。请把项目拆成两部分分别导出，再将两段成片合并。",
   "montage.exportErrorNoClips": "请先从左侧素材库加入至少一个片段。",
   "montage.err.projectNotFound": "合辑草稿不存在或已被删除。",
   "montage.err.clipNotFound": "素材库中找不到片段 #{id}，请刷新列表后重试。",

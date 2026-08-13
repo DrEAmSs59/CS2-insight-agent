@@ -8,8 +8,11 @@ import subprocess
 from pathlib import Path
 from typing import Any, Iterable
 
-from ...ffmpeg_process import process_error_tail, run_process_capture
+from ...ffmpeg_process import ensure_windows_command_length, process_error_tail, run_process_capture
 from ...video_composer import MontageComposerError, ffprobe_streams, resolve_ffprobe_binary, validate_output_path
+from .export_plan import LiteCutExportPlan
+from .graph_builders import build_audio_mix_graph
+from .timeline import _resolve_audio_clip_paths
 
 
 def ensure_ffmpeg_runnable(ffmpeg_bin: Path) -> None:
@@ -109,6 +112,82 @@ def ensure_output_space(output_path: Path, required_bytes: int) -> None:
             required_gb=f"{required_bytes / 1024**3:.1f}",
             free_gb=f"{free / 1024**3:.1f}",
         )
+
+
+def ensure_lite_cut_audio_command_length(
+    *,
+    ffmpeg_bin: Path,
+    export_plan: LiteCutExportPlan,
+    clip_path_by_id: dict[int, Path],
+    output_path: Path,
+) -> int | None:
+    """Preflight LiteCut's largest late-stage command without reading media.
+
+    Audio mixing adds one input and one filter branch per timeline audio event,
+    which is the usual source of WinError 206. Use conservative placeholder
+    paths for the private work directory and encoder-attempt output so an
+    oversized project is rejected before its video clips are normalized.
+    """
+
+    audio_clips = _resolve_audio_clip_paths(list(export_plan.audio_events), clip_path_by_id)
+    resolved: list[tuple[dict[str, Any], Path]] = []
+    for clip in audio_clips:
+        raw_path = str(clip.get("file_path") or "").strip()
+        if raw_path:
+            resolved.append((clip, Path(raw_path).expanduser().resolve(strict=False)))
+    if not resolved:
+        return None
+
+    filter_complex = build_audio_mix_graph(
+        has_base_audio=False,
+        audio_clips=[clip for clip, _path in resolved],
+        master_volume=export_plan.master_volume,
+    )
+    if not filter_complex:
+        return None
+
+    # tempfile's random token is currently eight characters. Use a longer
+    # conservative token so preflight cannot underestimate these two paths if
+    # that implementation detail changes later.
+    work_dir = output_path.parent / "cs2_lite_cut_1234567890123456"
+    attempt_output = output_path.with_name(
+        f".{output_path.stem}.encoder-attempt-1234567890123456{output_path.suffix}",
+    )
+    command = [
+        str(ffmpeg_bin),
+        "-y",
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-i",
+        str(work_dir / "visual_base.mp4"),
+    ]
+    for _clip, path in resolved:
+        command.extend(["-i", str(path)])
+    command.extend(
+        [
+            "-filter_complex",
+            filter_complex,
+            "-map",
+            "0:v:0",
+            "-map",
+            "[mixa]",
+            "-c:v",
+            "copy",
+            "-c:a",
+            "aac",
+            "-b:a",
+            "192k",
+            "-ar",
+            "48000",
+            "-ac",
+            "2",
+            "-t",
+            "999999.999999",
+            str(attempt_output),
+        ],
+    )
+    return ensure_windows_command_length(command)
 
 
 def validate_export_output(ffmpeg_bin: Path, output_path: Path) -> None:

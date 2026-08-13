@@ -118,6 +118,24 @@ class TestBgmFilter(unittest.TestCase):
         self.assertIn("atrim=0:120.500000", s)
 
 
+class TestFfmpegCommandLengthGuard(unittest.TestCase):
+    def test_montage_runner_checks_before_starting_ffmpeg(self):
+        command = ["ffmpeg.exe", "-version"]
+        with (
+            patch(
+                "app.ffmpeg_process.ensure_windows_command_length",
+                side_effect=MontageComposerError("MONTAGE_COMMAND_LINE_TOO_LONG"),
+            ) as guard,
+            patch("app.ffmpeg_process.subprocess.Popen") as popen,
+        ):
+            with self.assertRaises(MontageComposerError) as caught:
+                _run_ffmpeg_capture(command, timeout=1, stage="test")
+
+        self.assertEqual(caught.exception.code, "MONTAGE_COMMAND_LINE_TOO_LONG")
+        guard.assert_called_once_with(command)
+        popen.assert_not_called()
+
+
 class TestProbeVideoSummary(unittest.TestCase):
     def test_ffprobe_requests_average_rate_and_frame_count(self):
         with patch("app.video_composer._run_json", return_value={}) as run_json:

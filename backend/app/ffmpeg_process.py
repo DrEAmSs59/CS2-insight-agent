@@ -10,6 +10,8 @@ thread.  Always capture bytes and decode them here instead.
 from __future__ import annotations
 
 import locale
+import logging
+import os
 import re
 import subprocess
 import threading
@@ -19,11 +21,61 @@ from contextvars import copy_context
 from pathlib import Path
 from typing import Any
 
+from .montage_exceptions import MontageComposerError
+from .video_export_log import export_event
 from .video_export_log import export_progress as log_video_export_progress
 
 
 _MAX_CAPTURE_BYTES = 4 * 1024 * 1024
 _FRAME_PROGRESS_RE = re.compile(rb"Frame:\s*(\d+)\s*/\s*(\d+)")
+WINDOWS_COMMAND_LINE_SAFE_LIMIT = 28_000
+
+logger = logging.getLogger(__name__)
+
+
+def windows_command_line_length(command: Sequence[str]) -> int:
+    """Return the CreateProcess command-line length in UTF-16 code units."""
+
+    rendered = subprocess.list2cmdline([str(part) for part in command])
+    # CreateProcessW measures the command line in UTF-16 code units. Include
+    # the terminating NUL so the diagnostic can be compared with its limit.
+    return len(rendered.encode("utf-16-le")) // 2 + 1
+
+
+def ensure_windows_command_length(
+    command: Sequence[str],
+    *,
+    safe_limit: int = WINDOWS_COMMAND_LINE_SAFE_LIMIT,
+    is_windows: bool | None = None,
+) -> int:
+    """Reject commands that are too close to CreateProcessW's hard limit.
+
+    The command is not modified. A conservative margin below Windows' 32,767
+    UTF-16-unit ceiling turns WinError 206 into a stable, actionable export
+    error before FFmpeg starts.
+    """
+
+    command_length = windows_command_line_length(command)
+    if (os.name == "nt" if is_windows is None else bool(is_windows)) and command_length > int(safe_limit):
+        logger.warning(
+            "FFmpeg command rejected before launch: command_line_chars=%d safe_limit=%d args=%d",
+            command_length,
+            safe_limit,
+            len(command),
+        )
+        export_event(
+            "command_line_rejected",
+            level=logging.ERROR,
+            command_line_chars=command_length,
+            safe_limit=int(safe_limit),
+            argument_count=len(command),
+        )
+        raise MontageComposerError(
+            "MONTAGE_COMMAND_LINE_TOO_LONG",
+            command_line_chars=command_length,
+            safe_limit=int(safe_limit),
+        )
+    return command_length
 
 
 def decode_process_output(value: bytes | str | None) -> str:
@@ -79,6 +131,7 @@ def run_process_capture(
     **kwargs: Any,
 ) -> subprocess.CompletedProcess[str]:
     """Run a process with byte pipes and return safely decoded text output."""
+    ensure_windows_command_length(command)
     if stall_timeout is not None or cancel_event is not None:
         return _run_process_capture_with_stall_detection(
             command,

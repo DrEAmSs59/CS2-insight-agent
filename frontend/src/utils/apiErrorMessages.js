@@ -32,6 +32,7 @@ export const API_ERROR_I18N_KEYS = {
   CONFIG_NO_MANIFEST: "api.err.configNoManifest",
   CONFIG_OPEN_DIR_FAIL: "app.openDirManual",
   MONTAGE_EXPORT_FAILED: "montage.exportErrorGeneric",
+  MONTAGE_COMMAND_LINE_TOO_LONG: "montage.err.commandLineTooLong",
   MONTAGE_NO_CLIPS: "montage.exportErrorNoClips",
   MONTAGE_PROJECT_NOT_FOUND: "montage.err.projectNotFound",
   MONTAGE_CLIP_NOT_FOUND: "montage.err.clipNotFound",

@@ -306,6 +306,7 @@ export default {
   "montage.toastAddedBatch": "Added {n} {n, plural, one=clip, other=clips} to the timeline",
   "montage.toastAllBatchAlready": "All selected clips are already on the timeline",
   "montage.exportErrorGeneric": "Export failed, please try again.",
+  "montage.err.commandLineTooLong": "This project has too many clips or audio events for one Windows export. Split it into two exports, then combine the two finished videos.",
   "montage.exportErrorNoClips": "Please add at least one clip from the asset panel.",
   "montage.err.projectNotFound": "Montage draft not found or was deleted.",
   "montage.err.clipNotFound": "Clip #{id} was not found in the library — refresh the list and try again.",

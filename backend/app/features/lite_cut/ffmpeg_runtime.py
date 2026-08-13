@@ -10,7 +10,7 @@ import time
 from contextvars import copy_context
 from typing import Any, Callable
 
-from ...ffmpeg_process import command_for_log, decode_process_output
+from ...ffmpeg_process import command_for_log, decode_process_output, ensure_windows_command_length
 from ...video_export_log import export_event, export_progress as log_video_export_progress
 from ...video_composer import MontageComposerError
 
@@ -79,6 +79,7 @@ def run_ffmpeg_process(
     translate ``Frame: current/total`` updates into the export progress range.
     """
 
+    ensure_windows_command_length(cmd)
     started = time.monotonic()
     export_event(
         "stage_started",

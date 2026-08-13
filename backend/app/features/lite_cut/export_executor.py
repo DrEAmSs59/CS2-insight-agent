@@ -16,6 +16,7 @@ from .export_plan import build_lite_cut_export_plan
 from .export_preflight import (
     ensure_ffmpeg_runnable,
     ensure_files_readable,
+    ensure_lite_cut_audio_command_length,
     ensure_output_space,
     estimate_required_space,
     project_file_paths,
@@ -87,6 +88,13 @@ async def prepare_export(
         await asyncio.to_thread(ensure_ffmpeg_runnable, ffmpeg_bin)
         source_paths = project_file_paths(project_body, clip_paths.values())
         source_bytes = await asyncio.to_thread(ensure_files_readable, source_paths)
+        await asyncio.to_thread(
+            ensure_lite_cut_audio_command_length,
+            ffmpeg_bin=ffmpeg_bin,
+            export_plan=export_plan,
+            clip_path_by_id=clip_paths,
+            output_path=output_path,
+        )
         required_bytes = estimate_required_space(project_body, source_bytes)
         await asyncio.to_thread(ensure_output_space, output_path, required_bytes)
     except MontageComposerError as exc:
