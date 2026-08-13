@@ -89,11 +89,11 @@ async fn resolve_dropped_file_paths(
 ) -> Result<Vec<String>, String> {
     #[cfg(windows)]
     {
-        return tauri::async_runtime::spawn_blocking(move || {
+        tauri::async_runtime::spawn_blocking(move || {
             resolve_dropped_file_paths_windows(&window, &token)
         })
         .await
-        .map_err(|error| format!("file path resolver task failed: {error}"))?;
+        .map_err(|error| format!("file path resolver task failed: {error}"))?
     }
 
     #[cfg(not(windows))]
