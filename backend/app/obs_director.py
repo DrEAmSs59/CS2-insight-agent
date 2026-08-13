@@ -1883,9 +1883,69 @@ def _parse_record_inject_console_lines(raw: str) -> tuple[str, ...]:
     return tuple(lines)
 
 
-# 依赖"已第一人称观战某玩家"才生效的 cvar：warmup 阶段注入无效，
-# 必须在每片段 spec_player 锁定后再注入一次（参考 tv_listen_voice_indices 处理）。
-_POST_SPEC_CVAR_NAMES: frozenset[str] = frozenset({"cl_demo_predict"})
+# 依赖"已第一人称观战某玩家"才可靠生效的控制台项：warmup 阶段仍会注入，
+# 并在每片段 spec_player 锁定后按原顺序补注入一次。这里必须使用精确白名单，
+# 不能把所有 per_user cvar 都重复执行（其中还包含灵敏度、输入方式等非录制外观项）。
+_POST_SPEC_COMMAND_NAMES: frozenset[str] = frozenset({
+    # TrueView is initialized against the active spectator target.
+    "cl_demo_predict",
+    # Crosshair and scoped/ironsight reticles.
+    "apply_crosshair_code",
+    "cl_crosshair_drawoutline",
+    "cl_crosshair_dynamic_maxdist_splitratio",
+    "cl_crosshair_dynamic_splitalpha_innermod",
+    "cl_crosshair_dynamic_splitalpha_outermod",
+    "cl_crosshair_dynamic_splitdist",
+    "cl_crosshair_outlinethickness",
+    "cl_crosshair_recoil",
+    "cl_crosshair_sniper_width",
+    "cl_crosshair_t",
+    "cl_crosshairalpha",
+    "cl_crosshaircolor",
+    "cl_crosshaircolor_b",
+    "cl_crosshaircolor_g",
+    "cl_crosshaircolor_r",
+    "cl_crosshairdot",
+    "cl_crosshairgap",
+    "cl_crosshairgap_useweaponvalue",
+    "cl_crosshairsize",
+    "cl_crosshairstyle",
+    "cl_crosshairthickness",
+    "cl_crosshairusealpha",
+    "cl_fixedcrosshairgap",
+    "cl_ironsight_dot_scale",
+    "cl_ironsight_usecrosshaircolor",
+    # Grenade crosshair settings are also stored per player slot.
+    "cl_grenadecrosshair_decoy",
+    "cl_grenadecrosshair_explosive",
+    "cl_grenadecrosshair_fire",
+    "cl_grenadecrosshair_flash",
+    "cl_grenadecrosshair_keepusercrosshair",
+    "cl_grenadecrosshair_smoke",
+    "cl_grenadecrosshairdelay_decoy",
+    "cl_grenadecrosshairdelay_explosive",
+    "cl_grenadecrosshairdelay_fire",
+    "cl_grenadecrosshairdelay_flash",
+    "cl_grenadecrosshairdelay_smoke",
+    # Viewmodel and deterministic handedness commands. Deliberately exclude
+    # the toggling `switchhands` command so perspective changes cannot flip it.
+    "cl_prefer_lefthanded",
+    "switchhandsleft",
+    "switchhandsright",
+    "viewmodel_fov",
+    "viewmodel_offset_x",
+    "viewmodel_offset_y",
+    "viewmodel_offset_z",
+    "viewmodel_presetpos",
+    # Player-slot HUD and first-person behavior overrides.
+    "cl_debounce_zoom",
+    "cl_showloadout",
+    "cl_silencer_mode",
+    "cl_sniper_auto_rezoom",
+    "cl_teamid_overhead_maxdist",
+    "cl_teamid_overhead_maxdist_spec",
+    "hud_showtargetid",
+})
 _VOICE_CVAR_NAMES: frozenset[str] = frozenset({
     "voice_modenable",
     "snd_voipvolume",
@@ -1895,14 +1955,16 @@ _VOICE_CVAR_NAMES: frozenset[str] = frozenset({
 
 
 def _filter_post_spec_console_lines(lines) -> list[str]:
-    """从已解析的 record_inject 行中挑出命中 _POST_SPEC_CVAR_NAMES 的行（按首词即 cvar 名匹配，大小写不敏感）。"""
+    """从本次实际 warmup 命令中挑出需在 spec_player 后补注入的白名单项。"""
     out: list[str] = []
     for ln in lines:
         s = str(ln).strip()
         if not s:
             continue
-        cvar = s.split()[0].lower()
-        if cvar in _POST_SPEC_CVAR_NAMES:
+        # Allow a conventional trailing semicolon on no-argument commands such
+        # as `switchhandsleft;` while retaining the original command text.
+        command_name = s.split(maxsplit=1)[0].rstrip(";").lower()
+        if command_name in _POST_SPEC_COMMAND_NAMES:
             out.append(s)
     return out
 
@@ -3952,12 +4014,13 @@ class OBSDirector:
                 # dynamic audience mask; non-POV recording only mutes global volume.
                 # In both cases the per-segment backend mask injector stays disabled.
                 _warmup_inject_ok = False
+                effective_warmup_cmds: list[str] = []
                 if warmup is not None:
-                    warmup_cmds = self._recording_warmup_console_lines(
+                    effective_warmup_cmds = self._recording_warmup_console_lines(
                         warmup,
                         pov_enabled=self._pov_enabled,
                     )
-                    warmup_cmds = [*warmup_cmds, *_V3_DEMO_KEY_BINDINGS]
+                    effective_warmup_cmds = [*effective_warmup_cmds, *_V3_DEMO_KEY_BINDINGS]
                     if self._pov_enabled:
                         pov_cmds = [
                             *POV_CORE_FORCED_COMMANDS,
@@ -3967,16 +4030,19 @@ class OBSDirector:
                                 voice_disabled=warmup.pov_voice_disabled,
                             ),
                         ]
-                        warmup_cmds = [*warmup_cmds, *pov_cmds]
-                    if warmup_cmds:
-                        logger.info("[RecordingV3] applying warmup console commands: %d", len(warmup_cmds))
+                        effective_warmup_cmds = [*effective_warmup_cmds, *pov_cmds]
+                    if effective_warmup_cmds:
+                        logger.info(
+                            "[RecordingV3] applying warmup console commands: %d",
+                            len(effective_warmup_cmds),
+                        )
                         if self._pov_enabled:
                             logger.info("[RecordingV3][POV] applying POV HUD commands after warmup")
                             for _cmd in pov_cmds:
                                 logger.info("[RecordingV3][POV] inject command: %s", _cmd)
                         try:
                             _warmup_inject_ok = bool(
-                                await asyncio.to_thread(inject_console_sequence, warmup_cmds)
+                                await asyncio.to_thread(inject_console_sequence, effective_warmup_cmds)
                             )
                             if not _warmup_inject_ok:
                                 logger.warning("[RecordingV3] warmup console injection returned false")
@@ -3985,11 +4051,11 @@ class OBSDirector:
                 else:
                     # POV cannot be enabled without a warmup object. The non-POV
                     # default intentionally mutes only the global voice volume.
-                    default_warmup_cmds = [*_V3_DEMO_KEY_BINDINGS, "snd_voipvolume 0"]
+                    effective_warmup_cmds = [*_V3_DEMO_KEY_BINDINGS, "snd_voipvolume 0"]
                     try:
                         _warmup_inject_ok = bool(await asyncio.to_thread(
                             inject_console_sequence,
-                            default_warmup_cmds,
+                            effective_warmup_cmds,
                         ))
                         if not _warmup_inject_ok:
                             logger.warning("[RecordingV3] default mute warmup injection returned false")
@@ -4041,7 +4107,10 @@ class OBSDirector:
                     continue
 
                 # ── Execute each DTO through build_plan + RecordingExecutor ───
-                post_spec_lines = _filter_post_spec_console_lines(self._extra_warmup_console_lines)
+                # Filter the exact command batch that was applied above. This
+                # includes built-in recording options, extra warmup console lines,
+                # and final POV overrides, preserving their effective order.
+                post_spec_lines = _filter_post_spec_console_lines(effective_warmup_cmds)
                 executor = RecordingExecutor(
                     obs_client,
                     abort_event=self._abort_event,

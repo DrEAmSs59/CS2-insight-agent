@@ -15,6 +15,7 @@ from .replay_cache_storage import (
     replay_cache_namespace_root,
     replay_cache_namespace_roots,
 )
+from .replay_cache_owners import invalidate_owner_index, register_replay_cache_entry
 
 logger = logging.getLogger(__name__)
 
@@ -98,9 +99,13 @@ def _normalized_path(path: str) -> str:
     return os.path.normcase(os.path.abspath(os.path.expanduser(str(path))))
 
 
-def remove_frames_for_demo(demo_path: str) -> dict[str, int]:
-    """Remove legacy per-round payloads belonging to one Demo."""
-    wanted = _normalized_path(demo_path)
+def remove_frames_for_demos(
+    demo_paths: list[str],
+    *,
+    register_survivors: bool = False,
+) -> dict[str, int]:
+    """Remove several Demo owners while inflating legacy payloads only once."""
+    wanted = {_normalized_path(path) for path in demo_paths}
     removed_files = 0
     removed_bytes = 0
     seen: set[str] = set()
@@ -117,7 +122,16 @@ def remove_frames_for_demo(demo_path: str) -> dict[str, int]:
                     payload = json.load(handle)
                 fingerprint = payload.get("demo_fingerprint") if isinstance(payload, dict) else None
                 cached_path = fingerprint.get("path") if isinstance(fingerprint, dict) else None
-                if not cached_path or _normalized_path(str(cached_path)) != wanted:
+                if not cached_path:
+                    continue
+                if _normalized_path(str(cached_path)) not in wanted:
+                    if register_survivors:
+                        register_replay_cache_entry(
+                            "frames",
+                            str(cached_path),
+                            path.name.removesuffix(".json.gz"),
+                            (path,),
+                        )
                     continue
                 size = int(path.stat().st_size)
                 path.unlink(missing_ok=True)
@@ -126,6 +140,11 @@ def remove_frames_for_demo(demo_path: str) -> dict[str, int]:
             except Exception as exc:  # noqa: BLE001 - cleanup is best effort
                 logger.warning("replay frames cache cleanup failed for %s: %s", path, exc)
     return {"removed_files": removed_files, "removed_bytes": removed_bytes}
+
+
+def remove_frames_for_demo(demo_path: str) -> dict[str, int]:
+    """Remove legacy per-round payloads belonging to one Demo."""
+    return remove_frames_for_demos([demo_path])
 
 
 def save_frames(
@@ -165,6 +184,22 @@ def save_frames(
         with gzip.open(tmp, "wt", encoding="utf-8") as handle:
             json.dump(payload, handle, ensure_ascii=False, separators=(",", ":"))
         tmp.replace(path)
+        fingerprint_path = (
+            demo_fingerprint_meta.get("path")
+            if isinstance(demo_fingerprint_meta, dict)
+            else None
+        )
+        if fingerprint_path:
+            try:
+                register_replay_cache_entry(
+                    "frames",
+                    str(fingerprint_path),
+                    cache_key,
+                    (path,),
+                )
+            except OSError as exc:
+                invalidate_owner_index()
+                logger.warning("replay frames owner index update failed: %s", exc)
         logger.info(
             "replay frames cache saved key=%s frames=%s bytes=%s",
             cache_key,

@@ -25,6 +25,37 @@ def _demo_roster_source_fingerprint(demo_path: str) -> tuple[str, int | None, in
         return normalized_path, None, None
 
 
+async def persist_ingested_demo(
+    demo_id: int,
+    demo_path: str,
+    *,
+    players: list[dict[str, Any]],
+    meta: dict[str, Any],
+    source: str | None,
+    parsed_at: str,
+) -> dict[str, Any]:
+    """Persist metadata, roster rows/cache, and status in one transaction."""
+    normalized_path, file_size, mtime_ns = _demo_roster_source_fingerprint(demo_path)
+    await demo_db.persist_demo_ingest(
+        demo_id,
+        demo_path,
+        meta=meta,
+        source=source,
+        players=players,
+        roster_demo_path=normalized_path,
+        roster_cache_version=_DEMO_ROSTER_CACHE_VERSION,
+        source_file_size=file_size,
+        source_mtime_ns=mtime_ns,
+        parsed_at=parsed_at,
+    )
+    return {
+        "indexed": True,
+        "player_count": len(players),
+        "players": players,
+        "error": None,
+    }
+
+
 async def index_demo_player_stats(
     demo_id: int,
     demo_path: str,

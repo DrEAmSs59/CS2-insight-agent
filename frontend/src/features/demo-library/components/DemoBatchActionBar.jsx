@@ -17,11 +17,14 @@ export default function DemoBatchActionBar({
     "rounded-md border border-red-500/35 bg-red-500/10 px-2.5 py-1.5 text-[12px] font-semibold text-cs2-red-on-surface hover:border-red-500/55";
 
   return (
-    <div className="flex shrink-0 flex-wrap items-center gap-2 border-t border-cs2-border bg-cs2-bg-card/90 px-3 py-2 backdrop-blur-[1px]">
-      <span className="text-[12px] font-semibold tabular-nums text-cs2-text-secondary">
+    <div
+      data-testid="demo-library-selection-bar"
+      className="flex max-w-full shrink-0 flex-wrap items-center gap-1 rounded-lg border border-cs2-accent/30 bg-cs2-accent/5 p-1"
+    >
+      <span className="whitespace-nowrap px-1.5 text-[12px] font-semibold tabular-nums text-cs2-accent">
         {t("library.batchSelected", { count })}
       </span>
-      <div className="ml-auto flex flex-wrap items-center justify-end gap-1.5">
+      <div className="flex flex-wrap items-center justify-end gap-1">
         <button type="button" className={btn} onClick={() => void onLoadSelected()}>
           {t("library.batchLoad")}
         </button>

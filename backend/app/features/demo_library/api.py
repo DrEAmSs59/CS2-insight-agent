@@ -30,7 +30,7 @@ from ..demo_analysis.player_matching import (
 )
 from ..demo_analysis.workflows import run_library_demo_analyze
 from .ingestion import infer_demo_source
-from .roster import get_or_index_demo_roster, index_demo_player_stats
+from .roster import get_or_index_demo_roster, index_demo_player_stats, persist_ingested_demo
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["demo-library"])
@@ -742,15 +742,17 @@ async def batch_ingest_demos(body: BatchIngestBody):
             failed.append({"demo_id": demo_id, "filename": row.get("filename", ""), "error": str(error)})
             continue
         try:
+            refined_source = str(row.get("source") or "") or None
             if isinstance(meta, dict):
                 refined_source = infer_demo_source(Path(dem_path).name, server_name=meta.get("server_name"))
-                await demo_db.update_lightweight_meta(dem_path, meta, source=refined_source)
-            await index_demo_player_stats(
+            await persist_ingested_demo(
                 demo_id,
                 dem_path,
-                precomputed_players=players or [],
+                players=players or [],
+                meta=meta if isinstance(meta, dict) else {},
+                source=refined_source,
+                parsed_at=utc_now_iso(),
             )
-            await demo_db.update_status(dem_path, "loaded", error_msg=None, parsed_at=utc_now_iso())
             ingested += 1
         except Exception as exc:  # noqa: BLE001
             logger.exception("Ingest persist failed demo_id=%s path=%s", demo_id, dem_path)

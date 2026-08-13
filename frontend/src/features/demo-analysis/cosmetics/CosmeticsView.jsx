@@ -3,7 +3,8 @@
  *  Licensed under the PolyForm Noncommercial License 1.0.0. See LICENSE in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   ArrowRight,
   Check,
@@ -30,18 +31,74 @@ import { isCustomizable, itemsForTeam, mergeLoadoutWithEvidence, slotKey, sortCo
 import SkinReplacementPicker from "./SkinReplacementPicker.jsx";
 import { saveCustomSkinPlan, loadCustomSkinPlan } from "./saveCustomSkinPlan.js";
 
+const SKIN_CORE_FORCED_CUSTOM_NAME = "CS2 INSIGHT AGENT";
+
+function sameCosmeticIdentity(item, replacement) {
+  if (!item || !replacement) return false;
+  const itemType = String(item?.type || "");
+  const replacementType = String(replacement?.type || "");
+  if (itemType && replacementType && itemType !== replacementType) return false;
+  const itemCatalog = Number(item?.catalog_id);
+  const replacementCatalog = Number(replacement?.catalog_id);
+  const catalogMatches = Number.isFinite(replacementCatalog) && replacementCatalog > 0
+    && Number.isFinite(itemCatalog) && itemCatalog > 0
+    && itemCatalog === replacementCatalog;
+  const definitionMatches = Number(item?.def_index) === Number(replacement?.def_index)
+    && (Number(item?.paint_index) || 0) === (Number(replacement?.paint_index) || 0);
+  return catalogMatches || definitionMatches;
+}
+
+function originalCustomName(item, snapshot, replacement = null) {
+  if (!snapshot) return typeof item?.custom_name === "string" ? item.custom_name : "";
+  if (Object.prototype.hasOwnProperty.call(snapshot, "custom_name")) {
+    return typeof snapshot.custom_name === "string" ? snapshot.custom_name : "";
+  }
+  const current = typeof item?.custom_name === "string" ? item.custom_name : "";
+  const isAppliedCoreMarker = current.trim().toUpperCase() === SKIN_CORE_FORCED_CUSTOM_NAME
+    && sameCosmeticIdentity(item, replacement);
+  return isAppliedCoreMarker ? "" : current;
+}
+
 function planRowSlotKeys(row, inventory = []) {
   const key = String(row?.slot_key || "").trim();
   if (!key) return [];
-  if (/^(?:t|ct):/i.test(key)) return [key.toLowerCase()];
+  const scopedTeam = key.match(/^(t|ct):/i)?.[1]?.toLowerCase() || null;
+  const baseKey = scopedTeam ? key.replace(/^(?:t|ct):/i, "") : key;
+  const keys = [];
+  if (scopedTeam) keys.push(key.toLowerCase());
   const originalTeams = Array.isArray(row?.original?.observed_teams)
     ? row.original.observed_teams
     : [];
-  const inventoryItem = inventory.find((item) => slotKey(item) === key);
+  const inventoryItem = inventory.find((item) => slotKey(item) === baseKey);
   const observed = originalTeams.length ? originalTeams : (inventoryItem?.observed_teams || []);
   const teams = [...new Set(observed.map((team) => String(team || "").toLowerCase()))]
     .filter((team) => team === "t" || team === "ct");
-  return teams.length ? teams.map((team) => `${team}:${key}`) : [key];
+  if (!scopedTeam) keys.push(...(teams.length ? teams.map((team) => `${team}:${key}`) : [key]));
+
+  // A default glove starts as a placeholder (5028/5029), but skin-core
+  // materializes the replacement as a new glove entity. After re-analysis the
+  // inventory therefore has a different slot key even though the persisted
+  // plan still correctly points at the original placeholder. Alias that plan
+  // onto the observed replacement entity for the same side so the card keeps
+  // rendering "Default T/CT Gloves → replacement".
+  const original = row?.original;
+  const replacement = row?.replacement;
+  const originalId = Number(original?.item_id);
+  const isDefaultGloveSlot = String(original?.type || "") === "glove"
+    && !(Number.isFinite(originalId) && originalId > 0)
+    && (Boolean(original?.is_placeholder) || /^placeholder:/i.test(baseKey));
+  if (isDefaultGloveSlot && replacement && typeof replacement === "object") {
+    const targetTeams = scopedTeam ? [scopedTeam] : teams;
+    for (const item of inventory) {
+      if (String(item?.type || "") !== "glove") continue;
+      const observedTeams = (Array.isArray(item?.observed_teams) ? item.observed_teams : [])
+        .map((team) => String(team || "").toLowerCase());
+      const team = targetTeams.find((candidate) => observedTeams.includes(candidate));
+      if (!team) continue;
+      if (sameCosmeticIdentity(item, replacement)) keys.push(teamSlotKey(item, team));
+    }
+  }
+  return [...new Set(keys)];
 }
 
 function replacementsFromPlan(plan, inventory = []) {
@@ -96,14 +153,14 @@ function cosmeticPreview(item, replacement) {
 }
 
 /** Restore demo-original look after clearing a replacement (keeps live stickers). */
-function restoreOriginalVisual(item, snapshot) {
+function restoreOriginalVisual(item, snapshot, replacement = null) {
   if (!snapshot) return item;
   return {
     ...item,
     ...snapshot,
     image_url: snapshot.image_url || item?.image_url,
     stickers: item?.stickers,
-    custom_name: item?.custom_name || snapshot.custom_name,
+    custom_name: originalCustomName(item, snapshot, replacement),
     item_id: item?.item_id,
   };
 }
@@ -124,7 +181,9 @@ function snapshotOriginalItem(item, team = null) {
     alt_name: item?.alt_name,
     image_url: item?.image_url,
     rarity: item?.rarity,
-    custom_name: item?.custom_name,
+    // Persist an explicit empty string. JSON drops `undefined`, which made old
+    // plans unable to distinguish "the original had no tag" from "unknown".
+    custom_name: typeof item?.custom_name === "string" ? item.custom_name : "",
     finish_known: item?.finish_known,
     is_base: item?.is_base,
     is_placeholder: item?.is_placeholder,
@@ -202,7 +261,10 @@ function playerName(player) {
 function isVisibleCosmeticEvidence(item) {
   const type = String(item?.type || "").toLowerCase();
   const model = String(item?.model || "").toLowerCase();
-  return type !== "musickit" && model !== "c4" && Number(item?.def_index) !== 49;
+  return type !== "agent"
+    && type !== "musickit"
+    && model !== "c4"
+    && Number(item?.def_index) !== 49;
 }
 
 function localized(item, field, locale) {
@@ -215,6 +277,108 @@ function localized(item, field, locale) {
 
 function displayName(item, locale) {
   return localized(item, "name", locale) || String(item?.model || "CS2");
+}
+
+function rewriteOperationRows(replacements, originals, inventory, locale) {
+  return Object.entries(replacements || {}).flatMap(([key, replacement]) => {
+    if (!replacement || typeof replacement !== "object") return [];
+    const baseKey = String(key).replace(/^(?:t|ct):/i, "");
+    const inventoryItem = (inventory || []).find((item) => slotKey(item) === baseKey) || null;
+    const original = originals?.[key] || originals?.[baseKey] || inventoryItem;
+    const target = replacement.restore ? original : replacement;
+    const from = formatCraftPipeName(original || inventoryItem, locale)
+      || displayName(original || inventoryItem, locale);
+    const to = formatCraftPipeName(target, locale) || displayName(target, locale);
+    return from && to ? [{ key, from, to }] : [];
+  });
+}
+
+function SkinRewriteOverlay({ player, operations }) {
+  const t = useT();
+  const rootRef = useRef(null);
+  const [operationIndex, setOperationIndex] = useState(0);
+  const rows = Array.isArray(operations) ? operations : [];
+  const current = rows[operationIndex % Math.max(rows.length, 1)] || null;
+
+  useEffect(() => {
+    rootRef.current?.focus();
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const blockKeyboardNavigation = (event) => {
+      if (["Tab", "Enter", " ", "Escape"].includes(event.key)) {
+        event.preventDefault();
+        event.stopPropagation();
+      }
+    };
+    window.addEventListener("keydown", blockKeyboardNavigation, true);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", blockKeyboardNavigation, true);
+    };
+  }, []);
+
+  useEffect(() => {
+    setOperationIndex(0);
+    if (rows.length <= 1) return undefined;
+    const interval = window.setInterval(() => {
+      setOperationIndex((value) => (value + 1) % rows.length);
+    }, 2600);
+    return () => window.clearInterval(interval);
+  }, [rows.length]);
+
+  if (typeof document === "undefined") return null;
+  return createPortal(
+    <div
+      ref={rootRef}
+      tabIndex={-1}
+      role="alertdialog"
+      aria-modal="true"
+      aria-busy="true"
+      aria-labelledby="skin-rewrite-progress-title"
+      data-testid="skin-rewrite-overlay"
+      className="fixed inset-0 z-[250] flex items-center justify-center bg-black/75 px-4 py-8 backdrop-blur-md outline-none"
+      onContextMenu={(event) => event.preventDefault()}
+    >
+      <div className="w-full max-w-md overflow-hidden rounded-2xl border border-cs2-border bg-cs2-bg-card shadow-2xl">
+        <div className="flex items-center gap-3 border-b border-cs2-border px-5 py-4">
+          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-cs2-accent-soft text-cs2-accent">
+            <Loader2 className="h-5 w-5 animate-spin" aria-hidden />
+          </span>
+          <div className="min-w-0">
+            <h2 id="skin-rewrite-progress-title" className="text-[14px] font-black text-cs2-text-primary">
+              {t("analysis.cosmetics.rewriteProgressTitle")}
+            </h2>
+            <p className="mt-0.5 truncate text-[10px] text-cs2-text-muted">
+              {t("analysis.cosmetics.rewriteProgressPlayer", { player, count: rows.length })}
+            </p>
+          </div>
+        </div>
+        <div className="space-y-4 px-5 py-5">
+          <div data-testid="skin-rewrite-operation" className="flex min-h-10 flex-wrap items-center justify-center gap-x-1.5 gap-y-1 text-center text-[12px] font-semibold leading-relaxed text-cs2-text-primary">
+            {current ? (
+              <>
+                <span>{t("analysis.cosmetics.rewriteProgressPrefix")}</span>
+                <span>{current.from}</span>
+                <ArrowRight data-testid="skin-rewrite-arrow" className="h-3.5 w-3.5 shrink-0 text-cs2-accent" aria-hidden />
+                <span>{current.to}</span>
+              </>
+            ) : t("analysis.cosmetics.savingPlan")}
+          </div>
+          <div
+            role="progressbar"
+            aria-label={t("analysis.cosmetics.rewriteProgressTitle")}
+            className="h-2 overflow-hidden rounded-full bg-cs2-bg-input"
+          >
+            <div className="h-full w-[40%] animate-[indeterminate_1.5s_ease-in-out_infinite] rounded-full bg-gradient-to-r from-cs2-accent to-cs2-accent-light" />
+          </div>
+          <p className="text-center text-[10px] leading-relaxed text-cs2-text-muted">
+            {t("analysis.cosmetics.rewriteProgressHint")}
+          </p>
+        </div>
+      </div>
+    </div>,
+    document.body,
+  );
 }
 
 function saveResultOriginalName(row, locale) {
@@ -516,7 +680,7 @@ function CosmeticCard({
           data-cosmetic-rarity-rail
           aria-label={`${t("analysis.cosmetics.rarity")} ${t(`analysis.cosmetics.rarity.${rarityKey}`)}`}
           title={t(`analysis.cosmetics.rarity.${rarityKey}`)}
-          className="absolute left-0 top-1/2 z-[1] h-[60%] w-[3px] -translate-y-1/2 rounded-full"
+          className="absolute bottom-0 left-0 z-[1] h-[3px] w-full"
           style={{ backgroundColor: rarityColor }}
         />
         <CosmeticImage item={item} onlineAssetsEnabled={onlineAssetsEnabled} className="h-full w-full p-2" />
@@ -528,7 +692,7 @@ function CosmeticCard({
           </span>
         ) : null}
       </span>
-      <span data-cosmetic-card-label className="mt-1.5 block min-h-8 min-w-0 overflow-hidden leading-tight">
+      <span data-cosmetic-card-label className="mt-1.5 block min-w-0 overflow-hidden leading-tight">
         <CraftNameLines item={labelSource} locale={locale} rename={rename} compact />
         {replacementLabel ? <span className="mt-0.5 block break-words text-[10px] font-semibold leading-snug text-cs2-accent">{replacementLabel}</span> : null}
       </span>
@@ -557,14 +721,13 @@ function CosmeticsTeamRow({
       {showHeading ? (
         <div
           data-testid={`cosmetics-row-heading-${teamKey}`}
-          className={`flex w-36 items-center justify-between rounded-[10px] px-3 py-2 ${
+          className={`inline-flex items-center rounded-[10px] px-3 py-2 ${
           teamKey === "ct"
             ? "bg-cs2-cyan-surface text-cs2-cyan-on-surface"
             : "bg-cs2-amber-surface text-cs2-amber-on-surface"
         }`}
         >
           <h3 className="text-[11px] font-black uppercase tracking-wide">{t(`analysis.cosmetics.team.${teamKey}`)}</h3>
-          <span className="font-mono text-[10px] font-semibold opacity-75">{items.length}</span>
         </div>
       ) : null}
       {items.length ? (
@@ -573,22 +736,15 @@ function CosmeticsTeamRow({
             const key = teamSlotKey(item, teamKey);
             const replacement = localReplacements?.[key];
             const snapshot = originalBySlot?.[key];
-            if (replacement) return cosmeticPreview(item, replacement);
-            return restoreOriginalVisual(item, snapshot);
+            const originalItem = restoreOriginalVisual(item, snapshot, replacement);
+            return replacement ? cosmeticPreview(originalItem, replacement) : originalItem;
           }).map((item, index) => {
             const key = teamSlotKey(item, teamKey);
             const replacement = localReplacements?.[key] || null;
             const snapshot = originalBySlot?.[key] || null;
-            const visualItem = replacement
-              ? cosmeticPreview(item, replacement)
-              : restoreOriginalVisual(item, snapshot);
-            const labelItem = snapshot
-              ? {
-                  ...snapshot,
-                  custom_name: snapshot.custom_name || item?.custom_name,
-                  item_id: item?.item_id,
-                }
-              : item;
+            const originalItem = restoreOriginalVisual(item, snapshot, replacement);
+            const visualItem = replacement ? cosmeticPreview(originalItem, replacement) : originalItem;
+            const labelItem = snapshot ? originalItem : item;
             return (
             <CosmeticCard
               key={`${teamKey}-${item?.item_id || item?.catalog_id || "item"}-${index}`}
@@ -840,6 +996,10 @@ export default function CosmeticsView({ workspace, selectedPlayer, locale = "zh"
   const browseMode = viewMode === "browse";
   const hasReplacements = Object.keys(localReplacements).length > 0;
   const canSavePlan = Boolean(demoId) && hasReplacements && !saving;
+  const rewriteOperations = useMemo(
+    () => rewriteOperationRows(localReplacements, originalBySlot, inventory, locale),
+    [inventory, localReplacements, locale, originalBySlot],
+  );
 
   const clearOverlays = () => {
     setDetail(null);
@@ -1208,7 +1368,7 @@ export default function CosmeticsView({ workspace, selectedPlayer, locale = "zh"
         <div className="mb-3 flex items-center gap-2 border border-cs2-border bg-cs2-bg-input px-3 py-2 text-[10px] text-cs2-text-muted"><WifiOff className="h-3.5 w-3.5" />{t("analysis.cosmetics.onlineAssetsOff")}</div>
       ) : null}
 
-      <div className="space-y-7" data-testid="cosmetics-team-stack">
+      <div className="space-y-[18px]" data-testid="cosmetics-team-stack">
         {[
           ["ct", ctItems],
           ["t", tItems],
@@ -1362,6 +1522,7 @@ export default function CosmeticsView({ workspace, selectedPlayer, locale = "zh"
           </div>
         ) : null}
       </Modal>
+      {saving ? <SkinRewriteOverlay player={name} operations={rewriteOperations} /> : null}
     </div>
   );
 }

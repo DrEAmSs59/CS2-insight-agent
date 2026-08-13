@@ -16,7 +16,7 @@ vi.mock("../../../i18n/useT.js", () => ({
 }));
 
 describe("DemoPagination", () => {
-  it("renders pagination controls in a standalone elevated tray", () => {
+  it("renders borderless controls for the list's integrated pagination region", () => {
     render(
       <DemoPagination
         libraryPage={1}
@@ -32,9 +32,9 @@ describe("DemoPagination", () => {
     );
 
     const tray = screen.getByTestId("demo-library-pagination-tray");
-    expect(tray.className).toContain("rounded-lg");
-    expect(tray.className).toContain("border-cs2-border");
-    expect(tray.className).toContain("bg-cs2-bg-card");
+    expect(tray.className).not.toContain("rounded-lg");
+    expect(tray.className).not.toContain("border-cs2-border");
+    expect(tray.className).not.toContain("bg-cs2-bg-card");
     expect(tray.className).not.toContain("shadow");
     expect(tray.className).not.toContain("border-t");
     expect(screen.getByText("1/1")).toBeTruthy();

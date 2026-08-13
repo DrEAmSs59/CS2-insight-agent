@@ -27,7 +27,7 @@ export default function UploadDropZone({
     <label
       className={`group flex cursor-pointer flex-col items-center justify-center rounded-lg border border-dashed transition-all ${
         dragOver
-          ? "border-cs2-accent bg-cs2-accent-soft shadow-[inset_0_0_0_1px_rgba(255,140,0,.25)]"
+          ? "border-cs2-accent bg-cs2-accent-soft shadow-[inset_0_0_0_1px_rgba(224,127,10,.25)]"
           : "border-cs2-border bg-cs2-bg-card hover:border-cs2-accent/50 hover:bg-cs2-accent-soft"
       } ${compact ? "px-3 py-3" : "px-4 py-4"}`}
       onDragOver={(e) => {

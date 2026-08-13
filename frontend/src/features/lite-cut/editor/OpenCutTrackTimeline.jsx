@@ -1021,7 +1021,7 @@ export default function OpenCutTrackTimeline({ body, onDropMedia }) {
                   style={{ left: time * pixelsPerSecond, top: 14 + level * 6, backgroundColor: marker.color || "#f59e0b", clipPath: "polygon(50% 0, 100% 45%, 50% 100%, 0 45%)" }}
                 />
               ))}
-              <div className="pointer-events-none absolute inset-y-0 z-20 w-px bg-cs2-accent shadow-[0_0_8px_rgba(255,140,0,0.75)]" style={{ left: playheadSec * pixelsPerSecond }} />
+              <div className="pointer-events-none absolute inset-y-0 z-20 w-px bg-cs2-accent shadow-[0_0_8px_rgba(224,127,10,0.75)]" style={{ left: playheadSec * pixelsPerSecond }} />
               <div className="pointer-events-none absolute top-1 z-30 h-3 w-3 -translate-x-1/2 rounded-full border border-white/80 bg-cs2-accent shadow" style={{ left: playheadSec * pixelsPerSecond }} />
             </div>
           </div>
@@ -1240,7 +1240,7 @@ export default function OpenCutTrackTimeline({ body, onDropMedia }) {
               </div> : null}
               </Fragment>;
             })}
-            <div className="pointer-events-none absolute left-0 z-30 w-px bg-cs2-accent shadow-[0_0_8px_rgba(255,140,0,0.75)]" style={{ left: TRACK_HEADER_WIDTH + playheadSec * pixelsPerSecond, top: 0, height: laneHeight }} />
+            <div className="pointer-events-none absolute left-0 z-30 w-px bg-cs2-accent shadow-[0_0_8px_rgba(224,127,10,0.75)]" style={{ left: TRACK_HEADER_WIDTH + playheadSec * pixelsPerSecond, top: 0, height: laneHeight }} />
             {snapGuide != null ? <div className="pointer-events-none absolute z-40 w-px bg-amber-300 shadow-[0_0_7px_rgba(252,211,77,0.9)]" style={{ left: TRACK_HEADER_WIDTH + snapGuide * pixelsPerSecond, top: 0, height: laneHeight }} /> : null}
           </div>
         </div>

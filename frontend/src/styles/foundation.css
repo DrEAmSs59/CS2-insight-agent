@@ -33,7 +33,7 @@
   --cs2-text-success: var(--green-11);
 
   /* 品牌色 */
-  --cs2-accent: var(--orange-9);
+  --cs2-accent: #e07f0a;
   --cs2-accent-light: var(--orange-10);
   --cs2-accent-soft: var(--orange-3);
   --cs2-team-blue: var(--blue-9);
@@ -48,7 +48,7 @@
   --cs2-player-green-soft: var(--green-3);
   --cs2-player-yellow: var(--yellow-9);
   --cs2-player-yellow-soft: var(--yellow-3);
-  --cs2-player-orange: var(--orange-9);
+  --cs2-player-orange: var(--cs2-accent);
   --cs2-player-orange-soft: var(--orange-3);
   --cs2-player-purple: var(--purple-9);
   --cs2-player-purple-soft: var(--purple-3);
@@ -95,7 +95,7 @@
   --cs2-shadow-sm: 0 1px 2px rgba(0,0,0,0.15);
   --cs2-shadow-md: 0 4px 12px rgba(0,0,0,0.20);
   --cs2-shadow-lg: 0 8px 32px rgba(0,0,0,0.30);
-  --cs2-shadow-glow-accent: 0 0 16px rgba(255,140,0,0.20);
+  --cs2-shadow-glow-accent: 0 0 16px rgba(224,127,10,0.20);
 
   /* 动态颜色替换 (白/黑，各种 zinc) */
   --cs2-dynamic-white: var(--cs2-text-primary);

@@ -159,13 +159,13 @@ html {
 }
 
 .litecut-timeline-scroll::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 140, 0, 0.55);
+  background: rgba(224, 127, 10, 0.55);
 }
 
 .litecut-timeline-hbar {
   height: 12px;
   scrollbar-width: thin;
-  scrollbar-color: rgba(255, 140, 0, 0.5) rgba(255, 255, 255, 0.04);
+  scrollbar-color: rgba(224, 127, 10, 0.5) rgba(255, 255, 255, 0.04);
 }
 
 .litecut-timeline-hbar::-webkit-scrollbar {
@@ -179,14 +179,14 @@ html {
 }
 
 .litecut-timeline-hbar::-webkit-scrollbar-thumb {
-  background: linear-gradient(90deg, rgba(255, 165, 0, 0.45), rgba(255, 140, 0, 0.65));
+  background: linear-gradient(90deg, rgba(255, 165, 0, 0.45), rgba(224, 127, 10, 0.65));
   border-radius: 999px;
   border: 2px solid transparent;
   background-clip: padding-box;
 }
 
 .litecut-timeline-hbar::-webkit-scrollbar-thumb:hover {
-  background: linear-gradient(90deg, rgba(255, 183, 77, 0.75), rgba(255, 140, 0, 0.9));
+  background: linear-gradient(90deg, rgba(255, 183, 77, 0.75), rgba(224, 127, 10, 0.9));
   background-clip: padding-box;
 }
 

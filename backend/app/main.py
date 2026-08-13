@@ -125,6 +125,21 @@ async def lifespan(_: FastAPI):
     await demo_db.init_db()
     await montage_db.init_tables()
     await lite_cut_db.init_tables()
+    from .features.demo_analysis.replay_cache_storage import ensure_replay_cache_owner_index
+
+    async def warm_replay_cache_owner_index() -> None:
+        try:
+            result = await asyncio.to_thread(ensure_replay_cache_owner_index)
+            if result.get("rebuilt"):
+                logger.info(
+                    "Replay cache owner index warmed: ready=%s errors=%s",
+                    result.get("ready"),
+                    len(result.get("errors") or []),
+                )
+        except Exception:
+            logger.exception("Replay cache owner index warmup failed")
+
+    replay_cache_index_task = asyncio.create_task(warm_replay_cache_owner_index())
     stale_lite_cut_outputs = await lite_cut_db.recover_interrupted_exports()
     if stale_lite_cut_outputs:
         from .features.lite_cut.export_preflight import cleanup_stale_export_artifacts
@@ -159,6 +174,7 @@ async def lifespan(_: FastAPI):
             await shutdown_lite_cut_jobs(timeout_sec=5.0)
             if application_state.demo_watcher is not None:
                 await application_state.demo_watcher.stop()
+            await replay_cache_index_task
         except Exception:
             logger.exception("Application shutdown cleanup failed")
         if _FAULT_LOG_FILE and not _FAULT_LOG_FILE.closed:

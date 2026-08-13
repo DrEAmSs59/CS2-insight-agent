@@ -1,0 +1,3 @@
+11467|INFO:     127.0.0.1:54995 - "POST /api/demos/79/cosmetics/custom-plan HTTP/1.1" 502 Bad Gateway
+11494|INFO:     127.0.0.1:53716 - "POST /api/demos/79/cosmetics/custom-plan HTTP/1.1" 502 Bad Gateway
+11562|INFO:     127.0.0.1:63416 - "POST /api/demos/79/cosmetics/custom-plan HTTP/1.1" 502 Bad Gateway

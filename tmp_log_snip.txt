@@ -1,0 +1,36 @@
+11531|INFO:     127.0.0.1:50605 - "GET /api/demos/compact?limit=12&offset=0 HTTP/1.1" 200 OK
+11532|INFO:     127.0.0.1:50605 - "OPTIONS /api/steam/player-avatars?steam_ids=76561199703305624,76561199066151629,76561198447859460,76561199320244832,76561198805342745,76561199151036506,76561199841958952,76561199149793222,76561198846147584,76561198987671800 HTTP/1.1" 200 OK
+11533|INFO:     127.0.0.1:62948 - "POST /api/demos/79/analyze HTTP/1.1" 200 OK
+11534|INFO:     127.0.0.1:62948 - "GET /api/demos/compact?limit=12&offset=0 HTTP/1.1" 200 OK
+11535|INFO:     127.0.0.1:51524 - "OPTIONS /api/demos/79/cosmetics/custom-plan?steamid=76561199066151629 HTTP/1.1" 200 OK
+11536|INFO:     127.0.0.1:51524 - "GET /api/demos/79/cosmetics/custom-plan?steamid=76561199066151629 HTTP/1.1" 200 OK
+11537|INFO:     127.0.0.1:50605 - "GET /api/steam/player-avatars?steam_ids=76561199703305624,76561199066151629,76561198447859460,76561199320244832,76561198805342745,76561199151036506,76561199841958952,76561199149793222,76561198846147584,76561198987671800 HTTP/1.1" 200 OK
+11538|INFO:     127.0.0.1:63416 - "OPTIONS /api/demos/79/cosmetics/custom-plan HTTP/1.1" 200 OK
+11539|2026-08-07 15:15:28,355 [app.api.cosmetics_skin] ERROR: skin-core call failed: demo_id=79 steamid=76561199066151629 phase=rewrite
+11540|Traceback (most recent call last):
+11541|  File "\\?\D:\demo����\CS2 Insight Agent\backend\app\skin_core_client.py", line 211, in run_rewrite_owned_batch
+11542|    stdout, stderr = proc.communicate(
+11543|                     ^^^^^^^^^^^^^^^^^
+11544|  File "subprocess.py", line 1209, in communicate
+11545|  File "subprocess.py", line 1630, in _communicate
+11546|subprocess.TimeoutExpired: Command '['\\\\?\\D:\\demo����\\CS2 Insight Agent\\tools\\skin-core.exe', 'rewrite-owned-batch', '--input', 'C:\\Users\\lele\\AppData\\Roaming\\CS2 Insight Agent\\data\\demo-cache\\.9219469233293588236_0.skin-input-83d5789c60884073b38a18126dfb54e8.dem', '--output', 'C:\\Users\\lele\\AppData\\Roaming\\CS2 Insight Agent\\data\\demo-cache\\.43d045b7dc1c767579466eba5965ff84.skin-rewrite-664a819463384a03aac8ad720bb1cbdd.dem', '--request', 'C:\\Users\\lele\\AppData\\Local\\Temp\\skin-core-kfmiogdf\\request.bin', '--response', 'C:\\Users\\lele\\AppData\\Local\\Temp\\skin-core-kfmiogdf\\response.bin', '--demoparser2-python', '\\\\?\\D:\\demo����\\CS2 Insight Agent\\python\\python.exe']' timed out after 120.0 seconds
+11547|
+11548|The above exception was the direct cause of the following exception:
+11549|
+11550|Traceback (most recent call last):
+11551|  File "\\?\D:\demo����\CS2 Insight Agent\backend\app\api\cosmetics_skin.py", line 282, in post_custom_skin_plan
+11552|    skin_result = await asyncio.to_thread(
+11553|                  ^^^^^^^^^^^^^^^^^^^^^^^^
+11554|  File "asyncio\threads.py", line 25, in to_thread
+11555|  File "concurrent\futures\thread.py", line 58, in run
+11556|  File "\\?\D:\demo����\CS2 Insight Agent\backend\app\api\cosmetics_skin.py", line 85, in _run_one_owned_batch
+11557|    skin_result = run_rewrite_owned_batch(
+11558|                  ^^^^^^^^^^^^^^^^^^^^^^^^
+11559|  File "\\?\D:\demo����\CS2 Insight Agent\backend\app\skin_core_client.py", line 218, in run_rewrite_owned_batch
+11560|    raise SkinCoreError("skin-core timed out") from exc
+11561|app.skin_core_client.SkinCoreError: skin-core timed out
+11562|INFO:     127.0.0.1:63416 - "POST /api/demos/79/cosmetics/custom-plan HTTP/1.1" 502 Bad Gateway
+11563|INFO:     127.0.0.1:50993 - "OPTIONS /api/config/open-logs HTTP/1.1" 200 OK
+11564|INFO:     127.0.0.1:50993 - "POST /api/config/open-logs HTTP/1.1" 200 OK
+11565|INFO:     127.0.0.1:50993 - "POST /api/config/open-logs HTTP/1.1" 200 OK
+11566|INFO:     127.0.0.1:50993 - "POST /api/config/open-logs HTTP/1.1" 200 OK

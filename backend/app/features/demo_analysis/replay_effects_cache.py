@@ -19,6 +19,7 @@ from .replay_cache_storage import (
     replay_cache_namespace_root,
     replay_cache_namespace_roots,
 )
+from .replay_cache_owners import invalidate_owner_index, register_replay_cache_entry
 
 logger = logging.getLogger(__name__)
 
@@ -101,25 +102,43 @@ def load_tracks(demo_path: str) -> dict[str, Any] | None:
     return payload
 
 
-def remove_tracks_for_demo(demo_path: str) -> dict[str, int]:
-    """Remove sparse-effects entries attributed to one Demo path."""
-    key = demo_cache_key(demo_path)
-    wanted = os.path.normcase(os.path.abspath(os.path.expanduser(str(demo_path))))
+def remove_tracks_for_demos(
+    demo_paths: list[str],
+    *,
+    register_survivors: bool = False,
+) -> dict[str, int]:
+    """Remove sparse-effects entries for several Demo paths in one traversal."""
+    normalized_to_key = {
+        os.path.normcase(os.path.abspath(os.path.expanduser(str(path)))): demo_cache_key(path)
+        for path in demo_paths
+    }
+    wanted = set(normalized_to_key)
     removed_files = 0
     removed_bytes = 0
     seen: set[str] = set()
     for root in _cache_roots():
         if not root.is_dir():
             continue
-        matched_keys = {key} if key else set()
+        matched_keys = {key for key in normalized_to_key.values() if key}
         for meta_path in root.glob("*.meta.json"):
             try:
                 payload = json.loads(meta_path.read_text(encoding="utf-8"))
                 cached_path = payload.get("demo_path") if isinstance(payload, dict) else None
-                if cached_path and os.path.normcase(
+                if not cached_path:
+                    continue
+                normalized_cached_path = os.path.normcase(
                     os.path.abspath(os.path.expanduser(str(cached_path)))
-                ) == wanted:
-                    matched_keys.add(meta_path.name.removesuffix(".meta.json"))
+                )
+                cache_key = meta_path.name.removesuffix(".meta.json")
+                if normalized_cached_path in wanted:
+                    matched_keys.add(cache_key)
+                elif register_survivors:
+                    register_replay_cache_entry(
+                        "effects",
+                        str(cached_path),
+                        cache_key,
+                        (root / f"{cache_key}.pkl", meta_path),
+                    )
             except Exception as exc:  # noqa: BLE001 - cleanup skips unknown files
                 logger.warning("replay effects cache metadata read failed for %s: %s", meta_path, exc)
         for matched_key in matched_keys:
@@ -136,6 +155,11 @@ def remove_tracks_for_demo(demo_path: str) -> dict[str, int]:
                 except OSError as exc:
                     logger.warning("replay effects cache cleanup failed for %s: %s", path, exc)
     return {"removed_files": removed_files, "removed_bytes": removed_bytes}
+
+
+def remove_tracks_for_demo(demo_path: str) -> dict[str, int]:
+    """Remove sparse-effects entries attributed to one Demo path."""
+    return remove_tracks_for_demos([demo_path])
 
 
 def save_tracks(
@@ -179,6 +203,16 @@ def save_tracks(
         )
         tmp.replace(path)
         meta_tmp.replace(meta_path)
+        try:
+            register_replay_cache_entry(
+                "effects",
+                resolved_demo_path,
+                key,
+                (path, meta_path),
+            )
+        except OSError as exc:
+            invalidate_owner_index()
+            logger.warning("replay effects owner index update failed: %s", exc)
         _cleanup_stale_cache_files(keep_name=path.name)
         logger.info(
             "replay effects track cache saved key=%s tracks=%s bytes=%s",

@@ -11,7 +11,7 @@ import asyncio
 from pathlib import Path
 
 import pytest
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
 from app.api import cosmetics_skin
@@ -20,6 +20,27 @@ from app.skin_core_client import SkinCoreError
 
 
 STEAM_ID = "76561198000000001"
+
+
+def test_same_demo_rewrite_claim_rejects_overlap_and_releases_afterwards():
+    async def scenario():
+        demo_id = 987654321
+        first = cosmetics_skin._claim_demo_rewrite(demo_id)
+        assert await anext(first) is None
+        try:
+            second = cosmetics_skin._claim_demo_rewrite(demo_id)
+            with pytest.raises(HTTPException) as exc_info:
+                await anext(second)
+            assert exc_info.value.status_code == 409
+            assert "COSMETICS_SKIN_REWRITE_IN_PROGRESS" in str(exc_info.value.detail)
+        finally:
+            await first.aclose()
+
+        third = cosmetics_skin._claim_demo_rewrite(demo_id)
+        assert await anext(third) is None
+        await third.aclose()
+
+    asyncio.run(scenario())
 
 
 def _inventory_row(**overrides):
@@ -96,8 +117,8 @@ def api_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(cosmetics_skin, "demo_db", db)
     monkeypatch.setattr(
         cosmetics_skin,
-        "ensure_demo_compatible",
-        lambda path: type("R", (), {"cached": True, "path": path})(),
+        "ensure_compatible_baseline",
+        lambda source, _cache_dir: Path(source).resolve(),
     )
 
     app = FastAPI()
@@ -755,16 +776,16 @@ def test_get_unknown_demo_returns_404(api_env):
 def test_post_calls_ensure_demo_compatible_before_rewrite(api_env, monkeypatch):
     order: list[str] = []
 
-    def fake_compat(path):
+    def fake_compat(source, _cache_dir):
         order.append("compat")
-        return type("R", (), {"cached": False, "path": path})()
+        return Path(source).resolve()
 
     def fake_rewrite(*, input_dem, output_dem, steam_id64, items, demoparser2_python, timeout=600.0):
         order.append("rewrite")
         Path(output_dem).write_bytes(b"OUT")
         return {"ok": True, "sha256": "x", "items_rewritten": 1}
 
-    monkeypatch.setattr(cosmetics_skin, "ensure_demo_compatible", fake_compat)
+    monkeypatch.setattr(cosmetics_skin, "ensure_compatible_baseline", fake_compat)
     monkeypatch.setattr(cosmetics_skin, "run_rewrite_owned_batch", fake_rewrite)
 
     response = api_env["client"].post(
@@ -773,3 +794,44 @@ def test_post_calls_ensure_demo_compatible_before_rewrite(api_env, monkeypatch):
     )
     assert response.status_code == 200
     assert order == ["compat", "rewrite"]
+
+
+def test_post_falls_back_to_one_shot_compat_when_baseline_cache_fails(
+    api_env,
+    monkeypatch,
+):
+    order: list[str] = []
+    original: Path = api_env["original"]
+    seen_input: Path | None = None
+
+    def broken_baseline(_source, _cache_dir):
+        order.append("baseline-failed")
+        raise OSError("cache unavailable")
+
+    def fake_compat(path):
+        order.append("fallback-compat")
+        candidate = Path(path)
+        assert candidate.read_bytes() == original.read_bytes()
+        candidate.write_bytes(candidate.read_bytes() + b"-COMPAT")
+        return type("R", (), {"cached": False, "path": path})()
+
+    def fake_rewrite(*, input_dem, output_dem, **_kwargs):
+        nonlocal seen_input
+        order.append("rewrite")
+        seen_input = Path(input_dem)
+        assert seen_input.read_bytes() == original.read_bytes() + b"-COMPAT"
+        Path(output_dem).write_bytes(b"OUT")
+        return {"ok": True, "sha256": "x", "items_rewritten": 1}
+
+    monkeypatch.setattr(cosmetics_skin, "ensure_compatible_baseline", broken_baseline)
+    monkeypatch.setattr(cosmetics_skin, "ensure_demo_compatible", fake_compat)
+    monkeypatch.setattr(cosmetics_skin, "run_rewrite_owned_batch", fake_rewrite)
+
+    response = api_env["client"].post(
+        f"/api/demos/{api_env['demo_id']}/cosmetics/custom-plan",
+        json={"steamid": STEAM_ID, "replacements": {"id:10": _replacement()}},
+    )
+
+    assert response.status_code == 200
+    assert order == ["baseline-failed", "fallback-compat", "rewrite"]
+    assert seen_input is not None and not seen_input.exists()

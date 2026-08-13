@@ -4,7 +4,6 @@ import { LayoutGrid, List } from "lucide-react";
 import PageContainer from "../../components/PageContainer";
 import { useAppShell } from "../../context/AppShellContext";
 import DemoAdvancedFilters from "./components/DemoAdvancedFilters";
-import DemoBatchActionBar from "./components/DemoBatchActionBar";
 import DemoLibraryQueryBar from "./components/DemoLibraryQueryBar";
 import DemoLibraryToolbar from "./components/DemoLibraryToolbar";
 import DemoWatchPathsModal from "./components/DemoWatchPathsModal";
@@ -266,6 +265,10 @@ export default function DemoLibraryPage() {
         libraryTotal={s.libraryTotal}
         onSelectPage={handleSelectVisiblePage}
         onSelectAllLibrary={() => void s.selectAllLibraryDemos()}
+        selectedCount={s.selectedLibraryDemoIds.size}
+        onLoadSelected={() => void s.handleLoadSelectedLibraryDemos()}
+        onBatchDelete={handleBatchDelete}
+        onClearSelection={s.clearLibrarySelection}
         viewMode={viewMode}
         onViewModeChange={setViewMode}
       />
@@ -290,7 +293,7 @@ export default function DemoLibraryPage() {
         <DemoAdvancedFilters libraryAdvFilters={s.libraryAdvFilters} setLibraryAdvFilters={s.setLibraryAdvFilters} />
       ) : null}
 
-      <section className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border-x border-t border-cs2-border bg-cs2-bg-card">
+      <section className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border border-cs2-border bg-cs2-bg-card">
         <div className="demo-library-results min-h-0 flex-1 overflow-x-hidden overflow-y-auto p-4 custom-scrollbar">
           {s.libraryLoading ? (
             <div className="flex h-32 items-center justify-center text-cs2-text-muted text-sm">{t("library.loading")}</div>
@@ -349,28 +352,23 @@ export default function DemoLibraryPage() {
           )}
         </div>
 
+        <div
+          data-testid="demo-library-pagination-region"
+          className="flex shrink-0 justify-end border-t border-cs2-border bg-cs2-bg-card px-3 py-2"
+        >
+          <DemoPagination
+            libraryPage={s.libraryPage}
+            libraryTotalPages={s.libraryTotalPages}
+            libraryHasNextPage={s.libraryHasNextPage}
+            libraryPageSize={s.libraryPageSize}
+            onPageSizeChange={s.setLibraryPageSize}
+            libraryJumpDraft={s.libraryJumpDraft}
+            onPageChange={onPageChange}
+            onJumpDraftChange={s.setLibraryJumpDraft}
+            onJumpSubmit={s.handleLibraryPageJump}
+          />
+        </div>
       </section>
-
-      <div className="flex shrink-0 justify-end">
-        <DemoPagination
-          libraryPage={s.libraryPage}
-          libraryTotalPages={s.libraryTotalPages}
-          libraryHasNextPage={s.libraryHasNextPage}
-          libraryPageSize={s.libraryPageSize}
-          onPageSizeChange={s.setLibraryPageSize}
-          libraryJumpDraft={s.libraryJumpDraft}
-          onPageChange={onPageChange}
-          onJumpDraftChange={s.setLibraryJumpDraft}
-          onJumpSubmit={s.handleLibraryPageJump}
-        />
-      </div>
-
-      <DemoBatchActionBar
-        count={s.selectedLibraryDemoIds.size}
-        onLoadSelected={() => void s.handleLoadSelectedLibraryDemos()}
-        onBatchDelete={handleBatchDelete}
-        onClearSelection={s.clearLibrarySelection}
-      />
 
       <Modal
         open={batchDeleteCount > 0}

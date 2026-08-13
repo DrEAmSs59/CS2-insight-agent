@@ -192,7 +192,7 @@ function ChoiceCard({ selected, onClick, title, detail, badge }) {
       onClick={onClick}
       className={`relative rounded-xl border p-3 text-left transition-all ${
         selected
-          ? "border-cs2-accent/70 bg-cs2-accent/10 shadow-[0_0_0_1px_rgba(255,140,0,0.08)]"
+          ? "border-cs2-accent/70 bg-cs2-accent/10 shadow-[0_0_0_1px_rgba(224,127,10,0.08)]"
           : "border-cs2-border bg-cs2-bg-input/45 hover:border-cs2-accent/35 hover:bg-cs2-bg-hover"
       }`}
     >
@@ -303,7 +303,7 @@ export function DiscoveryRail({ recommendation, environment = null, recommendati
   return (
     <aside className="space-y-3 xl:sticky xl:top-0 xl:self-start">
       <div className="overflow-hidden rounded-2xl border border-cs2-accent/25 bg-cs2-bg-card">
-        <div className="bg-[radial-gradient(circle_at_top_right,rgba(255,140,0,0.14),transparent_56%)] p-4">
+        <div className="bg-[radial-gradient(circle_at_top_right,rgba(224,127,10,0.14),transparent_56%)] p-4">
           <div className="flex items-start justify-between gap-3">
             <div>
               <div className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.14em] text-cs2-text-muted">
@@ -422,7 +422,7 @@ export function GoalScreen({ goal, setGoal, recommendation, onBack, onNext, envi
   return (
     <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_300px]">
       <section className="overflow-hidden rounded-2xl border border-cs2-border bg-cs2-bg-card">
-        <div className="border-b border-cs2-border bg-[radial-gradient(circle_at_top_right,rgba(255,140,0,0.12),transparent_42%)] px-5 py-4">
+        <div className="border-b border-cs2-border bg-[radial-gradient(circle_at_top_right,rgba(224,127,10,0.12),transparent_42%)] px-5 py-4">
           <div className="flex items-start gap-3">
             <span className="rounded-xl border border-cs2-accent/30 bg-cs2-accent/10 p-2 text-cs2-accent">
               <Sparkles className="h-5 w-5" />
@@ -857,7 +857,7 @@ export default function ObsAiTuningPreviewPage() {
   };
 
   return (
-    <div className="h-full min-h-0 overflow-y-auto bg-[radial-gradient(circle_at_82%_0%,rgba(255,140,0,0.07),transparent_32%)]">
+    <div className="h-full min-h-0 overflow-y-auto bg-[radial-gradient(circle_at_82%_0%,rgba(224,127,10,0.07),transparent_32%)]">
       <PageContainer className="!h-auto min-h-full max-w-[1380px] pb-10">
         <header className="flex flex-col gap-4 border-b border-cs2-border/70 pb-4 sm:flex-row sm:items-center sm:justify-between">
           <div>

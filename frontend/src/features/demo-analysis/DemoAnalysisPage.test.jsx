@@ -1021,6 +1021,10 @@ describe("DemoAnalysisPage Insight Agent flow", () => {
     expect(screen.queryByText("Collapse round")).toBeNull();
 
     fireEvent.click(screen.getByRole("button", { name: "Overview" }));
+    const overviewContent = screen.getByTestId("analysis-overview-content");
+    expect(overviewContent.className).toContain("w-full");
+    expect(overviewContent.className).not.toContain("max-w-");
+    expect(overviewContent.className).not.toContain("mx-auto");
     expect(screen.getByTestId("overview-full-scoreboard").querySelector("header button")).toBeNull();
   });
 

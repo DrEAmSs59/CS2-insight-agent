@@ -65,7 +65,7 @@ export default function RoundTimelineView({
       ) : (
         <div className="timeline-root relative pl-1">
           <div
-            className="pointer-events-none absolute bottom-0 left-8 top-2 w-px bg-gradient-to-b from-[rgba(255,140,0,0.5)] to-[rgba(255,140,0,0.15)] opacity-50"
+            className="pointer-events-none absolute bottom-0 left-8 top-2 w-px bg-gradient-to-b from-[rgba(224,127,10,0.5)] to-[rgba(224,127,10,0.15)] opacity-50"
             aria-hidden
           />
           <div className="analysis-list-surface">

@@ -186,7 +186,7 @@ export default function CredentialPanel({
       {/* Risk notice */}
       <div
         className="mt-4 rounded-[8px] border px-4 py-3 text-[12px] leading-relaxed text-cs2-text-secondary"
-        style={{ background: "rgba(255,140,0,0.07)", borderColor: "rgba(255,140,0,0.25)" }}
+        style={{ background: "rgba(224,127,10,0.07)", borderColor: "rgba(224,127,10,0.25)" }}
       >
         <span className="font-semibold text-cs2-accent">{t("match.credSecurityTitle")}</span>
         {t("match.credSecurityBody")}{" "}

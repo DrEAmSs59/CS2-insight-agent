@@ -180,7 +180,7 @@ function ConnectionDialog({
   return (
     <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/75 p-4 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="obs-connection-title">
       <div className="max-h-[92vh] w-full max-w-2xl overflow-y-auto rounded-2xl border border-cs2-accent/35 bg-cs2-bg-card shadow-2xl shadow-black/50">
-        <div className="border-b border-cs2-border bg-[radial-gradient(circle_at_top_right,rgba(255,140,0,0.18),transparent_48%)] p-5">
+        <div className="border-b border-cs2-border bg-[radial-gradient(circle_at_top_right,rgba(224,127,10,0.18),transparent_48%)] p-5">
           <div className="flex items-start justify-between gap-4">
             <div className="flex items-start gap-3">
               <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-cs2-accent/30 bg-cs2-accent/10 text-cs2-accent">
@@ -289,7 +289,7 @@ function ConnectionDialog({
 
 function LockedWorkspace({ discoveryLoading, onOpen }) {
   return (
-    <div className="rounded-2xl border border-dashed border-cs2-accent/35 bg-[radial-gradient(circle_at_top_right,rgba(255,140,0,0.09),transparent_45%)] p-8 text-center">
+    <div className="rounded-2xl border border-dashed border-cs2-accent/35 bg-[radial-gradient(circle_at_top_right,rgba(224,127,10,0.09),transparent_45%)] p-8 text-center">
       <span className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl border border-cs2-accent/25 bg-cs2-accent/10 text-cs2-accent">
         {discoveryLoading ? <Loader2 className="h-5 w-5 animate-spin" /> : <LockKeyhole className="h-5 w-5" />}
       </span>
@@ -345,7 +345,7 @@ function CurrentObsConfiguration({ discovery, previewMode, refreshing, kept, onK
   ];
   return (
     <section className="overflow-hidden rounded-2xl border border-cs2-border bg-cs2-bg-card">
-      <div className="border-b border-cs2-border bg-[radial-gradient(circle_at_top_right,rgba(255,140,0,0.12),transparent_45%)] p-5">
+      <div className="border-b border-cs2-border bg-[radial-gradient(circle_at_top_right,rgba(224,127,10,0.12),transparent_45%)] p-5">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
           <div className="flex items-start gap-3">
             <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-emerald-400/25 bg-emerald-400/10 text-cs2-text-success"><CheckCircle2 className="h-5 w-5" /></span>
@@ -861,7 +861,7 @@ export default function ObsAiSettingsPanel({
 
   return (
     <section data-testid="obs-ai-settings-panel" className="space-y-4">
-      <header className="flex flex-col gap-4 rounded-2xl border border-cs2-accent/25 bg-[radial-gradient(circle_at_top_right,rgba(255,140,0,0.12),transparent_45%)] p-4 sm:flex-row sm:items-center sm:justify-between">
+      <header className="flex flex-col gap-4 rounded-2xl border border-cs2-accent/25 bg-[radial-gradient(circle_at_top_right,rgba(224,127,10,0.12),transparent_45%)] p-4 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-start gap-3">
           <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-cs2-accent/30 bg-cs2-accent/10 text-cs2-accent"><Sparkles className="h-5 w-5" /></span>
           <div>

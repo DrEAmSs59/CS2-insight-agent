@@ -18,6 +18,7 @@ from .replay_cache_storage import (
     replay_cache_namespace_root,
     replay_cache_namespace_roots,
 )
+from .replay_cache_owners import invalidate_owner_index, register_replay_cache_entry
 from .cs2_item_catalog import (
     build_player_skin_loadouts,
     resolve_weapon_model,
@@ -700,6 +701,21 @@ def materialize_match_replay_parquet_impl(
         parquet_tmp.replace(parquet_path)
         meta_tmp.replace(meta_path)
         remove_match_cache_for_demo(demo_path, keep_cache_key=cache_key)
+        try:
+            register_replay_cache_entry(
+                "matches",
+                demo_path,
+                cache_key,
+                (
+                    parquet_path,
+                    meta_path,
+                    parquet_tmp,
+                    meta_tmp,
+                ),
+            )
+        except OSError as exc:
+            invalidate_owner_index()
+            logger.warning("whole-match replay owner index update failed: %s", exc)
     except Exception:
         parquet_tmp.unlink(missing_ok=True)
         meta_tmp.unlink(missing_ok=True)
@@ -771,14 +787,15 @@ def _normalized_path(path: str) -> str:
     return os.path.normcase(os.path.abspath(os.path.expanduser(str(path))))
 
 
-def remove_match_cache_for_demo(
-    demo_path: str,
+def _remove_match_caches(
+    demo_paths: list[str],
     *,
     keep_cache_key: str | None = None,
+    register_survivors: bool = False,
 ) -> dict[str, int]:
-    """Remove whole-match Parquet entries associated with one Demo path."""
-    wanted = _normalized_path(demo_path)
-    current_fingerprint = _demo_fingerprint(demo_path) if keep_cache_key else None
+    wanted = {_normalized_path(path) for path in demo_paths}
+    keep_path = _normalized_path(demo_paths[0]) if keep_cache_key and len(demo_paths) == 1 else None
+    current_fingerprint = _demo_fingerprint(demo_paths[0]) if keep_path else None
     removed_files = 0
     removed_bytes = 0
     seen: set[str] = set()
@@ -798,30 +815,42 @@ def remove_match_cache_for_demo(
             fingerprint = payload.get("demo_fingerprint") if isinstance(payload, dict) else None
             cached_path = fingerprint.get("path") if isinstance(fingerprint, dict) else None
             cache_key = str(payload.get("cache_key") or "") if isinstance(payload, dict) else ""
-            if not cached_path or _normalized_path(str(cached_path)) != wanted:
+            if not cached_path or not cache_key:
                 continue
-            if keep_cache_key:
+            normalized_cached_path = _normalized_path(str(cached_path))
+            should_remove = normalized_cached_path in wanted
+            if should_remove and keep_cache_key and normalized_cached_path == keep_path:
                 if cache_key == keep_cache_key:
-                    continue
-                same_source_revision = bool(
-                    current_fingerprint
-                    and int(fingerprint.get("size") or -1) == current_fingerprint["size"]
-                    and int(fingerprint.get("mtime_ns") or -1) == current_fingerprint["mtime_ns"]
-                )
-                if (
-                    same_source_revision
-                    and payload.get("version") == REPLAY_MATCH_CACHE_VERSION
-                    and payload.get("parser_runtime") == REQUIRED_DEMOPARSER_VERSION
-                ):
-                    # A different FPS/tick-rate cache for the same current Demo
-                    # is still valid and must not be evicted by this build.
-                    continue
+                    should_remove = False
+                else:
+                    same_source_revision = bool(
+                        current_fingerprint
+                        and int(fingerprint.get("size") or -1) == current_fingerprint["size"]
+                        and int(fingerprint.get("mtime_ns") or -1) == current_fingerprint["mtime_ns"]
+                    )
+                    if (
+                        same_source_revision
+                        and payload.get("version") == REPLAY_MATCH_CACHE_VERSION
+                        and payload.get("parser_runtime") == REQUIRED_DEMOPARSER_VERSION
+                    ):
+                        # A different FPS/tick-rate cache for the same current Demo
+                        # is still valid and must not be evicted by this build.
+                        should_remove = False
             paths = (
                 meta_path,
                 root / f"{cache_key}.parquet",
                 root / f"{cache_key}.meta.json.partial",
                 root / f"{cache_key}.parquet.partial",
             )
+            if not should_remove:
+                if register_survivors:
+                    register_replay_cache_entry(
+                        "matches",
+                        str(cached_path),
+                        cache_key,
+                        paths,
+                    )
+                continue
             for path in paths:
                 if not path.is_file():
                     continue
@@ -835,6 +864,27 @@ def remove_match_cache_for_demo(
     if removed_files:
         _load_meta_file.cache_clear()
     return {"removed_files": removed_files, "removed_bytes": removed_bytes}
+
+
+def remove_match_caches_for_demos(
+    demo_paths: list[str],
+    *,
+    register_survivors: bool = False,
+) -> dict[str, int]:
+    """Remove several Demo owners while traversing large metadata only once."""
+    return _remove_match_caches(
+        demo_paths,
+        register_survivors=register_survivors,
+    )
+
+
+def remove_match_cache_for_demo(
+    demo_path: str,
+    *,
+    keep_cache_key: str | None = None,
+) -> dict[str, int]:
+    """Remove whole-match Parquet entries associated with one Demo path."""
+    return _remove_match_caches([demo_path], keep_cache_key=keep_cache_key)
 
 
 def _attach_shots(frames: list[dict[str, Any]], shots: list[dict[str, Any]]) -> None:

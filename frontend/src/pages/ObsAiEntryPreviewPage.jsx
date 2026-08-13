@@ -74,7 +74,7 @@ export default function ObsAiEntryPreviewPage() {
   const [aiEnabled, setAiEnabled] = useState(false);
 
   return (
-    <div className="h-full min-h-0 overflow-y-auto bg-[radial-gradient(circle_at_82%_0%,rgba(255,140,0,0.05),transparent_32%)]">
+    <div className="h-full min-h-0 overflow-y-auto bg-[radial-gradient(circle_at_82%_0%,rgba(224,127,10,0.05),transparent_32%)]">
       <PageContainer className="!h-auto min-h-full max-w-[1380px] pb-10">
         <header className="border-b border-cs2-border/70 pb-4">
           <Link to="/settings?tab=video" className="inline-flex items-center gap-1.5 text-[10px] font-semibold text-cs2-text-muted transition-colors hover:text-cs2-accent">

@@ -38,7 +38,7 @@ export default function TimelineNode({ result, targetKills, targetDeaths, glow =
               ring,
               fill,
               multiKill ? "shadow-[0_0_14px_rgba(250,204,21,0.75)]" : "",
-              glow ? "shadow-[0_0_18px_rgba(255,140,0,0.85)]" : "",
+              glow ? "shadow-[0_0_18px_rgba(224,127,10,0.85)]" : "",
             ].join(" ")}
           >
             {innerDot}
@@ -49,7 +49,7 @@ export default function TimelineNode({ result, targetKills, targetDeaths, glow =
               "timeline-dot relative z-[1] flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-full border border-black/50",
               ring,
               fill,
-              glow ? "shadow-[0_0_16px_rgba(255,140,0,0.8)]" : "",
+              glow ? "shadow-[0_0_16px_rgba(224,127,10,0.8)]" : "",
             ].join(" ")}
           >
             {innerDot}

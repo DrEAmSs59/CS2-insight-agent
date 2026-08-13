@@ -92,6 +92,83 @@ async def _seed_demo(
     return demo_id
 
 
+def test_persist_demo_ingest_writes_metadata_roster_and_status_atomically(tmp_path: Path):
+    async def scenario():
+        db = DemoDB(tmp_path / "ingest.sqlite3")
+        await db.init_db()
+        demo_path = str(tmp_path / "match.dem")
+        demo_id, _ = await db.add_demo(demo_path, status="pending")
+        await db.persist_demo_ingest(
+            demo_id,
+            demo_path,
+            meta={"map_name": "de_nuke", "total_rounds": 24},
+            source="Faceit",
+            players=[{"name": "alpha", "kills": 12, "deaths": 6}],
+            roster_demo_path=demo_path,
+            roster_cache_version=3,
+            source_file_size=123,
+            source_mtime_ns=456,
+            parsed_at="2026-08-13T00:00:00+00:00",
+        )
+        return (
+            await db.get_demo_by_id(demo_id),
+            await db.list_demo_player_stats(demo_id),
+            await db.get_demo_roster_cache(demo_id),
+        )
+
+    row, players, roster_cache = _run(scenario())
+    assert row["status"] == "loaded"
+    assert row["map_name"] == "de_nuke"
+    assert row["source"] == "Faceit"
+    assert players[0]["player_name"] == "alpha"
+    assert roster_cache["state"] == "ready"
+    assert roster_cache["row_count"] == 1
+
+
+def test_persist_demo_ingest_rolls_back_every_field_on_roster_failure(tmp_path: Path):
+    async def scenario():
+        db = DemoDB(tmp_path / "ingest-rollback.sqlite3")
+        await db.init_db()
+        demo_path = str(tmp_path / "match.dem")
+        demo_id, _ = await db.add_demo(demo_path, status="pending")
+        async with aiosqlite.connect(db.db_path) as conn:
+            await conn.execute(
+                """
+                CREATE TRIGGER fail_ingest_player
+                BEFORE INSERT ON demo_player_stats
+                BEGIN
+                    SELECT RAISE(ABORT, 'forced ingest failure');
+                END
+                """
+            )
+            await conn.commit()
+        with pytest.raises(sqlite3.IntegrityError, match="forced ingest failure"):
+            await db.persist_demo_ingest(
+                demo_id,
+                demo_path,
+                meta={"map_name": "de_nuke", "total_rounds": 24},
+                source="Faceit",
+                players=[{"name": "alpha"}],
+                roster_demo_path=demo_path,
+                roster_cache_version=3,
+                source_file_size=123,
+                source_mtime_ns=456,
+                parsed_at="2026-08-13T00:00:00+00:00",
+            )
+        return (
+            await db.get_demo_by_id(demo_id),
+            await db.list_demo_player_stats(demo_id),
+            await db.get_demo_roster_cache(demo_id),
+        )
+
+    row, players, roster_cache = _run(scenario())
+    assert row["status"] == "pending"
+    assert row["map_name"] is None
+    assert row["source"] is None
+    assert players == []
+    assert roster_cache is None
+
+
 def test_compact_list_uses_materialized_summary_and_two_selects(tmp_path: Path, monkeypatch):
     async def scenario():
         db = DemoDB(tmp_path / "compact.sqlite3")

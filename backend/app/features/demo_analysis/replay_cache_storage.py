@@ -14,11 +14,22 @@ migrate away from them.
 from __future__ import annotations
 
 import logging
-import os
+import threading
 from pathlib import Path
 from typing import Any, Iterable
 
+from .replay_cache_owners import (
+    clear_owner_index,
+    discard_owner_record,
+    discard_owner_records_for_paths,
+    load_owner_records,
+    mark_owner_index_ready,
+    normalized_demo_path,
+    owner_index_ready,
+)
+
 logger = logging.getLogger(__name__)
+_owner_cleanup_lock = threading.RLock()
 
 _NAMESPACE_DIRS = {
     "matches": "matches",
@@ -157,31 +168,62 @@ def clear_replay_cache() -> dict[str, Any]:
             )
         )
     removed = _unlink_files(roots)
+    clear_owner_index()
     return {"removed_files": removed["files"], "removed_bytes": removed["bytes"]}
 
 
-def remove_demo_replay_cache(demo_path: str) -> dict[str, Any]:
-    """Remove every replay cache format that can be attributed to one Demo."""
-    from .replay_effects_cache import remove_tracks_for_demo
-    from .replay_frames_cache import remove_frames_for_demo
-    from .replay_match_cache import remove_match_cache_for_demo
+def _is_managed_cache_file(path: Path) -> bool:
+    try:
+        resolved = path.resolve()
+    except OSError:
+        return False
+    for namespace in _NAMESPACE_DIRS:
+        for root in replay_cache_namespace_roots(
+            namespace,
+            include_legacy=True,
+            create_primary=False,
+        ):
+            try:
+                resolved.relative_to(root.resolve())
+                return True
+            except (OSError, ValueError):
+                continue
+    return False
 
+
+def _remove_indexed_demo_replay_caches(demo_paths: list[str]) -> dict[str, Any]:
+    records, errors = load_owner_records(demo_paths)
     removed_files = 0
     removed_bytes = 0
-    errors: list[str] = []
-    for remover in (
-        remove_match_cache_for_demo,
-        remove_frames_for_demo,
-        remove_tracks_for_demo,
-    ):
-        try:
-            result = remover(demo_path)
-        except Exception as exc:  # noqa: BLE001 - cache cleanup must not undo a Demo deletion
-            logger.warning("Could not remove %s replay cache for %s: %s", remover.__name__, demo_path, exc)
-            errors.append(f"{remover.__name__}: {type(exc).__name__}")
-            continue
-        removed_files += int(result.get("removed_files") or 0)
-        removed_bytes += int(result.get("removed_bytes") or 0)
+    seen: set[str] = set()
+    for record_path, payload in records:
+        record_ok = True
+        for raw_path in payload.get("files") or []:
+            path = Path(str(raw_path))
+            path_key = str(path.absolute()).casefold()
+            if path_key in seen:
+                continue
+            seen.add(path_key)
+            if not _is_managed_cache_file(path):
+                errors.append(f"{record_path.name}: unmanaged cache path")
+                record_ok = False
+                continue
+            if not path.is_file():
+                continue
+            try:
+                size = int(path.stat().st_size)
+                path.unlink(missing_ok=True)
+                removed_files += 1
+                removed_bytes += size
+            except OSError as exc:
+                logger.warning("Could not remove indexed replay cache file %s: %s", path, exc)
+                errors.append(f"{record_path.name}: {type(exc).__name__}")
+                record_ok = False
+        if record_ok:
+            try:
+                discard_owner_record(record_path)
+            except OSError as exc:
+                errors.append(f"{record_path.name}: {type(exc).__name__}")
     return {
         "removed_files": removed_files,
         "removed_bytes": removed_bytes,
@@ -189,8 +231,70 @@ def remove_demo_replay_cache(demo_path: str) -> dict[str, Any]:
     }
 
 
-def _normalized_demo_path(path: str) -> str:
-    return os.path.normcase(os.path.abspath(os.path.expanduser(str(path))))
+def _bootstrap_and_remove_demo_replay_caches(demo_paths: list[str]) -> dict[str, Any]:
+    """Scan legacy payloads once, index survivors, and remove all requested paths."""
+    from .replay_effects_cache import remove_tracks_for_demos
+    from .replay_frames_cache import remove_frames_for_demos
+    from .replay_match_cache import remove_match_caches_for_demos
+
+    removed_files = 0
+    removed_bytes = 0
+    errors: list[str] = []
+    for remover in (
+        remove_match_caches_for_demos,
+        remove_frames_for_demos,
+        remove_tracks_for_demos,
+    ):
+        try:
+            result = remover(demo_paths, register_survivors=True)
+        except Exception as exc:  # noqa: BLE001 - cache cleanup must not undo a Demo deletion
+            logger.warning("Could not reconcile %s replay cache: %s", remover.__name__, exc)
+            errors.append(f"{remover.__name__}: {type(exc).__name__}")
+            continue
+        removed_files += int(result.get("removed_files") or 0)
+        removed_bytes += int(result.get("removed_bytes") or 0)
+    discard_owner_records_for_paths(demo_paths)
+    if not errors:
+        mark_owner_index_ready()
+    return {
+        "removed_files": removed_files,
+        "removed_bytes": removed_bytes,
+        "errors": errors,
+    }
+
+
+def remove_demo_replay_caches(demo_paths: Iterable[str]) -> dict[str, Any]:
+    """Remove replay caches for several source/working paths in one operation."""
+    unique: dict[str, str] = {}
+    for raw in demo_paths:
+        value = str(raw or "").strip()
+        if value:
+            unique.setdefault(normalized_demo_path(value), value)
+    paths = list(unique.values())
+    if not paths:
+        return {"removed_files": 0, "removed_bytes": 0, "errors": []}
+    with _owner_cleanup_lock:
+        if owner_index_ready():
+            return _remove_indexed_demo_replay_caches(paths)
+        return _bootstrap_and_remove_demo_replay_caches(paths)
+
+
+def ensure_replay_cache_owner_index() -> dict[str, Any]:
+    """Warm the legacy cache index once without removing any replay assets."""
+    with _owner_cleanup_lock:
+        if owner_index_ready():
+            return {"ready": True, "rebuilt": False, "errors": []}
+        result = _bootstrap_and_remove_demo_replay_caches([])
+        return {
+            "ready": owner_index_ready(),
+            "rebuilt": True,
+            "errors": list(result.get("errors") or []),
+        }
+
+
+def remove_demo_replay_cache(demo_path: str) -> dict[str, Any]:
+    """Remove every replay cache format that can be attributed to one Demo."""
+    return remove_demo_replay_caches([demo_path])
 
 
 def remove_demo_row_caches(demo: dict[str, Any] | None) -> dict[str, Any]:
@@ -199,28 +303,8 @@ def remove_demo_row_caches(demo: dict[str, Any] | None) -> dict[str, Any]:
     Analysis uses ``cached_path`` when present, so cleanup must cover both
     ``path`` and ``cached_path`` before the working copy is unlinked.
     """
-    removed_files = 0
-    removed_bytes = 0
-    errors: list[str] = []
-    seen: set[str] = set()
     row = demo if isinstance(demo, dict) else {}
-    for key in ("path", "cached_path"):
-        raw = str(row.get(key) or "").strip()
-        if not raw:
-            continue
-        try:
-            normalized = _normalized_demo_path(raw)
-        except OSError:
-            normalized = raw.casefold()
-        if normalized in seen:
-            continue
-        seen.add(normalized)
-        result = remove_demo_replay_cache(raw)
-        removed_files += int(result.get("removed_files") or 0)
-        removed_bytes += int(result.get("removed_bytes") or 0)
-        errors.extend(list(result.get("errors") or []))
-    return {
-        "removed_files": removed_files,
-        "removed_bytes": removed_bytes,
-        "errors": errors,
-    }
+    return remove_demo_replay_caches(
+        str(row.get(key) or "").strip()
+        for key in ("path", "cached_path")
+    )

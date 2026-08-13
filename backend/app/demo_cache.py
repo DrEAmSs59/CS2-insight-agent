@@ -152,10 +152,12 @@ async def ensure_row_cached(demo_db: Any, row: dict[str, Any]) -> Path:
 
 
 def copy_original_to_temp_input(original: Path, cache_dir: Path) -> Path:
-    """Copy the library original into a unique temp dem under ``cache_dir``.
+    """Copy an immutable source baseline into a unique temp dem under ``cache_dir``.
 
-    Used as skin-core ``--input`` so a prior rewritten ``cached_path`` is never
-    overwritten until rewrite succeeds.
+    The normal caller passes the persistent compatible baseline derived from
+    the library original. The legacy fallback may still pass the original
+    directly. Either way a prior rewritten ``cached_path`` is never overwritten
+    until rewrite succeeds.
     """
     src = Path(original)
     if not src.is_file():

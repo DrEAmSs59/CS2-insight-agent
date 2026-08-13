@@ -789,10 +789,8 @@ def test_batch_ingest_bounds_inspection_concurrency_and_reuses_rosters(
         "get_demo_list_items",
         AsyncMock(return_value=rows),
     )
-    monkeypatch.setattr(main.demo_db, "update_lightweight_meta", AsyncMock())
-    monkeypatch.setattr(main.demo_db, "update_status", AsyncMock())
-    index_stats = AsyncMock(return_value={"indexed": True, "error": None})
-    monkeypatch.setattr(demo_library_api, "index_demo_player_stats", index_stats)
+    persist_ingest = AsyncMock(return_value={"indexed": True, "error": None})
+    monkeypatch.setattr(demo_library_api, "persist_ingested_demo", persist_ingest)
     notify = AsyncMock()
     monkeypatch.setattr(demo_library_api, "demo_library_hub", SimpleNamespace(notify=notify))
 
@@ -806,9 +804,9 @@ def test_batch_ingest_bounds_inspection_concurrency_and_reuses_rosters(
         for demo_id in (1, 2, 3)
     ]
     assert max_active == 2
-    assert [call.args[0] for call in index_stats.await_args_list] == [1, 2, 3]
+    assert [call.args[0] for call in persist_ingest.await_args_list] == [1, 2, 3]
     assert [
-        call.kwargs["precomputed_players"][0]["name"]
-        for call in index_stats.await_args_list
+        call.kwargs["players"][0]["name"]
+        for call in persist_ingest.await_args_list
     ] == ["match-1", "match-2", "match-3"]
     notify.assert_awaited_once_with("enqueue")

@@ -1,0 +1,9 @@
+11444|2026-08-07 14:26:39,569 [app.api.cosmetics_skin] ERROR: skin-core call failed: demo_id=79 steamid=76561199066151629 phase=rewrite
+11456|  File "\\?\D:\demo����\CS2 Insight Agent\backend\app\api\cosmetics_skin.py", line 282, in post_custom_skin_plan
+11461|  File "\\?\D:\demo����\CS2 Insight Agent\backend\app\api\cosmetics_skin.py", line 85, in _run_one_owned_batch
+11471|2026-08-07 14:35:11,860 [app.api.cosmetics_skin] ERROR: skin-core call failed: demo_id=79 steamid=76561199066151629 phase=rewrite
+11483|  File "\\?\D:\demo����\CS2 Insight Agent\backend\app\api\cosmetics_skin.py", line 282, in post_custom_skin_plan
+11488|  File "\\?\D:\demo����\CS2 Insight Agent\backend\app\api\cosmetics_skin.py", line 85, in _run_one_owned_batch
+11539|2026-08-07 15:15:28,355 [app.api.cosmetics_skin] ERROR: skin-core call failed: demo_id=79 steamid=76561199066151629 phase=rewrite
+11551|  File "\\?\D:\demo����\CS2 Insight Agent\backend\app\api\cosmetics_skin.py", line 282, in post_custom_skin_plan
+11556|  File "\\?\D:\demo����\CS2 Insight Agent\backend\app\api\cosmetics_skin.py", line 85, in _run_one_owned_batch

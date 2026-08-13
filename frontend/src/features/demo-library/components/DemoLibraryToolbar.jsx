@@ -1,5 +1,6 @@
 import { Database, FilePlus2, FolderOpen, LayoutGrid, List, Loader2, ScanSearch } from "lucide-react";
 import { useT } from "../../../i18n/useT.js";
+import DemoBatchActionBar from "./DemoBatchActionBar.jsx";
 
 export default function DemoLibraryToolbar({
   onOpenWatchPaths,
@@ -12,6 +13,10 @@ export default function DemoLibraryToolbar({
   libraryTotal,
   onSelectPage,
   onSelectAllLibrary,
+  selectedCount = 0,
+  onLoadSelected,
+  onBatchDelete,
+  onClearSelection,
   viewMode = "table",
   onViewModeChange,
 }) {
@@ -75,22 +80,33 @@ export default function DemoLibraryToolbar({
           {t("library.btnOpenLocal")}
         </button>
         <span className="mx-1 hidden h-5 w-px bg-cs2-border sm:block" aria-hidden />
-        <button
-          type="button"
-          disabled={libraryLoading || pageSelectableCount === 0}
-          className="rounded-md border border-cs2-border px-2.5 py-1.5 text-[12px] font-semibold text-cs2-text-secondary hover:border-cs2-accent/35 hover:text-cs2-text-primary disabled:cursor-not-allowed disabled:opacity-35"
-          onClick={onSelectPage}
-        >
-          {t("library.btnSelectPage", { count: pageSelectableCount })}
-        </button>
-        <button
-          type="button"
-          disabled={libraryLoading || (libraryTotal != null && libraryTotal === 0)}
-          className="rounded-md border border-cs2-border px-2.5 py-1.5 text-[12px] font-semibold text-cs2-text-secondary hover:border-cs2-accent/35 hover:text-cs2-text-primary disabled:cursor-not-allowed disabled:opacity-35"
-          onClick={() => void onSelectAllLibrary()}
-        >
-          {t("library.btnSelectAll", { count: libraryTotal ?? 0 })}
-        </button>
+        {selectedCount > 0 ? (
+          <DemoBatchActionBar
+            count={selectedCount}
+            onLoadSelected={onLoadSelected}
+            onBatchDelete={onBatchDelete}
+            onClearSelection={onClearSelection}
+          />
+        ) : (
+          <>
+            <button
+              type="button"
+              disabled={libraryLoading || pageSelectableCount === 0}
+              className="rounded-md border border-cs2-border px-2.5 py-1.5 text-[12px] font-semibold text-cs2-text-secondary hover:border-cs2-accent/35 hover:text-cs2-text-primary disabled:cursor-not-allowed disabled:opacity-35"
+              onClick={onSelectPage}
+            >
+              {t("library.btnSelectPage", { count: pageSelectableCount })}
+            </button>
+            <button
+              type="button"
+              disabled={libraryLoading || (libraryTotal != null && libraryTotal === 0)}
+              className="rounded-md border border-cs2-border px-2.5 py-1.5 text-[12px] font-semibold text-cs2-text-secondary hover:border-cs2-accent/35 hover:text-cs2-text-primary disabled:cursor-not-allowed disabled:opacity-35"
+              onClick={() => void onSelectAllLibrary()}
+            >
+              {t("library.btnSelectAll", { count: libraryTotal ?? 0 })}
+            </button>
+          </>
+        )}
       </div>
     </div>
   );

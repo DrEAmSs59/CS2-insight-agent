@@ -25,6 +25,10 @@ _CATALOG_GZIP_PATH = Path(__file__).with_name("cs2_item_catalog.generated.json.g
 _ALIAS_SEPARATORS = re.compile(r"[\s-]+")
 _ALIAS_PUNCTUATION = re.compile(r"[^\w]+", flags=re.UNICODE)
 _STEAM_ID64_INDIVIDUAL_BASE = 76561197960265728
+_TEAM_STARTER_PISTOL_DEFS = {
+    "t": frozenset({4}),
+    "ct": frozenset({32, 61}),
+}
 
 
 @lru_cache(maxsize=1)
@@ -434,10 +438,36 @@ def _skin_entry(row: Mapping[str, Any]) -> dict[str, Any] | None:
     return entry
 
 
+def _starter_pistol_def_from_inventory(value: object, team: str) -> int | None:
+    """Resolve a side-correct pistol only from a clean respawn inventory.
+
+    ``player_spawn`` also fires for players carrying saved equipment into a new
+    round. Those snapshots may contain a pistol picked up in the prior round, so
+    only knife + starter pistol (+ optional C4) inventories qualify here.
+    """
+    if not isinstance(value, Sequence) or isinstance(value, (str, bytes, bytearray)):
+        return None
+    allowed = _TEAM_STARTER_PISTOL_DEFS.get(team, frozenset())
+    found: set[int] = set()
+    for item_name in value:
+        model = resolve_weapon_model(item_name)
+        if not model:
+            return None
+        def_index = def_index_for_purchase_item_name(item_name)
+        if def_index in allowed:
+            found.add(def_index)
+            continue
+        if model == "c4" or model == "knife" or model.startswith("knife_"):
+            continue
+        return None
+    return next(iter(found)) if len(found) == 1 else None
+
+
 def _sample_player_context(
     parser: object,
     ticks: Sequence[int] | None,
     known_steamids: Sequence[str] | None = None,
+    starter_snapshot_ticks: Sequence[int] | None = None,
 ) -> dict[str, Any]:
     """Return cosmetic evidence sampled from weapon, pawn and controller entities."""
     empty = {
@@ -450,6 +480,8 @@ def _sample_player_context(
         "default_weapons": {},
         "pawn_gloves": {},
         "agents": {},
+        "starter_pistol_defs": {},
+        "starter_pistol_item_ids": {},
     }
     if not ticks:
         return empty
@@ -459,6 +491,7 @@ def _sample_player_context(
     wanted = [
         "item_id_high",
         "item_id_low",
+        "inventory",
         "weapon_stickers",
         "item_def_idx",
         "weapon_skin_id",
@@ -498,6 +531,9 @@ def _sample_player_context(
     default_weapons: dict[tuple[str, int], dict[str, Any]] = {}
     pawn_gloves: dict[tuple[str, int], dict[str, Any]] = {}
     agents: dict[tuple[str, int], dict[str, Any]] = {}
+    starter_pistol_candidates: dict[tuple[str, str], set[int]] = {}
+    starter_pistol_item_ids: dict[tuple[str, int], set[int]] = {}
+    starter_ticks = {int(tick) for tick in starter_snapshot_ticks or []}
     roster_steamids = {
         steamid
         for row in rows
@@ -518,6 +554,14 @@ def _sample_player_context(
         if team:
             player_teams.setdefault(steamid, set()).add(team)
         item_id = _compose_item_id(row.get("item_id_high"), row.get("item_id_low"))
+        if tick in starter_ticks and team:
+            starter_def = _starter_pistol_def_from_inventory(row.get("inventory"), team)
+            if starter_def is not None:
+                starter_pistol_candidates.setdefault((steamid, team), set()).add(starter_def)
+                active_def = _safe_int(row.get("item_def_idx"))
+                account_owner = _steamid64_from_account_id(row.get("Weapon.m_iAccountID"))
+                if item_id is not None and active_def == starter_def and account_owner == steamid:
+                    starter_pistol_item_ids.setdefault((steamid, starter_def), set()).add(item_id)
         if item_id is None:
             # Default buys often have item_id=0 and account_id 0/1 with unreliable
             # paint kits. Attribute a vanilla finish to the holder only when there
@@ -796,6 +840,20 @@ def _sample_player_context(
     for collection in (pawn_gloves, agents):
         for entry in collection.values():
             entry["evidence_observations"] = len(entry.pop("_observation_ticks", set()))
+    starter_pistol_defs: dict[str, set[int]] = {}
+    for (steamid, _team), candidates in starter_pistol_candidates.items():
+        # Conflicting CT spawn loadouts are unsafe for zero-id rewrite. Fail
+        # closed instead of guessing between USP-S and P2000.
+        if len(candidates) == 1:
+            starter_pistol_defs.setdefault(steamid, set()).update(candidates)
+    # Glock has no T-side loadout alternative. Some third-party demos omit the
+    # player_spawn event at halftime, so side participation itself is sufficient
+    # to create the player's Glock slot. Cosmetic identity is still selected only
+    # from that player's economy-owned asset below; otherwise it stays vanilla.
+    if starter_ticks:
+        for steamid, teams in player_teams.items():
+            if "t" in teams:
+                starter_pistol_defs.setdefault(steamid, set()).add(4)
     return {
         "item_teams": item_teams,
         "item_accounts": item_accounts,
@@ -806,7 +864,32 @@ def _sample_player_context(
         "default_weapons": default_weapons,
         "pawn_gloves": pawn_gloves,
         "agents": agents,
+        "starter_pistol_defs": starter_pistol_defs,
+        "starter_pistol_item_ids": starter_pistol_item_ids,
     }
+
+
+def _live_spawn_snapshot_ticks(parser: object, match_start_tick: int) -> list[int]:
+    """Return ticks immediately after live player spawns, before buys or pickups."""
+    start = int(match_start_tick or 0)
+    if start <= 0:
+        return []
+    parse_event = getattr(parser, "parse_event", None)
+    if callable(parse_event):
+        try:
+            rows = _records_from_columns(parse_event("player_spawn"))
+        except Exception as exc:  # noqa: BLE001 - optional cosmetics evidence
+            logger.info("CS2 player_spawn unavailable for starter-pistol gate: %s", exc)
+        else:
+            ticks = {
+                tick + 1
+                for row in rows
+                if (tick := _safe_int(row.get("tick"))) is not None and tick + 1 >= start
+            }
+            if ticks:
+                return sorted(ticks)
+    # begin_new_match commonly points at the first post-spawn snapshot already.
+    return [start]
 
 
 def _live_weapon_purchase_defs(
@@ -852,7 +935,9 @@ def build_player_cosmetic_inventory(
 
     When ``match_start_tick > 0``, gun cosmetics additionally require a live-phase
     ``item_purchase`` for that player+weapon def (warmup buys do not count).
-    Knives/gloves/agents are unchanged.
+    Glock-18/USP-S/P2000 instead qualify only from a fresh-spawn loadout snapshot,
+    before a player can pick up another player's pistol. Knives/gloves are unchanged;
+    agents, music kits, and C4 are deliberately omitted from the cosmetics page.
     """
     parse_skins = getattr(parser, "parse_skins", None)
     rows: list[dict[str, Any]] = []
@@ -862,32 +947,51 @@ def build_player_cosmetic_inventory(
         except Exception as exc:  # noqa: BLE001 - cosmetics never block analysis
             logger.info("CS2 owned cosmetic metadata unavailable: %s", exc)
 
-    live_sample_ticks = sample_ticks
     start_tick = int(match_start_tick or 0)
+    live_sample_ticks = sample_ticks
     if start_tick > 0 and sample_ticks is not None:
         live_sample_ticks = [tick for tick in sample_ticks if int(tick) >= start_tick]
+    starter_snapshot_ticks = _live_spawn_snapshot_ticks(parser, start_tick)
+    if starter_snapshot_ticks:
+        live_sample_ticks = sorted(
+            set(int(tick) for tick in live_sample_ticks or []) | set(starter_snapshot_ticks)
+        )
 
     context = _sample_player_context(
         parser,
         live_sample_ticks,
         known_steamids=[_safe_text(row.get("steamid")) for row in rows],
+        starter_snapshot_ticks=starter_snapshot_ticks,
     )
     item_teams = context["item_teams"]
     item_accounts = context["item_accounts"]
-    player_teams = context["player_teams"]
-    music_kits = context["music_kits"]
     item_stickers = context["item_stickers"]
     observed_items = context["observed_items"]
     default_weapons = context["default_weapons"]
     pawn_gloves = context["pawn_gloves"]
-    agents = context["agents"]
+    starter_pistol_defs = context["starter_pistol_defs"]
+    starter_pistol_item_ids = context["starter_pistol_item_ids"]
     live_weapon_buys = (
         _live_weapon_purchase_defs(parser, start_tick) if start_tick > 0 else None
     )
+
+    def weapon_allowed(steamid: str, def_index: int) -> bool:
+        return (
+            live_weapon_buys is None
+            or def_index in live_weapon_buys.get(steamid, set())
+            or def_index in starter_pistol_defs.get(steamid, set())
+        )
+
     grouped: dict[str, dict[tuple[Any, ...], dict[str, Any]]] = {}
     for row in rows:
         entry = _skin_entry(row)
         if not entry:
+            continue
+        if (
+            entry.get("type") in {"agent", "musickit"}
+            or str(entry.get("model") or "").lower() == "c4"
+            or int(entry.get("def_index") or 0) == 49
+        ):
             continue
         item_id = _safe_int(row.get("item_id"))
         skin_table_steamid = _safe_text(row.get("steamid"))
@@ -901,7 +1005,7 @@ def build_player_cosmetic_inventory(
             continue
         if entry.get("type") == "weapon" and live_weapon_buys is not None:
             def_index = int(entry["def_index"])
-            if def_index not in live_weapon_buys.get(steamid, set()):
+            if not weapon_allowed(steamid, def_index):
                 continue
         signature: tuple[Any, ...] = (
             ("item", item_id)
@@ -935,7 +1039,7 @@ def build_player_cosmetic_inventory(
                 def_index = int(observed_entry.get("def_index"))
             except (TypeError, ValueError):
                 continue
-            if def_index not in live_weapon_buys.get(steamid, set()):
+            if not weapon_allowed(steamid, def_index):
                 continue
         owner_entries = grouped.setdefault(steamid, {})
         matching = next((
@@ -978,9 +1082,7 @@ def build_player_cosmetic_inventory(
             owner_entries.setdefault(("item", item_id), observed_entry)
 
     for (steamid, def_index), default_entry in default_weapons.items():
-        if live_weapon_buys is not None and def_index not in live_weapon_buys.get(
-            steamid, set()
-        ):
+        if not weapon_allowed(steamid, def_index):
             continue
         owner_entries = grouped.setdefault(steamid, {})
         # Prefer a real economy-backed finish for the same definition when present.
@@ -992,38 +1094,74 @@ def build_player_cosmetic_inventory(
             continue
         owner_entries.setdefault(("default", def_index), default_entry)
 
+    for steamid, definitions in starter_pistol_defs.items():
+        owner_entries = grouped.setdefault(steamid, {})
+        for def_index in sorted(definitions):
+            matching = [
+                (key, entry)
+                for key, entry in owner_entries.items()
+                if str(entry.get("type") or "") == "weapon"
+                and int(entry.get("def_index") or 0) == def_index
+            ]
+            starter_ids = starter_pistol_item_ids.get((steamid, def_index), set())
+            precise = [
+                entry
+                for _key, entry in matching
+                if int(entry.get("item_id") or 0) in starter_ids
+            ]
+            durable = [
+                entry
+                for _key, entry in matching
+                if int(entry.get("item_id") or 0) > 0
+                and str(entry.get("ownership_evidence") or "") in {
+                    "weapon_account_id",
+                    "demo_skin_table",
+                }
+            ]
+            defaults = [
+                entry
+                for _key, entry in matching
+                if str(entry.get("ownership_evidence") or "") == "default_weapon_no_econ_id"
+            ]
+            chosen = (
+                precise[0] if len(precise) == 1
+                else durable[0] if len(durable) == 1
+                else defaults[0] if defaults
+                else None
+            )
+            if chosen is None:
+                chosen = _skin_entry({
+                    "def_index": def_index,
+                    "paint_index": 0,
+                    "paint_seed": None,
+                    "paint_wear": None,
+                    "item_id": None,
+                    "custom_name": None,
+                })
+                if chosen:
+                    chosen.update({
+                        "owner_steamid64": steamid,
+                        "ownership_evidence": "spawn_loadout_default_pistol",
+                        "stickers": [],
+                        "evidence_observations": 1,
+                    })
+            for key, _entry in matching:
+                owner_entries.pop(key, None)
+            if chosen:
+                side = "t" if def_index == 4 else "ct"
+                chosen["observed_teams"] = sorted(
+                    set(chosen.get("observed_teams") or []) | {side},
+                    key=("t", "ct").index,
+                )
+                owner_entries[("starter_pistol", def_index)] = chosen
+
     for (steamid, item_id), glove_entry in pawn_gloves.items():
         owner_entries = grouped.setdefault(steamid, {})
         if any(int(entry.get("item_id") or 0) == item_id for entry in owner_entries.values()):
             continue
         owner_entries.setdefault(("item", item_id), glove_entry)
 
-    for (steamid, agent_def), agent_entry in agents.items():
-        grouped.setdefault(steamid, {}).setdefault(("agent", agent_def), agent_entry)
-
-    for steamid, kit_ids in music_kits.items():
-        for kit_id in kit_ids:
-            item = resolve_cs2_item(1314, kit_id)
-            if not item or str(item.get("type") or "") != "musickit":
-                continue
-            entry = _skin_entry({
-                "def_index": 1314,
-                "paint_index": kit_id,
-                "paint_seed": None,
-                "paint_wear": None,
-                "custom_name": None,
-            })
-            if not entry:
-                continue
-            entry.update({
-                "owner_steamid64": steamid,
-                "ownership_evidence": "demo_player_controller_music_kit",
-                "observed_teams": sorted(player_teams.get(steamid, set()), key=("t", "ct").index),
-                "stickers": [],
-            })
-            grouped.setdefault(steamid, {}).setdefault(("music", kit_id), entry)
-
-    priority = {"melee": 0, "glove": 1, "weapon": 2, "agent": 3, "musickit": 4, "utility": 5}
+    priority = {"melee": 0, "glove": 1, "weapon": 2, "utility": 3}
     return {
         steamid: sorted(
             entries.values(),

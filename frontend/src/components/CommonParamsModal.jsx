@@ -488,7 +488,10 @@ export default function CommonParamsModal({
         </div>
         ) : null}
 
-        <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-y-contain px-3 py-3 sm:px-5 sm:py-4">
+        <div
+          className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-y-contain px-3 py-3 sm:px-5 sm:py-4"
+          style={{ scrollbarGutter: "stable both-edges" }}
+        >
           <div className="@container/params mx-auto w-full max-w-4xl min-w-0">
             <div className="mb-3 flex flex-col gap-3 rounded-xl border border-cs2-border bg-cs2-bg-elevated p-3 sm:mb-4 sm:flex-row sm:items-center sm:justify-between sm:p-4">
               <div className="min-w-0">

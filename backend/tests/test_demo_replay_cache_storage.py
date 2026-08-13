@@ -7,6 +7,7 @@ from pathlib import Path
 from app import main
 from app.features.demo_analysis import replay_effects_cache, replay_frames_cache, replay_match_cache
 from app.features.demo_analysis import replay_cache_storage
+from app.features.demo_analysis import replay_cache_owners
 from app.features.demo_library import api as demo_library_api
 
 
@@ -167,3 +168,87 @@ def test_remove_demo_row_caches_covers_working_copy(tmp_path, monkeypatch):
     assert removed["errors"] == []
     assert not (match_root / "match-working.parquet").exists()
     assert cached.is_file()  # working copy unlink is delete_demo's job
+
+
+def test_remove_demo_row_caches_bootstraps_all_paths_in_one_namespace_pass(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setenv("CS2_INSIGHT_DATA_DIR", str(tmp_path))
+    original = str(tmp_path / "original.dem")
+    cached = str(tmp_path / "cached.dem")
+    calls: list[tuple[str, ...]] = []
+
+    def fake_remove(paths, *, register_survivors=False):
+        assert register_survivors is True
+        calls.append(tuple(paths))
+        return {"removed_files": 0, "removed_bytes": 0}
+
+    monkeypatch.setattr(replay_match_cache, "remove_match_caches_for_demos", fake_remove)
+    monkeypatch.setattr(replay_frames_cache, "remove_frames_for_demos", fake_remove)
+    monkeypatch.setattr(replay_effects_cache, "remove_tracks_for_demos", fake_remove)
+
+    result = replay_cache_storage.remove_demo_row_caches(
+        {"path": original, "cached_path": cached}
+    )
+
+    assert result == {"removed_files": 0, "removed_bytes": 0, "errors": []}
+    assert calls == [(original, cached), (original, cached), (original, cached)]
+    assert replay_cache_owners.owner_index_ready() is True
+
+
+def test_ready_owner_index_deletes_directly_without_namespace_scan(tmp_path, monkeypatch):
+    monkeypatch.setenv("CS2_INSIGHT_DATA_DIR", str(tmp_path))
+    demo_path = tmp_path / "indexed.dem"
+    demo_path.write_bytes(b"demo")
+    match_root = replay_cache_storage.replay_cache_namespace_root("matches")
+    _write_match_entry(match_root, "indexed-match", demo_path)
+    files = (
+        match_root / "indexed-match.parquet",
+        match_root / "indexed-match.meta.json",
+    )
+    replay_cache_owners.register_replay_cache_entry(
+        "matches",
+        str(demo_path),
+        "indexed-match",
+        files,
+    )
+    replay_cache_owners.mark_owner_index_ready()
+
+    def unexpected_scan(*_args, **_kwargs):
+        raise AssertionError("ready owner index must bypass namespace scans")
+
+    monkeypatch.setattr(replay_match_cache, "remove_match_caches_for_demos", unexpected_scan)
+    monkeypatch.setattr(replay_frames_cache, "remove_frames_for_demos", unexpected_scan)
+    monkeypatch.setattr(replay_effects_cache, "remove_tracks_for_demos", unexpected_scan)
+
+    removed = replay_cache_storage.remove_demo_replay_cache(str(demo_path))
+
+    assert removed["removed_files"] == 2
+    assert removed["errors"] == []
+    assert all(not path.exists() for path in files)
+
+
+def test_owner_index_keeps_primary_and_legacy_entries_with_the_same_key(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setenv("CS2_INSIGHT_DATA_DIR", str(tmp_path))
+    demo_path = tmp_path / "duplicate-root.dem"
+    demo_path.write_bytes(b"demo")
+    primary = replay_cache_storage.replay_cache_namespace_root("matches")
+    legacy = tmp_path / "replay-match"
+    _write_match_entry(primary, "same-key", demo_path)
+    _write_match_entry(legacy, "same-key", demo_path)
+
+    warmed = replay_cache_storage.ensure_replay_cache_owner_index()
+    records, errors = replay_cache_owners.load_owner_records([str(demo_path)])
+
+    assert warmed == {"ready": True, "rebuilt": True, "errors": []}
+    assert errors == []
+    assert len(records) == 2
+
+    removed = replay_cache_storage.remove_demo_replay_cache(str(demo_path))
+
+    assert removed["removed_files"] == 4
+    assert removed["errors"] == []

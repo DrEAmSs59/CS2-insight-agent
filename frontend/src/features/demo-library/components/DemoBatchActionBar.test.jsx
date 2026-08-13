@@ -25,6 +25,10 @@ describe("DemoBatchActionBar", () => {
     );
 
     expect(screen.queryByText("载入并解析…")).toBeNull();
+    const bar = screen.getByTestId("demo-library-selection-bar");
+    expect(bar.className).toContain("rounded-lg");
+    expect(bar.className).toContain("border");
+    expect(bar.className.split(/\s+/)).not.toContain("w-full");
     expect(screen.getAllByRole("button")).toHaveLength(3);
     fireEvent.click(screen.getByText("载入选中"));
     expect(onLoadSelected).toHaveBeenCalledTimes(1);

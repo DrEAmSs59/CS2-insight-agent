@@ -72,13 +72,17 @@ describe("CosmeticsView", () => {
     expect(screen.queryByText("“不属于 JW”")).toBeNull();
     expect(screen.getByTestId("cosmetics-row-ct")).toBeTruthy();
     expect(screen.getByTestId("cosmetics-row-t")).toBeTruthy();
-    expect(screen.getByTestId("cosmetics-row-heading-ct").className).toContain("w-36");
+    expect(screen.getByTestId("cosmetics-row-heading-ct").className).toContain("inline-flex");
+    expect(screen.getByTestId("cosmetics-row-heading-ct").className).not.toContain("w-36");
     expect(screen.getByTestId("cosmetics-row-heading-ct").className).toContain("bg-cs2-cyan-surface");
     expect(screen.getByTestId("cosmetics-row-heading-t").className).toContain("bg-cs2-amber-surface");
     expect(screen.getByTestId("cosmetics-row-heading-ct").className).not.toContain("border-l-2");
     expect(screen.getByTestId("cosmetics-row-heading-t").className).not.toContain("border-l-2");
     expect(screen.getByTestId("cosmetics-row-heading-ct").className).not.toContain("bg-sky-500/10");
     expect(screen.getByTestId("cosmetics-row-heading-t").className).not.toContain("bg-amber-500/10");
+    expect(screen.getByTestId("cosmetics-row-heading-ct").textContent).toBe("CT");
+    expect(screen.getByTestId("cosmetics-row-heading-t").textContent).toBe("T");
+    expect(screen.getByTestId("cosmetics-team-stack").className).toContain("space-y-[18px]");
     expect(screen.queryByTestId("cosmetics-team-tab-ct")).toBeNull();
     expect(screen.queryByTestId("cosmetics-team-tab-t")).toBeNull();
     // Both team sections show the evidence knife + AWP + natural glove placeholder.
@@ -86,15 +90,19 @@ describe("CosmeticsView", () => {
     for (const preview of container.querySelectorAll("[data-cosmetic-card] .cosmetic-preview-surface")) {
       expect(preview.className).toContain("rounded-[10px]");
     }
+    for (const label of container.querySelectorAll("[data-cosmetic-card-label]")) {
+      expect(label.className).not.toContain("min-h-8");
+    }
     expect(container.querySelectorAll("[data-cosmetic-card] [data-cosmetic-rarity-rail]")).toHaveLength(6);
     expect(container.querySelectorAll("[data-cosmetic-card] [data-cosmetic-rarity-label]")).toHaveLength(0);
     for (const rail of container.querySelectorAll("[data-cosmetic-card] [data-cosmetic-rarity-rail]")) {
       expect(rail.className).toContain("left-0");
       expect(rail.className).not.toContain("right-0");
-      expect(rail.className).toContain("top-1/2");
-      expect(rail.className).toContain("h-[60%]");
-      expect(rail.className).toContain("w-[3px]");
-      expect(rail.className).toContain("-translate-y-1/2");
+      expect(rail.className).toContain("bottom-0");
+      expect(rail.className).toContain("h-[3px]");
+      expect(rail.className).toContain("w-full");
+      expect(rail.className).not.toContain("top-1/2");
+      expect(rail.className).not.toContain("-translate-y-1/2");
       expect(rail.className).not.toContain("ring-white");
       expect(rail.className).not.toContain("border-white");
     }
@@ -345,7 +353,7 @@ describe("CosmeticsView", () => {
     expect(screen.queryByText("错误归属的刀")).toBeNull();
   });
 
-  test("renders agent evidence but omits music-kit and C4 rows", () => {
+  test("omits agent, music-kit, and C4 rows", () => {
     const { container } = render(
       <CosmeticsView
         selectedPlayer={{ name: "JW", steamid64: STEAM_ID }}
@@ -363,16 +371,16 @@ describe("CosmeticsView", () => {
       />,
     );
 
-    expect(screen.getAllByText("探员")).toHaveLength(2);
-    expect(screen.getAllByText("血腥达里尔爵士（沉默）")).toHaveLength(2);
+    expect(screen.queryByText("探员")).toBeNull();
+    expect(screen.queryByText("血腥达里尔爵士（沉默）")).toBeNull();
     expect(screen.queryByText("音乐盒")).toBeNull();
     expect(screen.queryByText("Under Bright Lights")).toBeNull();
     expect(screen.queryByText("C4 炸弹")).toBeNull();
-    // Each team shows the agent + natural knife/glove placeholders.
-    expect(container.querySelectorAll("[data-cosmetic-card]").length).toBe(6);
+    // Each team only shows the natural knife/glove placeholders.
+    expect(container.querySelectorAll("[data-cosmetic-card]").length).toBe(4);
   });
 
-  test("custom mode grays non-swappable items and opens picker for weapons", async () => {
+  test("custom mode opens picker for weapons while agents remain hidden", async () => {
     render(
       <CosmeticsView
         selectedPlayer={{ name: "JW", steamid: STEAM_ID }}
@@ -392,10 +400,7 @@ describe("CosmeticsView", () => {
     fireEvent.click(screen.getByRole("button", { name: /自定义饰品|Customize skins/i }));
     expect(screen.getByRole("button", { name: /保存自定义皮肤方案|Save custom skin plan/i })).toBeTruthy();
 
-    const agent = screen.getByRole("button", { name: "探员甲" });
-    expect(agent.className).toMatch(/opacity|grayscale|cursor-not-allowed/);
-    fireEvent.click(agent);
-    expect(screen.queryByPlaceholderText(/搜索皮肤|Search skins/i)).toBeNull();
+    expect(screen.queryByRole("button", { name: "探员甲" })).toBeNull();
 
     fireEvent.click(screen.getByRole("button", { name: /AK原皮/ }));
     expect(screen.getByPlaceholderText(/搜索皮肤|Search skins/i)).toBeTruthy();
@@ -701,6 +706,13 @@ describe("CosmeticsView", () => {
     fireEvent.click(screen.getByTestId("cosmetics-save-plan"));
 
     expect(screen.getAllByText(/正在保存自定义饰品方案|Saving custom skin plan/i).length).toBeGreaterThanOrEqual(1);
+    const rewriteOverlay = screen.getByTestId("skin-rewrite-overlay");
+    expect(rewriteOverlay.className).toContain("fixed");
+    expect(rewriteOverlay.className).toContain("inset-0");
+    expect(within(rewriteOverlay).getByText(/玩家 JW|Player JW/i)).toBeTruthy();
+    expect(within(rewriteOverlay).getByTestId("skin-rewrite-operation").textContent).toMatch(/正在换|Applying/i);
+    expect(within(rewriteOverlay).getByTestId("skin-rewrite-arrow")).toBeTruthy();
+    expect(within(rewriteOverlay).getByRole("progressbar")).toBeTruthy();
     const saveButton = screen.getByTestId("cosmetics-save-plan");
     expect(saveButton.disabled).toBe(true);
     expect(saveButton.getAttribute("aria-busy")).toBe("true");
@@ -740,6 +752,7 @@ describe("CosmeticsView", () => {
     await waitFor(() => {
       expect(screen.getByText(/自定义皮肤方案已保存|Custom skin plan saved/i)).toBeTruthy();
     });
+    expect(screen.queryByTestId("skin-rewrite-overlay")).toBeNull();
     expect(screen.getByTestId("cosmetics-save-result")).toBeTruthy();
   });
 
@@ -1066,6 +1079,91 @@ describe("CosmeticsView", () => {
       expect(screen.getByText(/二西莫夫/)).toBeTruthy();
     });
     expect(screen.getByText(/→\s*M4A1消音版 \| 印花集/)).toBeTruthy();
+  });
+
+  test("keeps default T/CT glove originals after rewritten gloves are re-analyzed", async () => {
+    const hedgeMaze = {
+      catalog_id: 1718,
+      type: "glove",
+      def_index: 5030,
+      paint_index: 10038,
+      paint_seed: 0,
+      paint_wear: 0.06,
+      name_zh: "运动手套 | 树篱迷宫",
+      name_en: "Sport Gloves | Hedge Maze",
+      rarity: "#eb4b4b",
+    };
+    vi.mocked(loadCustomSkinPlan).mockResolvedValueOnce({
+      ok: true,
+      plan: {
+        steamid: STEAM_ID,
+        items: [
+          {
+            slot_key: "ct:placeholder:5029",
+            original: {
+              type: "glove",
+              def_index: 5029,
+              paint_index: 0,
+              is_placeholder: true,
+              observed_teams: ["ct"],
+              name_zh: "默认反恐精英手套",
+              name_en: "Default CT Gloves",
+            },
+            replacement: hedgeMaze,
+          },
+          {
+            slot_key: "t:placeholder:5028",
+            original: {
+              type: "glove",
+              def_index: 5028,
+              paint_index: 0,
+              is_placeholder: true,
+              observed_teams: ["t"],
+              name_zh: "默认T手套",
+              name_en: "Default T Gloves",
+            },
+            replacement: hedgeMaze,
+          },
+        ],
+      },
+    });
+
+    render(
+      <CosmeticsView
+        demoId={10}
+        selectedPlayer={{ name: "JW", steamid: STEAM_ID }}
+        workspace={{
+          cosmetics: {
+            players: {
+              [STEAM_ID]: [
+                cosmetic({
+                  ...hedgeMaze,
+                  item_id: 9001,
+                  observed_teams: ["ct"],
+                  custom_name: "CS2 INSIGHT AGENT",
+                }),
+                cosmetic({
+                  ...hedgeMaze,
+                  item_id: 9002,
+                  observed_teams: ["t"],
+                  custom_name: "CS2 INSIGHT AGENT",
+                }),
+              ],
+            },
+          },
+        }}
+      />,
+    );
+
+    await waitFor(() => {
+      const ctRow = screen.getByTestId("cosmetics-row-ct");
+      const tRow = screen.getByTestId("cosmetics-row-t");
+      expect(within(ctRow).getByText("默认反恐精英手套")).toBeTruthy();
+      expect(within(ctRow).getByText(/→\s*运动手套 \| 树篱迷宫/)).toBeTruthy();
+      expect(within(tRow).getByText("默认T手套")).toBeTruthy();
+      expect(within(tRow).getByText(/→\s*运动手套 \| 树篱迷宫/)).toBeTruthy();
+      expect(screen.queryByText(/CS2 INSIGHT AGENT/)).toBeNull();
+    });
   });
 
   test("hover shows replaced knife instead of unfinished original", async () => {

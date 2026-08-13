@@ -99,6 +99,11 @@ frontend/src-tauri/bundle-resources/*
 # Local generated preview artifacts (match report preview, etc.)
 frontend/preview/
 
+# Local generated skin-core review artifacts
+/outputs/019ff569-5dc4-70f2-be8e-2805bd349591/
+/docs/skin-core-paid-features-and-validation-design.md
+/docs/skin-core-remote-validation-design.md
+
 # Local UI design backups created before visual refactors
 backups/
 

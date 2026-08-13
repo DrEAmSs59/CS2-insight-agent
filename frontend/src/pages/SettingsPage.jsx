@@ -701,7 +701,10 @@ export default function SettingsPage() {
       </div>
 
       {/* Content */}
-      <div className={`min-h-0 flex-1 ${activeTab === "recording" ? "flex flex-col overflow-hidden" : "overflow-y-auto"}`}>
+      <div
+        className={`min-h-0 flex-1 ${activeTab === "recording" ? "flex flex-col overflow-hidden" : "overflow-y-auto"}`}
+        style={activeTab === "recording" ? undefined : { scrollbarGutter: "stable both-edges" }}
+      >
         <div
           className={
             activeTab === "recording"
@@ -1470,7 +1473,13 @@ export default function SettingsPage() {
   <div className="shrink-0 px-4 pb-3 pt-2">
     <div
       data-testid="settings-save-footer-card"
-      className={`flex items-center justify-between gap-4 rounded-[10px] border border-cs2-border bg-cs2-bg-card px-4 py-2.5 ${activeTab === "video" && aiObsRecommendationEnabled ? "w-full" : "mx-auto w-full max-w-6xl"}`}
+      className={`flex items-center justify-between gap-4 rounded-[10px] border border-cs2-border bg-cs2-bg-card px-4 py-2.5 ${
+        activeTab === "video" && aiObsRecommendationEnabled
+          ? "w-full"
+          : activeTab === "recording"
+            ? "mx-auto w-full max-w-4xl"
+            : "mx-auto w-full max-w-[54rem]"
+      }`}
     >
       <div className="min-w-0 flex-1">
         {activeTab !== "recording" && saveMsg && (

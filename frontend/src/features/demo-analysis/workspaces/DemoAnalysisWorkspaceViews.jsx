@@ -271,7 +271,7 @@ export function OverviewView({ data, onSelectPlayer, onOpenRound, onOpenReplayRo
   const secondaryCount = [hasOpening, hasObjective, hasPlayerEvents].filter(Boolean).length;
 
   return (
-    <div className="mx-auto w-full max-w-[1440px] space-y-3 pb-6">
+    <div data-testid="analysis-overview-content" className="w-full space-y-3 pb-6">
       <MatchMainlineCard mainline={overview.mainline} />
 
       <section className="grid auto-rows-fr grid-cols-1 gap-2.5 lg:grid-cols-2 xl:grid-cols-12 xl:auto-rows-[210px]">

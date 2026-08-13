@@ -324,6 +324,10 @@ class DemoDB:
                 "CREATE INDEX IF NOT EXISTS idx_demo_files_status_id ON demo_files(status, id)",
             )
             await conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_demo_files_status_added_at_id "
+                "ON demo_files(status, added_at DESC, id DESC)",
+            )
+            await conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_demo_files_path_nocase ON demo_files(path COLLATE NOCASE)",
             )
             await conn.execute(
@@ -694,75 +698,100 @@ class DemoDB:
         *,
         error_msg: str | None = None,
         parsed_at: str | None = None,
+        _conn: aiosqlite.Connection | None = None,
     ) -> None:
-        async with aiosqlite.connect(self.db_path) as conn:
-            await conn.execute(
+        if _conn is None:
+            async with aiosqlite.connect(self.db_path) as conn:
+                await self.update_status(
+                    demo_path,
+                    status,
+                    error_msg=error_msg,
+                    parsed_at=parsed_at,
+                    _conn=conn,
+                )
+                await conn.commit()
+            return
+        await _conn.execute(
+            """
+            UPDATE demo_files
+            SET status = ?, error_msg = ?, parsed_at = ?
+            WHERE path = ?
+            """,
+            (status, error_msg, parsed_at, demo_path),
+        )
+
+    async def update_lightweight_meta(
+        self,
+        demo_path: str,
+        meta: dict[str, Any],
+        source: str | None = None,
+        *,
+        _conn: aiosqlite.Connection | None = None,
+    ) -> None:
+        if _conn is None:
+            async with aiosqlite.connect(self.db_path) as conn:
+                await self.update_lightweight_meta(
+                    demo_path,
+                    meta,
+                    source,
+                    _conn=conn,
+                )
+                await conn.commit()
+            return
+        if source:
+            await _conn.execute(
                 """
                 UPDATE demo_files
-                SET status = ?, error_msg = ?, parsed_at = ?
+                SET map_name = ?,
+                    total_rounds = ?,
+                    team_a_score = ?,
+                    team_b_score = ?,
+                    team_a_name = ?,
+                    team_b_name = ?,
+                    duration_mins = ?,
+                    match_date = ?,
+                    source = ?
                 WHERE path = ?
                 """,
-                (status, error_msg, parsed_at, demo_path),
+                (
+                    meta.get("map_name"),
+                    meta.get("total_rounds"),
+                    meta.get("team_a_score"),
+                    meta.get("team_b_score"),
+                    meta.get("team_a_name"),
+                    meta.get("team_b_name"),
+                    meta.get("duration_mins"),
+                    meta.get("match_date"),
+                    source,
+                    demo_path,
+                ),
             )
-            await conn.commit()
-
-    async def update_lightweight_meta(self, demo_path: str, meta: dict[str, Any], source: str | None = None) -> None:
-        async with aiosqlite.connect(self.db_path) as conn:
-            if source:
-                await conn.execute(
-                    """
-                    UPDATE demo_files
-                    SET map_name = ?,
-                        total_rounds = ?,
-                        team_a_score = ?,
-                        team_b_score = ?,
-                        team_a_name = ?,
-                        team_b_name = ?,
-                        duration_mins = ?,
-                        match_date = ?,
-                        source = ?
-                    WHERE path = ?
-                    """,
-                    (
-                        meta.get("map_name"),
-                        meta.get("total_rounds"),
-                        meta.get("team_a_score"),
-                        meta.get("team_b_score"),
-                        meta.get("team_a_name"),
-                        meta.get("team_b_name"),
-                        meta.get("duration_mins"),
-                        meta.get("match_date"),
-                        source,
-                        demo_path,
-                    ),
-                )
-            else:
-                await conn.execute(
-                    """
-                    UPDATE demo_files
-                    SET map_name = ?,
-                        total_rounds = ?,
-                        team_a_score = ?,
-                        team_b_score = ?,
-                        team_a_name = ?,
-                        team_b_name = ?,
-                        duration_mins = ?,
-                        match_date = ?
-                    WHERE path = ?
-                    """,
-                    (
-                        meta.get("map_name"),
-                        meta.get("total_rounds"),
-                        meta.get("team_a_score"),
-                        meta.get("team_b_score"),
-                        meta.get("team_a_name"),
-                        meta.get("team_b_name"),
-                        meta.get("duration_mins"),
-                        meta.get("match_date"),
-                        demo_path,
-                    ),
-                )
-            await conn.commit()
+        else:
+            await _conn.execute(
+                """
+                UPDATE demo_files
+                SET map_name = ?,
+                    total_rounds = ?,
+                    team_a_score = ?,
+                    team_b_score = ?,
+                    team_a_name = ?,
+                    team_b_name = ?,
+                    duration_mins = ?,
+                    match_date = ?
+                WHERE path = ?
+                """,
+                (
+                    meta.get("map_name"),
+                    meta.get("total_rounds"),
+                    meta.get("team_a_score"),
+                    meta.get("team_b_score"),
+                    meta.get("team_a_name"),
+                    meta.get("team_b_name"),
+                    meta.get("duration_mins"),
+                    meta.get("match_date"),
+                    demo_path,
+                ),
+            )
 
     async def _replace_timeline_events_in_connection(
         self,
@@ -1180,6 +1209,8 @@ class DemoDB:
         demo_id: int,
         demo_path: str,
         players: list[dict[str, Any]],
+        *,
+        _conn: aiosqlite.Connection | None = None,
     ) -> None:
         now = utc_now_iso()
         rows: list[tuple[Any, ...]] = []
@@ -1264,20 +1295,28 @@ class DemoDB:
                     now,
                 ),
             )
-        async with aiosqlite.connect(self.db_path) as conn:
-            await conn.execute("DELETE FROM demo_player_stats WHERE demo_id = ?", (demo_id,))
-            if rows:
-                await conn.executemany(
-                    """
-                    INSERT INTO demo_player_stats(
-                        demo_id, demo_path, steam_id64, steam_id, account_id, user_id,
-                        player_name, normalized_name, team_name, team_number,
-                        player_color, kills, deaths, assists, kd, indexed_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    rows,
+        if _conn is None:
+            async with aiosqlite.connect(self.db_path) as conn:
+                await self.replace_demo_player_stats(
+                    demo_id,
+                    demo_path,
+                    players,
+                    _conn=conn,
                 )
-            await conn.commit()
+                await conn.commit()
+            return
+        await _conn.execute("DELETE FROM demo_player_stats WHERE demo_id = ?", (demo_id,))
+        if rows:
+            await _conn.executemany(
+                """
+                INSERT INTO demo_player_stats(
+                    demo_id, demo_path, steam_id64, steam_id, account_id, user_id,
+                    player_name, normalized_name, team_name, team_number,
+                    player_color, kills, deaths, assists, kd, indexed_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                rows,
+            )
 
     async def list_demo_player_stats(self, demo_id: int) -> list[dict[str, Any]]:
         async with aiosqlite.connect(self.db_path) as conn:
@@ -1325,45 +1364,110 @@ class DemoDB:
         state: Literal["ready", "empty", "error"],
         row_count: int,
         error_msg: str | None = None,
+        _conn: aiosqlite.Connection | None = None,
     ) -> None:
         """Persist the result of one roster parse, including negative results."""
-        async with aiosqlite.connect(self.db_path) as conn:
-            await conn.execute(
-                """
-                INSERT INTO demo_roster_cache(
-                    demo_id, demo_path, cache_version, source_content_md5,
-                    source_file_size, source_mtime_ns, state, row_count,
-                    error_msg, updated_at
-                ) VALUES (
-                    ?, ?, ?,
-                    (SELECT content_md5 FROM demo_files WHERE id = ?),
-                    ?, ?, ?, ?, ?, ?
+        if _conn is None:
+            async with aiosqlite.connect(self.db_path) as conn:
+                await self.save_demo_roster_cache(
+                    demo_id,
+                    demo_path,
+                    cache_version=cache_version,
+                    source_file_size=source_file_size,
+                    source_mtime_ns=source_mtime_ns,
+                    state=state,
+                    row_count=row_count,
+                    error_msg=error_msg,
+                    _conn=conn,
                 )
-                ON CONFLICT(demo_id) DO UPDATE SET
-                    demo_path = excluded.demo_path,
-                    cache_version = excluded.cache_version,
-                    source_content_md5 = excluded.source_content_md5,
-                    source_file_size = excluded.source_file_size,
-                    source_mtime_ns = excluded.source_mtime_ns,
-                    state = excluded.state,
-                    row_count = excluded.row_count,
-                    error_msg = excluded.error_msg,
-                    updated_at = excluded.updated_at
-                """,
-                (
-                    demo_id,
-                    str(demo_path),
-                    int(cache_version),
-                    demo_id,
-                    source_file_size,
-                    source_mtime_ns,
-                    state,
-                    max(0, int(row_count)),
-                    error_msg,
-                    utc_now_iso(),
-                ),
+                await conn.commit()
+            return
+        await _conn.execute(
+            """
+            INSERT INTO demo_roster_cache(
+                demo_id, demo_path, cache_version, source_content_md5,
+                source_file_size, source_mtime_ns, state, row_count,
+                error_msg, updated_at
+            ) VALUES (
+                ?, ?, ?,
+                (SELECT content_md5 FROM demo_files WHERE id = ?),
+                ?, ?, ?, ?, ?, ?
             )
-            await conn.commit()
+            ON CONFLICT(demo_id) DO UPDATE SET
+                demo_path = excluded.demo_path,
+                cache_version = excluded.cache_version,
+                source_content_md5 = excluded.source_content_md5,
+                source_file_size = excluded.source_file_size,
+                source_mtime_ns = excluded.source_mtime_ns,
+                state = excluded.state,
+                row_count = excluded.row_count,
+                error_msg = excluded.error_msg,
+                updated_at = excluded.updated_at
+            """,
+            (
+                demo_id,
+                str(demo_path),
+                int(cache_version),
+                demo_id,
+                source_file_size,
+                source_mtime_ns,
+                state,
+                max(0, int(row_count)),
+                error_msg,
+                utc_now_iso(),
+            ),
+        )
+
+    async def persist_demo_ingest(
+        self,
+        demo_id: int,
+        demo_path: str,
+        *,
+        meta: dict[str, Any],
+        source: str | None,
+        players: list[dict[str, Any]],
+        roster_demo_path: str,
+        roster_cache_version: int,
+        source_file_size: int | None,
+        source_mtime_ns: int | None,
+        parsed_at: str,
+    ) -> None:
+        """Atomically persist all lightweight ingest state in one transaction."""
+        async with aiosqlite.connect(self.db_path) as conn:
+            try:
+                await self.update_lightweight_meta(
+                    demo_path,
+                    meta,
+                    source,
+                    _conn=conn,
+                )
+                await self.replace_demo_player_stats(
+                    demo_id,
+                    demo_path,
+                    players,
+                    _conn=conn,
+                )
+                await self.save_demo_roster_cache(
+                    demo_id,
+                    roster_demo_path,
+                    cache_version=roster_cache_version,
+                    source_file_size=source_file_size,
+                    source_mtime_ns=source_mtime_ns,
+                    state="ready" if players else "empty",
+                    row_count=len(players),
+                    _conn=conn,
+                )
+                await self.update_status(
+                    demo_path,
+                    "loaded",
+                    error_msg=None,
+                    parsed_at=parsed_at,
+                    _conn=conn,
+                )
+                await conn.commit()
+            except Exception:
+                await conn.rollback()
+                raise
 
     async def invalidate_demo_roster_cache(
         self,
@@ -1982,7 +2086,7 @@ class DemoDB:
             list_sql = (
                 "SELECT d.id, d.path, d.filename, d.file_size, d.source, d.added_at"
                 + where_sql
-                + " ORDER BY d.id DESC LIMIT ? OFFSET ?"
+                + " ORDER BY d.added_at DESC, d.id DESC LIMIT ? OFFSET ?"
             )
             list_cur = await conn.execute(list_sql, [*params, limit, offset])
             rows = [dict(row) for row in await list_cur.fetchall()]
@@ -2006,7 +2110,7 @@ class DemoDB:
             if name_query:
                 sql += " AND d.filename LIKE ?"
                 params.append(f"%{name_query}%")
-            sql += " ORDER BY d.id DESC LIMIT ? OFFSET ?"
+            sql += " ORDER BY d.added_at DESC, d.id DESC LIMIT ? OFFSET ?"
             params.extend([limit, offset])
             cur = await conn.execute(sql, params)
             return [dict(r) for r in await cur.fetchall()]

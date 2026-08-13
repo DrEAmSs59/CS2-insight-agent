@@ -47,6 +47,39 @@ def test_discovered_page_preserves_duplicate_rules_and_pagination(tmp_path: Path
     _run(scenario())
 
 
+def test_discovered_lists_order_by_discovered_at_desc_with_id_tiebreaker(tmp_path: Path):
+    async def scenario():
+        db = DemoDB(tmp_path / "discovered-order.sqlite3")
+        await db.init_db()
+
+        older_id, _ = await db.add_demo(
+            str(tmp_path / "older.dem"),
+            added_at="2026-01-01T00:00:00+00:00",
+        )
+        newest_id, _ = await db.add_demo(
+            str(tmp_path / "newest.dem"),
+            added_at="2026-01-03T00:00:00+00:00",
+        )
+        same_time_first_id, _ = await db.add_demo(
+            str(tmp_path / "same-time-first.dem"),
+            added_at="2026-01-02T00:00:00+00:00",
+        )
+        same_time_second_id, _ = await db.add_demo(
+            str(tmp_path / "same-time-second.dem"),
+            added_at="2026-01-02T00:00:00+00:00",
+        )
+        expected_ids = [newest_id, same_time_second_id, same_time_first_id, older_id]
+
+        page_rows, total = await db.list_discovered_page()
+        list_rows = await db.list_discovered_demos()
+
+        assert total == len(expected_ids)
+        assert [row["id"] for row in page_rows] == expected_ids
+        assert [row["id"] for row in list_rows] == expected_ids
+
+    _run(scenario())
+
+
 def test_discovered_query_uses_dedicated_indexes(tmp_path: Path):
     async def initialize():
         db = DemoDB(tmp_path / "plan.sqlite3")
@@ -62,7 +95,7 @@ def test_discovered_query_uses_dedicated_indexes(tmp_path: Path):
     with closing(sqlite3.connect(db.db_path)) as conn:
         details = "\n".join(str(row[3]) for row in conn.execute(sql))
 
-    assert "idx_demo_files_status_id" in details
+    assert "idx_demo_files_status_added_at_id" in details
     assert "idx_demo_files_path_nocase" in details
     assert "idx_demo_files_filename_nocase" in details
     assert "idx_demo_files_content_md5" in details
