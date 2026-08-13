@@ -24,6 +24,22 @@ def is_zhipu_glm_model(model: str, base_url: Optional[str]) -> bool:
     return "glm" in m or "bigmodel.cn" in u
 
 
+def completion_temperature(
+    model: str,
+    base_url: Optional[str],
+    preferred: float,
+) -> float:
+    """Return a provider-compatible chat-completion temperature.
+
+    Kimi endpoints (including Kimi 2.7) reject every temperature except 1.
+    Gateway model IDs are not standardized, so also recognize Moonshot URLs.
+    """
+    marker = f"{model} {base_url or ''}".lower()
+    if "kimi" in marker or "moonshot" in marker:
+        return 1
+    return preferred
+
+
 def completion_extra_body(model: str, base_url: Optional[str]) -> Optional[dict[str, Any]]:
     """GLM thinking mode puts JSON in reasoning_content; disable for chat completions."""
     if is_zhipu_glm_model(model, base_url):

@@ -1221,7 +1221,7 @@ def build_match_workspace(
 
     return {
         "version": 1,
-        "algorithm_version": "match-workspace-2026.08.8",
+        "algorithm_version": "match-workspace-2026.08.10",
         "data_source": "demo_parser_with_derived_metrics",
         "team_assignment_source": (
             "round_side_groups" if group_side_by_round else "roster_order_fallback"
@@ -1262,9 +1262,9 @@ def build_match_workspace(
         "players": stats,
         "rounds": rounds_out,
         "cosmetics": {
-            "version": 9,
+            "version": 11,
             "ownership_source": "demo_economy_entities",
-            "weapon_ownership_gate": "live_item_purchase_or_default_pistol",
+            "weapon_ownership_gate": "purchase_provenance_or_default_pistol",
             "players": player_cosmetics,
         },
         "effect_tracks_version": 1,

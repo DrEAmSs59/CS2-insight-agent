@@ -13,6 +13,7 @@ import logging
 import math
 import re
 import struct
+from bisect import bisect_right
 from collections.abc import Mapping, Sequence
 from functools import lru_cache
 from pathlib import Path
@@ -467,7 +468,8 @@ def _sample_player_context(
     parser: object,
     ticks: Sequence[int] | None,
     known_steamids: Sequence[str] | None = None,
-    starter_snapshot_ticks: Sequence[int] | None = None,
+    starter_snapshot_players: Mapping[int, set[str]] | None = None,
+    zero_id_weapon_provenance: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Return cosmetic evidence sampled from weapon, pawn and controller entities."""
     empty = {
@@ -533,7 +535,8 @@ def _sample_player_context(
     agents: dict[tuple[str, int], dict[str, Any]] = {}
     starter_pistol_candidates: dict[tuple[str, str], set[int]] = {}
     starter_pistol_item_ids: dict[tuple[str, int], set[int]] = {}
-    starter_ticks = {int(tick) for tick in starter_snapshot_ticks or []}
+    starter_players = starter_snapshot_players or {}
+    starter_ticks = {int(tick) for tick in starter_players}
     roster_steamids = {
         steamid
         for row in rows
@@ -554,7 +557,12 @@ def _sample_player_context(
         if team:
             player_teams.setdefault(steamid, set()).add(team)
         item_id = _compose_item_id(row.get("item_id_high"), row.get("item_id_low"))
-        if tick in starter_ticks and team:
+        eligible_starter_players = starter_players.get(int(tick)) if tick is not None else None
+        if (
+            tick in starter_ticks
+            and team
+            and (not eligible_starter_players or steamid in eligible_starter_players)
+        ):
             starter_def = _starter_pistol_def_from_inventory(row.get("inventory"), team)
             if starter_def is not None:
                 starter_pistol_candidates.setdefault((steamid, team), set()).add(starter_def)
@@ -591,6 +599,16 @@ def _sample_player_context(
                         "heavy",
                         "shotgun",
                     }
+                    and (
+                        zero_id_weapon_provenance is None
+                        or _zero_id_weapon_is_purchase_backed(
+                            zero_id_weapon_provenance,
+                            steamid=steamid,
+                            def_index=int(default_entry["def_index"]),
+                            tick=tick,
+                            team=team,
+                        )
+                    )
                 ):
                     def_index = int(default_entry["def_index"])
                     key = (steamid, def_index)
@@ -869,11 +887,21 @@ def _sample_player_context(
     }
 
 
-def _live_spawn_snapshot_ticks(parser: object, match_start_tick: int) -> list[int]:
-    """Return ticks immediately after live player spawns, before buys or pickups."""
+def _live_spawn_snapshot_windows(
+    parser: object,
+    match_start_tick: int,
+) -> dict[int, set[str]]:
+    """Return small per-player live-spawn windows before buys or pickups.
+
+    ``parse_ticks`` only returns exact demo ticks. Some demos have player state at
+    the spawn tick and two ticks later, but no row at ``spawn + 1``. Sampling all
+    three offsets keeps starter-pistol detection independent of that cadence; the
+    player identity and clean-inventory gates still reject unrelated, saved, or
+    picked-up equipment.
+    """
     start = int(match_start_tick or 0)
     if start <= 0:
-        return []
+        return {}
     parse_event = getattr(parser, "parse_event", None)
     if callable(parse_event):
         try:
@@ -881,45 +909,183 @@ def _live_spawn_snapshot_ticks(parser: object, match_start_tick: int) -> list[in
         except Exception as exc:  # noqa: BLE001 - optional cosmetics evidence
             logger.info("CS2 player_spawn unavailable for starter-pistol gate: %s", exc)
         else:
-            ticks = {
-                tick + 1
-                for row in rows
-                if (tick := _safe_int(row.get("tick"))) is not None and tick + 1 >= start
-            }
-            if ticks:
-                return sorted(ticks)
+            windows: dict[int, set[str]] = {}
+            for row in rows:
+                tick = _safe_int(row.get("tick"))
+                if tick is None:
+                    continue
+                steamid = _safe_text(row.get("user_steamid"))
+                for candidate in (tick, tick + 1, tick + 2):
+                    if candidate < start:
+                        continue
+                    players = windows.setdefault(candidate, set())
+                    if steamid:
+                        players.add(steamid)
+            if windows:
+                return windows
     # begin_new_match commonly points at the first post-spawn snapshot already.
-    return [start]
+    # An empty player set means the fallback applies to every participant row.
+    return {start: set()}
+
+
+def _optional_event_rows(parser: object, event_name: str) -> list[dict[str, Any]]:
+    parse_event = getattr(parser, "parse_event", None)
+    if not callable(parse_event):
+        return []
+    try:
+        return _records_from_columns(parse_event(event_name))
+    except Exception as exc:  # noqa: BLE001 - optional cosmetics evidence
+        logger.info("CS2 %s unavailable for cosmetics provenance: %s", event_name, exc)
+        return []
+
+
+def _live_weapon_purchase_rows(
+    parser: object,
+    match_start_tick: int,
+) -> list[dict[str, Any]]:
+    """Return live-phase weapon purchase rows with a resolved definition."""
+    start = int(match_start_tick or 0)
+    if start <= 0:
+        return []
+    out: list[dict[str, Any]] = []
+    for row in _optional_event_rows(parser, "item_purchase"):
+        tick = _safe_int(row.get("tick"))
+        steamid = _safe_text(row.get("steamid"))
+        def_index = def_index_for_purchase_item_name(row.get("item_name"))
+        if tick is None or tick < start or not steamid or def_index is None:
+            continue
+        out.append({**row, "tick": tick, "steamid": steamid, "def_index": def_index})
+    return out
 
 
 def _live_weapon_purchase_defs(
-    parser: object,
-    match_start_tick: int,
+    purchase_rows: Sequence[Mapping[str, Any]],
 ) -> dict[str, set[int]]:
-    """Return steamid -> weapon def_index set bought at/after match start."""
-    parse_event = getattr(parser, "parse_event", None)
-    if not callable(parse_event) or int(match_start_tick or 0) <= 0:
-        return {}
-    try:
-        table = parse_event("item_purchase")
-    except Exception as exc:  # noqa: BLE001 - cosmetics never block analysis
-        logger.info("CS2 item_purchase unavailable for cosmetics gate: %s", exc)
-        return {}
-    rows = _records_from_columns(table)
+    """Return steamid -> weapon def_index set from resolved live purchases."""
     out: dict[str, set[int]] = {}
-    start = int(match_start_tick)
-    for row in rows:
-        tick = _safe_int(row.get("tick"))
-        if tick is None or tick < start:
-            continue
+    for row in purchase_rows:
         steamid = _safe_text(row.get("steamid"))
-        if not steamid:
-            continue
-        def_index = def_index_for_purchase_item_name(row.get("item_name"))
-        if def_index is None:
+        def_index = _safe_int(row.get("def_index"))
+        if not steamid or def_index is None:
             continue
         out.setdefault(steamid, set()).add(def_index)
     return out
+
+
+def _team_at_tick(
+    team_changes: Mapping[str, Sequence[tuple[int, str]]],
+    steamid: str,
+    tick: int,
+) -> str:
+    changes = team_changes.get(steamid) or ()
+    if not changes:
+        return ""
+    index = bisect_right([change[0] for change in changes], tick) - 1
+    return changes[index][1] if index >= 0 else ""
+
+
+def _zero_id_weapon_provenance(
+    parser: object,
+    match_start_tick: int,
+    purchase_rows: Sequence[Mapping[str, Any]],
+) -> dict[str, Any]:
+    """Build acquisition history for weapons whose demo economy ID is zero.
+
+    ``item_pickup`` is emitted for both buy-menu grants and ground pickups. A
+    pickup matching a same-tick purchase keeps purchase provenance; an unmatched
+    pickup replaces it. Deaths and side changes reset prior provenance.
+    """
+    start = int(match_start_tick or 0)
+    team_changes: dict[str, list[tuple[int, str]]] = {}
+    resets: dict[str, set[int]] = {}
+    for row in _optional_event_rows(parser, "player_team"):
+        steamid = _safe_text(row.get("user_steamid"))
+        tick = _safe_int(row.get("tick"))
+        team_number = _safe_int(row.get("team"))
+        team = "t" if team_number == 2 else "ct" if team_number == 3 else ""
+        if not steamid or tick is None:
+            continue
+        if team:
+            team_changes.setdefault(steamid, []).append((tick, team))
+        old_team = _safe_int(row.get("oldteam"))
+        if tick >= start and old_team in {2, 3} and team_number != old_team:
+            resets.setdefault(steamid, set()).add(tick)
+    for changes in team_changes.values():
+        changes.sort()
+
+    for row in _optional_event_rows(parser, "player_death"):
+        steamid = _safe_text(row.get("user_steamid"))
+        tick = _safe_int(row.get("tick"))
+        if steamid and tick is not None and tick >= start:
+            resets.setdefault(steamid, set()).add(tick)
+
+    acquisitions: dict[tuple[str, int], list[tuple[int, str, str]]] = {}
+    purchase_ticks: dict[tuple[str, int], set[int]] = {}
+    for row in purchase_rows:
+        steamid = _safe_text(row.get("steamid"))
+        tick = _safe_int(row.get("tick"))
+        def_index = _safe_int(row.get("def_index"))
+        if not steamid or tick is None or def_index is None:
+            continue
+        key = (steamid, def_index)
+        purchase_ticks.setdefault(key, set()).add(tick)
+        acquisitions.setdefault(key, []).append((
+            tick,
+            "purchase",
+            _team_at_tick(team_changes, steamid, tick),
+        ))
+
+    for row in _optional_event_rows(parser, "item_pickup"):
+        steamid = _safe_text(row.get("user_steamid"))
+        tick = _safe_int(row.get("tick"))
+        def_index = _safe_int(row.get("defindex"))
+        if def_index is None:
+            def_index = def_index_for_purchase_item_name(row.get("item"))
+        if not steamid or tick is None or tick < start or def_index is None:
+            continue
+        key = (steamid, def_index)
+        # Buy-menu grants normally emit item_purchase and item_pickup on the same
+        # tick. Keep a tiny tolerance for demos whose event order is off by a tick.
+        if any(abs(purchase_tick - tick) <= 1 for purchase_tick in purchase_ticks.get(key, set())):
+            continue
+        acquisitions.setdefault(key, []).append((tick, "pickup", ""))
+
+    return {
+        "acquisitions": {
+            key: tuple(sorted(events, key=lambda event: event[0]))
+            for key, events in acquisitions.items()
+        },
+        "resets": {
+            steamid: tuple(sorted(ticks))
+            for steamid, ticks in resets.items()
+        },
+    }
+
+
+def _zero_id_weapon_is_purchase_backed(
+    provenance: Mapping[str, Any],
+    *,
+    steamid: str,
+    def_index: int,
+    tick: int | None,
+    team: str,
+) -> bool:
+    if tick is None:
+        return False
+    events = (provenance.get("acquisitions") or {}).get((steamid, def_index)) or ()
+    if not events:
+        return False
+    event_index = bisect_right([event[0] for event in events], tick) - 1
+    if event_index < 0:
+        return False
+    event_tick, source, purchase_team = events[event_index]
+    reset_ticks = (provenance.get("resets") or {}).get(steamid) or ()
+    reset_index = bisect_right(reset_ticks, tick) - 1
+    if reset_index >= 0 and event_tick <= reset_ticks[reset_index]:
+        return False
+    if source != "purchase":
+        return False
+    return not purchase_team or not team or purchase_team == team
 
 
 def build_player_cosmetic_inventory(
@@ -951,17 +1117,27 @@ def build_player_cosmetic_inventory(
     live_sample_ticks = sample_ticks
     if start_tick > 0 and sample_ticks is not None:
         live_sample_ticks = [tick for tick in sample_ticks if int(tick) >= start_tick]
-    starter_snapshot_ticks = _live_spawn_snapshot_ticks(parser, start_tick)
-    if starter_snapshot_ticks:
+    starter_snapshot_players = _live_spawn_snapshot_windows(parser, start_tick)
+    if starter_snapshot_players:
         live_sample_ticks = sorted(
-            set(int(tick) for tick in live_sample_ticks or []) | set(starter_snapshot_ticks)
+            set(int(tick) for tick in live_sample_ticks or []) | set(starter_snapshot_players)
         )
+    live_purchase_rows = _live_weapon_purchase_rows(parser, start_tick)
+    live_weapon_buys = (
+        _live_weapon_purchase_defs(live_purchase_rows) if start_tick > 0 else None
+    )
+    zero_id_provenance = (
+        _zero_id_weapon_provenance(parser, start_tick, live_purchase_rows)
+        if start_tick > 0
+        else None
+    )
 
     context = _sample_player_context(
         parser,
         live_sample_ticks,
         known_steamids=[_safe_text(row.get("steamid")) for row in rows],
-        starter_snapshot_ticks=starter_snapshot_ticks,
+        starter_snapshot_players=starter_snapshot_players,
+        zero_id_weapon_provenance=zero_id_provenance,
     )
     item_teams = context["item_teams"]
     item_accounts = context["item_accounts"]
@@ -971,9 +1147,6 @@ def build_player_cosmetic_inventory(
     pawn_gloves = context["pawn_gloves"]
     starter_pistol_defs = context["starter_pistol_defs"]
     starter_pistol_item_ids = context["starter_pistol_item_ids"]
-    live_weapon_buys = (
-        _live_weapon_purchase_defs(parser, start_tick) if start_tick > 0 else None
-    )
 
     def weapon_allowed(steamid: str, def_index: int) -> bool:
         return (

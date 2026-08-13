@@ -208,6 +208,111 @@ def test_post_custom_plan_rewrites_cache_only_and_persists_plan(api_env, monkeyp
     assert row["content_md5"] == expected_md5
 
 
+def test_post_keeps_distinct_t_ct_rules_for_zero_id_deagle(api_env, monkeypatch):
+    """Regression: CT Hypnotic must not replace the T-side Blaze rule."""
+    client = api_env["client"]
+    demo_id = api_env["demo_id"]
+    db = api_env["db"]
+    original: Path = api_env["original"]
+    asyncio.run(
+        db.save_result(
+            str(original),
+            {
+                "analysis_workspace": {
+                    "cosmetics": {
+                        "players": {
+                            STEAM_ID: [
+                                _inventory_row(
+                                    catalog_id=0,
+                                    item_id=None,
+                                    def_index=1,
+                                    paint_index=0,
+                                    paint_seed=0,
+                                    paint_wear=0,
+                                    model="deagle",
+                                    name_en="Desert Eagle",
+                                    name_zh="沙漠之鹰",
+                                    observed_teams=["ct", "t"],
+                                )
+                            ]
+                        }
+                    }
+                }
+            },
+        )
+    )
+
+    def fake_rewrite(
+        *, input_dem, output_dem, steam_id64, items, demoparser2_python, timeout=600.0
+    ):
+        assert steam_id64 == STEAM_ID
+        assert [
+            (
+                row.get("item_id64"),
+                row.get("definition_index"),
+                row.get("team"),
+                row.get("paint_kit"),
+            )
+            for row in items
+        ] == [
+            ("0", 1, "CT", 61),
+            ("0", 1, "T", 37),
+        ]
+        Path(output_dem).write_bytes(b"SIDE-SCOPED-DEAGLE")
+        return {
+            "ok": True,
+            "sha256": "side-scoped",
+            "items_rewritten": 2,
+            "succeeded": [
+                {"item_id64": "0", "definition_index": 1, "team": "CT"},
+                {"item_id64": "0", "definition_index": 1, "team": "T"},
+            ],
+            "failed": [],
+        }
+
+    monkeypatch.setattr(cosmetics_skin, "run_rewrite_owned_batch", fake_rewrite)
+    response = client.post(
+        f"/api/demos/{demo_id}/cosmetics/custom-plan",
+        json={
+            "steamid": STEAM_ID,
+            "replacements": {
+                "ct:def:1:0:0:0": _replacement(
+                    catalog_id=69,
+                    def_index=1,
+                    paint_index=61,
+                    paint_seed=0,
+                    paint_wear=0,
+                    model="deagle",
+                    name_en="Desert Eagle | Hypnotic",
+                    name_zh="沙漠之鹰 | 蛊惑之色",
+                ),
+                "t:def:1:0:0:0": _replacement(
+                    catalog_id=67,
+                    def_index=1,
+                    paint_index=37,
+                    paint_seed=0,
+                    paint_wear=0,
+                    model="deagle",
+                    name_en="Desert Eagle | Blaze",
+                    name_zh="沙漠之鹰 | 炽烈之炎",
+                ),
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["ok"] is True
+    assert [row["slot_key"] for row in body["succeeded"]] == [
+        "ct:def:1:0:0:0",
+        "t:def:1:0:0:0",
+    ]
+    assert [entry["slot_key"] for entry in body["plan"]["items"]] == [
+        "ct:def:1:0:0:0",
+        "t:def:1:0:0:0",
+    ]
+
+
 def test_post_custom_plan_restores_cache_from_original_before_rewrite(api_env, monkeypatch):
     client = api_env["client"]
     demo_id = api_env["demo_id"]

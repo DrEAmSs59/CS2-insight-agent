@@ -1166,6 +1166,123 @@ describe("CosmeticsView", () => {
     });
   });
 
+  test("keeps zero-id Deagle and owned glove originals after synthetic IDs are re-analyzed", async () => {
+    const hypnotic = {
+      catalog_id: 69,
+      type: "weapon",
+      model: "deagle",
+      def_index: 1,
+      paint_index: 61,
+      paint_seed: 0,
+      paint_wear: 0,
+      name_zh: "沙漠之鹰 | 蛊惑之色",
+      name_en: "Desert Eagle | Hypnotic",
+      rarity: "#d32ce6",
+    };
+    const arid = {
+      catalog_id: 1716,
+      type: "glove",
+      model: "sporty_gloves",
+      def_index: 5030,
+      paint_index: 10019,
+      paint_seed: 0,
+      paint_wear: 0.06,
+      name_zh: "运动手套 | 干旱",
+      name_en: "Sport Gloves | Arid",
+      rarity: "#eb4b4b",
+    };
+    vi.mocked(loadCustomSkinPlan).mockResolvedValueOnce({
+      ok: true,
+      plan: {
+        steamid: STEAM_ID,
+        items: [
+          {
+            slot_key: "ct:def:1:0:0:0",
+            original: {
+              catalog_id: 0,
+              type: "weapon",
+              model: "deagle",
+              def_index: 1,
+              paint_index: 0,
+              paint_seed: 0,
+              paint_wear: 0,
+              observed_teams: ["ct"],
+              name_zh: "沙漠之鹰",
+              name_en: "Desert Eagle",
+            },
+            replacement: hypnotic,
+          },
+          {
+            slot_key: "ct:id:53188157085",
+            original: {
+              catalog_id: 1710,
+              item_id: 53188157085,
+              type: "glove",
+              model: "studded_brokenfang_gloves",
+              def_index: 4725,
+              paint_index: 10088,
+              paint_seed: 36,
+              paint_wear: 0.142666,
+              observed_teams: ["ct"],
+              name_zh: "狂牙手套 | 精神错乱",
+              name_en: "Broken Fang Gloves | Unhinged",
+            },
+            replacement: arid,
+          },
+        ],
+      },
+    });
+
+    render(
+      <CosmeticsView
+        demoId={11}
+        selectedPlayer={{ name: "JW", steamid: STEAM_ID }}
+        locale="en"
+        workspace={{
+          cosmetics: {
+            players: {
+              [STEAM_ID]: [
+                // The original owned glove remains as provenance but is no
+                // longer visible on either side after materialization.
+                cosmetic({
+                  catalog_id: 1710,
+                  item_id: 53188157085,
+                  type: "glove",
+                  model: "studded_brokenfang_gloves",
+                  def_index: 4725,
+                  paint_index: 10088,
+                  observed_teams: [],
+                  name_en: "Broken Fang Gloves | Unhinged",
+                }),
+                cosmetic({
+                  ...hypnotic,
+                  item_id: 9101,
+                  observed_teams: ["ct"],
+                  custom_name: "CS2 INSIGHT AGENT",
+                }),
+                cosmetic({
+                  ...arid,
+                  item_id: 9102,
+                  observed_teams: ["ct"],
+                  custom_name: "CS2 INSIGHT AGENT",
+                }),
+              ],
+            },
+          },
+        }}
+      />,
+    );
+
+    await waitFor(() => {
+      const ctRow = screen.getByTestId("cosmetics-row-ct");
+      expect(within(ctRow).getByText("Desert Eagle")).toBeTruthy();
+      expect(within(ctRow).getByText(/Hypnotic/)).toBeTruthy();
+      expect(within(ctRow).getByText(/Broken Fang Gloves/)).toBeTruthy();
+      expect(within(ctRow).getByText(/Sport Gloves \| Arid/)).toBeTruthy();
+      expect(screen.queryByText(/CS2 INSIGHT AGENT/)).toBeNull();
+    });
+  });
+
   test("hover shows replaced knife instead of unfinished original", async () => {
     vi.mocked(loadCustomSkinPlan).mockResolvedValueOnce({
       ok: true,

@@ -826,6 +826,125 @@ def test_weapons_require_live_match_purchase_when_match_start_provided():
     assert weapons[0]["ownership_evidence"] == "weapon_account_id"
 
 
+def test_zero_id_ground_pickup_does_not_inherit_purchase_provenance_across_sides():
+    owner = "76561198000000001"
+
+    class FakeParser:
+        def parse_skins(self):
+            return {}
+
+        def parse_event(self, name):
+            if name == "player_spawn":
+                return {"tick": [], "user_steamid": []}
+            if name == "item_purchase":
+                return {
+                    "tick": [100],
+                    "steamid": [owner],
+                    "item_name": ["AK-47"],
+                }
+            if name == "item_pickup":
+                return {
+                    "tick": [100, 500],
+                    "user_steamid": [owner, owner],
+                    "defindex": [7, 7],
+                    "item": ["ak47", "ak47"],
+                }
+            if name == "player_team":
+                return {
+                    "tick": [50, 400],
+                    "user_steamid": [owner, owner],
+                    "oldteam": [0, 2],
+                    "team": [2, 3],
+                }
+            if name == "player_death":
+                return {"tick": [], "user_steamid": []}
+            raise AssertionError(name)
+
+        def parse_ticks(self, _wanted, *, ticks):
+            assert ticks == [100, 200, 600]
+            return {
+                "steamid": [owner, owner],
+                "tick": [200, 600],
+                "inventory": [["Knife", "Glock-18", "AK-47"], ["Knife", "USP-S", "AK-47"]],
+                "item_id_high": [0, 0],
+                "item_id_low": [0, 0],
+                "Weapon.m_iAccountID": [0, 1],
+                "weapon_stickers": [[], []],
+                "item_def_idx": [7, 7],
+                "weapon_skin_id": [0, 0],
+                "weapon_paint_seed": [0, 0],
+                "weapon_float": [0.0, 0.0],
+                "team_num": [2, 3],
+            }
+
+    inventory = build_player_cosmetic_inventory(
+        FakeParser(), sample_ticks=[200, 600], match_start_tick=100
+    )
+
+    ak = next(row for row in inventory[owner] if row.get("def_index") == 7)
+    assert ak["ownership_evidence"] == "default_weapon_no_econ_id"
+    assert ak["observed_teams"] == ["t"]
+    assert ak["evidence_observations"] == 1
+
+
+def test_zero_id_ground_pickup_replaces_earlier_purchase_provenance_on_same_side():
+    owner = "76561198000000001"
+
+    class FakeParser:
+        def parse_skins(self):
+            return {}
+
+        def parse_event(self, name):
+            if name == "player_spawn":
+                return {"tick": [], "user_steamid": []}
+            if name == "item_purchase":
+                return {
+                    "tick": [100],
+                    "steamid": [owner],
+                    "item_name": ["AK-47"],
+                }
+            if name == "item_pickup":
+                return {
+                    "tick": [100, 500],
+                    "user_steamid": [owner, owner],
+                    "defindex": [7, 7],
+                    "item": ["ak47", "ak47"],
+                }
+            if name == "player_team":
+                return {
+                    "tick": [50],
+                    "user_steamid": [owner],
+                    "oldteam": [0],
+                    "team": [2],
+                }
+            if name == "player_death":
+                return {"tick": [], "user_steamid": []}
+            raise AssertionError(name)
+
+        def parse_ticks(self, _wanted, *, ticks):
+            assert ticks == [100, 600]
+            return {
+                "steamid": [owner],
+                "tick": [600],
+                "inventory": [["Knife", "Glock-18", "AK-47"]],
+                "item_id_high": [0],
+                "item_id_low": [0],
+                "Weapon.m_iAccountID": [1],
+                "weapon_stickers": [[]],
+                "item_def_idx": [7],
+                "weapon_skin_id": [0],
+                "weapon_paint_seed": [0],
+                "weapon_float": [0.0],
+                "team_num": [2],
+            }
+
+    inventory = build_player_cosmetic_inventory(
+        FakeParser(), sample_ticks=[600], match_start_tick=100
+    )
+
+    assert not any(row.get("def_index") == 7 for row in inventory.get(owner) or [])
+
+
 def test_spawn_loadout_pistols_bypass_purchase_without_attributing_pickups():
     usp_owner = "76561198000000001"
     p2000_owner = "76561198000000002"
@@ -849,7 +968,7 @@ def test_spawn_loadout_pistols_bypass_purchase_without_attributing_pickups():
             raise AssertionError(name)
 
         def parse_ticks(self, _wanted, *, ticks):
-            assert ticks == [100, 1000]
+            assert ticks == [100, 101, 1000]
             return {
                 "steamid": [usp_owner, p2000_owner, glock_owner, usp_owner],
                 "tick": [100, 100, 100, 1000],
@@ -899,6 +1018,71 @@ def test_spawn_loadout_pistols_bypass_purchase_without_attributing_pickups():
     assert not any(row.get("item_id") == p2000_id for row in inventory[usp_owner])
 
 
+def test_spawn_pistol_window_handles_missing_spawn_plus_one_tick():
+    owner = "76561198000000001"
+    bystander = "76561198000000002"
+    usp_id = 41090984121
+    p2000_id = 41090984122
+
+    class FakeParser:
+        def parse_skins(self):
+            return {}
+
+        def parse_event(self, name):
+            if name == "player_spawn":
+                return {"tick": [100], "user_steamid": [owner]}
+            if name == "item_purchase":
+                return {"tick": [], "steamid": [], "item_name": []}
+            raise AssertionError(name)
+
+        def parse_ticks(self, _wanted, *, ticks):
+            assert ticks == [100, 101, 102]
+            # Real demos may expose exact state at N/N+2 but no row at N+1.
+            return {
+                "steamid": [owner, bystander, owner, bystander],
+                "tick": [100, 100, 102, 102],
+                "inventory": [
+                    ["Knife", "USP-S"],
+                    ["Knife", "P2000"],
+                    ["Knife", "USP-S"],
+                    ["Knife", "P2000"],
+                ],
+                "item_id_high": [
+                    usp_id >> 32,
+                    p2000_id >> 32,
+                    usp_id >> 32,
+                    p2000_id >> 32,
+                ],
+                "item_id_low": [
+                    usp_id & 0xFFFFFFFF,
+                    p2000_id & 0xFFFFFFFF,
+                    usp_id & 0xFFFFFFFF,
+                    p2000_id & 0xFFFFFFFF,
+                ],
+                "Weapon.m_iAccountID": [
+                    account_id(owner),
+                    account_id(bystander),
+                    account_id(owner),
+                    account_id(bystander),
+                ],
+                "weapon_stickers": [[], [], [], []],
+                "item_def_idx": [61, 32, 61, 32],
+                "weapon_skin_id": [0, 0, 0, 0],
+                "weapon_paint_seed": [0, 0, 0, 0],
+                "weapon_float": [0.0, 0.0, 0.0, 0.0],
+                "team_num": [3, 3, 3, 3],
+            }
+
+    inventory = build_player_cosmetic_inventory(
+        FakeParser(), sample_ticks=[], match_start_tick=100
+    )
+
+    usp = next(row for row in inventory[owner] if row.get("def_index") == 61)
+    assert usp["item_id"] == usp_id
+    assert usp["observed_teams"] == ["ct"]
+    assert not any(row.get("def_index") == 32 for row in inventory.get(bystander, []))
+
+
 def test_zero_id_spawn_p2000_falls_back_to_safe_vanilla_slot():
     owner = "76561198000000001"
 
@@ -914,7 +1098,7 @@ def test_zero_id_spawn_p2000_falls_back_to_safe_vanilla_slot():
             raise AssertionError(name)
 
         def parse_ticks(self, _wanted, *, ticks):
-            assert ticks == [100, 200]
+            assert ticks == [100, 101, 199, 200, 201]
             return {
                 "steamid": [owner, owner],
                 "tick": [100, 200],

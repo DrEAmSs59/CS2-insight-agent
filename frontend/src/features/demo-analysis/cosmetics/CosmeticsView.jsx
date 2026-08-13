@@ -75,27 +75,25 @@ function planRowSlotKeys(row, inventory = []) {
     .filter((team) => team === "t" || team === "ct");
   if (!scopedTeam) keys.push(...(teams.length ? teams.map((team) => `${team}:${key}`) : [key]));
 
-  // A default glove starts as a placeholder (5028/5029), but skin-core
-  // materializes the replacement as a new glove entity. After re-analysis the
-  // inventory therefore has a different slot key even though the persisted
-  // plan still correctly points at the original placeholder. Alias that plan
-  // onto the observed replacement entity for the same side so the card keeps
-  // rendering "Default T/CT Gloves → replacement".
-  const original = row?.original;
+  // Materialization may assign a synthetic item ID to a zero-ID weapon or to a
+  // side-scoped glove. After re-analysis that replacement has a different slot
+  // key from the persisted original. Alias the plan onto the uniquely observed
+  // replacement entity for the same side so cards keep rendering
+  // "demo original → replacement" instead of only the applied skin.
   const replacement = row?.replacement;
-  const originalId = Number(original?.item_id);
-  const isDefaultGloveSlot = String(original?.type || "") === "glove"
-    && !(Number.isFinite(originalId) && originalId > 0)
-    && (Boolean(original?.is_placeholder) || /^placeholder:/i.test(baseKey));
-  if (isDefaultGloveSlot && replacement && typeof replacement === "object") {
+  if (replacement && typeof replacement === "object") {
     const targetTeams = scopedTeam ? [scopedTeam] : teams;
-    for (const item of inventory) {
-      if (String(item?.type || "") !== "glove") continue;
-      const observedTeams = (Array.isArray(item?.observed_teams) ? item.observed_teams : [])
-        .map((team) => String(team || "").toLowerCase());
-      const team = targetTeams.find((candidate) => observedTeams.includes(candidate));
-      if (!team) continue;
-      if (sameCosmeticIdentity(item, replacement)) keys.push(teamSlotKey(item, team));
+    for (const team of targetTeams) {
+      const candidates = inventory.filter((item) => {
+        const observedTeams = (Array.isArray(item?.observed_teams) ? item.observed_teams : [])
+          .map((entry) => String(entry || "").toLowerCase());
+        return observedTeams.includes(team) && sameCosmeticIdentity(item, replacement);
+      });
+      const exact = candidates.find((item) => slotKey(item) === baseKey);
+      // Do not guess when two unrelated inventory entities have the same finish
+      // on one side. The persisted key remains available for an exact match.
+      const applied = exact || (candidates.length === 1 ? candidates[0] : null);
+      if (applied) keys.push(teamSlotKey(applied, team));
     }
   }
   return [...new Set(keys)];
