@@ -157,14 +157,14 @@ fn call_webview2_devtools(
 #[cfg(windows)]
 fn devtools_remote_object_id(response: &serde_json::Value) -> Option<&str> {
     response
-        .pointer("/result/result/objectId")
+        .pointer("/result/objectId")
         .and_then(serde_json::Value::as_str)
 }
 
 #[cfg(windows)]
 fn devtools_indexed_object_ids(response: &serde_json::Value) -> Vec<String> {
     let mut indexed = response
-        .pointer("/result/result")
+        .pointer("/result")
         .and_then(serde_json::Value::as_array)
         .into_iter()
         .flatten()
@@ -179,6 +179,11 @@ fn devtools_indexed_object_ids(response: &serde_json::Value) -> Vec<String> {
         .into_iter()
         .map(|(_, object_id)| object_id)
         .collect()
+}
+
+#[cfg(windows)]
+fn devtools_file_path(response: &serde_json::Value) -> Option<&str> {
+    response.get("path").and_then(serde_json::Value::as_str)
 }
 
 #[cfg(windows)]
@@ -231,9 +236,7 @@ fn resolve_dropped_file_paths_windows(
                 "DOM.getFileInfo",
                 serde_json::json!({ "objectId": file_object_id }),
             )?;
-            let Some(path) = file_info
-                .pointer("/result/path")
-                .and_then(serde_json::Value::as_str)
+            let Some(path) = devtools_file_path(&file_info)
                 .map(str::trim)
                 .filter(|path| !path.is_empty())
             else {
@@ -256,12 +259,12 @@ fn resolve_dropped_file_paths_windows(
 
 #[cfg(all(test, windows))]
 mod dropped_file_path_tests {
-    use super::{devtools_indexed_object_ids, devtools_remote_object_id};
+    use super::{devtools_file_path, devtools_indexed_object_ids, devtools_remote_object_id};
 
     #[test]
     fn reads_runtime_evaluate_object_id() {
         let response = serde_json::json!({
-            "result": { "result": { "type": "object", "objectId": "list-7" } }
+            "result": { "type": "object", "objectId": "list-7" }
         });
         assert_eq!(devtools_remote_object_id(&response), Some("list-7"));
     }
@@ -269,17 +272,24 @@ mod dropped_file_path_tests {
     #[test]
     fn orders_file_objects_and_ignores_non_index_properties() {
         let response = serde_json::json!({
-            "result": {
-                "result": [
-                    { "name": "length", "value": { "value": 2 } },
-                    { "name": "1", "value": { "objectId": "file-b" } },
-                    { "name": "0", "value": { "objectId": "file-a" } }
-                ]
-            }
+            "result": [
+                { "name": "length", "value": { "value": 2 } },
+                { "name": "1", "value": { "objectId": "file-b" } },
+                { "name": "0", "value": { "objectId": "file-a" } }
+            ]
         });
         assert_eq!(
             devtools_indexed_object_ids(&response),
             vec!["file-a".to_string(), "file-b".to_string()]
+        );
+    }
+
+    #[test]
+    fn reads_dom_get_file_info_path() {
+        let response = serde_json::json!({ "path": "C:\\captures\\match.mp4" });
+        assert_eq!(
+            devtools_file_path(&response),
+            Some("C:\\captures\\match.mp4")
         );
     }
 }
