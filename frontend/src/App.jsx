@@ -4,6 +4,7 @@ import { AppShellProvider } from "./context/AppShellContext";
 import UpdateCheckModal from "./components/UpdateCheckModal";
 import RecordingBlockedDialog from "./components/RecordingBlockedDialog";
 import RecordingResultModal from "./components/recordingQueue/RecordingResultModal";
+import RecordingProgressModal from "./components/recordingQueue/RecordingProgressModal";
 import RecordWarmupModal from "./components/RecordWarmupModal";
 import ProgressBar from "./components/ProgressBar";
 import BatchLoadErrorModal from "./components/BatchLoadErrorModal";
@@ -1393,10 +1394,10 @@ export default function App() {
     location.pathname === "/analysis" &&
     (parsing || anyDemoParsing || analysisInlineProgress?.active === true);
 
-  const showGlobalNotice =
-    batchRecording ||
+  const showGlobalNotice = !batchRecording && (
     (Boolean(progressText?.trim()) && !parsingShownInline) ||
-    (anyDemoParsing && !parsingShownInline);
+    (anyDemoParsing && !parsingShownInline)
+  );
   const globalNoticeText = progressText
     || (batchRecording ? t("app.batchRecording") : "")
     || (analysisInlineProgress?.active === true ? analysisInlineProgress.text : "")
@@ -1510,6 +1511,14 @@ export default function App() {
             </div>
           </div>
         ) : null}
+
+        <RecordingProgressModal
+          open={batchRecording}
+          statusText={progressText}
+          queueLength={queue.length}
+          abortRequested={recordingAbortRequested}
+          onAbort={recordingAbortRequested ? undefined : handleAbortBatchRecording}
+        />
 
         <RecordWarmupModal
           open={recordWarmupOpen}

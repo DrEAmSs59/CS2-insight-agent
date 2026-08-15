@@ -31,6 +31,8 @@ import { playerAppearance, steamIdForPlayer } from "../../utils/playerAppearance
 import { playerIdentityKey } from "../../utils/playerIdentity.js";
 import { ALL_TAG, AnalysisViewNavigation, DemoSelector, EmptyResult, HighlightWorkspaceToolbar, MatchRailSummary, PAGE_CONTAINER_CLASS, PlayerPicker, firstTeamName, playerName, splitTeams } from "./DemoAnalysisScaffold.jsx";
 
+const PINNED_COMPILATION_ORDER = ["all_kills", "all_deaths", "freeze_to_death"];
+
 export default function DemoAnalysisPage() {
   const t = useT();
   const locale = useLocaleStore((state) => state.effectiveLocale);
@@ -102,6 +104,13 @@ export default function DemoAnalysisPage() {
   ));
   const playerAiReviewing = Boolean(s.aiReviewingPlayers?.[`${s.currentMatchIndex}:${activePlayer}`]);
   const regularClips = (s.clips || []).filter((clip) => clip.category !== "meme_death");
+  const pinnedCompilationTags = PINNED_COMPILATION_ORDER.flatMap((kind) => {
+    const clip = regularClips.find((candidate) => (
+      candidate.category === "compilation" && candidate.compilation_kind === kind
+    ));
+    const tag = clip?.context_tags?.[0];
+    return tag ? [{ kind, tag }] : [];
+  });
   const tagCounts = useMemo(() => {
     const counts = new Map([[ALL_TAG, regularClips.length]]);
     regularClips.forEach((clip) => (clip.context_tags || []).forEach((tag) => counts.set(tag, (counts.get(tag) || 0) + 1)));
@@ -251,6 +260,7 @@ export default function DemoAnalysisPage() {
                         setSelectedTag={setSelectedTag}
                         locale={locale}
                         avatars={steamAvatars}
+                        pinnedCompilationTags={pinnedCompilationTags}
                       />
                       {activeHighlightView === "clips" && (
                         <ClipList clips={visibleClips} targetPlayer={activePlayer} selectedIds={s.selectedClientClipUids} onToggle={s.handleToggleClip} aiMode={s.aiMode} queuedClientClipUids={s.queuedClientClipUidsForCurrentDemo} onDequeue={s.handleDequeueClip} parsedPlayers={parsedPlayers} matchTotalRounds={s.roundMontageMaxRounds} freezeToDeathDraft={s.freezeToDeathDraft} onFreezeToDeathDraftChange={s.setFreezeToDeathDraft} roundMontagePickerDisabled={parsingCurrent || s.batchRecording} suppressSummaryHeader />

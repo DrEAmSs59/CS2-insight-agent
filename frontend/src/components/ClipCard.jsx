@@ -134,6 +134,10 @@ export default function ClipCard({
   const hasAiScore = normalizeAiScore(clip.ai_score) != null;
 
   const hasScore = clip.score_own != null && clip.score_opp != null;
+  const weaponTokens = weaponUsedTokens(clip.weapon_used, locale);
+  const hasSecondaryMeta = Boolean(
+    clip.context_tags?.length || showKillerBadge || showVictimsBadge,
+  );
 
   // 若 context_tags 已包含对应杀数词，则不再单独显示数字徽章（避免「双杀」+「2 杀」重复）
   const KILL_COUNT_TAGS = new Set(["双杀", "三杀", "四杀", "五杀 (ACE)"]);
@@ -224,11 +228,6 @@ export default function ClipCard({
                     <span className="text-cs2-rose-on-surface">{clip.score_opp}</span>
                   </span>
                 )}
-                {clip.kill_count > 0 && !killCountInTags && (
-                  <span className="text-[10px] font-bold text-cs2-text-secondary">
-                    {t("clip.kills", { n: clip.kill_count })}
-                  </span>
-                )}
               </>
             )}
             {clip.category === "compilation" && (
@@ -241,16 +240,25 @@ export default function ClipCard({
                     {t("clip.segments", { n: clip.source_ticks.length })}
                   </span>
                 )}
-                {clip.kill_count > 0 && (
-                  <span className="text-[10px] font-bold text-cs2-text-secondary">
-                    {t("clip.kills", { n: clip.kill_count })}
-                  </span>
-                )}
               </>
+            )}
+            {weaponTokens.map((weapon) => (
+              <span
+                key={weapon}
+                className="inline-flex items-center rounded border border-cs2-accent/35 bg-cs2-accent/[0.07] px-1.5 py-0.5 font-mono text-[10px] font-bold text-cs2-text-primary"
+              >
+                {weapon}
+              </span>
+            ))}
+            {clip.kill_count > 0 && (clip.category === "compilation" || !killCountInTags) && (
+              <span className="text-[10px] font-bold text-cs2-text-secondary">
+                {t("clip.kills", { n: clip.kill_count })}
+              </span>
             )}
           </div>
 
-          <div className="mb-1.5 flex flex-wrap items-center gap-x-2.5 gap-y-1">
+          {hasSecondaryMeta ? (
+            <div className="mb-1.5 flex flex-wrap items-center gap-x-2.5 gap-y-1">
               {clip.context_tags?.map((tag, ti) => {
                 const desc = describeTag(tag, locale);
                 const flashNames = tag === "🤝 好闪配好人" && clip.flash_assisters?.length
@@ -267,14 +275,6 @@ export default function ClipCard({
                   </span>
                 );
               })}
-              {weaponUsedTokens(clip.weapon_used, locale).map((w) => (
-                  <span
-                    key={w}
-                    className="analysis-meta-token font-mono"
-                  >
-                    {w}
-                  </span>
-                ))}
               {showKillerBadge && (
                 <span className="analysis-meta-token text-cs2-rose-on-surface">
                   {t("clip.killerBadge", { name: clip.killer_name })}
@@ -285,7 +285,8 @@ export default function ClipCard({
                   {t("clip.victimsBadge", { names: victimsList.join(", ") })}
                 </span>
               )}
-          </div>
+            </div>
+          ) : null}
 
           <div className="font-mono text-[9px] text-cs2-text-muted">
             tick {clip.start_tick.toLocaleString()} → {clip.end_tick.toLocaleString()}

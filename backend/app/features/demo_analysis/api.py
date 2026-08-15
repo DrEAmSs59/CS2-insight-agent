@@ -292,6 +292,10 @@ async def parse_demo_multi(
         raise HTTPException(500, error_detail(demo_failure_code(e, "analysis"))) from e
 
     analysis_workspace = results_by_player.pop("__analysis_workspace__", None)
+    has_player_keyboard_input = results_by_player.pop(
+        "__has_player_keyboard_input__",
+        None,
+    )
     players_out = {
         player: result
         for player, result in results_by_player.items()
@@ -304,6 +308,7 @@ async def parse_demo_multi(
     return {
         "players": players_out,
         "analysis_workspace": analysis_workspace if isinstance(analysis_workspace, dict) else None,
+        "has_player_keyboard_input": has_player_keyboard_input,
     }
 
 

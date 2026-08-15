@@ -1,4 +1,5 @@
 import { CS2_ITEM_CATALOG } from "../generated/cs2ItemCatalog.js";
+import { cs2BaseItemForModel, resolveCs2WeaponModel } from "../utils/cs2ItemCatalog.js";
 
 /** Locale-aware weapon names generated from cs2-lib, plus legacy cache aliases. */
 
@@ -78,13 +79,18 @@ export const WEAPON_NAME_ZH_TO_EN = {
   "拆弹器":              "Defuse Kit",
 };
 
+const WEAPON_NAME_EN_CASEFOLD = new Set([
+  ...Object.values(CS2_ITEM_CATALOG.bases).map((item) => item?.name_en),
+  ...Object.values(WEAPON_NAME_ZH_TO_EN),
+].filter(Boolean).map((name) => String(name).toLocaleLowerCase("en")));
+
 /**
  * Return the weapon's display name appropriate for the current locale.
  *
- * - Non-English locale: returns `weaponName` unchanged (Chinese stays Chinese).
- * - English locale: reverse-maps Chinese display names to English CS2 names;
- *   falls back to the original string for names that are already English or
- *   are unknown (so nothing ever becomes blank or mislabeled).
+ * - Parser/platform aliases are resolved through the generated CS2 catalog,
+ *   including dynamic PWA/5E prefixes and suffixes around a schema name.
+ * - Existing translated labels stay readable; unknown values are preserved so
+ *   nothing ever becomes blank or mislabeled.
  * - Null / empty input: returned as-is (preserves "—" fallback at call sites).
  *
  * @param {string | null | undefined} weaponName
@@ -93,10 +99,27 @@ export const WEAPON_NAME_ZH_TO_EN = {
  */
 export function weaponDisplayName(weaponName, locale) {
   if (weaponName == null) return weaponName;
-  if (typeof weaponName !== "string") return String(weaponName);
-  if (!weaponName) return weaponName;
-  if (locale !== "en") return weaponName;
-  return WEAPON_NAME_ZH_TO_EN[weaponName] ?? weaponName;
+  const raw = typeof weaponName === "string" ? weaponName : String(weaponName);
+  if (!raw) return raw;
+
+  // Preserve the project's established Chinese labels. Raw parser aliases are
+  // not keys in this map and continue into catalog canonicalization below.
+  if (locale !== "en" && Object.prototype.hasOwnProperty.call(WEAPON_NAME_ZH_TO_EN, raw)) {
+    return raw;
+  }
+  if (locale === "en" && WEAPON_NAME_EN_CASEFOLD.has(raw.toLocaleLowerCase("en"))) {
+    return raw;
+  }
+
+  const model = resolveCs2WeaponModel(raw);
+  const base = model ? cs2BaseItemForModel(model) : null;
+  if (base) {
+    const canonical = locale === "en" ? base.name_en : base.name_zh;
+    return String(canonical || base.name_en || model);
+  }
+
+  if (locale === "en") return WEAPON_NAME_ZH_TO_EN[raw] ?? raw;
+  return raw;
 }
 
 /** Split backend `weapon_used` ("A / B") and localize each token. */

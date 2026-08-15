@@ -4,7 +4,7 @@ function normalizedName(value) {
   return String(value || "").trim().toLocaleLowerCase();
 }
 
-export const DEMO_ANALYSIS_WORKSPACE_ALGORITHM_VERSION = "match-workspace-2026.08.10";
+export const DEMO_ANALYSIS_WORKSPACE_ALGORITHM_VERSION = "match-workspace-2026.08.15-keyboard-input-v1";
 
 export function demoAnalysisRoster(demo) {
   const seen = new Set();

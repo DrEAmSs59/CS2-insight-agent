@@ -563,7 +563,7 @@ def test_library_multi_parse_normalizes_targets_and_uses_first_success(monkeypat
 
     def fake_analyze_multi(dem_path, target_players, freeze_rounds):
         worker_calls.append((dem_path, target_players, freeze_rounds))
-        return parsed
+        return {"__has_player_keyboard_input__": False, **parsed}
 
     monkeypatch.setattr(demo_parse_isolation, "analyze_multi_isolated", fake_analyze_multi)
     monkeypatch.setattr(workflows, "get_or_index_demo_roster", AsyncMock(return_value={"error": None}))
@@ -593,6 +593,8 @@ def test_library_multi_parse_normalizes_targets_and_uses_first_success(monkeypat
     composite = save_result.await_args.args[1]
     assert composite["auto_target_player"] == "alpha"
     assert composite["analyzed_target_players"] == ["alpha"]
+    assert composite["has_player_keyboard_input"] is False
+    assert response["has_player_keyboard_input"] is False
     clear_result.assert_not_awaited()
 
 

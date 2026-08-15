@@ -1001,6 +1001,68 @@ describe("DemoAnalysisPage Insight Agent flow", () => {
     expect(screen.queryByTestId("highlight-tag-options")).toBeNull();
   });
 
+  test("pins full-match compilation tags outside the collapsed tag list", () => {
+    const clips = [
+      {
+        client_clip_uid: "regular-highlight",
+        category: "highlight",
+        round: 1,
+        start_tick: 100,
+        end_tick: 400,
+        context_tags: ["首杀"],
+      },
+      {
+        client_clip_uid: "all-kills",
+        category: "compilation",
+        compilation_kind: "all_kills",
+        start_tick: 100,
+        end_tick: 900,
+        source_ticks: [[100, 200], [500, 600]],
+        context_tags: ["🎬 全部击杀"],
+      },
+      {
+        client_clip_uid: "all-deaths",
+        category: "compilation",
+        compilation_kind: "all_deaths",
+        start_tick: 200,
+        end_tick: 1000,
+        source_ticks: [[200, 300]],
+        context_tags: ["💀 全部死亡"],
+      },
+      {
+        client_clip_uid: "round-compilation",
+        category: "compilation",
+        compilation_kind: "freeze_to_death",
+        start_tick: 100,
+        end_tick: 1000,
+        source_ticks: [[100, 300], [500, 800]],
+        freeze_to_death_round_filter: [1, 2],
+        context_tags: ["🎬 回合合集"],
+      },
+    ];
+    const shell = buildShell({
+      currentActivePlayer: "ZywOo",
+      currentParsed: { players: { ZywOo: { clips, match_meta: {} } } },
+      parsedPlayerNames: ["ZywOo"],
+      clips,
+      freezeToDeathDraft: { picked: [1, 2] },
+    });
+    const view = renderPage(shell);
+
+    const pinnedTags = screen.getByTestId("analysis-pinned-compilation-tags");
+    expect(within(pinnedTags).getByRole("button", { name: /全部击杀/ })).toBeTruthy();
+    expect(within(pinnedTags).getByRole("button", { name: /全部死亡/ })).toBeTruthy();
+    expect(within(pinnedTags).getByRole("button", { name: /回合合集/ })).toBeTruthy();
+    expect(screen.queryByText("快捷合集")).toBeNull();
+
+    fireEvent.click(within(pinnedTags).getByRole("button", { name: /全部击杀/ }));
+    expect(view.container.querySelectorAll(".analysis-list-surface [data-category='compilation']")).toHaveLength(1);
+    expect(view.container.querySelectorAll(".analysis-list-surface [data-category='highlight']")).toHaveLength(0);
+
+    fireEvent.click(within(pinnedTags).getByRole("button", { name: /回合合集/ }));
+    expect(screen.getByTitle("第 1 回合")).toBeTruthy();
+  });
+
   test("keeps analysis content expanded without nested collapse controls", () => {
     useLocaleStore.getState().hydrate("en");
     renderPage(buildShell({

@@ -38,6 +38,19 @@ describe("weaponDisplayName", () => {
     expect(weaponDisplayName("unknown_weapon_xyz", "en")).toBe("unknown_weapon_xyz");
   });
 
+  test.each([
+    ["ak47_txz09", "AK-47", "AK-47"],
+    ["fiveseven_vip", "FN57", "Five-SeveN"],
+    ["m4a1_silencer_txz15", "M4A1消音版", "M4A1-S"],
+    ["hkp2000_txz03", "P2000", "P2000"],
+    ["5e_summernbsr2026002_awp", "AWP", "AWP"],
+    ["5e_tyloo2025_deagle_ace", "沙漠之鹰", "Desert Eagle"],
+    ["5e_tyloo2025_usp_silencer", "USP消音版", "USP-S"],
+  ])("normalizes platform alias %s", (raw, zh, en) => {
+    expect(weaponDisplayName(raw, "zh")).toBe(zh);
+    expect(weaponDisplayName(raw, "en")).toBe(en);
+  });
+
   test("empty string is returned as-is for both locales", () => {
     expect(weaponDisplayName("", "zh")).toBe("");
     expect(weaponDisplayName("", "en")).toBe("");
@@ -77,6 +90,11 @@ describe("weaponUsedTokens", () => {
 
   test("zh returns tokens unchanged", () => {
     expect(weaponUsedTokens("消音 M4A1-S / AK-47", "zh")).toEqual(["消音 M4A1-S", "AK-47"]);
+  });
+
+  test("normalizes platform aliases in cached highlight labels", () => {
+    expect(weaponUsedTokens("ak47_vip / 5e_event_m4a1_silencer_ace", "zh"))
+      .toEqual(["AK-47", "M4A1消音版"]);
   });
 
   test("empty input returns []", () => {

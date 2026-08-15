@@ -14,7 +14,7 @@ from ...demo_library_hub import demo_library_hub
 
 logger = logging.getLogger(__name__)
 _demo_roster_locks: weakref.WeakValueDictionary[int, asyncio.Lock] = weakref.WeakValueDictionary()
-_DEMO_ROSTER_CACHE_VERSION = 3
+_DEMO_ROSTER_CACHE_VERSION = 4
 
 def _demo_roster_source_fingerprint(demo_path: str) -> tuple[str, int | None, int | None]:
     normalized_path = os.path.normcase(os.path.abspath(os.fspath(demo_path)))

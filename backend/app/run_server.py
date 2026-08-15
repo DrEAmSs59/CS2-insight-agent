@@ -71,6 +71,13 @@ def main() -> None:
         host=host,
         port=port,
         loop="asyncio",
+        # The lean desktop runtime intentionally omits httptools' native
+        # extension.  An in-place upgrade can still leave an old, incomplete
+        # ``httptools`` package in site-packages; Uvicorn's auto detection then
+        # selects it and accepts TCP connections without ever parsing HTTP.
+        # Pin the bundled pure-Python parser so startup identity probes remain
+        # reliable on both clean and upgraded installations.
+        http="h11",
         log_level="info",
         access_log=True,
     )

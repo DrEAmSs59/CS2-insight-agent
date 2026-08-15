@@ -24,10 +24,11 @@ from .cs2_item_catalog import (
     resolve_weapon_model,
     skin_for_player_weapon,
 )
+from .weapons import _normalize_item
 
 logger = logging.getLogger(__name__)
 
-REPLAY_MATCH_CACHE_VERSION = 6
+REPLAY_MATCH_CACHE_VERSION = 7
 REPLAY_MATCH_FPS = 32.0
 
 _RAW_PLAYER_FIELDS = (
@@ -409,15 +410,15 @@ def _safe_inventory(value: Any) -> list[str]:
 def _resolved_weapon(row: Any, inventory: list[str]) -> str:
     weapon = _safe_weapon(row.get("active_weapon_name")) or _safe_weapon(row.get("active_weapon"))
     if weapon:
-        return weapon
+        return _normalize_item(weapon)
     for item in inventory:
         lowered = item.lower().replace("-", "").replace(" ", "")
         if not any(token in lowered for token in _UTILITY_WEAPON_TOKENS):
-            return item
+            return _normalize_item(item)
     for item in inventory:
         lowered = item.lower()
         if "knife" in lowered or "bayonet" in lowered or "karambit" in lowered:
-            return item
+            return _normalize_item(item)
     return ""
 
 

@@ -2,6 +2,14 @@ import { ensureClientClipUidsOnClips } from "../../utils/clipClientUid";
 import { freezeToDeathDraftFromClipFilter } from "../../utils/freezeToDeathRoundFilter";
 import { playerIdentityKey } from "../../utils/playerIdentity.js";
 
+function nullableKeyboardInputFlag(...values) {
+  for (const value of values) {
+    if (value === true || value === 1) return true;
+    if (value === false || value === 0) return false;
+  }
+  return null;
+}
+
 export function buildLoadedLibraryDemo(item, playersResult) {
   const cachedResult = item?.result || null;
   const cachedMeta = cachedResult?.match_meta || null;
@@ -28,6 +36,10 @@ export function buildLoadedLibraryDemo(item, playersResult) {
     match_meta: playersResult.match_meta || cachedMeta || null,
     cached_result: cachedResult,
     cached_auto_player: autoPlayer,
+    has_player_keyboard_input: nullableKeyboardInputFlag(
+      item?.has_player_keyboard_input,
+      cachedResult?.has_player_keyboard_input,
+    ),
   };
 }
 
@@ -54,6 +66,7 @@ function parsedMatchFromDemo(demo) {
     return {
       players,
       analysis_workspace: result.analysis_workspace ?? null,
+      has_player_keyboard_input: demo.has_player_keyboard_input,
       demo_path: demo.path,
       demo_filename: demo.filename,
     };
@@ -71,6 +84,7 @@ function parsedMatchFromDemo(demo) {
       },
     },
     analysis_workspace: result.analysis_workspace ?? null,
+    has_player_keyboard_input: demo.has_player_keyboard_input,
     demo_path: demo.path,
     demo_filename: demo.filename,
   };

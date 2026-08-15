@@ -874,7 +874,10 @@ def get_player_list(
                 )
                 rec = stats.get(key)
                 if rec is not None:
-                    if tm in (2, 3) and rec.get("team") is None:
+                    # Team names and score slots are anchored to match_start_tick.
+                    # parse_player_info reflects the final side after halftime, so
+                    # an exact start snapshot must replace that fallback value.
+                    if tm in (2, 3):
                         rec["team"] = tm
                     rec["player_color"] = _player_color_name(r.get("player_color"))
 

@@ -56,30 +56,65 @@ def normalize_weapon_alias(value: object) -> str:
     return re.sub(r"_+", "_", text).strip("_")
 
 
-def resolve_weapon_model(value: object) -> str:
-    alias = normalize_weapon_alias(value)
-    if not alias:
-        return ""
+@lru_cache(maxsize=1)
+def _canonical_weapon_models() -> frozenset[str]:
+    return frozenset(
+        str(item["model"])
+        for item in (load_cs2_item_catalog().get("bases") or {}).values()
+        if isinstance(item, dict) and item.get("model")
+    )
+
+
+@lru_cache(maxsize=1)
+def _weapon_aliases_longest_first() -> tuple[tuple[str, str], ...]:
     catalog = load_cs2_item_catalog()
+    aliases = dict(catalog.get("aliases") or {})
+    # Model keys are authoritative. Display aliases can collide (both the CT
+    # ``knife`` and T ``knife_t`` are named "Knife"), so an actual schema key
+    # must always resolve to itself.
+    for model in _canonical_weapon_models():
+        aliases[model] = model
+    return tuple(
+        (str(candidate), str(model))
+        for candidate, model in sorted(
+            aliases.items(),
+            key=lambda item: (-len(item[0]), item[0]),
+        )
+    )
+
+
+@lru_cache(maxsize=4096)
+def _resolve_normalized_weapon_alias(alias: str) -> str:
+    catalog = load_cs2_item_catalog()
+    if alias in _canonical_weapon_models():
+        return alias
     aliases = catalog.get("aliases") or {}
     direct = aliases.get(alias)
     if direct:
         return str(direct)
-    compact = alias.replace("_", "")
-    for candidate, model in sorted(
-        aliases.items(),
-        key=lambda item: (-len(item[0]), item[0]),
-    ):
+
+    # Platform demos decorate the schema name rather than replacing it:
+    #   PWA: ak47_vip / m4a1_silencer_txz15
+    #   5E:  5e_event_ak47 / 5e_event_deagle_ace
+    # Match complete underscore-delimited aliases, longest first, so the
+    # embedded m4a1_silencer wins before the shorter m4a1. Compact equality
+    # still accepts punctuation-only spelling differences such as AK-47.
+    padded_alias = f"_{alias}_"
+    compact_alias = alias.replace("_", "")
+    for candidate, model in _weapon_aliases_longest_first():
+        if f"_{candidate}_" in padded_alias:
+            return model
         candidate_compact = candidate.replace("_", "")
-        if (
-            alias.startswith(f"{candidate}_")
-            or alias.endswith(f"_{candidate}")
-            or f"_{candidate}_" in alias
-            or (candidate_compact and compact == candidate_compact)
-            or (candidate_compact and compact.endswith(candidate_compact))
-        ):
-            return str(model)
+        if candidate_compact and compact_alias == candidate_compact:
+            return model
     return ""
+
+
+def resolve_weapon_model(value: object) -> str:
+    alias = normalize_weapon_alias(value)
+    if not alias:
+        return ""
+    return _resolve_normalized_weapon_alias(alias)
 
 
 @lru_cache(maxsize=1)

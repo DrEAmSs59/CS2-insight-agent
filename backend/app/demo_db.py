@@ -151,7 +151,8 @@ class DemoDB:
                     display_name TEXT,
                     source TEXT,
                     watch_root TEXT,
-                    remark TEXT
+                    remark TEXT,
+                    has_player_keyboard_input INTEGER
                 )
                 """,
             )
@@ -289,6 +290,10 @@ class DemoDB:
                 alter_stmts.append("ALTER TABLE demo_files ADD COLUMN origin_zip TEXT")
             if "cached_path" not in cols:
                 alter_stmts.append("ALTER TABLE demo_files ADD COLUMN cached_path TEXT")
+            if "has_player_keyboard_input" not in cols:
+                alter_stmts.append(
+                    "ALTER TABLE demo_files ADD COLUMN has_player_keyboard_input INTEGER"
+                )
             for stmt in alter_stmts:
                 await conn.execute(stmt)
             cur_summary = await conn.execute("PRAGMA table_info(demo_result_summaries)")
@@ -894,6 +899,13 @@ class DemoDB:
             four_k_count,
             five_k_count,
         ) = _summarize_result(result)
+        has_keyboard_flag = "has_player_keyboard_input" in result
+        raw_keyboard_flag = result.get("has_player_keyboard_input")
+        keyboard_flag = (
+            1 if raw_keyboard_flag is True
+            else 0 if raw_keyboard_flag is False
+            else None
+        )
         async with aiosqlite.connect(self.db_path) as conn:
             await conn.execute("DELETE FROM match_results WHERE demo_path = ?", (demo_path,))
             await conn.execute(
@@ -936,6 +948,11 @@ class DemoDB:
                 result,
                 primary_target,
             )
+            if has_keyboard_flag:
+                await conn.execute(
+                    "UPDATE demo_files SET has_player_keyboard_input = ? WHERE path = ?",
+                    (keyboard_flag, demo_path),
+                )
             if timeline_results is not None:
                 for target_player, player_result in timeline_results.items():
                     if isinstance(player_result, dict):
@@ -979,6 +996,10 @@ class DemoDB:
             await conn.execute("DELETE FROM match_results WHERE demo_path = ?", (demo_path,))
             await conn.execute("DELETE FROM demo_result_summaries WHERE demo_path = ?", (demo_path,))
             await conn.execute("DELETE FROM demo_timeline_events WHERE demo_path = ?", (demo_path,))
+            await conn.execute(
+                "UPDATE demo_files SET has_player_keyboard_input = NULL WHERE path = ?",
+                (demo_path,),
+            )
             await conn.commit()
 
     async def find_by_filename(self, filename: str):
@@ -1157,14 +1178,14 @@ class DemoDB:
     _LIST_SELECT = """
         SELECT DISTINCT d.id, d.path, d.filename, d.display_name, d.file_size, d.status, d.added_at, d.parsed_at, d.error_msg,
                d.map_name, d.total_rounds, d.team_a_score, d.team_b_score, d.team_a_name, d.team_b_name, d.duration_mins, d.match_date, d.source, d.remark,
-               d.content_md5, d.origin_zip, d.cached_path,
+               d.content_md5, d.origin_zip, d.cached_path, d.has_player_keyboard_input,
                r.result_json, r.created_at AS result_created_at
         """
 
     _COMPACT_LIST_SELECT = """
         SELECT DISTINCT d.id, d.path, d.filename, d.display_name, d.file_size, d.status, d.added_at, d.parsed_at, d.error_msg,
                d.map_name, d.total_rounds, d.team_a_score, d.team_b_score, d.team_a_name, d.team_b_name, d.duration_mins, d.match_date, d.source, d.remark,
-               d.content_md5, d.origin_zip, d.cached_path,
+               d.content_md5, d.origin_zip, d.cached_path, d.has_player_keyboard_input,
                CASE WHEN rs.demo_path IS NULL THEN 0 ELSE 1 END AS has_result,
                COALESCE(rs.clip_count, 0) AS clip_count,
                rs.primary_target,

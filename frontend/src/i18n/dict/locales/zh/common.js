@@ -44,7 +44,7 @@ export default {
   "actionbar.addCurrentPlayerHighlights": "{player} 的全部高光入队",
   "actionbar.addCurrentPlayerFails": "{player} 的全部下饭入队",
   "actionbar.addSelected": "将选中片段加入队列",
-  "actionbar.queueCount": "当前队列 {n} 条 — 点击右侧「录制队列」进行批量导出",
+  "actionbar.queueCount": "当前队列 {n} 条 — 点击菜单中的「录制队列」进行批量导出",
   "upload.dragDropMsg": "拖拽一个或多个 .dem 到此处",
   "upload.dragReleaseMsg": "松开即可上传",
   "upload.clickBrowse": "或点击浏览 — 支持多选 / 批量导入",

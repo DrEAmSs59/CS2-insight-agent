@@ -48,7 +48,11 @@ def test_parse_demo_multi_uses_one_shared_worker(monkeypatch, tmp_path):
 
     response = _run_parse_multi(players=["alpha", "bravo"])
 
-    assert response == {"players": expected, "analysis_workspace": None}
+    assert response == {
+        "players": expected,
+        "analysis_workspace": None,
+        "has_player_keyboard_input": None,
+    }
     assert calls == [(str(demo_path), ["alpha", "bravo"], None)]
 
 
@@ -103,6 +107,7 @@ def test_parse_demo_multi_extracts_shared_analysis_workspace(monkeypatch, tmp_pa
     workspace = {"version": 1, "map_name": "de_mirage", "players": [], "rounds": []}
     parsed = {
         "__analysis_workspace__": workspace,
+        "__has_player_keyboard_input__": False,
         "alpha": {"clips": [], "match_meta": {"target_player": "alpha"}},
     }
     monkeypatch.setattr(demo_parse_isolation, "analyze_multi_isolated", lambda *_args: parsed)
@@ -110,7 +115,9 @@ def test_parse_demo_multi_extracts_shared_analysis_workspace(monkeypatch, tmp_pa
     response = _run_parse_multi(players=["alpha"])
 
     assert response["analysis_workspace"] == workspace
+    assert response["has_player_keyboard_input"] is False
     assert "__analysis_workspace__" not in response["players"]
+    assert "__has_player_keyboard_input__" not in response["players"]
 
 
 def test_parse_demo_multi_returns_stable_timeout_code(monkeypatch, tmp_path):

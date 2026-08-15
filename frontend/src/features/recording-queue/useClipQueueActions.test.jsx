@@ -13,6 +13,7 @@ describe("useClipQueueActions player fail batching", () => {
     const parsed = {
       demo_filename: "match.dem",
       demo_path: "D:\\demos\\match.dem",
+      has_player_keyboard_input: false,
       players: {
         player: {
           clips: [highlight, fail, queuedFail],
@@ -57,6 +58,7 @@ describe("useClipQueueActions player fail batching", () => {
     const queued = addToQueue.mock.calls[0][0];
     expect(queued.map((item) => item.clientClipUid)).toEqual(["player-f1"]);
     expect(queued[0].targetPlayer).toBe("Player");
+    expect(queued[0].demoHasPlayerKeyboardInput).toBe(false);
     expect(setProgressText).toHaveBeenCalledWith(
       "app.enqueuePlayerFailsDone",
       { autoDismissMs: 2000, queueLink: true },

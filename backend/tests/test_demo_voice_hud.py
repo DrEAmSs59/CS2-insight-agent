@@ -250,11 +250,20 @@ def test_voice_payload_injection_is_bounded_and_rebuilds_vpk():
 def test_checked_in_voice_template_contains_only_an_empty_payload():
     template_path = Path(__file__).resolve().parents[2] / "pov" / "pov_voice_template.vpk"
     entries = read_inline_vpk(template_path.read_bytes())
+    alert_script = entries["panorama/scripts/hud/hudalerts_insight.vjs_c"]
+    alert_style = entries["panorama/styles/hud/hudalerts_insight.vcss_c"]
     script = entries[VOICE_SCRIPT_PATH]
     start = script.index(VOICE_DATA_BEGIN) + len(VOICE_DATA_BEGIN)
     end = script.index(VOICE_DATA_END)
 
     assert script[start:end].rstrip() == b"[[], [], [], []]"
+    assert "panorama/layout/hud/hudalerts.vxml_c" in entries
+    assert "panorama/styles/hud/hudalerts.vcss_c" not in entries
+    assert b"CSGOHudAlerts.CS2InsightSeekSuppress" in alert_style
+    assert b"CSGOHudAlerts.CS2InsightPausedSeekSuppress" in alert_style
+    assert b"PanoramaGameTimeJumpEvent" in alert_script
+    assert b"SEEK_SETTLE_SAMPLES = 60" in alert_script
+    assert b"HIDDEN_STABLE_SAMPLES = 10" in alert_script
     assert end - start == 8_000_000
     assert b"CS2InsightDemoVoice" in script
     assert b"CS2InsightInputHud" in script
@@ -276,15 +285,34 @@ def test_checked_in_voice_template_contains_only_an_empty_payload():
         b'ConsoleCommand("snd_sos_start_soundevent " + KILL_CONFIRMATION_EVENT)'
         in script
     )
-    assert b"FLASH_FULL_OPAQUE_THRESHOLD_TICKS = 192" in script
-    assert b"FLASH_FADE_TICKS = 128" in script
+    assert b"FLASH_FULL_DURATION_TICKS = 288" in script
+    assert b"FLASH_FULL_OPAQUE_THRESHOLD_TICKS" not in script
+    assert b"FLASH_FADE_TICKS" not in script
     assert b"FLASH_ACTIVE_REFRESH_SECONDS = 0.016" in script
     assert b"FLASH_IDLE_REFRESH_SECONDS = 0.05" in script
     assert b"blind ? FLASH_ACTIVE_REFRESH_SECONDS : FLASH_IDLE_REFRESH_SECONDS" in script
-    assert b"if (elapsed <= holdTicks)" in script
-    assert b"return Math.pow(1 - fadeProgress, 1.2)" in script
+    assert b"const peak = Math.min(1, span / FLASH_FULL_DURATION_TICKS)" in script
+    assert b"return peak * Math.pow(1 - t, fadePower)" in script
     assert b"Math.min(1, flashWashOpacity(blind, tick))" in script
     assert b"if (opacity <= 0.01)" not in script
+    assert b'findHudTraverse("ChatHistoryText")' in script
+    assert b'"PanoramaGameTimeJumpEvent"' in script
+    assert b"TRANSIENT_HUD_TICK_JUMP_THRESHOLD = 64" in script
+    assert b"TRANSIENT_HUD_RESUME_GRACE_TICKS = 32" in script
+    assert b'STOCK_HUD_ALERT_SUPPRESS_CLASS = "CS2InsightPausedSeekSuppress"' in script
+    assert b"STOCK_HUD_ALERT_RESUME_GRACE_TICKS = 128" in script
+    assert b"STOCK_HUD_ALERT_HIDDEN_STABLE_FRAMES = 10" in script
+    assert b"if (state.bIsPaused || tick <= transientHudSuppressUntilTick)" in script
+    assert b"$.Schedule(0.016, watchDemoTimeJumps)" in script
+    assert b"$.Schedule(0, watchDemoTimeJumps)" in script
+    assert b'findHudTraverse("AlertText")' in script
+    assert b"armStockHudAlertSeekSuppress(state, tick)" in script
+    assert b"updateStockHudAlertSeekSuppress(state, tick)" in script
+    assert b'GameInterfaceAPI.ConsoleCommand("hud_reloadscheme")' not in script
+    assert (
+        b'"PanoramaGameTimeJumpEvent",\n            scheduleTransientStockHudClear'
+        in script
+    )
     assert b"CS2InsightPovSoundRing" not in script
     assert b'FindChildTraverse("RI_PlayerSoundContainer")' not in script
     assert b'ConsoleCommand("cl_drawhud_force_radar 0")' not in script
@@ -293,6 +321,19 @@ def test_checked_in_voice_template_contains_only_an_empty_payload():
     assert b'["R", 194, 0' in script
     assert b"onlyWhenActive" in script
     assert b"765611" not in script
+
+
+def test_static_pov_package_resets_only_stale_match_alert_toasts():
+    package_path = Path(__file__).resolve().parents[2] / "pov" / "pov_default.vpk"
+    entries = read_inline_vpk(package_path.read_bytes())
+
+    alert_script = entries["panorama/scripts/hud/hudalerts_insight.vjs_c"]
+    alert_style = entries["panorama/styles/hud/hudalerts_insight.vcss_c"]
+    assert "panorama/layout/hud/hudalerts.vxml_c" in entries
+    assert "panorama/styles/hud/hudalerts.vcss_c" not in entries
+    assert b"CSGOHudAlerts.CS2InsightSeekSuppress" in alert_style
+    assert b"CSGOHudAlerts.CS2InsightPausedSeekSuppress" in alert_style
+    assert b"PanoramaGameTimeJumpEvent" in alert_script
 
 
 def test_disabled_voice_omits_speaking_schedule_but_keeps_other_payload_data():

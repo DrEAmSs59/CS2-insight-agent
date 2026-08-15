@@ -15,6 +15,7 @@ from app.features.demo_analysis.input_track import (
     _resolve_col,
     _resolve_button_mask_col,
     _event_ticks_for_player,
+    detect_player_keyboard_input,
     _infer_movement_from_motion,
     _scope_press_at,
 )
@@ -39,6 +40,41 @@ def test_resolve_col_missing_returns_none():
 def test_resolve_button_mask_supports_new_usercmd_layout():
     df = pd.DataFrame({"usercmd_buttonstate_1": [8]})
     assert _resolve_button_mask_col(df) == "usercmd_buttonstate_1"
+
+
+def test_detect_player_keyboard_input_accepts_live_or_usercmd_button_data():
+    class FakeParser:
+        def parse_ticks(self, props, *, ticks):
+            assert props == ["buttons", "usercmd_buttonstate_1"]
+            return pd.DataFrame({
+                "tick": ticks,
+                "buttons": [None] * len(ticks),
+                "usercmd_buttonstate_1": [None, *([8] * (len(ticks) - 1))],
+            })
+
+    assert detect_player_keyboard_input(
+        FakeParser(), start_tick=100, end_tick=10_000,
+    ) is True
+
+
+def test_detect_player_keyboard_input_reports_confirmed_missing_data():
+    class FakeParser:
+        def parse_ticks(self, props, *, ticks):
+            return pd.DataFrame({"tick": ticks, "name": ["alpha"] * len(ticks)})
+
+    assert detect_player_keyboard_input(
+        FakeParser(), start_tick=100, end_tick=10_000,
+    ) is False
+
+
+def test_detect_player_keyboard_input_keeps_probe_failure_unknown():
+    class FakeParser:
+        def parse_ticks(self, _props, *, ticks):
+            raise RuntimeError(f"native parse failed at {ticks[0]}")
+
+    assert detect_player_keyboard_input(
+        FakeParser(), start_tick=100, end_tick=10_000,
+    ) is None
 
 
 def test_motion_inference_uses_player_view_space():

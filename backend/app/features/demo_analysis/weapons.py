@@ -1,7 +1,11 @@
 from __future__ import annotations
 
 from ... import native_table as pd
-from .cs2_item_catalog import cs2_weapon_translation_map, resolve_weapon_model
+from .cs2_item_catalog import (
+    cs2_weapon_translation_map,
+    normalize_weapon_alias,
+    resolve_weapon_model,
+)
 
 WEAPON_TRANSLATION_MAP: dict[str, str] = cs2_weapon_translation_map()
 WEAPON_TRANSLATION_MAP.update(
@@ -38,10 +42,12 @@ _KEQIAO_SEMI_SNIPERS = frozenset({"scar20", "g3sg1"})
 _KEQIAO_RIFLES       = frozenset(PRIMARY_WEAPONS) - SNIPER_WEAPONS - _KEQIAO_SEMI_SNIPERS
 _KEQIAO_WEAPONS      = _KEQIAO_RIFLES | DEAGLE_VARIANTS
 GRENADE_ITEMS = {"flashbang", "hegrenade", "smokegrenade", "molotov", "incgrenade", "decoy"}
+_SEMANTIC_DAMAGE_SOURCE_KEYS = {"planted_c4", "inferno", "world", "defuse_kit"}
 
 
 def _translate_weapon(raw: str) -> str:
-    return WEAPON_TRANSLATION_MAP.get(raw, raw.replace("_", " ").capitalize())
+    weapon = _normalize_item(raw)
+    return WEAPON_TRANSLATION_MAP.get(weapon, weapon.replace("_", " ").capitalize())
 
 
 def _highlight_weapon_used_label(kills_sorted: list[dict]) -> str:
@@ -49,7 +55,7 @@ def _highlight_weapon_used_label(kills_sorted: list[dict]) -> str:
     counts: dict[str, int] = {}
     first_idx: dict[str, int] = {}
     for i, k in enumerate(kills_sorted):
-        w = str(k.get("weapon") or "").strip()
+        w = _normalize_item(k.get("weapon"))
         if not w:
             continue
         counts[w] = counts.get(w, 0) + 1
@@ -64,11 +70,17 @@ def _highlight_weapon_used_label(kills_sorted: list[dict]) -> str:
 
 
 def _normalize_item(name) -> str:
-    """统一武器/道具名: 小写、去 weapon_ 前缀。"""
-    s = str(name).lower().strip()
-    if s.startswith("weapon_"):
-        s = s[7:]
-    return s
+    """Return a canonical CS2 model key while preserving unknown damage sources.
+
+    Platform demos commonly wrap the real schema key in dynamic affixes.  The
+    catalog resolver finds the longest complete alias inside those wrappers,
+    which handles PWA ``*_vip`` / ``*_txzNN`` and 5E ``5e_*_<weapon>[_ace]``
+    without maintaining an open-ended list of event or tournament names.
+    """
+    alias = normalize_weapon_alias(name)
+    if alias in _SEMANTIC_DAMAGE_SOURCE_KEYS:
+        return alias
+    return resolve_weapon_model(alias) or alias
 
 
 def _is_knife_highlight_weapon(weapon: str) -> bool:

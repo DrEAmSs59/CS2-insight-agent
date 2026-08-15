@@ -122,6 +122,8 @@ export function useRecordingSessionController({
     recordingAbortRequestedRef.current = false;
     setRecordingAbortRequested(false);
     setRecordingRecoveryPrompt({ configRecoveryNeeded: null, povRecoveryNeeded: false });
+    setRecordingResults(null);
+    setRecordingResultModalOpen(false);
     setBatchRecording(true);
     setProgressText(t("app.preparingRecording"), { loading: true });
 
@@ -147,6 +149,7 @@ export function useRecordingSessionController({
       }, 1000);
     }
 
+    let openResultsAfterRecording = false;
     try {
       let requests = buildRecordingQueueRequestsFromQueue(
         queue,
@@ -197,7 +200,7 @@ export function useRecordingSessionController({
       }));
       if (results.length > 0 && results.every((result) => result?.success)) clearQueue();
       setRecordingResults(annotatedResults);
-      setRecordingResultModalOpen(true);
+      openResultsAfterRecording = true;
 
       const unexpectedCs2Exit = recordingQueueHadUnexpectedCs2Exit(results);
       const aborted = recordingQueueWasAborted(results, recordingAbortRequestedRef.current);
@@ -268,6 +271,9 @@ export function useRecordingSessionController({
       recordingAbortRequestedRef.current = false;
       setRecordingAbortRequested(false);
       setBatchRecording(false);
+      if (openResultsAfterRecording) {
+        setRecordingResultModalOpen(true);
+      }
       void refreshConfigBackupStatus();
     }
   }, [

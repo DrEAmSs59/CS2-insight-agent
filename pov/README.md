@@ -66,11 +66,36 @@ Every POV kill plays the stock body/headshot attacker-feedback event and the
 stock `UI.KillCard.1` confirmation layer (`kill_doof_01.vsnd`) together. The
 confirmation sound is additive; it does not replace the armor/headshot variant.
 
-Strong flash-blind events (at least three seconds at the usual 64 tick rate)
-hold the full-screen Panorama wash at exact opacity 1 before a two-second fade.
-This deliberately covers radar, teamcounter, kill feed, and other HUD panels;
-short glancing flashes keep a duration-scaled translucent peak. The opacity
-curve never changes the demo-authored start/end ticks or extends the effect.
+Flash-blind opacity now scales continuously toward a full-face reference of
+about 4.5 seconds at the usual 64 tick rate, then decays across the complete
+demo-authored `player_blind` interval. There is no three-second mode switch or
+fixed two-second tail, so similar flash durations no longer produce an abrupt
+change in how long the white wash appears to last. The curve never changes the
+demo-authored start/end ticks or extends the effect.
 While a flash wash is active, only its Panorama render cadence rises from 20Hz
-to about 60Hz; idle polling remains 20Hz. Detection, hold/fade tick counts,
-pause/seek behavior, and the existing opacity curve remain unchanged.
+to about 60Hz; idle polling remains 20Hz.
+
+When demo playback jumps to another highlight segment, the injected controller
+clears stock chat history. It listens for the Panorama time-jump event, detects
+large tick discontinuities, and keeps clearing while the executor is paused at
+the exact new-segment start. A half-second demo-tick grace covers the final
+cached chat update after playback resumes.
+
+Both POV packages override the stock `hudalerts.vxml_c` layout with an otherwise
+identical layout that loads `hudalerts_insight.js` in the alert panel's own
+Panorama context. On a demo time jump it adds a temporary suppress class, then
+waits three seconds for CS2 to finish rebuilding HUD state and removes that
+class only after the native alert has then remained `AlertHidden` for half a
+second. This clears a seek-stale planted-bomb toast without disabling new match
+alerts later in normal POV playback. The stock `hudalerts.vcss_c` styling
+remains untouched; kill feed and Insight overlays are separate panels. Demo
+playback and OBS Start/Pause/Resume timing are unchanged.
+
+Recording uses `demo_pause` before `demo_gototick`, and CS2 does not reliably
+deliver the time-jump event for that paused path. The persistent demo controller
+therefore also detects the tick discontinuity directly. After `demo_resume` it
+keeps the current alert panel suppressed across the two-second `spec_player`
+HUD-rebuild window, re-resolves the panel if CS2 replaces it, and releases only
+after the native alert becomes stably hidden. With no stale alert, suppression
+ends during the five-second pre-roll, so alerts raised during the recorded
+segment remain visible.

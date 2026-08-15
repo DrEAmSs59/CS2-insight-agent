@@ -65,8 +65,19 @@ from .clip_builder import (
     round_start_scores_for_target, is_mr12_regulation_decided_score,
 )
 from .spatial_analysis import count_shots_before
+from .input_track import detect_player_keyboard_input
 
 logger = logging.getLogger(__name__)
+
+
+def _is_explicit_team_kill(attacker_team: Any, victim_team: Any) -> bool:
+    """Return whether a death event explicitly identifies a same-side kill."""
+    try:
+        attacker_team_num = int(float(attacker_team))
+        victim_team_num = int(float(victim_team))
+    except (TypeError, ValueError, OverflowError):
+        return False
+    return attacker_team_num in (2, 3) and attacker_team_num == victim_team_num
 
 
 # These events can share one native demoparser scan. Keep player_death and
@@ -413,6 +424,7 @@ class DemoAnalyzer:
         self.dem_path = Path(dem_path)
         self.parser = DemoParser(str(self.dem_path))
         self.analysis_workspace: dict[str, Any] = {}
+        self.has_player_keyboard_input: bool | None = None
 
     def _detect_map(self) -> str:
         try:
@@ -968,6 +980,15 @@ class DemoAnalyzer:
             shared_events=_shared,
             expected_players=players,
         )
+        self.has_player_keyboard_input = detect_player_keyboard_input(
+            self.parser,
+            start_tick=match_start_tick,
+            end_tick=getattr(
+                shared_facts,
+                "demo_end_tick",
+                getattr(shared_facts, "demo_max_tick", match_start_tick),
+            ),
+        )
         shared_roster = getattr(shared_facts, "all_players_roster", None)
         if isinstance(shared_roster, list):
             identity_registry.enrich_roster(shared_roster)
@@ -1038,8 +1059,17 @@ class DemoAnalyzer:
             _vic  = str(_brow.get("user_name", "") or "").strip()
             _wpn  = _normalize_item(_brow.get("weapon", ""))
             _tick = _int(_brow.get("tick"))
+            _is_team_kill = _is_explicit_team_kill(
+                _brow.get("attackerteam"),
+                _brow.get("userteam"),
+            )
 
-            if _atk and _atk != _vic and _rn not in _first_death_tick_shared:
+            if (
+                _atk
+                and _atk != _vic
+                and not _is_team_kill
+                and _rn not in _first_death_tick_shared
+            ):
                 _first_death_tick_shared[_rn] = _tick
 
             _evt: dict = {
@@ -1067,7 +1097,10 @@ class DemoAnalyzer:
                 "vic_y": _safe_coord_bucket(_brow.get("user_Y")),
                 "vic_z": _safe_coord_bucket(_brow.get("user_Z")),
             }
-            if _atk and _atk != _vic:
+            # Friendly fire remains in the victim/death bucket so the existing
+            # "痛击队友" fail tag still works, but it must never feed highlight
+            # kill counts, tags, compilations, or K/D summaries.
+            if _atk and _atk != _vic and not _is_team_kill:
                 _bucket_kills.setdefault(_atk, []).append(_evt)
             if _vic:
                 _bucket_deaths.setdefault(_vic, []).append(_evt)
@@ -1351,7 +1384,7 @@ class DemoAnalyzer:
             logger.exception("build_match_workspace failed for %s", self.dem_path)
             self.analysis_workspace = {
                 "version": 1,
-                "algorithm_version": "match-workspace-2026.08.10",
+                "algorithm_version": "match-workspace-2026.08.15-keyboard-input-v1",
                 "data_source": "demo_parser_with_derived_metrics",
                 "team_assignment_source": "unavailable",
                 "derived_fields": [],

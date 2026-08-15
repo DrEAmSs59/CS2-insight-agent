@@ -60,6 +60,8 @@ _EVENT_CACHE_MAX = 8
 _tick_table_cache: dict[tuple, pd.DataFrame] = {}
 _event_table_cache: dict[tuple, pd.DataFrame] = {}
 
+_KEYBOARD_INPUT_PROBE_MAX_TICKS = 2048
+
 _TICK_PROPS = (
     PROP_BUTTONS,
     PROP_USERCMD_BUTTONS,
@@ -307,6 +309,61 @@ def _resolve_button_mask_col(df: pd.DataFrame) -> str | None:
         "m_nButtonDownMaskPrev",
         PROP_USERCMD_BUTTONS,
     )
+
+
+def _keyboard_input_probe_ticks(
+    start_tick: int,
+    end_tick: int,
+    *,
+    max_ticks: int = _KEYBOARD_INPUT_PROBE_MAX_TICKS,
+) -> list[int]:
+    """Return evenly distributed ticks for a cheap demo-level capability probe."""
+    start_i = max(0, int(start_tick))
+    end_i = max(start_i, int(end_tick))
+    total = end_i - start_i + 1
+    stride = max(1, (total + max(1, int(max_ticks)) - 1) // max(1, int(max_ticks)))
+    ticks = list(range(start_i, end_i + 1, stride))
+    if ticks[-1] != end_i:
+        ticks.append(end_i)
+    return ticks
+
+
+def detect_player_keyboard_input(
+    parser: DemoParser,
+    *,
+    start_tick: int,
+    end_tick: int,
+) -> bool | None:
+    """Detect whether this demo exposes button data usable by the OBS keyboard.
+
+    ``True`` and ``False`` are authoritative. ``None`` means the probe itself
+    failed, so callers must not turn an unrelated parse error into a warning.
+    Both button layouts accepted by :func:`extract_input_track` are checked.
+    """
+    ticks = _keyboard_input_probe_ticks(start_tick, end_tick)
+    props = [PROP_BUTTONS, PROP_USERCMD_BUTTONS]
+    try:
+        frame = _to_df(parser.parse_ticks(props, ticks=ticks))
+    except Exception:
+        # A missing requested property can make older parser builds raise.
+        # Confirm that an ordinary tick query still works before declaring the
+        # keyboard fields absent; otherwise preserve the tri-state as unknown.
+        try:
+            parser.parse_ticks(["name"], ticks=ticks[:1])
+        except Exception:
+            return None
+        return False
+
+    if frame.empty:
+        return False
+    for candidate in (PROP_BUTTONS, "m_nButtonDownMaskPrev", PROP_USERCMD_BUTTONS):
+        column = _resolve_col(frame, candidate)
+        if not column:
+            continue
+        values = pd.to_numeric(frame[column], errors="coerce")
+        if bool(values.notna().any()):
+            return True
+    return False
 
 
 def _infer_movement_from_motion(

@@ -8,6 +8,7 @@ import math
 from ... import native_table as pd
 
 from .parse_utils import _bool, _int, _round_end_winner_team_num, _to_pandas_df
+from .weapons import _normalize_item
 
 
 _UTILITY_WEAPONS = {"hegrenade", "inferno", "molotov", "incgrenade", "incendiary"}
@@ -56,7 +57,7 @@ def _normalize_weapon(value: object) -> str:
     for prefix in ("weapon_", "item_"):
         if weapon.startswith(prefix):
             weapon = weapon[len(prefix):]
-    return weapon
+    return _normalize_item(weapon)
 
 
 def _round_number_for_active_event(row: pd.Series) -> int:
@@ -1221,7 +1222,7 @@ def build_match_workspace(
 
     return {
         "version": 1,
-        "algorithm_version": "match-workspace-2026.08.10",
+        "algorithm_version": "match-workspace-2026.08.15-keyboard-input-v1",
         "data_source": "demo_parser_with_derived_metrics",
         "team_assignment_source": (
             "round_side_groups" if group_side_by_round else "roster_order_fallback"

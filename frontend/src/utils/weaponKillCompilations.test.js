@@ -68,6 +68,25 @@ describe("weapon kill compilations", () => {
     expect(summarizeWeaponKills(roundTimeline)).toEqual({ groupCount: 2, killCount: 3 });
   });
 
+  it("merges dynamic PWA and 5E aliases under canonical weapon models", () => {
+    const aliasedTimeline = [{
+      round_number: 1,
+      events: [
+        { type: "kill", tick: 10, weapon_key: "ak47_vip", weapon_name: "ak47_vip" },
+        { type: "kill", tick: 20, weapon_key: "ak47_txz15", weapon_name: "ak47_txz15" },
+        { type: "kill", tick: 30, weapon_key: "5e_event_ak47_ace", weapon_name: "5e_event_ak47_ace" },
+        { type: "kill", tick: 40, weapon_key: "m4a1_silencer_txz09", weapon_name: "m4a1_silencer_txz09" },
+        { type: "kill", tick: 50, weapon_key: "5e_event_m4a1_silencer", weapon_name: "5e_event_m4a1_silencer" },
+      ],
+    }];
+
+    const groups = groupTimelineKillsByWeapon(aliasedTimeline, "en");
+    expect(groups.map((group) => [group.weaponKey, group.weaponName, group.killCount])).toEqual([
+      ["ak47", "AK-47", 3],
+      ["m4a1_silencer", "M4A1-S", 2],
+    ]);
+  });
+
   it("builds the existing kill-compilation recording contract", () => {
     const [akGroup] = groupTimelineKillsByWeapon(roundTimeline, "en");
     const clipData = buildWeaponKillCompilationClipData({

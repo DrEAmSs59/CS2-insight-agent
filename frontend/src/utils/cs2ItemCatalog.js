@@ -5,7 +5,13 @@
 
 import { CS2_ITEM_CATALOG } from "../generated/cs2ItemCatalog.js";
 
-const aliasesLongestFirst = Object.entries(CS2_ITEM_CATALOG.aliases)
+const canonicalModels = new Set(
+  Object.values(CS2_ITEM_CATALOG.bases).map((item) => item.model).filter(Boolean),
+);
+const aliasesLongestFirst = Object.entries({
+  ...CS2_ITEM_CATALOG.aliases,
+  ...Object.fromEntries([...canonicalModels].map((model) => [model, model])),
+})
   .sort(([left], [right]) => right.length - left.length || left.localeCompare(right));
 const baseByModel = Object.fromEntries(
   Object.values(CS2_ITEM_CATALOG.bases).map((item) => [item.model, item]),
@@ -25,17 +31,16 @@ export function normalizeCs2WeaponAlias(value) {
 export function resolveCs2WeaponModel(...values) {
   const aliases = values.map(normalizeCs2WeaponAlias).filter(Boolean);
   for (const alias of aliases) {
+    if (canonicalModels.has(alias)) return alias;
     const direct = CS2_ITEM_CATALOG.aliases[alias];
     if (direct) return direct;
     const compact = alias.replaceAll("_", "");
+    const paddedAlias = `_${alias}_`;
     for (const [candidate, model] of aliasesLongestFirst) {
       const candidateCompact = candidate.replaceAll("_", "");
       if (
-        alias.startsWith(`${candidate}_`)
-        || alias.endsWith(`_${candidate}`)
-        || alias.includes(`_${candidate}_`)
+        paddedAlias.includes(`_${candidate}_`)
         || (candidateCompact && compact === candidateCompact)
-        || (candidateCompact && compact.endsWith(candidateCompact))
       ) return model;
     }
   }

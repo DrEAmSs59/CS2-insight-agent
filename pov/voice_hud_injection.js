@@ -39,14 +39,29 @@
     const FLASH_TINNITUS_SHORT = "Flashbang.Ring.Short";
     const FLASH_TINNITUS_MEDIUM = "Flashbang.Ring.Medium";
     const FLASH_TINNITUS_LONG = "Flashbang.Ring.Long";
-    // At 64 tick/s, a >=3s blind is a strong/full flash. Keep the wash fully
-    // opaque first so no Panorama HUD leaks through, then fade over ~2 seconds.
-    const FLASH_FULL_OPAQUE_THRESHOLD_TICKS = 192;
-    const FLASH_FADE_TICKS = 128;
+    // A full-face player_blind lasts about 4.5s at the usual 64 tick rate.
+    // Scale weaker hits continuously toward that reference and decay over the
+    // event's complete authored duration; a hard strength threshold creates a
+    // very visible duration jump between otherwise similar flashes.
+    const FLASH_FULL_DURATION_TICKS = 288;
     // Rendering cadence only: flash timing and strength remain demo-tick based.
     // Raise active washes to ~60Hz so opacity changes do not arrive in 20Hz steps.
     const FLASH_ACTIVE_REFRESH_SECONDS = 0.016;
     const FLASH_IDLE_REFRESH_SECONDS = 0.05;
+    // Normal playback advances only a few ticks per 20Hz sample. A larger jump
+    // means demo_gototick moved to a new highlight segment.
+    const TRANSIENT_HUD_TICK_JUMP_THRESHOLD = 64;
+    // Keep clearing chat briefly after the pre-record pause is released. CS2
+    // can publish one final cached chat update on the first resumed frames.
+    const TRANSIENT_HUD_RESUME_GRACE_TICKS = 32;
+    // A paused demo_gototick does not reliably emit PanoramaGameTimeJumpEvent.
+    // Recording then runs spec_player shortly after demo_resume, which can
+    // republish the seek-stale match alert. Keep the alert suppressed through
+    // that rebuild window, then hand visibility back to CS2 once its native
+    // state machine is stably hidden.
+    const STOCK_HUD_ALERT_SUPPRESS_CLASS = "CS2InsightPausedSeekSuppress";
+    const STOCK_HUD_ALERT_RESUME_GRACE_TICKS = 128;
+    const STOCK_HUD_ALERT_HIDDEN_STABLE_FRAMES = 10;
     const roster = encodedRoster.map(function (encoded) {
         return {
             xuid: String(encoded[0]),
@@ -287,6 +302,13 @@
     let povRadarFx = null;
     let killFeedbackLastTick = -1;
     let killFeedbackCheatsReady = false;
+    let transientHudLastTick = -1;
+    let transientHudSuppressUntilTick = -1;
+    let stockHudChatHistoryText = null;
+    let stockHudAlertPanel = null;
+    let stockHudAlertSeekSuppressActive = false;
+    let stockHudAlertResumeTick = -1;
+    let stockHudAlertHiddenStableFrames = 0;
     // Stock-ish radar intel timings (no public convar; matched to live feel).
     const RADAR_DEATH_ICON_SECONDS = 2.0;
     const RADAR_LAST_KNOWN_SECONDS = 1.5;
@@ -652,6 +674,135 @@
             }
         }
         return null;
+    }
+
+    function clearStockHudChat() {
+        // HudChat owns this rich-text label. Clearing it preserves the stock
+        // panel and lets messages produced in the new segment appear normally.
+        let chatHistoryText = stockHudChatHistoryText;
+        if (!chatHistoryText || !chatHistoryText.IsValid()) {
+            chatHistoryText = findHudTraverse("ChatHistoryText");
+            stockHudChatHistoryText = chatHistoryText;
+        }
+        if (!chatHistoryText || !chatHistoryText.IsValid()) {
+            return;
+        }
+        try {
+            chatHistoryText.text = "";
+        } catch (errText) {}
+    }
+
+    function scheduleTransientStockHudClear() {
+        // Panorama can apply old chat state just after the time-jump event, so
+        // clear once immediately and twice after its deferred UI work.
+        clearStockHudChat();
+        $.Schedule(0.05, clearStockHudChat);
+        $.Schedule(0.20, clearStockHudChat);
+    }
+
+    function currentStockHudAlertPanel() {
+        const alertText = findHudTraverse("AlertText");
+        const resolved = alertText && alertText.IsValid() && alertText.GetParent
+            ? alertText.GetParent()
+            : null;
+        if (resolved && resolved.IsValid()) {
+            stockHudAlertPanel = resolved;
+        } else if (!stockHudAlertPanel || !stockHudAlertPanel.IsValid()) {
+            stockHudAlertPanel = null;
+        }
+        return stockHudAlertPanel;
+    }
+
+    function nativeStockHudAlertIsHidden(panel) {
+        if (!panel || !panel.IsValid()) {
+            return false;
+        }
+        try {
+            return panel.BHasClass("AlertHidden")
+                && !panel.BHasClass("AlertVisible")
+                && !panel.BHasClass("FlashAnim")
+                && !panel.BHasClass("HideFlash");
+        } catch (errClass) {
+            return false;
+        }
+    }
+
+    function armStockHudAlertSeekSuppress(state, tick) {
+        stockHudAlertSeekSuppressActive = true;
+        stockHudAlertResumeTick = state && state.bIsPaused ? -1 : tick;
+        stockHudAlertHiddenStableFrames = 0;
+    }
+
+    function updateStockHudAlertSeekSuppress(state, tick) {
+        if (!stockHudAlertSeekSuppressActive) {
+            return;
+        }
+
+        // Re-resolve after spec_player: CS2 can replace the native alert panel.
+        const panel = currentStockHudAlertPanel();
+        if (panel && panel.IsValid()) {
+            try { panel.AddClass(STOCK_HUD_ALERT_SUPPRESS_CLASS); } catch (errAdd) {}
+        }
+
+        if (state.bIsPaused) {
+            stockHudAlertHiddenStableFrames = 0;
+            return;
+        }
+        if (stockHudAlertResumeTick < 0) {
+            stockHudAlertResumeTick = tick;
+        }
+        if (tick < stockHudAlertResumeTick + STOCK_HUD_ALERT_RESUME_GRACE_TICKS) {
+            stockHudAlertHiddenStableFrames = 0;
+            return;
+        }
+
+        stockHudAlertHiddenStableFrames = nativeStockHudAlertIsHidden(panel)
+            ? stockHudAlertHiddenStableFrames + 1
+            : 0;
+        if (stockHudAlertHiddenStableFrames < STOCK_HUD_ALERT_HIDDEN_STABLE_FRAMES) {
+            return;
+        }
+
+        try { panel.RemoveClass(STOCK_HUD_ALERT_SUPPRESS_CLASS); } catch (errRemove) {}
+        stockHudAlertSeekSuppressActive = false;
+        stockHudAlertResumeTick = -1;
+        stockHudAlertHiddenStableFrames = 0;
+    }
+
+    function watchDemoTimeJumps() {
+        const state = controller.GetDemoControllerState();
+        if (state && isFinite(Number(state.nTick))) {
+            const tick = Number(state.nTick);
+            const jumped = transientHudLastTick >= 0
+                && (tick + 2 < transientHudLastTick
+                    || tick - transientHudLastTick > TRANSIENT_HUD_TICK_JUMP_THRESHOLD);
+            if (jumped) {
+                transientHudSuppressUntilTick = Math.max(
+                    transientHudSuppressUntilTick,
+                    tick + TRANSIENT_HUD_RESUME_GRACE_TICKS,
+                );
+                armStockHudAlertSeekSuppress(state, tick);
+                scheduleTransientStockHudClear();
+            }
+
+            // The executor deliberately pauses at the exact segment start before
+            // StartRecord/ResumeRecord. Keep clearing for the whole paused state,
+            // because demo pre-roll can recreate old chat content long after
+            // demo_gototick's initial event. The short tick grace covers CS2's
+            // deferred update on the first resumed frames.
+            if (state.bIsPaused) {
+                transientHudSuppressUntilTick = Math.max(
+                    transientHudSuppressUntilTick,
+                    tick + TRANSIENT_HUD_RESUME_GRACE_TICKS,
+                );
+            }
+            if (state.bIsPaused || tick <= transientHudSuppressUntilTick) {
+                clearStockHudChat();
+            }
+            updateStockHudAlertSeekSuppress(state, tick);
+            transientHudLastTick = tick;
+        }
+        $.Schedule(0.016, watchDemoTimeJumps);
     }
 
     function findTeamCounterRoot() {
@@ -1256,24 +1407,10 @@
         if (t > 1) {
             t = 1;
         }
-        // A strong flash must be genuinely opaque for a meaningful interval.
-        // A translucent white panel leaves HUD panels visible as grey silhouettes.
-        if (span >= FLASH_FULL_OPAQUE_THRESHOLD_TICKS) {
-            const fadeTicks = Math.max(1, Math.min(FLASH_FADE_TICKS, span));
-            const holdTicks = Math.max(0, span - fadeTicks);
-            if (elapsed <= holdTicks) {
-                return 1;
-            }
-            const fadeProgress = Math.max(
-                0,
-                Math.min(1, (elapsed - holdTicks) / fadeTicks),
-            );
-            return Math.pow(1 - fadeProgress, 1.2);
-        }
-
-        // Glancing/weak flashes remain translucent, with strength derived from
-        // the authoritative player_blind duration.
-        const peak = Math.min(1, span / FLASH_FULL_OPAQUE_THRESHOLD_TICKS);
+        // Peak strength comes from the authoritative player_blind duration.
+        // Every strength uses the complete event span, avoiding the old 3s
+        // branch whose fixed two-second tail made nearby durations look unlike.
+        const peak = Math.min(1, span / FLASH_FULL_DURATION_TICKS);
         // Stronger flash lingers nearer white (lower power); weak fades quicker.
         const fadePower = 2.4 - 1.2 * peak;
         return peak * Math.pow(1 - t, fadePower);
@@ -3138,6 +3275,13 @@
     $.Schedule(0, updateInputHud);
     $.Schedule(0, tickTeamCounterHud);
     $.Schedule(0, tickFlashBlindHud);
+    try {
+        $.RegisterForUnhandledEvent(
+            "PanoramaGameTimeJumpEvent",
+            scheduleTransientStockHudClear,
+        );
+    } catch (errTimeJumpEvent) {}
+    $.Schedule(0, watchDemoTimeJumps);
     if (radarTrack) {
         $.Schedule(0, updateRadarHud);
     }

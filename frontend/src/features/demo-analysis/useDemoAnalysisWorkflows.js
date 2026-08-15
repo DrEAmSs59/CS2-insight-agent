@@ -205,6 +205,7 @@ export function useDemoAnalysisWorkflows({
         matches[index] = {
           players: { ...(current?.players || {}), ...processedPlayers },
           analysis_workspace: data.analysis_workspace ?? current?.analysis_workspace ?? null,
+          has_player_keyboard_input: data.has_player_keyboard_input ?? null,
           demo_path: demos[index].path,
           demo_filename: filename,
         };

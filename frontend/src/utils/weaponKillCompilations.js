@@ -1,5 +1,6 @@
 import { weaponDisplayName } from "../i18n/weaponNames.js";
 import { resolveHudWeaponStem } from "../features/demo-analysis/workspaces/timeline/killfeed/resolveHudWeaponStem.js";
+import { resolveCs2WeaponModel } from "./cs2ItemCatalog.js";
 
 function isKillEvent(event) {
   const type = String(event?.record_type || event?.type || "").trim();
@@ -9,6 +10,8 @@ function isKillEvent(event) {
 function normalizedWeaponKey(event) {
   const rawKey = String(event?.weapon_key || event?.weapon || "").trim();
   const rawName = String(event?.weapon_name || "").trim();
+  const catalogModel = resolveCs2WeaponModel(rawKey, rawName);
+  if (catalogModel) return catalogModel;
   const haystack = `${rawKey} ${rawName}`.toLowerCase().replace(/[-\s]+/g, "_");
   const hudStem = resolveHudWeaponStem(rawKey, rawName);
   // resolveHudWeaponStem intentionally falls back to ak47 for missing HUD assets.
@@ -139,7 +142,7 @@ export function buildWeaponKillCompilationClipData({
     victim_steamid64s: kills.map((event) => String(event?.victim_steamid || "").trim()),
     victim_spec_slots: kills.map((event) => event?.victim_spec_slot ?? null),
     kill_ticks: kills.map((event) => Number(event.tick)),
-    kill_weapons: kills.map((event) => String(event?.weapon_key || event?.weapon_name || resolvedKey)),
+    kill_weapons: kills.map(normalizedWeaponKey),
     kill_headshots: kills.map((event) => Boolean(event?.is_headshot ?? event?.headshot)),
     kill_tag_lists: kills.map(() => []),
     source_rounds: kills.map((event) => Number(event?.round) || 0),

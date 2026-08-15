@@ -12,6 +12,7 @@ describe("Demo Library analysis handoff", () => {
       filename: "match.dem",
       display_name: "Final",
       path: "C:/demos/match.dem",
+      has_player_keyboard_input: 0,
       result: {
         analyzed_target_players: ["alpha", "beta"],
         players: {
@@ -33,6 +34,7 @@ describe("Demo Library analysis handoff", () => {
     expect(Object.keys(handoff.parsedMatches[0].players)).toEqual(["alpha", "beta"]);
     expect(handoff.parsedMatches[0].players.alpha.clips[0].client_clip_uid).toBeTruthy();
     expect(handoff.parsedMatches[0].demo_path).toBe("C:/demos/match.dem");
+    expect(handoff.parsedMatches[0].has_player_keyboard_input).toBe(false);
   });
 
   test("falls back to the live roster when no cached analysis exists", () => {

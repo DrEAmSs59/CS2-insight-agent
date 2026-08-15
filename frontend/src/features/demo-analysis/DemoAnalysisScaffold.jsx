@@ -9,6 +9,7 @@ import {
   Flame,
   Gem,
   ListChecks,
+  ListFilter,
   Loader2,
   MapPin,
   Swords,
@@ -297,12 +298,15 @@ function HighlightWorkspaceToolbar({
   setSelectedTag,
   locale,
   avatars,
+  pinnedCompilationTags = [],
 }) {
   const t = useT();
   const isBlue = playerTeamNumber(selectedPlayer) === 2;
   const selectedAppearance = playerAppearance(selectedPlayer, isBlue ? "blue" : "amber");
   const selectedAvatarUrl = selectedPlayer ? avatars?.[steamIdForPlayer(selectedPlayer)] || "" : "";
   const [tagsExpanded, setTagsExpanded] = useState(false);
+  const pinnedTagSet = new Set(pinnedCompilationTags.map(({ tag }) => tag));
+  const hiddenTagCount = tagCounts.filter(([tag]) => tag !== ALL_TAG && !pinnedTagSet.has(tag)).length;
 
   useEffect(() => {
     setTagsExpanded(false);
@@ -351,24 +355,46 @@ function HighlightWorkspaceToolbar({
       ) : null}
       {activeHighlightView === "clips" ? (
         <div className="border-t border-cs2-border-subtle">
-          <button
-            type="button"
-            aria-expanded={tagsExpanded}
-            aria-label={t(tagsExpanded ? "dock.collapse" : "dock.expand", { panel: t("analysis.workspace.tags") })}
-            onClick={() => setTagsExpanded((expanded) => !expanded)}
-            className="flex min-h-9 w-full items-center gap-2 px-3 text-left text-[10px] font-bold text-cs2-text-secondary transition-colors hover:bg-cs2-bg-hover hover:text-cs2-text-primary"
-          >
-            <span className="uppercase tracking-[0.14em]">{t("analysis.workspace.tags")}</span>
-            <span className="rounded bg-cs2-bg-input px-1.5 py-0.5 font-mono text-[9px] text-cs2-text-muted">
-              {selectedTag === ALL_TAG ? t("analysis.workspace.allTags") : labelTag(selectedTag, locale)}
-            </span>
-            <ChevronDown className={`ml-auto h-3.5 w-3.5 text-cs2-text-muted transition-transform ${tagsExpanded ? "rotate-180" : ""}`} />
-          </button>
+          <div className="flex min-h-10 flex-wrap items-center gap-1.5 px-3 py-1.5 text-[10px] font-bold text-cs2-text-secondary">
+            <ListFilter className="h-3.5 w-3.5 text-cs2-text-muted" />
+            <span className="mr-1 uppercase tracking-[0.14em]">{t("analysis.workspace.tagFilters")}</span>
+            <div className="flex flex-wrap items-center gap-1" data-testid="analysis-pinned-compilation-tags">
+              <button
+                type="button"
+                data-active={selectedTag === ALL_TAG ? "true" : "false"}
+                onClick={() => setSelectedTag(ALL_TAG)}
+                className="analysis-filter-toggle border border-cs2-border-subtle bg-cs2-bg-input/40"
+              >
+                {t("analysis.workspace.allTags")}
+              </button>
+              {pinnedCompilationTags.map(({ kind, tag }) => (
+                <button
+                  key={kind}
+                  type="button"
+                  data-active={selectedTag === tag ? "true" : "false"}
+                  onClick={() => setSelectedTag(tag)}
+                  className="analysis-filter-toggle border border-cs2-border-subtle bg-cs2-bg-input/40"
+                >
+                  {labelTag(tag, locale)}
+                </button>
+              ))}
+            </div>
+            <button
+              type="button"
+              aria-expanded={tagsExpanded}
+              aria-label={t(tagsExpanded ? "dock.collapse" : "dock.expand", { panel: t("analysis.workspace.tags") })}
+              onClick={() => setTagsExpanded((expanded) => !expanded)}
+              className="ml-auto flex min-h-7 items-center gap-1.5 rounded px-2 text-[9px] font-semibold text-cs2-text-muted transition-colors hover:bg-cs2-bg-hover hover:text-cs2-text-primary"
+            >
+              {t(tagsExpanded ? "analysis.workspace.hideTagFilters" : "analysis.workspace.showTagFilters", { n: hiddenTagCount })}
+              <ChevronDown className={`h-3.5 w-3.5 transition-transform ${tagsExpanded ? "rotate-180" : ""}`} />
+            </button>
+          </div>
           {tagsExpanded ? (
             <div data-testid="highlight-tag-options" className="flex flex-wrap gap-1 border-t border-cs2-border-subtle px-3 py-2">
-              {tagCounts.map(([tag, count]) => (
+              {tagCounts.filter(([tag]) => tag !== ALL_TAG && !pinnedTagSet.has(tag)).map(([tag, count]) => (
                 <button key={tag} type="button" data-active={selectedTag === tag ? "true" : "false"} onClick={() => setSelectedTag(tag)} className="analysis-filter-toggle">
-                  {tag === ALL_TAG ? t("analysis.workspace.allTags") : labelTag(tag, locale)} <span className="ml-0.5 font-mono opacity-70">{count}</span>
+                  {labelTag(tag, locale)} <span className="ml-0.5 font-mono opacity-70">{count}</span>
                 </button>
               ))}
             </div>

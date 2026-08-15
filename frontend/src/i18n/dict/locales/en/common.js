@@ -43,7 +43,7 @@ export default {
   "actionbar.addCurrentPlayerHighlights": "Queue all highlights from {player}",
   "actionbar.addCurrentPlayerFails": "Queue all fails from {player}",
   "actionbar.addSelected": "Add selected to queue",
-  "actionbar.queueCount": "{n} in queue — click \"Recording Queue\" on the right to batch export",
+  "actionbar.queueCount": "{n} in queue — click \"Recording Queue\" on the menu bar to batch export",
   "upload.dragDropMsg": "Drag one or more .dem files here",
   "upload.dragReleaseMsg": "Release to upload",
   "upload.clickBrowse": "or click to browse — multi-select supported",

@@ -107,9 +107,17 @@ export function useClipQueueActions({
     const steamId = meta?.target_steam_id != null && meta?.target_steam_id !== ""
       ? String(meta.target_steam_id)
       : null;
+    const rawKeyboardInput = parsed?.has_player_keyboard_input
+      ?? upload?.has_player_keyboard_input;
+    const demoHasPlayerKeyboardInput = rawKeyboardInput === true || rawKeyboardInput === 1
+      ? true
+      : rawKeyboardInput === false || rawKeyboardInput === 0
+        ? false
+        : null;
     return {
       demoFilename: parsed?.demo_filename ?? upload?.filename ?? "",
       demoPath: parsed?.demo_path ?? upload?.path ?? "",
+      demoHasPlayerKeyboardInput,
       targetPlayer: meta?.target_player || playerName || null,
       targetPlayerUserId: meta?.target_player_user_id ?? null,
       targetSteamId: steamId,
@@ -170,11 +178,7 @@ export function useClipQueueActions({
     const queueItems = [];
     for (const clip of candidates) {
       const baseItem = {
-        demoPath: meta.demoPath,
-        demoFilename: meta.demoFilename,
-        targetPlayer: meta.targetPlayer,
-        targetPlayerUserId: meta.targetPlayerUserId,
-        targetSteamId: meta.targetSteamId,
+        ...meta,
         clipId: clip.clip_id,
         clientClipUid: clip.client_clip_uid,
         clipData: { ...clip },
@@ -222,11 +226,7 @@ export function useClipQueueActions({
     if (!currentParsed || !currentActivePlayer) return;
     const meta = queueItemMetaForPlayer(currentMatchIndex, currentActivePlayer);
     const queueItems = currentPlayerClipScope.queueableHighlights.map((clip) => ({
-      demoPath: meta.demoPath,
-      demoFilename: meta.demoFilename,
-      targetPlayer: meta.targetPlayer,
-      targetPlayerUserId: meta.targetPlayerUserId,
-      targetSteamId: meta.targetSteamId,
+      ...meta,
       clipId: clip.clip_id,
       clientClipUid: clip.client_clip_uid,
       clipData: clip,
@@ -255,11 +255,7 @@ export function useClipQueueActions({
     if (!currentParsed || !currentActivePlayer) return;
     const meta = queueItemMetaForPlayer(currentMatchIndex, currentActivePlayer);
     const queueItems = currentPlayerClipScope.queueableFails.map((clip) => ({
-      demoPath: meta.demoPath,
-      demoFilename: meta.demoFilename,
-      targetPlayer: meta.targetPlayer,
-      targetPlayerUserId: meta.targetPlayerUserId,
-      targetSteamId: meta.targetSteamId,
+      ...meta,
       clipId: clip.clip_id,
       clientClipUid: clip.client_clip_uid,
       clipData: clip,
@@ -286,11 +282,7 @@ export function useClipQueueActions({
 
   const addQueueItem = useCallback((clipData, meta) => {
     addToQueue({
-      demoPath: meta.demoPath,
-      demoFilename: meta.demoFilename,
-      targetPlayer: meta.targetPlayer,
-      targetPlayerUserId: meta.targetPlayerUserId,
-      targetSteamId: meta.targetSteamId,
+      ...meta,
       clipId: clipData.clip_id,
       clientClipUid: clipData.client_clip_uid,
       clipData,
@@ -380,11 +372,7 @@ export function useClipQueueActions({
       });
       if (isAlreadyQueued(clipData, meta)) continue;
       queueItems.push({
-        demoPath: meta.demoPath,
-        demoFilename: meta.demoFilename,
-        targetPlayer: meta.targetPlayer,
-        targetPlayerUserId: meta.targetPlayerUserId,
-        targetSteamId: meta.targetSteamId,
+        ...meta,
         clipId: clipData.clip_id,
         clientClipUid: clipData.client_clip_uid,
         clipData,

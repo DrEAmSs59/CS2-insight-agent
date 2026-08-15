@@ -62,6 +62,10 @@ async def run_library_demo_analyze(
             freeze_to_death_rounds,
         )
         analysis_workspace = batch_result.pop("__analysis_workspace__", None)
+        has_player_keyboard_input = batch_result.pop(
+            "__has_player_keyboard_input__",
+            None,
+        )
         players_out = {p: v for p, v in batch_result.items() if isinstance(v, dict)}
         missing = [p for p in target_players if p not in players_out]
         if missing:
@@ -93,6 +97,7 @@ async def run_library_demo_analyze(
     composite: dict[str, Any] = {
         "players": players_payload,
         "analysis_workspace": analysis_workspace if isinstance(analysis_workspace, dict) else None,
+        "has_player_keyboard_input": has_player_keyboard_input,
         "analyzed_target_players": analyzed_targets,
         "auto_target_player": first_player,
         # 兼容仍读取「顶层 clips / match_meta」的旧逻辑（列表、SSE、部分 UI）
@@ -120,5 +125,6 @@ async def run_library_demo_analyze(
     return {
         "players": players_out,
         "analysis_workspace": analysis_workspace if isinstance(analysis_workspace, dict) else None,
+        "has_player_keyboard_input": has_player_keyboard_input,
         "demo_path": library_path,
     }

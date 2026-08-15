@@ -1,4 +1,4 @@
-use super::entities::PlayerMetaData;
+use super::entities::{Entity, PlayerMetaData};
 use super::variants::Sticker;
 use super::variants::Variant;
 use crate::first_pass::prop_controller::*;
@@ -136,6 +136,26 @@ fn stickers_from_econ_attributes(attributes: impl IntoIterator<Item = (u32, f32)
         .collect()
 }
 
+fn weapon_econ_attributes(entity: &Entity) -> Vec<(u32, f32)> {
+    let Some(length) = entity.weapon_econ_attribute_length() else {
+        return Vec::new();
+    };
+    (0..length)
+        .filter_map(|index| {
+            let index = u32::try_from(index).ok()?;
+            let definition_index = match entity.props.get(&(WEAPON_ATTRIBUTE_DEF_INDEX_ID + index)) {
+                Some(Variant::U32(value)) => *value,
+                Some(Variant::I32(value)) if *value >= 0 => *value as u32,
+                _ => return None,
+            };
+            let raw_value = match entity.props.get(&(WEAPON_SKIN_ID + index)) {
+                Some(Variant::F32(value)) => *value,
+                _ => return None,
+            };
+            Some((definition_index, raw_value))
+        })
+        .collect()
+}
 
 // This file collects the data that is converted into a dataframe in the end in parser.parse_ticks()
 
@@ -985,21 +1005,14 @@ impl<'a> SecondPassParser<'a> {
     pub fn find_stickers(&self, weapon_entity_id: &i32) -> Result<Variant, PropCollectionError> {
         // Attribute-index based sticker decode (ported from unicbm/demotracer with permission).
         // Upstream fixed-offset WEAPON_SKIN_ID+4..24 misreads CS2 econ attribute lists.
-        let mut sticker_attributes = Vec::new();
-        for idx in 0..64 {
-            let def = self.get_prop_from_ent(&(WEAPON_ATTRIBUTE_DEF_INDEX_ID + idx), weapon_entity_id);
-            let definition_index = match def {
-                Ok(Variant::U32(value)) => value,
-                Ok(Variant::I32(value)) if value >= 0 => value as u32,
-                _ => continue,
-            };
-            let Ok(Variant::F32(raw_value)) =
-                self.get_prop_from_ent(&(WEAPON_SKIN_ID + idx), weapon_entity_id)
-            else {
-                continue;
-            };
-            sticker_attributes.push((definition_index, raw_value));
-        }
+        let Some(entity) = self
+            .entities
+            .get(*weapon_entity_id as usize)
+            .and_then(Option::as_ref)
+        else {
+            return Ok(Variant::Stickers(Vec::new()));
+        };
+        let sticker_attributes = weapon_econ_attributes(entity);
         Ok(Variant::Stickers(stickers_from_econ_attributes(sticker_attributes)))
     }
 
@@ -1725,5 +1738,56 @@ impl std::error::Error for PropCollectionError {}
 impl fmt::Display for PropCollectionError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{:?}", self)
+    }
+}
+
+#[cfg(test)]
+mod econ_vector_tests {
+    use super::*;
+    use crate::first_pass::sendtables::{ResolvedField, VectorElementKind, VectorId, VectorRootInfo};
+    use crate::second_pass::entities::{Entity, EntityType};
+    use ahash::AHashMap;
+
+    #[test]
+    fn econ_vector_collector_ignores_stale_properties_past_current_length() {
+        let mut entity = Entity {
+            cls_id: 1,
+            entity_id: 1,
+            props: AHashMap::new(),
+            vector_lengths: AHashMap::new(),
+            cosmetic_revision: 0,
+            entity_type: EntityType::Normal,
+        };
+        SecondPassParser::insert_resolved_field(
+            &mut entity,
+            Variant::U32(3),
+            Some(ResolvedField::VectorLength(VectorRootInfo {
+                vector_id: VectorId {
+                    path: [4, 0, 0, 0, 0, 0, 0],
+                    last: 0,
+                },
+                element_kind: VectorElementKind::WeaponEconAttribute,
+            })),
+        );
+        for index in 0..3 {
+            entity.props.insert(
+                WEAPON_ATTRIBUTE_DEF_INDEX_ID + index,
+                Variant::U32(6 + index),
+            );
+            entity
+                .props
+                .insert(WEAPON_SKIN_ID + index, Variant::F32(index as f32));
+        }
+        entity
+            .props
+            .insert(WEAPON_ATTRIBUTE_DEF_INDEX_ID + 3, Variant::U32(113));
+        entity
+            .props
+            .insert(WEAPON_SKIN_ID + 3, Variant::F32(f32::from_bits(80)));
+
+        let attributes = weapon_econ_attributes(&entity);
+
+        assert_eq!(attributes.len(), 3);
+        assert!(stickers_from_econ_attributes(attributes).is_empty());
     }
 }

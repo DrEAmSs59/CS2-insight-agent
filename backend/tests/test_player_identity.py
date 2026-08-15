@@ -117,6 +117,64 @@ def test_roster_stats_do_not_merge_same_nickname_players():
     assert by_key[f"steamid:{SID_B}"]["team"] == 3
 
 
+def test_roster_uses_match_start_teams_when_player_info_has_final_sides():
+    """A halftime swap must not detach the roster from start-anchored team names."""
+    player_info = pd.DataFrame([
+        {"name": "alpha", "steamid": SID_A, "team_number": 3},
+        {"name": "bravo", "steamid": SID_B, "team_number": 2},
+    ])
+    deaths = pd.DataFrame([
+        {
+            "tick": 200,
+            "attacker_name": "alpha",
+            "attacker_steamid": SID_A,
+            "attacker_user_id": 10,
+            "attackerteam": 3,
+            "user_name": "bravo",
+            "user_steamid": SID_B,
+            "user_user_id": 20,
+            "userteam": 2,
+        },
+    ])
+
+    class Parser:
+        def parse_ticks(self, _fields, *, ticks):
+            tick = ticks[0]
+            return pd.DataFrame([
+                {
+                    "tick": tick,
+                    "name": "alpha",
+                    "steamid": SID_A,
+                    "user_id": 10,
+                    "team_num": 2,
+                    "player_color": "blue",
+                },
+                {
+                    "tick": tick,
+                    "name": "bravo",
+                    "steamid": SID_B,
+                    "user_id": 20,
+                    "team_num": 3,
+                    "player_color": "orange",
+                },
+            ])
+
+        def parse_player_info(self):
+            return player_info
+
+    rows = get_player_list(
+        "halftime-swap.dem",
+        parser=Parser(),
+        match_start_tick=100,
+        death_events=deaths,
+        player_info_df=player_info,
+    )
+
+    by_name = {row["name"]: row for row in rows}
+    assert by_name["alpha"]["team"] == 2
+    assert by_name["bravo"]["team"] == 3
+
+
 def test_roster_drops_fake_steamid_placeholder_from_player_info():
     """Disconnect/GOTV slots often appear in parse_player_info with tiny fake ids."""
     player_info = pd.DataFrame([

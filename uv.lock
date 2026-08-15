@@ -196,7 +196,7 @@ requires-dist = [
     { name = "aiosqlite", specifier = "==0.22.1" },
     { name = "cramjam", specifier = "==2.11.0" },
     { name = "cryptography", specifier = "==50.0.0" },
-    { name = "demoparser2", marker = "platform_machine == 'AMD64' and sys_platform == 'win32'", url = "https://github.com/DrEAmSs59/CS2-insight-agent/releases/download/demoparser-runtime-v0.41.4-cs2insight8-r1/demoparser2-0.41.4%2Bcs2insight8-cp312-cp312-win_amd64.whl" },
+    { name = "demoparser2", marker = "platform_machine == 'AMD64' and sys_platform == 'win32'", url = "https://github.com/DrEAmSs59/CS2-insight-agent/releases/download/demoparser-runtime-v0.41.4-cs2insight9-r1/demoparser2-0.41.4%2Bcs2insight9-cp312-cp312-win_amd64.whl" },
     { name = "fastapi", specifier = "==0.136.3" },
     { name = "httpx", specifier = "==0.28.1" },
     { name = "obs-websocket-py", specifier = "==1.0" },
@@ -217,10 +217,10 @@ parser-build = [{ name = "maturin", specifier = "==1.14.1" }]
 
 [[package]]
 name = "demoparser2"
-version = "0.41.4+cs2insight8"
-source = { url = "https://github.com/DrEAmSs59/CS2-insight-agent/releases/download/demoparser-runtime-v0.41.4-cs2insight8-r1/demoparser2-0.41.4%2Bcs2insight8-cp312-cp312-win_amd64.whl" }
+version = "0.41.4+cs2insight9"
+source = { url = "https://github.com/DrEAmSs59/CS2-insight-agent/releases/download/demoparser-runtime-v0.41.4-cs2insight9-r1/demoparser2-0.41.4%2Bcs2insight9-cp312-cp312-win_amd64.whl" }
 wheels = [
-    { url = "https://github.com/DrEAmSs59/CS2-insight-agent/releases/download/demoparser-runtime-v0.41.4-cs2insight8-r1/demoparser2-0.41.4%2Bcs2insight8-cp312-cp312-win_amd64.whl", hash = "sha256:b695419fca5e2f397b9d0d6b2f804a6a1a86c1f86fdc7b3d890fc7966db2254b" },
+    { url = "https://github.com/DrEAmSs59/CS2-insight-agent/releases/download/demoparser-runtime-v0.41.4-cs2insight9-r1/demoparser2-0.41.4%2Bcs2insight9-cp312-cp312-win_amd64.whl", hash = "sha256:c9882dcbc961791fac93d7b1f726e1020da70eb493d839ea0e5d15f5f3c6635e" },
 ]
 
 [[package]]
