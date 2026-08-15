@@ -129,6 +129,15 @@ export const useRecordingQueue = create((set, get) => ({
   queue: /** @type {RecordingQueueItem[]} */ ([]),
 
   /**
+   * 「回合时间线」页签上的开关：按阈值合并击杀/死亡镜头。
+   * 开启后，批量入队的间隔相近（≤ 击杀合集阈值）的击杀/死亡镜头会被合并为
+   * 单条多杀/多死合集，录制时静默合并为一段连续素材，避免连杀或击杀后迅速死亡
+   * 产生大量重复内容。回合列表本身保持不变。
+   * @type {boolean}
+   */
+  mergeTimelineClipsEnabled: false,
+
+  /**
    * 全局节奏参数，作用于所有未单独设置 pacing_override 的片段。
    * 仅存储用户**显式修改**过的字段；未修改字段由后端默认值接管。
    * @type {PacingOverride}
@@ -222,6 +231,11 @@ export const useRecordingQueue = create((set, get) => ({
     set((s) => ({
       globalPacing: { ...s.globalPacing, ...partial },
     }));
+  },
+
+  /** 设置「回合时间线」按阈值合并击杀/死亡镜头的开关。 */
+  setMergeTimelineClips(enabled) {
+    set({ mergeTimelineClipsEnabled: Boolean(enabled) });
   },
 
   /** 更新「设置 → 录制预设」的节奏默认值。 */
