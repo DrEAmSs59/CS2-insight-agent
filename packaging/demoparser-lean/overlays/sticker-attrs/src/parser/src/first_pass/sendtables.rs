@@ -56,6 +56,38 @@ pub struct FieldInfo {
     pub prop_id: u32,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum VectorElementKind {
+    WeaponEconAttribute,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct VectorId {
+    pub path: [i32; 7],
+    pub last: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct VectorRootInfo {
+    pub vector_id: VectorId,
+    pub element_kind: VectorElementKind,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum ResolvedField {
+    Property(FieldInfo),
+    VectorLength(VectorRootInfo),
+}
+
+impl ResolvedField {
+    pub fn property(self) -> Option<FieldInfo> {
+        match self {
+            Self::Property(info) => Some(info),
+            Self::VectorLength(_) => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum FieldCategory {
     Pointer,
@@ -316,6 +348,8 @@ pub struct ArrayField {
 pub struct VectorField {
     pub field_enum: Box<Field>,
     pub decoder: Decoder,
+    pub name: String,
+    pub send_node: String,
 }
 #[derive(Debug, Clone, PartialEq)]
 pub struct ValueField {
@@ -376,10 +410,17 @@ impl ValueField {
     }
 }
 impl VectorField {
-    pub fn new(field_enum: Field, f: std::option::Option<Box<FieldType>>) -> VectorField {
+    pub fn new(
+        field_enum: Field,
+        _f: std::option::Option<Box<FieldType>>,
+        name: String,
+        send_node: String,
+    ) -> VectorField {
         VectorField {
             field_enum: Box::new(field_enum),
             decoder: UnsignedDecoder,
+            name,
+            send_node,
         }
     }
 }
@@ -559,6 +600,53 @@ pub fn get_propinfo(field: &Field, path: &FieldPath) -> Option<FieldInfo> {
     return Some(fi);
 }
 
+fn field_contains_prop_id(field: &Field, prop_id: u32) -> bool {
+    match field {
+        Field::Value(value) => value.prop_id == prop_id,
+        Field::Serializer(serializer) => serializer
+            .serializer
+            .fields
+            .iter()
+            .any(|field| field_contains_prop_id(field, prop_id)),
+        Field::Pointer(pointer) => pointer
+            .serializer
+            .fields
+            .iter()
+            .any(|field| field_contains_prop_id(field, prop_id)),
+        Field::Array(array) => field_contains_prop_id(&array.field_enum, prop_id),
+        Field::Vector(vector) => field_contains_prop_id(&vector.field_enum, prop_id),
+        Field::None => false,
+    }
+}
+
+fn get_vector_root_info(field: &Field, path: &FieldPath) -> Option<VectorRootInfo> {
+    let Field::Vector(vector) = field else {
+        return None;
+    };
+    if vector
+        .send_node
+        .ends_with("m_NetworkedDynamicAttributes")
+        && field_contains_prop_id(&vector.field_enum, WEAPON_ATTRIBUTE_DEF_INDEX_ID)
+        && field_contains_prop_id(&vector.field_enum, WEAPON_SKIN_ID)
+    {
+        return Some(VectorRootInfo {
+            vector_id: VectorId {
+                path: path.path,
+                last: path.last,
+            },
+            element_kind: VectorElementKind::WeaponEconAttribute,
+        });
+    }
+    None
+}
+
+pub fn get_resolved_propinfo(field: &Field, path: &FieldPath) -> Option<ResolvedField> {
+    if let Some(vector_info) = get_vector_root_info(field, path) {
+        return Some(ResolvedField::VectorLength(vector_info));
+    }
+    get_propinfo(field, path).map(ResolvedField::Property)
+}
+
 fn create_field(
     _sid: &String,
     fd: &mut ConstructorField,
@@ -588,7 +676,12 @@ fn create_field(
 
     let element_field = match fd.category {
         FieldCategory::Array => Field::Array(ArrayField::new(element_field, fd.field_type.count.unwrap_or(0) as usize)),
-        FieldCategory::Vector => Field::Vector(VectorField::new(element_field, element_type)),
+        FieldCategory::Vector => Field::Vector(VectorField::new(
+            element_field,
+            element_type,
+            fd.var_name.clone(),
+            fd.send_node.clone(),
+        )),
         _ => return Ok(element_field),
     };
     Ok(element_field)
@@ -823,4 +916,52 @@ pub struct FieldType {
     pub pointer: bool,
     pub count: Option<i32>,
     pub element_type: Option<Box<FieldType>>,
+}
+
+#[cfg(test)]
+mod econ_vector_tests {
+    use super::*;
+
+    #[test]
+    fn econ_vector_serializer_root_resolves_to_length_metadata() {
+        let mut definition = ValueField::new(UnsignedDecoder, "m_iAttributeDefinitionIndex");
+        definition.prop_id = WEAPON_ATTRIBUTE_DEF_INDEX_ID;
+        definition.should_parse = true;
+        let mut raw = ValueField::new(NoscaleDecoder, "m_iRawValue32");
+        raw.prop_id = WEAPON_SKIN_ID;
+        raw.should_parse = true;
+        let field = Field::Vector(VectorField {
+            field_enum: Box::new(Field::Serializer(SerializerField {
+                serializer: Serializer {
+                    name: "CEconItemAttribute".to_string(),
+                    fields: vec![Field::Value(definition), Field::Value(raw)],
+                },
+            })),
+            decoder: UnsignedDecoder,
+            name: "m_Attributes".to_string(),
+            send_node: "m_AttributeManager.m_Item.m_NetworkedDynamicAttributes".to_string(),
+        });
+        let path = FieldPath {
+            path: [4, 0, 0, 0, 0, 0, 0],
+            last: 0,
+        };
+
+        assert!(matches!(
+            get_resolved_propinfo(&field, &path),
+            Some(ResolvedField::VectorLength(VectorRootInfo {
+                vector_id: VectorId {
+                    path: [4, 0, 0, 0, 0, 0, 0],
+                    last: 0,
+                },
+                element_kind: VectorElementKind::WeaponEconAttribute,
+            }))
+        ));
+
+        let mut static_attributes = field.clone();
+        let Field::Vector(vector) = &mut static_attributes else {
+            unreachable!();
+        };
+        vector.send_node = "m_AttributeManager.m_Item.m_AttributeList".to_string();
+        assert!(get_resolved_propinfo(&static_attributes, &path).is_none());
+    }
 }

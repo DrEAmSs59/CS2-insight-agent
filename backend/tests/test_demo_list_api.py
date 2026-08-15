@@ -8,6 +8,8 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app import main
+from app.features.demo_library import api as demo_library_api
+from app.features.match_history import api as match_history_api
 
 
 def _run(coro):
@@ -58,7 +60,7 @@ def test_compact_list_route_uses_compact_query_and_forwards_all_filters(monkeypa
     monkeypatch.setattr(main.demo_db, "list_demos_compact", fake_list_demos_compact)
     monkeypatch.setattr(main.demo_db, "list_demos", forbidden_legacy_list)
 
-    response = _run(main.list_demos_compact_api(**_route_kwargs()))
+    response = _run(demo_library_api.list_demos_compact_api(**_route_kwargs()))
 
     assert response["items"] == [{"id": 7, "has_result": True, "clip_count": 2}]
     assert response["total"] == 1
@@ -95,7 +97,7 @@ def test_legacy_list_route_preserves_full_result_contract(monkeypatch):
     monkeypatch.setattr(main.demo_db, "list_demos", list_mock)
     monkeypatch.setattr(main.demo_db, "list_demos_compact", compact_mock)
 
-    response = _run(main.list_demos(**_route_kwargs()))
+    response = _run(demo_library_api.list_demos(**_route_kwargs()))
 
     assert response["items"] == [full_item]
     assert response["items"][0]["result"]["clips"] == [{"id": "clip"}]
@@ -113,7 +115,7 @@ def test_list_demo_ids_returns_only_filtered_ids(monkeypatch):
     monkeypatch.setattr(main.demo_db, "list_filtered_demo_ids", fake_list_filtered_demo_ids)
 
     response = _run(
-        main.list_demo_ids(
+        demo_library_api.list_demo_ids(
             **_route_kwargs(
                 limit=1000,
                 offset=0,
@@ -186,7 +188,7 @@ def test_match_history_batches_library_lookup(monkeypatch):
         raise AssertionError("match history must not issue per-row filename queries")
 
     monkeypatch.setattr(
-        main,
+        match_history_api,
         "load_config",
         lambda: SimpleNamespace(
             steam_api_key="key",
@@ -195,12 +197,12 @@ def test_match_history_batches_library_lookup(monkeypatch):
             match_mode="premier",
         ),
     )
-    monkeypatch.setattr(main, "fetch_match_history", fake_matches)
-    monkeypatch.setattr(main, "fetch_player_summary", fake_player)
-    monkeypatch.setattr(main.demo_db, "find_existing_filenames", fake_existing)
-    monkeypatch.setattr(main.demo_db, "find_by_filename", forbidden_single_lookup)
+    monkeypatch.setattr(match_history_api, "fetch_match_history", fake_matches)
+    monkeypatch.setattr(match_history_api, "fetch_player_summary", fake_player)
+    monkeypatch.setattr(match_history_api.demo_db, "find_existing_filenames", fake_existing)
+    monkeypatch.setattr(match_history_api.demo_db, "find_by_filename", forbidden_single_lookup)
 
-    response = _run(main.get_match_history())
+    response = _run(match_history_api.get_match_history())
 
     assert batch_calls == [["match730_1.dem", "match730_2.dem"]]
     assert [row["demo_in_library"] for row in response["matches"]] == [False, True]
@@ -222,12 +224,12 @@ def test_batch_summary_reports_corrupt_result_as_item_error(monkeypatch):
         ),
     )
     monkeypatch.setattr(
-        main,
-        "_library_working_demo_path",
+        demo_library_api,
+        "library_working_demo_path",
         AsyncMock(return_value=Path("broken.dem")),
     )
 
-    response = _run(main.batch_demo_summary(main.BatchSummaryBody(ids=[7])))
+    response = _run(demo_library_api.batch_demo_summary(demo_library_api.BatchSummaryBody(ids=[7])))
 
     assert response["items"] == []
     assert response["failed"] == [{

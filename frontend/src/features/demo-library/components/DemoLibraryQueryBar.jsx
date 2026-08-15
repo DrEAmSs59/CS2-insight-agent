@@ -1,0 +1,163 @@
+import { Filter, X, Search, Calendar, ArrowUpDown, ChevronDown, ChevronUp } from "lucide-react";
+import { DEMO_LIBRARY_MAP_OPTIONS, DEMO_LIBRARY_STATUS_FILTER_OPTIONS } from "../../../constants/demoLibraryFilters";
+import { useT } from "../../../i18n/useT.js";
+
+export default function DemoLibraryQueryBar({
+  librarySearchInput,
+  onSearchChange,
+  onSearchSubmit,
+  libraryAdvFilters,
+  setLibraryAdvFilters,
+  sortKey,
+  sortDir,
+  onSortKeyChange,
+  onSortDirChange,
+  advancedOpen,
+  onToggleAdvanced,
+  onClearQuickFilters,
+  hasQuickOrAdvancedFilters,
+}) {
+  const t = useT();
+
+  const SORT_OPTIONS = [
+    { value: "library", label: t("library.sortOptLibrary") },
+    { value: "date", label: t("library.sortOptDate") },
+    { value: "size", label: t("library.sortOptSize") },
+    { value: "duration", label: t("library.sortOptDuration") },
+    { value: "rounds", label: t("library.sortOptRounds") },
+    { value: "map", label: t("library.sortOptMap") },
+    { value: "filename", label: t("library.sortOptFilename") },
+  ];
+
+  const STATUS_FILTER_LABELS = {
+    loaded: t("library.statusFilterLoaded"),
+    parsing: t("library.statusFilterParsing"),
+    done: t("library.statusFilterDone"),
+    error: t("library.statusFilterError"),
+  };
+
+  return (
+    <div className="demo-library-querybar flex shrink-0 flex-col gap-2">
+      <div className="demo-library-querybar__controls flex min-w-0 flex-wrap items-center gap-2">
+        <div className="demo-library-querybar__search relative min-w-0 flex-[1_1_14rem]">
+          <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-cs2-text-muted" />
+          <input
+            type="search"
+            enterKeyHint="search"
+            placeholder={t("library.searchPlaceholder")}
+            className="w-full rounded-md border border-cs2-border bg-cs2-bg-input py-1.5 pl-8 pr-2 font-mono text-[12px] text-cs2-text-primary outline-none placeholder:text-cs2-text-muted focus:border-cs2-accent/40"
+            value={librarySearchInput}
+            onChange={(e) => onSearchChange(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                onSearchSubmit();
+              }
+            }}
+            aria-label={t("library.searchAriaLabel")}
+          />
+        </div>
+
+        <select
+          className="rounded-md border border-cs2-border bg-cs2-bg-input px-2 py-1.5 font-mono text-[12px] text-cs2-text-primary outline-none focus:border-cs2-accent/40"
+          value={libraryAdvFilters.mapName}
+          onChange={(e) => setLibraryAdvFilters((p) => ({ ...p, mapName: e.target.value }))}
+          aria-label={t("library.mapAriaLabel")}
+        >
+          <option value="">{t("library.mapAll")}</option>
+          {DEMO_LIBRARY_MAP_OPTIONS.map((m) => (
+            <option key={m} value={m}>
+              {m}
+            </option>
+          ))}
+        </select>
+
+        <select
+          className="rounded-md border border-cs2-border bg-cs2-bg-input px-2 py-1.5 text-[12px] text-cs2-text-primary outline-none focus:border-cs2-accent/40"
+          value={libraryAdvFilters.status}
+          onChange={(e) => setLibraryAdvFilters((p) => ({ ...p, status: e.target.value }))}
+          aria-label={t("library.statusAriaLabel")}
+        >
+          <option value="all">{t("library.statusAll")}</option>
+          {DEMO_LIBRARY_STATUS_FILTER_OPTIONS.map(({ value }) => (
+            <option key={value} value={value}>
+              {STATUS_FILTER_LABELS[value] ?? value}
+            </option>
+          ))}
+        </select>
+
+        <div className="demo-library-querybar__date-range flex min-w-0 max-w-full items-center gap-1 rounded-md border border-cs2-border bg-cs2-bg-input px-1 py-0.5">
+          <Calendar className="h-3 w-3 shrink-0 text-cs2-text-muted" aria-hidden />
+          <input
+            type="date"
+            aria-label={t("library.dateFromAriaLabel")}
+            className="min-w-0 flex-1 bg-transparent py-1 font-mono text-[11px] text-cs2-text-secondary outline-none"
+            value={libraryAdvFilters.dateFrom}
+            onChange={(e) => setLibraryAdvFilters((p) => ({ ...p, dateFrom: e.target.value }))}
+          />
+          <span className="text-cs2-text-muted">—</span>
+          <input
+            type="date"
+            aria-label={t("library.dateToAriaLabel")}
+            className="min-w-0 flex-1 bg-transparent py-1 font-mono text-[11px] text-cs2-text-secondary outline-none"
+            value={libraryAdvFilters.dateTo}
+            onChange={(e) => setLibraryAdvFilters((p) => ({ ...p, dateTo: e.target.value }))}
+          />
+        </div>
+
+        <div className="demo-library-querybar__sort flex min-w-0 items-center gap-1">
+          <ArrowUpDown className="h-3.5 w-3.5 text-cs2-text-muted" aria-hidden />
+          <select
+            className="demo-library-querybar__sort-select min-w-0 rounded-md border border-cs2-border bg-cs2-bg-input px-2 py-1.5 text-[12px] text-cs2-text-primary outline-none focus:border-cs2-accent/40"
+            value={sortKey}
+            onChange={(e) => {
+              const k = e.target.value;
+              onSortKeyChange(k);
+              onSortDirChange(k === "filename" || k === "map" ? "asc" : "desc");
+            }}
+            aria-label={t("library.sortAriaLabel")}
+          >
+            {SORT_OPTIONS.map(({ value, label }) => (
+              <option key={value} value={value}>
+                {label}
+              </option>
+            ))}
+          </select>
+          <button
+            type="button"
+            className="rounded-md border border-cs2-border px-2 py-1.5 font-mono text-[11px] font-semibold text-cs2-text-secondary hover:border-cs2-accent/35 hover:text-cs2-text-primary"
+            title={sortDir === "asc" ? t("library.sortAscTitle") : t("library.sortDescTitle")}
+            onClick={() => onSortDirChange(sortDir === "asc" ? "desc" : "asc")}
+          >
+            {sortDir === "asc" ? t("library.sortAsc") : t("library.sortDesc")}
+          </button>
+        </div>
+
+        <button
+          type="button"
+          onClick={onToggleAdvanced}
+          className={`inline-flex items-center gap-1 rounded-md border px-2.5 py-1.5 text-[12px] font-semibold transition-colors ${
+            advancedOpen
+              ? "border-cs2-accent/45 bg-cs2-accent/10 text-cs2-accent"
+              : "border-cs2-border bg-cs2-bg-hover text-cs2-text-secondary hover:border-cs2-accent/35 hover:text-cs2-text-primary"
+          }`}
+        >
+          <Filter className="h-3.5 w-3.5" />
+          {t("library.advancedFilters")}
+          {advancedOpen ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+        </button>
+
+        {hasQuickOrAdvancedFilters ? (
+          <button
+            type="button"
+            onClick={onClearQuickFilters}
+            className="inline-flex items-center gap-1 rounded-md border border-cs2-border px-2.5 py-1.5 text-[12px] font-semibold text-cs2-text-muted hover:border-cs2-border hover:text-cs2-text-secondary"
+          >
+            <X className="h-3.5 w-3.5" />
+            {t("library.clearFilters")}
+          </button>
+        ) : null}
+      </div>
+    </div>
+  );
+}

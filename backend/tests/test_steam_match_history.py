@@ -23,8 +23,8 @@ from app.steam_match_history import (
     build_demo_url,
     parse_match_row,
 )
-from app import main
 from app.env_utils import AppConfig
+from app.features.match_history import api as match_history_api
 
 
 def test_official_steam_avatar_url_accepts_only_https_steam_cdn():
@@ -113,10 +113,10 @@ def test_public_player_summary_prefers_profile_animated_avatar(monkeypatch):
 
 def test_player_avatar_route_is_disabled_without_network_opt_in(monkeypatch):
     public_lookup = AsyncMock(side_effect=AssertionError("disabled setting must not make a request"))
-    monkeypatch.setattr(main, "load_config", lambda: AppConfig(steam_cdn_assets_enabled=False))
-    monkeypatch.setattr(main, "fetch_public_player_summaries", public_lookup)
+    monkeypatch.setattr(match_history_api, "load_config", lambda: AppConfig(steam_cdn_assets_enabled=False))
+    monkeypatch.setattr(match_history_api, "fetch_public_player_summaries", public_lookup)
 
-    result = asyncio.run(main.get_steam_player_avatars("76561198000000001"))
+    result = asyncio.run(match_history_api.get_steam_player_avatars("76561198000000001"))
 
     assert result == {"enabled": False, "avatars": {}}
     public_lookup.assert_not_awaited()
@@ -128,10 +128,10 @@ def test_player_avatar_route_filters_ids_and_non_steam_urls(monkeypatch):
         {"steamid": steam_id, "avatarfull": "https://avatars.cloudflare.steamstatic.com/abc_full.jpg"},
         {"steamid": "76561198000000002", "avatarfull": "https://example.com/not-steam.jpg"},
     ])
-    monkeypatch.setattr(main, "load_config", lambda: AppConfig(steam_cdn_assets_enabled=True))
-    monkeypatch.setattr(main, "fetch_public_player_summaries", public_lookup)
+    monkeypatch.setattr(match_history_api, "load_config", lambda: AppConfig(steam_cdn_assets_enabled=True))
+    monkeypatch.setattr(match_history_api, "fetch_public_player_summaries", public_lookup)
 
-    result = asyncio.run(main.get_steam_player_avatars(f"bad,{steam_id},{steam_id}"))
+    result = asyncio.run(match_history_api.get_steam_player_avatars(f"bad,{steam_id},{steam_id}"))
 
     assert result == {
         "enabled": True,

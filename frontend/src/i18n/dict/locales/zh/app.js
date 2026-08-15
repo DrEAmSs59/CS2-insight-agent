@@ -41,6 +41,8 @@ export default {
   "app.enqueueSkippedHint": "（已跳过 {n} 条未满足条件的片段）",
   "app.enqueuePlayerHighlightsEmpty": "{player} 没有可加入的高光（可能已全部在队列中）。",
   "app.enqueuePlayerHighlightsDone": "已将 {player} 的 {n} 条高光加入队列。",
+  "app.enqueuePlayerFailsEmpty": "{player} 没有可加入的下饭片段（可能已全部在队列中）。",
+  "app.enqueuePlayerFailsDone": "已将 {player} 的 {n} 条下饭片段加入队列。",
   "app.enqueueTimelineAlreadyIn": "该项已在录制队列中。",
   "app.enqueueTimelineDone": "已加入录制队列（时间线）",
   "app.enqueueWeaponKillsDone": "已将该枪械的全部击杀加入录制队列",

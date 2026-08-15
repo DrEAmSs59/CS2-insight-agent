@@ -1,0 +1,15 @@
+/* Hide only while the alert panel itself is waiting for CS2's native state
+ * machine to settle after a demo time jump. Stock alert styling remains intact. */
+CSGOHudAlerts.CS2InsightSeekSuppress
+{
+    visibility: collapse;
+    opacity: 0;
+}
+
+/* The persistent demo controller owns this class for pause -> seek -> resume.
+ * It is separate so the panel-local time-jump handler cannot remove it. */
+CSGOHudAlerts.CS2InsightPausedSeekSuppress
+{
+    visibility: collapse;
+    opacity: 0;
+}

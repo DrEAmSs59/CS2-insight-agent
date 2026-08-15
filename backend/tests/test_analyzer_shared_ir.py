@@ -6,21 +6,21 @@ from app import native_table as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from app.parser import analyzer as analyzer_module
-from app.parser import player_roster as player_roster_module
-from app.parser import round_economy as round_economy_module
-from app.parser.analyzer import DemoAnalyzer, _build_shared_player_indexes
-from app.parser.parse_utils import _max_demo_tick
-from app.parser.player_roster import (
+from app.features.demo_analysis import analyzer as analyzer_module
+from app.features.demo_analysis import player_roster as player_roster_module
+from app.features.demo_analysis import round_economy as round_economy_module
+from app.features.demo_analysis.analyzer import DemoAnalyzer, _build_shared_player_indexes
+from app.features.demo_analysis.parse_utils import _max_demo_tick
+from app.features.demo_analysis.player_roster import (
     build_player_name_to_steam_id,
     build_player_name_to_user_id,
 )
-from app.parser.round_economy import (
+from app.features.demo_analysis.round_economy import (
     build_round_scores,
     build_round_winner_side_map,
     compute_team_identity_scoreline,
 )
-from app.parser.spatial_analysis import (
+from app.features.demo_analysis.spatial_analysis import (
     build_equip_timeline,
     build_fire_index,
     build_hurt_index,
@@ -416,6 +416,102 @@ def test_multi_player_analysis_builds_shared_facts_once(monkeypatch):
     assert fact_builds[0]["expected_players"] == players
     assert finish_facts == [facts] * 10
     assert parser.header_calls == 1
+
+
+def test_multi_player_analysis_excludes_team_kills_from_highlight_kills(monkeypatch):
+    empty = pd.DataFrame()
+    deaths = pd.DataFrame(
+        [
+            {
+                "tick": 90,
+                "total_rounds_played": 0,
+                "attacker_name": "alpha",
+                "user_name": "teammate",
+                "attackerteam": "2",
+                "userteam": "2",
+                "weapon": "ak47",
+            },
+            {
+                "tick": 100,
+                "total_rounds_played": 0,
+                "attacker_name": "alpha",
+                "user_name": "enemy",
+                "attackerteam": 2,
+                "userteam": 3,
+                "weapon": "ak47",
+            },
+        ]
+    )
+    shared_events = {
+        "events": deaths,
+        "fire_df": empty,
+        "hurt_df": empty,
+        "equip_df": empty,
+        "pickup_df": empty,
+        "planted_df": empty,
+        "defused_df": empty,
+        "bomb_exploded_df": empty,
+        "begindefuse_df": empty,
+        "nade_batch": {},
+        "re_df_cached": empty,
+        "blind_df": empty,
+        "economy_map_shared": {},
+        "round_freeze_end_ticks_shared": {1: 50},
+        "round_freeze_start_ticks_shared": {},
+        "tick_to_round_shared": {},
+        "economy_ticks_df": empty,
+        "freeze_end_df": empty,
+        "round_start_df": empty,
+        "match_start_df": empty,
+        "steam_to_final_team_shared": {},
+        "name_to_final_team_shared": {"alpha": 2, "teammate": 2, "enemy": 3},
+        "group_side_by_round_shared": {},
+        "player_info_df": empty,
+    }
+
+    class Parser:
+        def parse_header(self):
+            return {"map_name": "de_test"}
+
+    analyzer = object.__new__(DemoAnalyzer)
+    analyzer.dem_path = Path("fixture.dem")
+    analyzer.parser = Parser()
+    captured = {}
+
+    monkeypatch.setattr(analyzer_module, "_get_match_start_tick", lambda *_args, **_kwargs: 1)
+    monkeypatch.setattr(
+        analyzer,
+        "_parse_shared_event_batch",
+        lambda: {"round_announce_match_start": empty},
+    )
+    monkeypatch.setattr(analyzer, "_parse_shared_events", lambda *_args, **_kwargs: shared_events)
+    monkeypatch.setattr(analyzer, "_build_shared_demo_facts", lambda **_kwargs: object())
+    monkeypatch.setattr(
+        analyzer_module,
+        "extract_player_team_maps",
+        lambda *_args, **_kwargs: {"alpha": {1: 2}},
+    )
+    monkeypatch.setattr(analyzer_module, "build_round_scores_team_based", lambda *_args, **_kwargs: {})
+
+    def fake_spatial_snapshots(_parser, ticks):
+        captured["spatial_ticks"] = list(ticks)
+        return {}, {}
+
+    monkeypatch.setattr(analyzer_module, "parse_spatial_snapshots", fake_spatial_snapshots)
+
+    def fake_finish(**kwargs):
+        captured.update(kwargs)
+        return kwargs["target_player"]
+
+    monkeypatch.setattr(analyzer, "_finish_single_player_analysis", fake_finish)
+
+    assert analyzer.analyze_multi_players(["alpha"]) == {"alpha": "alpha"}
+    assert captured["target_total_kills"] == 1
+    assert captured["round_target_kill_ticks"] == {1: [100]}
+    assert [kill["victim"] for kill in captured["round_kills"][1]] == ["enemy"]
+    assert captured["round_first_death_tick"] == {1: 100}
+    assert 100 in captured["spatial_ticks"]
+    assert 90 not in captured["spatial_ticks"]
 
 
 def test_shared_facts_materialize_event_indexes_and_copy_rosters(monkeypatch):

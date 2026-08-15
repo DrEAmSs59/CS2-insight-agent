@@ -80,8 +80,6 @@ cs2-insight.db-shm
 data/**
 !data/cs2-insight.config.example.json
 !data/basic.ini
-!data/lite_cut_effect_contract.json
-!data/lite_cut_visual_acceptance.json
 
 # Alternate local data root used by development/testing
 /data1/
@@ -100,6 +98,11 @@ frontend/src-tauri/bundle-resources/*
 
 # Local generated preview artifacts (match report preview, etc.)
 frontend/preview/
+
+# Local generated skin-core review artifacts
+/outputs/019ff569-5dc4-70f2-be8e-2805bd349591/
+/docs/skin-core-paid-features-and-validation-design.md
+/docs/skin-core-remote-validation-design.md
 
 # Local UI design backups created before visual refactors
 backups/

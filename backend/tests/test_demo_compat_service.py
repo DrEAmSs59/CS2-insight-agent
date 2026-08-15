@@ -131,3 +131,84 @@ def test_recovered_terminal_tail_is_cached_after_atomic_finalization(
     assert second.cached is True
     assert second.report == first.report
     assert source.read_bytes() != source_bytes
+
+
+def test_compatible_baseline_repairs_once_and_never_mutates_original(
+    monkeypatch,
+    tmp_path: Path,
+):
+    source = tmp_path / "library" / "match.dem"
+    source.parent.mkdir()
+    source_bytes = b"ORIGINAL-DEMO"
+    source.write_bytes(source_bytes)
+    cache_dir = tmp_path / "cache"
+    calls: list[Path] = []
+
+    def fake_repair(path, **_kwargs):
+        candidate = Path(path)
+        calls.append(candidate)
+        candidate.write_bytes(candidate.read_bytes() + b"-COMPAT")
+        return _clean_report()
+
+    monkeypatch.setattr(service, "_cache_path", lambda: tmp_path / "compat-cache.json")
+    monkeypatch.setattr(service, "repair_demo_in_place", fake_repair)
+
+    first = service.ensure_compatible_baseline(source, cache_dir)
+    second = service.ensure_compatible_baseline(source, cache_dir)
+
+    assert first == second
+    assert first.parent == cache_dir.resolve()
+    assert first.read_bytes() == source_bytes + b"-COMPAT"
+    assert source.read_bytes() == source_bytes
+    assert len(calls) == 1
+    assert first.with_suffix(".json").is_file()
+
+
+def test_compatible_baseline_invalidates_when_original_changes(monkeypatch, tmp_path: Path):
+    source = tmp_path / "match.dem"
+    source.write_bytes(b"FIRST")
+    cache_dir = tmp_path / "cache"
+    calls = 0
+
+    def fake_repair(path, **_kwargs):
+        nonlocal calls
+        calls += 1
+        candidate = Path(path)
+        candidate.write_bytes(candidate.read_bytes() + b"-COMPAT")
+        return _clean_report()
+
+    monkeypatch.setattr(service, "_cache_path", lambda: tmp_path / "compat-cache.json")
+    monkeypatch.setattr(service, "repair_demo_in_place", fake_repair)
+
+    first = service.ensure_compatible_baseline(source, cache_dir)
+    source.write_bytes(b"SECOND-VERSION")
+    second = service.ensure_compatible_baseline(source, cache_dir)
+
+    assert first != second
+    assert first.read_bytes() == b"FIRST-COMPAT"
+    assert second.read_bytes() == b"SECOND-VERSION-COMPAT"
+    assert calls == 2
+
+
+def test_compatible_baseline_failure_publishes_nothing(monkeypatch, tmp_path: Path):
+    source = tmp_path / "match.dem"
+    source_bytes = b"ORIGINAL"
+    source.write_bytes(source_bytes)
+    cache_dir = tmp_path / "cache"
+
+    def broken_repair(_path, **_kwargs):
+        raise RuntimeError("repair failed")
+
+    monkeypatch.setattr(service, "_cache_path", lambda: tmp_path / "compat-cache.json")
+    monkeypatch.setattr(service, "repair_demo_in_place", broken_repair)
+
+    try:
+        service.ensure_compatible_baseline(source, cache_dir)
+    except RuntimeError as exc:
+        assert str(exc) == "repair failed"
+    else:
+        raise AssertionError("baseline construction must fail closed")
+
+    assert source.read_bytes() == source_bytes
+    assert not list(cache_dir.glob(".skin-compat-v*.dem"))
+    assert not list(cache_dir.glob(".skin-compat-build-*.dem"))

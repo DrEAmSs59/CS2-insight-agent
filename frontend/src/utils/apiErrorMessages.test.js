@@ -25,4 +25,11 @@ describe("messageFromApiCode", () => {
     expect(message).toContain("FrameMeld");
     expect(message).toContain("ffmpeg.exe");
   });
+
+  it("explains how to recover from an oversized Windows export command", () => {
+    const message = messageFromApiCode("MONTAGE_COMMAND_LINE_TOO_LONG", zh, {});
+
+    expect(message).toContain("拆成两部分");
+    expect(message).toContain("Windows");
+  });
 });

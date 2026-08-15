@@ -26,6 +26,10 @@ describe("DemoPlayOptionsModal", () => {
     fireEvent.click(screen.getByRole("button", { name: /实验功能：POV HUD/ }));
     expect(onPlayNormal).toHaveBeenCalledTimes(1);
     expect(onPlayPov).toHaveBeenCalledTimes(1);
+    expect(screen.getByTestId("demo-play-normal-option").className).toContain("justify-start");
+    expect(screen.getByTestId("demo-play-pov-option").className).toContain("justify-start");
+    expect(screen.getByTestId("demo-play-normal-option").className).toContain("min-h-[112px]");
+    expect(screen.getByTestId("demo-play-pov-option").className).toContain("min-h-[112px]");
   });
 
   it("blocks playback while CS2 is running and allows a recheck", () => {

@@ -1,6 +1,6 @@
 from array import array
 
-from app.lite_cut.waveform import _bucket_peaks, waveform_command, waveform_view
+from app.features.lite_cut.waveform import _bucket_peaks, waveform_command, waveform_view
 
 
 def test_waveform_command_decodes_only_compact_mono_pcm(tmp_path):
@@ -19,6 +19,21 @@ def test_waveform_view_returns_only_the_trimmed_range():
     assert second["start_sec"] == 5
     assert len(first["peaks"]) == 10
     assert len(second["peaks"]) == 10
+    assert first["cache_buckets"] == 100
+    assert max(first["peaks"]) == 0.1
+    assert max(second["peaks"]) == 1.0
+    assert first["normalization_peak"] == second["normalization_peak"] == 1.0
+
+
+def test_waveform_view_caps_each_visible_tile_without_reducing_the_disk_cache():
+    payload = {"duration_sec": 1_383.416667, "peaks": [0.25] * 16_384}
+
+    view = waveform_view(payload, start_sec=120, end_sec=150, buckets=10_000)
+
+    assert view["start_sec"] == 120
+    assert view["end_sec"] == 150
+    assert view["buckets"] == 512
+    assert view["cache_buckets"] == 16_384
 
 
 def test_bucket_peaks_does_not_append_silence_for_short_sources():

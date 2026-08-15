@@ -1,4 +1,4 @@
-from app.parser.tag_detection import build_highlight_tags
+from app.features.demo_analysis.tag_detection import build_highlight_tags
 
 
 def _kill(tick: int) -> dict:

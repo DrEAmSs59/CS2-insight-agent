@@ -14,7 +14,7 @@ import {
 } from "lucide-react";
 import API from "../api/api";
 import { useT } from "../i18n/useT.js";
-import { useReplayStore } from "../stores/replayStore";
+import { useReplayStore } from "../features/demo-analysis/replay/replayStore";
 import { useThemeStore } from "../stores/themeStore";
 
 const STORAGE_KEY = "cs2-insight:sidebar-layout-v2";

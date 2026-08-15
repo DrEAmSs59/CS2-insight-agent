@@ -4,6 +4,7 @@ import { AppShellProvider } from "./context/AppShellContext";
 import UpdateCheckModal from "./components/UpdateCheckModal";
 import RecordingBlockedDialog from "./components/RecordingBlockedDialog";
 import RecordingResultModal from "./components/recordingQueue/RecordingResultModal";
+import RecordingProgressModal from "./components/recordingQueue/RecordingProgressModal";
 import RecordWarmupModal from "./components/RecordWarmupModal";
 import ProgressBar from "./components/ProgressBar";
 import BatchLoadErrorModal from "./components/BatchLoadErrorModal";
@@ -12,54 +13,31 @@ import { useRecordingQueue } from "./stores/recordingQueueStore";
 import { useLocaleStore } from "./i18n/localeStore";
 import { useT } from "./i18n/useT.js";
 import { ensureClientClipUidsOnClips } from "./utils/clipClientUid";
-import { getPlayerClipScope } from "./utils/playerClipScope";
 import {
-  freezeToDeathDraftFromClipFilter,
   isFreezeToDeathCompilation,
-  sliceFreezeToDeathClipForEnqueue,
 } from "./utils/freezeToDeathRoundFilter";
-import { splitRecordWarmupConfirmPayload } from "./utils/warmupDefaults";
-import { buildTimelineEventClipData, buildTimelineRoundClipData } from "./utils/timelineQueue";
-import {
-  queueItemClientUid,
-  runWithConcurrency,
-  buildRecordingQueueRequestsFromQueue,
-  applySessionObsTransitionToRequests,
-  applySessionKbOverlayToRequests,
-} from "./utils/recordingBatch";
-import { messageFromApiCode } from "./utils/apiErrorMessages";
-import { formatRecordingApiError, parseRecordingApiError } from "./utils/formatRecordingApiError";
 import { progressToastShowsBusy } from "./utils/progressToast";
-import { buildPendingDemoAnalysisSpecs, demoAnalysisRoster } from "./utils/demoAnalysisCache";
 import { playerIdentityKey } from "./utils/playerIdentity.js";
-import {
-  DEMO_ANALYSIS_REQUEST_TIMEOUT_MS,
-  demoBatchFailureMessage,
-  normalizeDemoBatchFailures,
-} from "./utils/demoBatchFailures";
-import { resetDemoAnalysisDefaultView } from "./utils/demoAnalysisSession";
-import {
-  recordingAbortToastKind,
-  recordingQueueHadUnexpectedCs2Exit,
-  recordingQueueWasAborted,
-  unexpectedCs2ExitRecoveryMessageKey,
-} from "./utils/recordingAbort";
+import { useDemoAnalysisWorkflows } from "./features/demo-analysis/useDemoAnalysisWorkflows";
+import { useDemoLibraryController } from "./features/demo-library/useDemoLibraryController";
+import { useClipQueueActions } from "./features/recording-queue/useClipQueueActions";
+import { useRecordingSessionController } from "./features/recording-queue/useRecordingSessionController";
 import { shouldCheckAppUpdates } from "./utils/shouldCheckAppUpdates";
 import { createDesktopUpdateCheck } from "./utils/desktopUpdater";
-import { getVersion as getDesktopAppVersion } from "@tauri-apps/api/app";
+import { desktopBridge } from "./desktop/desktopBridge.js";
 import { Loader2 } from "lucide-react";
-import API, { BACKEND_CONNECT_LABEL, getDemosStreamUrl } from "./api/api";
+import API, { BACKEND_CONNECT_LABEL } from "./api/api";
 
 import CustomTitleBar from "./components/CustomTitleBar";
 import SidebarNav from "./components/SidebarNav";
 
 const GuidePage = lazy(() => import("./pages/GuidePage"));
-const DemoLibraryPage = lazy(() => import("./pages/DemoLibraryPage"));
-const DemoAnalysisPreviewPage = lazy(() => import("./pages/DemoAnalysisPreviewPage"));
+const DemoLibraryPage = lazy(() => import("./features/demo-library/DemoLibraryPage"));
+const DemoAnalysisPage = lazy(() => import("./features/demo-analysis/DemoAnalysisPage"));
 const RecordingQueuePage = lazy(() => import("./pages/RecordingQueuePage"));
 const MontageWorkbenchPage = lazy(() => import("./pages/MontageWorkbenchPage"));
-const LiteCutEditorPage = lazy(() => import("./pages/liteCut/LiteCutEditorPage"));
-const LiteCutExportPage = lazy(() => import("./pages/liteCut/LiteCutExportPage"));
+const LiteCutEditorPage = lazy(() => import("./features/lite-cut/pages/LiteCutEditorPage"));
+const LiteCutExportPage = lazy(() => import("./features/lite-cut/pages/LiteCutExportPage"));
 const RecordingParamsPage = lazy(() => import("./pages/RecordingParamsPage"));
 const SettingsPage = lazy(() => import("./pages/SettingsPage"));
 const PlayerGameConfigPage = lazy(() => import("./pages/PlayerGameConfigPage"));
@@ -122,11 +100,7 @@ export default function App() {
    */
   const [parsedMatches, setParsedMatches] = useState(null);
   const [currentMatchIndex, setCurrentMatchIndex] = useState(0);
-  const currentMatchIndexRef = useRef(0);
   const autoParseLoadedDemosRef = useRef(null);
-  useEffect(() => {
-    currentMatchIndexRef.current = currentMatchIndex;
-  }, [currentMatchIndex]);
 
   /** 每场 Demo 独立的多选玩家列表（索引 -> string[]） */
   const [selectedPlayers, setSelectedPlayers] = useState({});
@@ -135,17 +109,10 @@ export default function App() {
 
   /** 当前 Demo 正在查看的玩家 Tab（索引 -> playerName） */
   const [activePlayerTabs, setActivePlayerTabs] = useState({});
-  const [aiReviewingPlayers, setAiReviewingPlayers] = useState({});
-  const aiReviewInFlightRef = useRef(new Set());
 
   /** 与 clip.client_clip_uid 对应（非后端 clip_id） */
   const [selectedClientClipUids, setSelectedClientClipUids] = useState(new Set());
 
-  const [parsing, setParsing] = useState(false);
-  /** 按场次索引的后台解析（与上传时的全局 parsing 区分，便于切换场次） */
-  const [parsingByIndex, setParsingByIndex] = useState({});
-  /** 解析分析页内嵌：当前场次解析读条 / 完成或上传成功提示（不占顶部栏） */
-  const [analysisInlineProgress, setAnalysisInlineProgress] = useState(null);
   const [progressText, setProgressTextInner] = useState("");
   /** 底部 ProgressBar 可选行为：自动消失、跳转队列按钮 */
   const [progressToastMeta, setProgressToastMeta] = useState(null);
@@ -159,25 +126,6 @@ export default function App() {
     }
   }, []);
 
-  useEffect(() => {
-    setAnalysisInlineProgress(null);
-  }, [currentMatchIndex]);
-  const [batchRecording, setBatchRecording] = useState(false);
-  const [recordingAbortRequested, setRecordingAbortRequested] = useState(false);
-  const recordingAbortRequestedRef = useRef(false);
-  const [recordingResults, setRecordingResults] = useState(null);
-  const [recordingResultModalOpen, setRecordingResultModalOpen] = useState(false);
-  const [recordingBlockedMessage, setRecordingBlockedMessage] = useState("");
-  const [recordingBlockedCode, setRecordingBlockedCode] = useState(null);
-  const [recordingRecoveryPrompt, setRecordingRecoveryPrompt] = useState({
-    configRecoveryNeeded: null,
-    povRecoveryNeeded: false,
-  });
-  const [recordWarmupOpen, setRecordWarmupOpen] = useState(false);
-  const [warmupIntent, setWarmupIntent] = useState(null);
-  /** @type {null | { restore_required?: boolean; message?: string; cs2_running?: boolean; backup_dir?: string }} */
-  const [configBackupStatus, setConfigBackupStatus] = useState(null);
-  const [configBackupLoading, setConfigBackupLoading] = useState(false);
   /** 来自 data/cs2-insight.config.json（或 CS2_INSIGHT_CONFIG），打开录制预热对话框时作为初始选项 */
   const [savedRecordWarmupDefaults, setSavedRecordWarmupDefaults] = useState(null);
   const savedRecordWarmupDefaultsRef = useRef(null);
@@ -204,47 +152,97 @@ export default function App() {
   const [demoWatchPaths, setDemoWatchPaths] = useState([]);
   const [demoWatchScanDepth, setDemoWatchScanDepth] = useState(2);
   const [expectedParsePlayersText, setExpectedParsePlayersText] = useState("");
-  const [demoLibraryItems, setDemoLibraryItems] = useState([]);
-  const [libraryLoading, setLibraryLoading] = useState(false);
-  /** 仅「扫描本地 demo 库」进行中；不在顶部 ProgressBar 展示，由按钮内 spinner 表示 */
-  const [libraryScanning, setLibraryScanning] = useState(false);
-  const [libraryLoadingOverlay, setLibraryLoadingOverlay] = useState(false);
-  const [libraryLoadingText, setLibraryLoadingText] = useState("");
-  const [libraryPage, setLibraryPage] = useState(1);
-  const libraryPageRef = useRef(1);
-  const [libraryHasNextPage, setLibraryHasNextPage] = useState(false);
-  const [libraryTotal, setLibraryTotal] = useState(null);
-  const [selectedLibraryDemoIds, setSelectedLibraryDemoIds] = useState(new Set());
-  const [libraryDemoIdsByIndex, setLibraryDemoIdsByIndex] = useState({});
-  const [libraryRename, setLibraryRename] = useState(null);
-  /** @type {{ id: number, label: string } | null} */
-  const [libraryDeletePrompt, setLibraryDeletePrompt] = useState(null);
-  const [librarySearchInput, setLibrarySearchInput] = useState("");
-  const [librarySearchQ, setLibrarySearchQ] = useState("");
-  const [libraryAdvFilters, setLibraryAdvFilters] = useState({
-    mapName: "",
-    status: "all",
-    playerQuery: "",
-    steamQuery: "",
-    minKills: "",
-    maxDeaths: "",
-    minAssists: "",
-    minKd: "",
-    roundsMin: "",
-    roundsMax: "",
-    durationMin: "",
-    durationMax: "",
-    dateFrom: "",
-    dateTo: "",
+  const {
+    demoLibraryItems,
+    libraryLoading,
+    libraryScanning,
+    libraryLoadingOverlay,
+    libraryLoadingText,
+    libraryPage,
+    setLibraryPage,
+    libraryHasNextPage,
+    libraryTotal,
+    selectedLibraryDemoIds,
+    setSelectedLibraryDemoIds,
+    libraryDemoIdsByIndex,
+    setLibraryDemoIdsByIndex,
+    libraryRename,
+    setLibraryRename,
+    libraryDeletePrompt,
+    setLibraryDeletePrompt,
+    librarySearchInput,
+    setLibrarySearchInput,
+    librarySearchQ,
+    setLibrarySearchQ,
+    libraryAdvFilters,
+    setLibraryAdvFilters,
+    libraryJumpDraft,
+    setLibraryJumpDraft,
+    libraryPageSize,
+    setLibraryPageSize,
+    libraryTotalPages,
+    batchLoadError,
+    setBatchLoadError,
+    hasLibraryAdvancedFilters,
+    refreshDemoLibrary,
+    handleLibrarySearchSubmit,
+    handleLibraryPageJump,
+    handleScanDemos,
+    handleDeleteDemo,
+    handleDeleteDemoFile,
+    handleLibraryBatchDelete,
+    handleSaveLibraryRename,
+    handleLoadDemoFromLibrary,
+    handleLoadSelectedLibraryDemos,
+    selectLibraryPage,
+    selectAllLibraryDemos,
+    clearLibrarySelection,
+  } = useDemoLibraryController({
+    t,
+    navigate,
+    setProgressText,
+    startupInitDone,
+    analysis: {
+      autoParseLoadedDemosRef,
+      setUploadedDemos,
+      setParsedMatches,
+      setCurrentMatchIndex,
+      setSelectedPlayers,
+      setActivePlayerTabs,
+      setFreezeToDeathRoundsByMatch,
+      setSelectedClientClipUids,
+    },
   });
-  const [libraryJumpDraft, setLibraryJumpDraft] = useState("");
-  /** Demo 库列表每页条数（与 GET /demos limit 一致） */
-  const [libraryPageSize, setLibraryPageSize] = useState(12);
-  const libraryPageSizeEffectSkipRef = useRef(false);
-  const [batchLoadError, setBatchLoadError] = useState({
-    open: false,
-    failed: [],
-    mode: "load",
+  const {
+    parsing,
+    parsingByIndex,
+    analysisInlineProgress,
+    aiReviewingPlayers,
+    handleUpload,
+    handleParse,
+    ensurePlayerAiReview,
+    resetAnalysisWorkflow,
+  } = useDemoAnalysisWorkflows({
+    t,
+    navigate,
+    setProgressText,
+    setBatchLoadError,
+    aiMode,
+    uploadedDemos,
+    setUploadedDemos,
+    parsedMatches,
+    setParsedMatches,
+    currentMatchIndex,
+    setCurrentMatchIndex,
+    selectedPlayers,
+    setSelectedPlayers,
+    freezeToDeathRoundsByMatch,
+    setFreezeToDeathRoundsByMatch,
+    setActivePlayerTabs,
+    setSelectedClientClipUids,
+    libraryDemoIdsByIndex,
+    setLibraryDemoIdsByIndex,
+    autoParseLoadedDemosRef,
   });
   const [llmKeySavedOnServer, setLlmKeySavedOnServer] = useState(false);
   const llmConfigRef = useRef(llmConfig);
@@ -256,6 +254,39 @@ export default function App() {
   const removeByClientClipUid  = useRecordingQueue((s) => s.removeByClientClipUid);
   const clearQueue             = useRecordingQueue((s) => s.clearQueue);
   const globalPacing    = useRecordingQueue((s) => s.globalPacing);
+
+  const {
+    batchRecording,
+    recordingAbortRequested,
+    recordingResults,
+    recordingResultModalOpen,
+    recordingBlockedMessage,
+    recordingBlockedCode,
+    recordingRecoveryPrompt,
+    recordWarmupOpen,
+    configBackupStatus,
+    configBackupLoading,
+    refreshConfigBackupStatus,
+    openBatchWarmup,
+    handleWarmupConfirm,
+    handleRestorePlayerConfig,
+    handleOpenConfigBackupDir,
+    handleAbortBatchRecording,
+    dismissWarmup,
+    closeRecordingResults,
+    clearRecordingResultsAndQueue,
+    clearRecordingBlock,
+  } = useRecordingSessionController({
+    t,
+    setProgressText,
+    setQueueDrawerOpen,
+    queue,
+    clearQueue,
+    obsConfig,
+    uploadedDemos,
+    parsedMatches,
+    demoLibraryItems,
+  });
 
   const currentUpload = uploadedDemos?.[currentMatchIndex] ?? null;
   const currentParsed = parsedMatches?.[currentMatchIndex] ?? null;
@@ -314,21 +345,46 @@ export default function App() {
   );
 
   const currentDemoFilename = currentParsed?.demo_filename ?? currentUpload?.filename ?? "";
-  const queuedClientClipUidsForCurrentDemo = useMemo(() => {
-    if (!currentDemoFilename) return new Set();
-    const uids = new Set();
-    for (const q of queue) {
-      if (q.demoFilename !== currentDemoFilename) continue;
-      uids.add(queueItemClientUid(q));
-      if (q.sourceClientClipUid) uids.add(q.sourceClientClipUid);
-    }
-    return uids;
-  }, [queue, currentDemoFilename]);
-
-  const queuedClientClipUidsGlobal = useMemo(
-    () => new Set(queue.map((q) => queueItemClientUid(q))),
-    [queue]
-  );
+  const {
+    queuedClientClipUidsForCurrentDemo,
+    regularSelectableTotal,
+    selectedRegularCount,
+    canAddCurrentPlayerHighlights,
+    canAddCurrentPlayerFails,
+    handleToggleClip,
+    handleSelectAll,
+    handleDeselectAll,
+    handleAddSelectedToQueue,
+    handleAddCurrentPlayerHighlights,
+    handleAddCurrentPlayerFails,
+    handleAddTimelineEventToQueue,
+    handleAddTimelineRoundToQueue,
+    handleAddTimelineEventsBatchToQueue,
+    handleAddWeaponKillsToQueue,
+    handleDequeueClip,
+    handleRemoveTimelineEventFromQueue,
+    handleRemoveTimelineRoundFromQueue,
+  } = useClipQueueActions({
+    t,
+    locale,
+    setProgressText,
+    queue,
+    addToQueue,
+    removeByClientClipUid,
+    uploadedDemos,
+    parsedMatches,
+    currentMatchIndex,
+    currentParsed,
+    currentActivePlayer,
+    matchMeta,
+    activePlayerTabs,
+    selectedPlayers,
+    clips,
+    freezeToDeathDraft,
+    selectedClientClipUids,
+    setSelectedClientClipUids,
+    currentDemoFilename,
+  });
 
   // ── 确保 client_clip_uid 已注入 ──
   useEffect(() => {
@@ -355,20 +411,6 @@ export default function App() {
       return next;
     });
   }, [parsedMatches, currentMatchIndex, uploadedDemos]);
-
-  useEffect(() => {
-    setSelectedClientClipUids((prev) => {
-      const next = new Set(prev);
-      let changed = false;
-      for (const uid of queuedClientClipUidsForCurrentDemo) {
-        if (next.has(uid)) {
-          next.delete(uid);
-          changed = true;
-        }
-      }
-      return changed ? next : prev;
-    });
-  }, [queuedClientClipUidsForCurrentDemo]);
 
   // 切换玩家 Tab 时清空选中状态
   useEffect(() => {
@@ -405,512 +447,6 @@ export default function App() {
       };
     });
   }, [uploadedDemos, parsedMatches]);
-
-  const libraryTotalPages =
-    libraryTotal == null ? null : Math.max(1, Math.ceil(libraryTotal / libraryPageSize));
-
-  const libraryAdvFiltersKey = useMemo(() => JSON.stringify(libraryAdvFilters), [libraryAdvFilters]);
-
-  useEffect(() => {
-    setLibraryPage(1);
-  }, [libraryAdvFiltersKey]);
-
-  const appendDemoLibraryFilterParams = useCallback((params) => {
-    const f = libraryAdvFilters;
-    if (f.mapName.trim()) params.map_name = f.mapName.trim();
-    if (f.status && f.status !== "all") params.status = f.status;
-    const pq = f.playerQuery.trim();
-    if (pq) params.player_query = pq;
-    const sq = f.steamQuery.trim();
-    if (sq) params.steam_query = sq;
-    const num = (v) => {
-      const s = String(v ?? "").trim();
-      if (!s) return null;
-      const n = parseInt(s, 10);
-      return Number.isFinite(n) && n >= 0 ? n : null;
-    };
-    const fl = (v) => {
-      const s = String(v ?? "").trim();
-      if (!s) return null;
-      const n = parseFloat(s);
-      return Number.isFinite(n) && n >= 0 ? n : null;
-    };
-    const mk = num(f.minKills);
-    if (mk != null) params.min_kills = mk;
-    const xdth = num(f.maxDeaths);
-    if (xdth != null) params.max_deaths = xdth;
-    const ma = num(f.minAssists);
-    if (ma != null) params.min_assists = ma;
-    const mkd = fl(f.minKd);
-    if (mkd != null) params.min_kd = mkd;
-    const roundsMin = num(f.roundsMin);
-    if (roundsMin != null) params.rounds_min = roundsMin;
-    const roundsMax = num(f.roundsMax);
-    if (roundsMax != null) params.rounds_max = roundsMax;
-    const durationMin = fl(f.durationMin);
-    if (durationMin != null) params.duration_min = durationMin;
-    const durationMax = fl(f.durationMax);
-    if (durationMax != null) params.duration_max = durationMax;
-    const dateBoundary = (value, endOfDay) => {
-      const date = String(value ?? "").trim();
-      if (!date) return null;
-      const local = new Date(`${date}T${endOfDay ? "23:59:59.999" : "00:00:00.000"}`);
-      return Number.isNaN(local.getTime()) ? null : local.toISOString();
-    };
-    const dateFrom = dateBoundary(f.dateFrom, false);
-    if (dateFrom) params.date_from = dateFrom;
-    const dateTo = dateBoundary(f.dateTo, true);
-    if (dateTo) params.date_to = dateTo;
-  }, [libraryAdvFilters]);
-
-  const refreshDemoLibrary = useCallback(async (page = libraryPage, opts = {}) => {
-    const { manageLoading = true, searchQ: searchQOverride } = opts;
-    if (manageLoading) setLibraryLoading(true);
-    try {
-      const limit = libraryPageSize;
-      const offset = (page - 1) * limit;
-      const params = { limit, offset };
-      const qEff = searchQOverride !== undefined ? searchQOverride : librarySearchQ;
-      if (qEff) params.q = qEff;
-      appendDemoLibraryFilterParams(params);
-      const { data } = await API.get("/demos/compact", { params });
-      setDemoLibraryItems(data.items || []);
-      const total = typeof data.total === "number" ? data.total : null;
-      if (total != null) {
-        setLibraryTotal(total);
-        setLibraryHasNextPage(offset + (data.items || []).length < total);
-      } else {
-        setLibraryTotal(null);
-        setLibraryHasNextPage((data.items || []).length === limit);
-      }
-    } catch {
-      // ignore
-    } finally {
-      if (manageLoading) setLibraryLoading(false);
-    }
-  }, [libraryPage, librarySearchQ, libraryPageSize, appendDemoLibraryFilterParams]);
-
-  const refreshDemoLibraryRef = useRef(refreshDemoLibrary);
-  refreshDemoLibraryRef.current = refreshDemoLibrary;
-
-  const handleLibrarySearchSubmit = useCallback(() => {
-    const next = librarySearchInput.trim();
-    setLibrarySearchQ(next);
-    setLibraryPage(1);
-    void refreshDemoLibrary(1, { manageLoading: true, searchQ: next });
-  }, [librarySearchInput, refreshDemoLibrary]);
-
-  useEffect(() => {
-    if (!libraryPageSizeEffectSkipRef.current) {
-      libraryPageSizeEffectSkipRef.current = true;
-      return;
-    }
-    setLibraryPage(1);
-    void refreshDemoLibraryRef.current(1, { manageLoading: false });
-  }, [libraryPageSize]);
-
-  useEffect(() => {
-    libraryPageRef.current = libraryPage;
-  }, [libraryPage]);
-
-  useEffect(() => {
-    let cancelled = false;
-    let es = null;
-    let debounce = null;
-    const scheduleRefresh = () => {
-      if (cancelled) return;
-      window.clearTimeout(debounce);
-      debounce = window.setTimeout(() => {
-        void refreshDemoLibrary(libraryPageRef.current, { manageLoading: false });
-      }, 600);
-    };
-    const connect = () => {
-      if (cancelled) return;
-      try {
-        es = new EventSource(getDemosStreamUrl());
-      } catch {
-        return;
-      }
-      es.addEventListener("library", scheduleRefresh);
-      es.onerror = () => {
-        if (cancelled) return;
-        try {
-          es?.close();
-        } catch {
-          /* ignore */
-        }
-        es = null;
-        if (!cancelled) window.setTimeout(connect, 4000);
-      };
-    };
-    connect();
-    return () => {
-      cancelled = true;
-      window.clearTimeout(debounce);
-      try {
-        es?.close();
-      } catch {
-        /* ignore */
-      }
-    };
-  }, [refreshDemoLibrary]);
-
-  const handleLibraryPageJump = useCallback(() => {
-    const raw = libraryJumpDraft.trim();
-    if (!raw) return;
-    const n = parseInt(raw, 10);
-    if (!Number.isFinite(n) || n < 1) {
-      setProgressText(t("app.libraryPageJumpInvalid"));
-      return;
-    }
-    const maxPage = libraryTotalPages;
-    let target = n;
-    if (maxPage != null && n > maxPage) {
-      target = maxPage;
-      setProgressText(t("app.libraryPageJumpClamped", { maxPage }));
-    }
-    setLibraryJumpDraft("");
-    setLibraryPage(target);
-    void refreshDemoLibrary(target, { manageLoading: false });
-  }, [libraryJumpDraft, libraryTotalPages, refreshDemoLibrary, t]);
-
-  const handleScanDemos = useCallback(async () => {
-    setLibraryScanning(true);
-    try {
-      const { data } = await API.post("/demos/scan");
-      await refreshDemoLibrary(libraryPage, { manageLoading: false });
-      const n = data?.discovered_count;
-      setProgressText(
-        typeof n === "number" && n > 0
-          ? t("app.scanDone", { n })
-          : t("app.scanDoneEmpty", { scanned: data?.scanned || 0 })
-      );
-      return data;
-    } catch (e) {
-      setProgressText(t("app.scanFail", { msg: e.response?.data?.detail || e.message }), { isError: true });
-      return null;
-    } finally {
-      setLibraryScanning(false);
-    }
-  }, [refreshDemoLibrary, libraryPage, t]);
-
-  const handleDeleteDemo = useCallback(
-    async (id) => {
-      setLibraryDeletePrompt(null);
-      setLibraryLoadingOverlay(true);
-      setLibraryLoadingText(t("app.deletingDemo"));
-      try {
-        await API.delete(`/demos/${id}`);
-        await refreshDemoLibrary(libraryPage, { manageLoading: false });
-      } catch (e) {
-        setProgressText(t("app.deleteFail", { msg: e.response?.data?.detail || e.message }), { isError: true });
-      } finally {
-        setLibraryLoadingOverlay(false);
-        setLibraryLoadingText(t("app.libraryLoadingDemo"));
-      }
-    },
-    [refreshDemoLibrary, libraryPage, t]
-  );
-
-  const handleDeleteDemoFile = useCallback(
-    async (id) => {
-      try {
-        await API.post(`/demos/${id}/delete-file`);
-        setLibraryDeletePrompt(null);
-        setProgressText(t("app.deleteFileDone"));
-        await refreshDemoLibrary(libraryPage, { manageLoading: false });
-      } catch (e) {
-        setProgressText(t("app.deleteFileFail", { msg: e.response?.data?.detail || e.message }), { isError: true });
-      }
-    },
-    [refreshDemoLibrary, libraryPage, t]
-  );
-
-  const handleLibraryBatchDelete = useCallback(
-    async (ids) => {
-      const list = [...ids];
-      if (!list.length) return;
-      setLibraryLoadingOverlay(true);
-      setLibraryLoadingText(t("app.batchDeleteProgress", { done: 0, total: list.length }));
-      let done = 0;
-      try {
-        for (const id of list) {
-          try {
-            await API.delete(`/demos/${id}`);
-            done += 1;
-            setLibraryLoadingText(t("app.batchDeleteProgress", { done, total: list.length }));
-          } catch (e) {
-            setProgressText(t("app.batchDeleteFail", { msg: e.response?.data?.detail || e.message }), { isError: true });
-            await refreshDemoLibrary(libraryPage, { manageLoading: false });
-            return;
-          }
-        }
-        setSelectedLibraryDemoIds(new Set());
-        setProgressText(t("app.batchDeleteDone", { n: list.length }));
-        await refreshDemoLibrary(libraryPage, { manageLoading: false });
-      } finally {
-        setLibraryLoadingOverlay(false);
-        setLibraryLoadingText(t("app.libraryLoadingDemo"));
-      }
-    },
-    [refreshDemoLibrary, libraryPage, t]
-  );
-
-  const handleSaveLibraryRename = useCallback(async () => {
-    if (!libraryRename) return;
-    try {
-      await API.patch(`/demos/${libraryRename.id}`, { display_name: libraryRename.draft });
-      setLibraryRename(null);
-      await refreshDemoLibrary(libraryPage, { manageLoading: false });
-    } catch (e) {
-      setProgressText(t("app.renameFail", { msg: e.response?.data?.detail || e.message }), { isError: true });
-    }
-  }, [libraryRename, refreshDemoLibrary, libraryPage, t]);
-
-  const handleLoadDemoFromLibrary = useCallback(async (items, opts = {}) => {
-    const { resolvedByDemoId, skipLoadingOverlay = false } = opts;
-    if (!skipLoadingOverlay) {
-      setLibraryLoadingOverlay(true);
-      setLibraryLoadingText(t("app.libraryLoadingDemo"));
-    }
-    try {
-      const list = Array.isArray(items) ? items : [items];
-      const loaded = await Promise.all(
-        list.map(async (item) => {
-          const playersResult =
-            item.players != null
-              ? { players: item.players, match_meta: item.match_meta }
-              : (await API.get(`/demos/${item.id}/players`)).data;
-          const data = playersResult;
-          const cachedResult = item?.result || null;
-          const cachedMeta = cachedResult?.match_meta || null;
-          const ordered =
-            Array.isArray(cachedResult?.analyzed_target_players) && cachedResult.analyzed_target_players.length
-              ? cachedResult.analyzed_target_players.filter((n) => typeof n === "string" && n.trim())
-              : null;
-          const autoPlayer =
-            (ordered && ordered[0]) ||
-            cachedResult?.auto_target_player ||
-            cachedMeta?.target_player ||
-            playerIdentityKey(data.players?.[0]) ||
-            "";
-          const displayLabel =
-            (item.display_name && String(item.display_name).trim()) || item.filename;
-          return {
-            id: item.id,
-            filename: displayLabel,
-            path: item.path,
-            players: data.players || [],
-            // 优先使用实时 summary，确保地图名等基础信息总是可见
-            match_meta: data.match_meta || item?.result?.match_meta || null,
-            cached_result: cachedResult,
-            cached_auto_player: autoPlayer,
-          };
-        })
-      );
-      // A fresh selection from the Demo library is a new analysis entry. Keep
-      // in-page navigation restorable, but always enter this flow on Highlights.
-      resetDemoAnalysisDefaultView(loaded);
-      setUploadedDemos(loaded);
-      setParsedMatches(
-        loaded.map((d) => {
-          const r = d.cached_result;
-          if (!r) return null;
-          const pObj = r.players;
-          if (pObj && typeof pObj === "object" && !Array.isArray(pObj)) {
-            const names = Object.keys(pObj).filter((n) => String(n).trim());
-            if (!names.length) return null;
-            const players = {};
-            for (const name of names) {
-              const pd = pObj[name];
-              if (!pd || typeof pd !== "object") continue;
-              players[name] = {
-                clips: ensureClientClipUidsOnClips(pd.clips || []),
-                match_meta: pd.match_meta || r.match_meta || d.match_meta || null,
-                timeline: pd.timeline ?? null,
-                round_timeline: pd.round_timeline ?? null,
-              };
-            }
-            if (!Object.keys(players).length) return null;
-            return {
-              players,
-              analysis_workspace: r.analysis_workspace ?? null,
-              demo_path: d.path,
-              demo_filename: d.filename,
-            };
-          }
-          const ap = d.cached_auto_player;
-          if (!ap || !Array.isArray(r.clips)) return null;
-          return {
-            players: {
-              [ap]: {
-                clips: ensureClientClipUidsOnClips(r.clips || []),
-                match_meta: r.match_meta || d.match_meta || null,
-                timeline: r.timeline ?? null,
-                round_timeline: r.round_timeline ?? null,
-              },
-            },
-            analysis_workspace: r.analysis_workspace ?? null,
-            demo_path: d.path,
-            demo_filename: d.filename,
-          };
-        }),
-      );
-      const idMap = {};
-      const selectedMap = {};
-      loaded.forEach((x, i) => {
-        idMap[i] = x.id;
-        if (resolvedByDemoId && Object.prototype.hasOwnProperty.call(resolvedByDemoId, x.id)) {
-          const r = resolvedByDemoId[x.id] ?? [];
-          selectedMap[i] = r;
-        } else if (x.cached_result) {
-          const r = x.cached_result;
-          let names = [];
-          if (Array.isArray(r.analyzed_target_players) && r.analyzed_target_players.length) {
-            names = r.analyzed_target_players.filter((n) => typeof n === "string" && n.trim());
-          } else if (r.players && typeof r.players === "object" && !Array.isArray(r.players)) {
-            names = Object.keys(r.players).filter((n) => String(n).trim());
-          }
-          if (names.length) {
-            selectedMap[i] = names;
-          } else if (x.cached_auto_player) {
-            selectedMap[i] = [x.cached_auto_player];
-          }
-        }
-        if (
-          !(resolvedByDemoId && Object.prototype.hasOwnProperty.call(resolvedByDemoId, x.id))
-          && !Object.prototype.hasOwnProperty.call(selectedMap, i)
-        ) {
-          const rosterNames = (x.players || [])
-            .map(playerIdentityKey)
-            .filter((name) => typeof name === "string" && name.trim());
-          selectedMap[i] = rosterNames;
-        }
-      });
-      setLibraryDemoIdsByIndex(idMap);
-      setCurrentMatchIndex(0);
-      setSelectedPlayers(selectedMap);
-      setActivePlayerTabs({});
-      const ftdByIndex = {};
-      loaded.forEach((x, i) => {
-        const r = x.cached_result;
-        if (!r) return;
-        let clips = null;
-        const pObj = r.players;
-        if (pObj && typeof pObj === "object" && !Array.isArray(pObj)) {
-          const keys = Object.keys(pObj).filter((k) => String(k).trim());
-          const ref =
-            typeof r.auto_target_player === "string" &&
-            r.auto_target_player.trim() &&
-            pObj[r.auto_target_player]
-              ? r.auto_target_player
-              : keys[0];
-          clips = ref && pObj[ref] && Array.isArray(pObj[ref].clips) ? pObj[ref].clips : null;
-        } else {
-          clips = r.clips;
-        }
-        if (!Array.isArray(clips)) return;
-        const ftd = clips.find(
-          (c) => c.category === "compilation" && c.compilation_kind === "freeze_to_death"
-        );
-        if (ftd) {
-          const tr =
-            x.cached_result?.match_meta?.total_rounds ??
-            x.match_meta?.total_rounds ??
-            24;
-          const maxR = Math.max(1, Math.min(64, Number(tr) || 24));
-          ftdByIndex[i] = freezeToDeathDraftFromClipFilter(ftd.freeze_to_death_round_filter, maxR);
-        }
-      });
-      setFreezeToDeathRoundsByMatch(ftdByIndex);
-      setSelectedClientClipUids(new Set());
-      setProgressText("");
-      navigate("/analysis");
-      return loaded;
-    } catch (e) {
-      setProgressText(t("app.libraryLoadFail", {
-        msg: demoBatchFailureMessage(e, t),
-      }), { isError: true });
-      return null;
-    } finally {
-      if (!skipLoadingOverlay) {
-        setLibraryLoadingOverlay(false);
-        setLibraryLoadingText(t("app.libraryLoadingDemo"));
-      }
-    }
-  }, [navigate, t]);
-
-  const handleLoadSelectedLibraryDemos = useCallback(async () => {
-    const ids = Array.from(selectedLibraryDemoIds);
-    if (!ids.length) return;
-    setLibraryLoadingOverlay(true);
-    setLibraryLoadingText(t("app.libraryLoadingDemo"));
-    try {
-      ids.sort((a, b) => Number(a) - Number(b));
-      const { data } = await API.post("/demos/batch-summary", { ids });
-      const failedItems = Array.isArray(data.failed) ? data.failed : [];
-      if (!data.items?.length) {
-        setBatchLoadError({
-          open: true,
-          failed: normalizeDemoBatchFailures(failedItems, t, "library"),
-          mode: "analysis",
-        });
-        return;
-      }
-      const loaded = await handleLoadDemoFromLibrary(data.items, { skipLoadingOverlay: true });
-      if (loaded?.length) {
-        const idMap = Object.fromEntries(loaded.map((demo, index) => [index, demo.id]));
-        setLibraryLoadingOverlay(false);
-        await autoParseLoadedDemosRef.current?.(loaded, idMap, failedItems);
-      }
-    } catch (e) {
-      const failed = e.response?.data?.detail?.failed;
-      if (Array.isArray(failed) && failed.length) {
-        setBatchLoadError({
-          open: true,
-          failed: normalizeDemoBatchFailures(failed, t, "library"),
-          mode: "load",
-        });
-      } else {
-        setProgressText(t("app.libraryLoadSelectedFail", {
-          msg: demoBatchFailureMessage(e, t),
-        }), { isError: true });
-      }
-    } finally {
-      setLibraryLoadingOverlay(false);
-    }
-  }, [selectedLibraryDemoIds, handleLoadDemoFromLibrary, setProgressText, t]);
-
-  const selectLibraryPage = useCallback(() => {
-    setSelectedLibraryDemoIds((prev) => {
-      const next = new Set(prev);
-      for (const it of demoLibraryItems) {
-        next.add(it.id);
-      }
-      return next;
-    });
-  }, [demoLibraryItems]);
-
-  const selectAllLibraryDemos = useCallback(async () => {
-    try {
-      const cap = 1000;
-      const want = libraryTotal != null ? Math.min(libraryTotal, cap) : cap;
-      const params = { limit: want, offset: 0 };
-      if (librarySearchQ) params.q = librarySearchQ;
-      appendDemoLibraryFilterParams(params);
-      const { data } = await API.get("/demos/ids", { params });
-      setSelectedLibraryDemoIds(new Set(data.ids || []));
-      if (libraryTotal != null && libraryTotal > cap) {
-        setProgressText(t("app.librarySelectAllCapped", { cap }));
-      }
-    } catch (e) {
-      setProgressText(t("app.librarySelectAllFail", { msg: e.response?.data?.detail || e.message }), { isError: true });
-    }
-  }, [libraryTotal, librarySearchQ, appendDemoLibraryFilterParams, t]);
-
-  const clearLibrarySelection = useCallback(() => {
-    setSelectedLibraryDemoIds(new Set());
-  }, []);
 
   const applyCommonParamsFromConfigData = useCallback((data) => {
     if (!data || typeof data !== "object") return;
@@ -1034,910 +570,9 @@ export default function App() {
     };
   }, [applyCommonParamsFromConfigData]);
 
-  const refreshConfigBackupStatus = useCallback(async () => {
-    setConfigBackupLoading(true);
-    try {
-      const { data } = await API.get("/config-backup/status");
-      const nextStatus = data && typeof data === "object" ? data : null;
-      setConfigBackupStatus(nextStatus);
-      return nextStatus;
-    } catch (e) {
-      const msg = formatRecordingApiError(e, t, t("app.backendConnectFail"));
-      const failedStatus = {
-        fetch_failed: true,
-        message: msg,
-      };
-      setConfigBackupStatus(failedStatus);
-      return failedStatus;
-    } finally {
-      setConfigBackupLoading(false);
-    }
-  }, [t]);
-
-  useEffect(() => {
-    void refreshConfigBackupStatus();
-  }, [refreshConfigBackupStatus]);
-
   // 全局节奏改由「常用参数」页顶「保存」写入配置；录制队列抽屉内微调仍只改内存，刷新后以配置文件为准。
 
-  useEffect(() => {
-    // 后端就绪后再拉库，避免启动阶段请求失败导致进 Demo 库需手动回车刷新
-    if (!startupInitDone) return;
-    void refreshDemoLibrary(libraryPage, { manageLoading: false });
-  }, [refreshDemoLibrary, libraryPage, startupInitDone]);
-
-  useEffect(() => {
-    if (!startupInitDone) return;
-    const timer = window.setTimeout(() => {
-      const next = librarySearchInput.trim();
-      if (next === librarySearchQ) return;
-      setLibrarySearchQ(next);
-      setLibraryPage(1);
-      void refreshDemoLibraryRef.current(1, { manageLoading: false, searchQ: next });
-    }, 400);
-    return () => window.clearTimeout(timer);
-  }, [librarySearchInput, librarySearchQ, startupInitDone]);
-
-  const hasLibraryAdvancedFilters = useMemo(() => {
-    const f = libraryAdvFilters;
-    const numOrStr = (v) => String(v ?? "").trim();
-    return !!(
-      f.mapName.trim() ||
-      (f.status && f.status !== "all") ||
-      f.playerQuery.trim() ||
-      f.steamQuery.trim() ||
-      numOrStr(f.minKills) ||
-      numOrStr(f.maxDeaths) ||
-      numOrStr(f.minAssists) ||
-      numOrStr(f.minKd) ||
-      numOrStr(f.roundsMin) ||
-      numOrStr(f.roundsMax) ||
-      numOrStr(f.durationMin) ||
-      numOrStr(f.durationMax) ||
-      numOrStr(f.dateFrom) ||
-      numOrStr(f.dateTo)
-    );
-  }, [libraryAdvFilters]);
-
-  const handleUpload = useCallback(async (files) => {
-    const list = Array.isArray(files) ? files : [files];
-    if (!list.length) return;
-
-    setProgressText(t("app.uploadingDemo"), { loading: true });
-    setParsing(true);
-
-    try {
-      const sourcePaths = list.map((f) => {
-        if (typeof f === "string") return f;
-        try {
-          return window.electron?.getPathForFile?.(f) || "";
-        } catch {
-          return "";
-        }
-      });
-      let data;
-      if (sourcePaths.every(Boolean)) {
-        ({ data } = await API.post("/demo/open-local", { paths: sourcePaths }));
-      } else {
-        const formData = new FormData();
-        list.forEach((f) => formData.append("files", f));
-        formData.append("source_paths_json", JSON.stringify(sourcePaths));
-        ({ data } = await API.post("/demo/upload-multiple", formData));
-      }
-      const uploads = data.uploads ?? [];
-      const preparationFailures = Array.isArray(data.failed) ? data.failed : [];
-      if (!uploads.length) {
-        const failed = normalizeDemoBatchFailures(preparationFailures, t, "upload");
-        setAnalysisInlineProgress({ active: false, text: t("app.autoParseNoUsable") });
-        setProgressText(t("app.autoParseNoUsable"), { isError: true });
-        if (failed.length) {
-          setBatchLoadError({ open: true, failed, mode: "analysis" });
-        }
-        return;
-      }
-      setUploadedDemos(uploads);
-      setParsedMatches(uploads.map(() => null));
-      setLibraryDemoIdsByIndex({});
-      setCurrentMatchIndex(0);
-      const selectedMap = {};
-      uploads.forEach((upload, index) => {
-        const names = (upload.players || [])
-          .map(playerIdentityKey)
-          .filter((name) => typeof name === "string" && name.trim());
-        selectedMap[index] = names;
-      });
-      setSelectedPlayers(selectedMap);
-      setActivePlayerTabs({});
-      setFreezeToDeathRoundsByMatch({});
-      setSelectedClientClipUids(new Set());
-      const uploadDoneMsg =
-        uploads.length > 1
-          ? t("app.uploadDoneMulti", { n: uploads.length })
-          : t("app.uploadDoneSingle");
-      setProgressText("");
-      setAnalysisInlineProgress({ active: false, text: uploadDoneMsg });
-      navigate("/analysis");
-      await autoParseLoadedDemosRef.current?.(uploads, {}, preparationFailures);
-    } catch (e) {
-      setProgressText(t("app.uploadFail", { msg: demoBatchFailureMessage(e, t) }), { isError: true });
-    } finally {
-      setParsing(false);
-    }
-  }, [navigate, t]);
-
-  const roundMontageCanEnqueue = useMemo(() => {
-    const p = freezeToDeathDraft?.picked ?? [];
-    return p.length > 0;
-  }, [freezeToDeathDraft]);
-
-  const regularSelectableTotal = useMemo(
-    () =>
-      clips.filter((c) => {
-        if (c.category === "meme_death" || !c.client_clip_uid) return false;
-        if (queuedClientClipUidsForCurrentDemo.has(c.client_clip_uid)) return false;
-        if (isFreezeToDeathCompilation(c) && !roundMontageCanEnqueue) return false;
-        return true;
-      }).length,
-    [clips, queuedClientClipUidsForCurrentDemo, roundMontageCanEnqueue]
-  );
-  const selectedRegularCount = useMemo(
-    () =>
-      clips.filter((c) => {
-        if (c.category === "meme_death" || !c.client_clip_uid) return false;
-        if (!selectedClientClipUids.has(c.client_clip_uid)) return false;
-        if (queuedClientClipUidsForCurrentDemo.has(c.client_clip_uid)) return false;
-        if (isFreezeToDeathCompilation(c) && !roundMontageCanEnqueue) return false;
-        return true;
-      }).length,
-    [
-      clips,
-      selectedClientClipUids,
-      queuedClientClipUidsForCurrentDemo,
-      roundMontageCanEnqueue,
-    ]
-  );
-
-  const currentPlayerClipScope = useMemo(
-    () =>
-      getPlayerClipScope(
-        currentParsed?.players,
-        currentActivePlayer,
-        queuedClientClipUidsForCurrentDemo,
-      ),
-    [currentParsed, currentActivePlayer, queuedClientClipUidsForCurrentDemo],
-  );
-  const canAddCurrentPlayerHighlights = currentPlayerClipScope.queueableHighlights.length > 0;
-
-  /**
-   * @param {number} idx
-   * @param {string[] | null} [playerListOverride] 非 null 时忽略 selectedPlayers
-   * @param {{ demos?: any[]; libraryDemoIdsByIndex?: Record<number, number>; suppressProgressText?: boolean } | null} [ctx] 库批量载入后立即解析时使用，避免尚未提交的 React 状态
-   */
-  const handleParseForIndex = useCallback(
-    async (idx, playerListOverride = null, ctx = null) => {
-      const demos = ctx?.demos ?? uploadedDemos;
-      const libIds = ctx?.libraryDemoIdsByIndex ?? libraryDemoIdsByIndex;
-      const quietProgress = Boolean(ctx?.suppressProgressText);
-      if (!demos?.length) return;
-      const names =
-        playerListOverride != null ? playerListOverride : (selectedPlayers[idx] ?? []);
-      if (!names.length) return;
-      const fn = demos[idx]?.filename;
-      if (!fn) return;
-
-      setParsingByIndex((prev) => ({ ...prev, [idx]: true }));
-      const viewingHere = currentMatchIndexRef.current === idx;
-      if (viewingHere && !quietProgress) {
-        setProgressText("");
-        setAnalysisInlineProgress({ active: true, text: t("app.parsingDemo", { fn }) });
-        setSelectedClientClipUids(new Set());
-      }
-
-      try {
-        const activeLibraryDemoId = libIds[idx] ?? demos[idx]?.id;
-        const body = { target_players: names, locale: useLocaleStore.getState().locale };
-        const ftdCfg = freezeToDeathRoundsByMatch[idx] ?? { picked: [] };
-        const ftdPicked = [...(ftdCfg.picked || [])].sort((a, b) => a - b);
-        // null = 后端按全部合规非赛后回合生成回合合集；[] 会显式跳过生成（见 demo_parser）
-        body.freeze_to_death_rounds = ftdPicked.length ? ftdPicked : null;
-        const { data } = activeLibraryDemoId
-          ? await API.post(`/demos/${activeLibraryDemoId}/analyze`, body, {
-              timeout: DEMO_ANALYSIS_REQUEST_TIMEOUT_MS,
-            })
-          : await API.post(
-              `/demo/parse-multi?filename=${encodeURIComponent(fn)}&path=${encodeURIComponent(demos[idx]?.path || fn)}`,
-              body,
-              { timeout: DEMO_ANALYSIS_REQUEST_TIMEOUT_MS },
-            );
-
-        const processedPlayers = {};
-        for (const [playerName, playerData] of Object.entries(data.players ?? {})) {
-          processedPlayers[playerName] = {
-            ...playerData,
-            clips: ensureClientClipUidsOnClips(playerData.clips ?? []),
-          };
-        }
-
-        setParsedMatches((prev) => {
-          const base =
-            prev && prev.length === demos.length ? [...prev] : demos.map(() => null);
-          const cur = base[idx];
-          const mergedPlayers = { ...(cur?.players || {}), ...processedPlayers };
-          base[idx] = {
-            players: mergedPlayers,
-            analysis_workspace: data.analysis_workspace ?? cur?.analysis_workspace ?? null,
-            demo_path: demos[idx].path,
-            demo_filename: fn,
-          };
-          return base;
-        });
-
-        const firstMeta = Object.values(processedPlayers)[0]?.match_meta;
-        const ftdMaxRounds = Math.max(
-          1,
-          Math.min(
-            64,
-            Number(firstMeta?.total_rounds) ||
-              Number(demos[idx]?.match_meta?.total_rounds) ||
-              24
-          )
-        );
-
-        const refPlayer = names[0];
-        const refClips = processedPlayers[refPlayer]?.clips ?? [];
-        const ftdClip = refClips.find(
-          (c) => c.category === "compilation" && c.compilation_kind === "freeze_to_death"
-        );
-        setFreezeToDeathRoundsByMatch((prev) => ({
-          ...prev,
-          [idx]: ftdClip
-            ? freezeToDeathDraftFromClipFilter(
-                ftdClip.freeze_to_death_round_filter,
-                ftdMaxRounds
-              )
-            : { picked: [] },
-        }));
-
-        const rounds = firstMeta?.total_rounds ?? "?";
-        const totalRegular = Object.values(processedPlayers).reduce(
-          (s, pd) => s + (pd.clips ?? []).filter((c) => c.category !== "meme_death").length,
-          0
-        );
-        const totalMeme = Object.values(processedPlayers).reduce(
-          (s, pd) => s + (pd.clips ?? []).filter((c) => c.category === "meme_death").length,
-          0
-        );
-        const playerLabel =
-          names.length === 1 ? names[0] : t("app.parseDonePlayerCount", { n: names.length });
-        const doneMsg =
-          totalMeme > 0
-            ? t("app.parseDoneWithMeme", { fn, rounds, playerLabel, totalRegular, totalMeme })
-            : t("app.parseDone", { fn, rounds, playerLabel, totalRegular });
-        if (!quietProgress) {
-          if (viewingHere) setAnalysisInlineProgress({ active: false, text: doneMsg });
-          else setProgressText((prev) => (prev ? `${prev}\n${doneMsg}` : doneMsg));
-        }
-        return { ok: true };
-      } catch (e) {
-        const reason = demoBatchFailureMessage(e, t);
-        const err = t("app.parseFail", { fn, msg: reason });
-        if (!quietProgress) {
-          if (viewingHere) setAnalysisInlineProgress({ active: false, text: err });
-          else setProgressText((prev) => (prev ? `${prev}\n${err}` : err));
-        }
-        return { ok: false, reason };
-      } finally {
-        setParsingByIndex((prev) => {
-          const next = { ...prev };
-          delete next[idx];
-          return next;
-        });
-      }
-    },
-    [uploadedDemos, selectedPlayers, libraryDemoIdsByIndex, freezeToDeathRoundsByMatch, t]
-  );
-
-  const handleParse = useCallback(async () => {
-    await handleParseForIndex(currentMatchIndex, null, null);
-  }, [currentMatchIndex, handleParseForIndex]);
-
-  const LIBRARY_PARSE_CONCURRENCY = 2;
-
-  const autoParseLoadedDemos = useCallback(async (
-    loaded,
-    demoIdsByIndex = {},
-    initialFailures = [],
-  ) => {
-    const demos = Array.isArray(loaded) ? loaded : [];
-    const specs = buildPendingDemoAnalysisSpecs(demos);
-    const inferredFailures = demos
-      .map((demo, index) => ({ demo, index }))
-      .filter(({ demo }) => demoAnalysisRoster(demo).length === 0)
-      .map(({ demo, index }) => ({
-        id: demo?.id ?? `roster-${index}`,
-        filename: demo?.filename || `Demo ${index + 1}`,
-        code: demo?.inspection_error?.code || "DEMO_INSPECTION_FAILED",
-      }));
-    const failures = normalizeDemoBatchFailures(
-      [...(Array.isArray(initialFailures) ? initialFailures : []), ...inferredFailures],
-      t,
-      "analysis",
-    );
-    if (!specs.length) {
-      setAnalysisInlineProgress({
-        active: false,
-        text: failures.length ? t("app.autoParseNoUsable") : "",
-      });
-      if (failures.length) {
-        setBatchLoadError({ open: true, failed: failures, mode: "analysis" });
-      }
-      return;
-    }
-
-    let done = failures.length;
-    let succeeded = 0;
-    const activeNames = new Set();
-    const total = specs.length + failures.length;
-    const totalPlayers = specs.reduce((sum, spec) => sum + spec.players.length, 0);
-    setAnalysisInlineProgress({
-      active: true,
-      text: t("app.autoParseStart", { demos: total, players: totalPlayers }),
-    });
-    const ctx = {
-      demos,
-      libraryDemoIdsByIndex: demoIdsByIndex,
-      suppressProgressText: true,
-    };
-
-    const showRunningProgress = () => {
-      setAnalysisInlineProgress({
-        active: done < total,
-        text: t("app.autoParseProgressDetail", {
-          done,
-          total,
-          failed: failures.length,
-          active: Array.from(activeNames).join("、") || t("app.autoParsePreparing"),
-        }),
-      });
-    };
-
-    await runWithConcurrency(LIBRARY_PARSE_CONCURRENCY, specs, async (spec) => {
-      const filename = demos[spec.index]?.filename || `Demo ${spec.index + 1}`;
-      activeNames.add(filename);
-      showRunningProgress();
-      const result = await handleParseForIndex(spec.index, spec.players, ctx);
-      activeNames.delete(filename);
-      done += 1;
-      if (result?.ok) {
-        succeeded += 1;
-      } else {
-        failures.push({
-          id: demos[spec.index]?.id ?? `analysis-${spec.index}`,
-          filename,
-          reason: result?.reason || t("api.err.demoAnalysisFailed"),
-        });
-      }
-      setAnalysisInlineProgress({
-        active: done < total,
-        text: done < total
-          ? t("app.autoParseProgressDetail", {
-              done,
-              total,
-              failed: failures.length,
-              active: Array.from(activeNames).join("、") || t("app.autoParsePreparing"),
-            })
-          : failures.length === 0
-            ? t("app.autoParseDone", { demos: specs.length, players: totalPlayers })
-            : t("app.autoParsePartial", {
-                succeeded,
-                failed: failures.length,
-              }),
-      });
-    });
-    if (failures.length) {
-      setBatchLoadError({ open: true, failed: failures, mode: "analysis" });
-    }
-  }, [handleParseForIndex, t]);
-  autoParseLoadedDemosRef.current = autoParseLoadedDemos;
-
-  const ensurePlayerAiReview = useCallback(async (playerName, matchIndex = currentMatchIndex) => {
-    const name = String(playerName || "").trim();
-    if (!aiMode || !name) return false;
-    const playerData = parsedMatches?.[matchIndex]?.players?.[name];
-    const clipsToReview = Array.isArray(playerData?.clips) ? playerData.clips : [];
-    if (!clipsToReview.length) return false;
-    const alreadyReviewed = Boolean(playerData?.ai_reviewed) || clipsToReview.some((clip) => (
-      clip?.ai_score != null
-      || String(clip?.ai_commentary || clip?.ai_comment || "").trim()
-    ));
-    if (alreadyReviewed) return true;
-
-    const requestKey = `${matchIndex}:${name}`;
-    if (aiReviewInFlightRef.current.has(requestKey)) return false;
-    aiReviewInFlightRef.current.add(requestKey);
-    setAiReviewingPlayers((previous) => ({ ...previous, [requestKey]: true }));
-    try {
-      const { data } = await API.post("/demo/review-clips", {
-        clips: clipsToReview,
-        match_meta: playerData?.match_meta || {},
-        locale: useLocaleStore.getState().locale,
-      });
-      const reviewedClips = ensureClientClipUidsOnClips(data?.clips || clipsToReview);
-      setParsedMatches((previous) => {
-        if (!Array.isArray(previous) || !previous[matchIndex]?.players?.[name]) return previous;
-        const next = [...previous];
-        const current = next[matchIndex];
-        next[matchIndex] = {
-          ...current,
-          players: {
-            ...current.players,
-            [name]: {
-              ...current.players[name],
-              clips: reviewedClips,
-              ai_reviewed: true,
-            },
-          },
-        };
-        return next;
-      });
-      return true;
-    } catch (error) {
-      setProgressText(t("app.aiReviewFailed", { message: error.response?.data?.detail || error.message || t("common.requestFail") }), { isError: true });
-      return false;
-    } finally {
-      aiReviewInFlightRef.current.delete(requestKey);
-      setAiReviewingPlayers((previous) => {
-        const next = { ...previous };
-        delete next[requestKey];
-        return next;
-      });
-    }
-  }, [aiMode, currentMatchIndex, parsedMatches, setProgressText, t]);
-
-  const handleToggleClip = useCallback(
-    (clientClipUid) => {
-      if (!clientClipUid || queuedClientClipUidsForCurrentDemo.has(clientClipUid)) return;
-      const clip = clips.find((c) => c.client_clip_uid === clientClipUid);
-      if (clip && isFreezeToDeathCompilation(clip)) {
-        const p = freezeToDeathDraft?.picked ?? [];
-        if (!p.length) return;
-      }
-      setSelectedClientClipUids((prev) => {
-        const next = new Set(prev);
-        if (next.has(clientClipUid)) next.delete(clientClipUid);
-        else next.add(clientClipUid);
-        return next;
-      });
-    },
-    [queuedClientClipUidsForCurrentDemo, clips, freezeToDeathDraft]
-  );
-
-  const handleSelectAll = useCallback(() => {
-    setSelectedClientClipUids((prev) => {
-      const next = new Set(prev);
-      clips
-        .filter((c) => {
-          if (c.category === "meme_death" || !c.client_clip_uid) return false;
-          if (queuedClientClipUidsForCurrentDemo.has(c.client_clip_uid)) return false;
-          if (isFreezeToDeathCompilation(c) && !roundMontageCanEnqueue) return false;
-          return true;
-        })
-        .forEach((c) => next.add(c.client_clip_uid));
-      return next;
-    });
-  }, [clips, queuedClientClipUidsForCurrentDemo, roundMontageCanEnqueue]);
-
-  const handleDeselectAll = useCallback(() => {
-    setSelectedClientClipUids(new Set());
-  }, []);
-
-  const queueItemMetaForPlayer = useCallback(
-    (index, playerName) => {
-      const um = uploadedDemos?.[index];
-      const pm = parsedMatches?.[index];
-      const playerData = pm?.players?.[playerName];
-      const meta = playerData?.match_meta ?? um?.match_meta ?? null;
-      const demoFilename = pm?.demo_filename ?? um?.filename ?? "";
-      const demoPath = pm?.demo_path ?? um?.path ?? "";
-      const steam =
-        meta?.target_steam_id != null && meta?.target_steam_id !== ""
-          ? String(meta.target_steam_id)
-          : null;
-      return {
-        demoFilename,
-        demoPath,
-        targetPlayer: meta?.target_player || playerName || null,
-        targetPlayerUserId: meta?.target_player_user_id ?? null,
-        targetSteamId: steam,
-      };
-    },
-    [uploadedDemos, parsedMatches]
-  );
-
-  // 兼容旧版接口（单玩家，用当前活跃玩家）
-  const queueItemMetaForIndex = useCallback(
-    (index) => {
-      const activePlayer =
-        activePlayerTabs[index] ??
-        Object.keys(parsedMatches?.[index]?.players ?? {})[0] ??
-        selectedPlayers[index]?.[0] ??
-        "";
-      return queueItemMetaForPlayer(index, activePlayer);
-    },
-    [activePlayerTabs, parsedMatches, selectedPlayers, queueItemMetaForPlayer]
-  );
-
-  const handleAddSelectedToQueue = useCallback(() => {
-    if (!currentParsed || selectedClientClipUids.size === 0) return;
-    const meta = queueItemMetaForIndex(currentMatchIndex);
-    const ftdPicksSorted = [...(freezeToDeathDraft?.picked ?? [])].sort((a, b) => a - b);
-    const candidates = clips.filter(
-      (c) => c.client_clip_uid && selectedClientClipUids.has(c.client_clip_uid)
-    );
-    const toAdd = [];
-    for (const c of candidates) {
-      const row = {
-        demoPath: meta.demoPath,
-        demoFilename: meta.demoFilename,
-        targetPlayer: meta.targetPlayer,
-        targetPlayerUserId: meta.targetPlayerUserId,
-        targetSteamId: meta.targetSteamId,
-        clipId: c.clip_id,
-        clientClipUid: c.client_clip_uid,
-        clipData: { ...c },
-      };
-      if (isFreezeToDeathCompilation(c)) {
-        const sliced = sliceFreezeToDeathClipForEnqueue(c, ftdPicksSorted);
-        if (!sliced.ok) {
-          setProgressText(t(sliced.errorKey));
-          return;
-        }
-        toAdd.push({
-          ...row,
-          clientClipUid: sliced.clip.client_clip_uid,
-          sourceClientClipUid: c.client_clip_uid,
-          clipData: sliced.clip,
-          freezeToDeathQueueRounds: [...ftdPicksSorted],
-        });
-      } else {
-        toAdd.push(row);
-      }
-    }
-    if (!toAdd.length) {
-      return;
-    }
-    addToQueue(toAdd);
-    setSelectedClientClipUids(new Set());
-    const skipped = candidates.length - toAdd.length;
-    const skipHint =
-      skipped > 0 ? t("app.enqueueSkippedHint", { n: skipped }) : "";
-    setProgressText(t("app.enqueueAdded", { n: toAdd.length }) + skipHint, {
-      autoDismissMs: 2000,
-      queueLink: true,
-    });
-  }, [
-    currentParsed,
-    clips,
-    selectedClientClipUids,
-    addToQueue,
-    currentMatchIndex,
-    queueItemMetaForIndex,
-    freezeToDeathDraft,
-    t,
-  ]);
-
-  const handleAddCurrentPlayerHighlights = useCallback(() => {
-    if (!currentParsed || !currentActivePlayer) return;
-    const toAdd = [];
-    const meta = queueItemMetaForPlayer(currentMatchIndex, currentActivePlayer);
-    for (const c of currentPlayerClipScope.queueableHighlights) {
-      toAdd.push({
-        demoPath: meta.demoPath,
-        demoFilename: meta.demoFilename,
-        targetPlayer: meta.targetPlayer,
-        targetPlayerUserId: meta.targetPlayerUserId,
-        targetSteamId: meta.targetSteamId,
-        clipId: c.clip_id,
-        clientClipUid: c.client_clip_uid,
-        clipData: c,
-      });
-    }
-    if (!toAdd.length) {
-      setProgressText(t("app.enqueuePlayerHighlightsEmpty", { player: currentActivePlayer }));
-      return;
-    }
-    addToQueue(toAdd);
-    setProgressText(t("app.enqueuePlayerHighlightsDone", {
-      player: currentActivePlayer,
-      n: toAdd.length,
-    }), {
-      autoDismissMs: 2000,
-      queueLink: true,
-    });
-  }, [
-    currentParsed,
-    currentActivePlayer,
-    currentPlayerClipScope,
-    currentMatchIndex,
-    addToQueue,
-    queueItemMetaForPlayer,
-    t,
-  ]);
-
-  const handleAddTimelineEventToQueue = useCallback(
-    (event, roundRow) => {
-      const hasWindow =
-        (event?.suggested_clip && typeof event.suggested_clip === "object") ||
-        (event?.start_tick != null && event?.end_tick != null);
-      if (!currentParsed || !hasWindow) return;
-      const meta = queueItemMetaForIndex(currentMatchIndex);
-      const mapName = matchMeta?.map_name || "";
-      const clipData = buildTimelineEventClipData({
-        event,
-        mapName,
-        targetPlayer: meta.targetPlayer,
-        round: roundRow?.round ?? event?.round,
-        t,
-        locale,
-      });
-      const uid = clipData.client_clip_uid;
-      const qk = queueItemClientUid({
-        clientClipUid: uid,
-        clipData,
-        demoFilename: meta.demoFilename,
-        clipId: clipData.clip_id,
-      });
-      if (queuedClientClipUidsGlobal.has(qk)) {
-        setProgressText(t("app.enqueueTimelineAlreadyIn"), { autoDismissMs: 2000 });
-        return;
-      }
-      addToQueue({
-        demoPath: meta.demoPath,
-        demoFilename: meta.demoFilename,
-        targetPlayer: meta.targetPlayer,
-        targetPlayerUserId: meta.targetPlayerUserId,
-        targetSteamId: meta.targetSteamId,
-        clipId: clipData.clip_id,
-        clientClipUid: uid,
-        clipData,
-      });
-      setProgressText(t("app.enqueueTimelineDone"), { autoDismissMs: 2000, queueLink: true });
-    },
-    [
-      currentParsed,
-      currentMatchIndex,
-      queueItemMetaForIndex,
-      matchMeta,
-      addToQueue,
-      queuedClientClipUidsGlobal,
-      setProgressText,
-      t,
-      locale,
-    ],
-  );
-
-  const handleAddTimelineRoundToQueue = useCallback(
-    (roundRow) => {
-      if (!currentParsed || !roundRow) return;
-      const meta = queueItemMetaForIndex(currentMatchIndex);
-      const mapName = matchMeta?.map_name || "";
-      const clipData = buildTimelineRoundClipData({ roundRow, mapName, targetPlayer: meta.targetPlayer, demoFilename: meta.demoFilename, t });
-      const uid = clipData.client_clip_uid;
-      const qk = queueItemClientUid({
-        clientClipUid: uid,
-        clipData,
-        demoFilename: meta.demoFilename,
-        clipId: clipData.clip_id,
-      });
-      if (queuedClientClipUidsGlobal.has(qk)) {
-        setProgressText(t("app.enqueueRoundAlreadyIn"), { autoDismissMs: 2000 });
-        return;
-      }
-      addToQueue({
-        demoPath: meta.demoPath,
-        demoFilename: meta.demoFilename,
-        targetPlayer: meta.targetPlayer,
-        targetPlayerUserId: meta.targetPlayerUserId,
-        targetSteamId: meta.targetSteamId,
-        clipId: clipData.clip_id,
-        clientClipUid: uid,
-        clipData,
-      });
-      setProgressText(t("app.enqueueRoundDone"), { autoDismissMs: 2000, queueLink: true });
-    },
-    [
-      currentParsed,
-      currentMatchIndex,
-      queueItemMetaForIndex,
-      matchMeta,
-      addToQueue,
-      queuedClientClipUidsGlobal,
-      setProgressText,
-      t,
-    ],
-  );
-
-  const handleAddTimelineEventsBatchToQueue = useCallback(
-    (eventList) => {
-      if (!currentParsed || !Array.isArray(eventList) || !eventList.length) return;
-      const meta = queueItemMetaForIndex(currentMatchIndex);
-      const mapName = matchMeta?.map_name || "";
-      const toAdd = [];
-      for (const ev of eventList) {
-        if (!ev?.suggested_clip && (ev?.start_tick == null || ev?.end_tick == null)) continue;
-        const clipData = buildTimelineEventClipData({
-          event: ev,
-          mapName,
-          targetPlayer: meta.targetPlayer,
-          round: ev.round,
-          t,
-          locale,
-        });
-        const uid = clipData.client_clip_uid;
-        const qk = queueItemClientUid({
-          clientClipUid: uid,
-          clipData,
-          demoFilename: meta.demoFilename,
-          clipId: clipData.clip_id,
-        });
-        if (queuedClientClipUidsGlobal.has(qk)) continue;
-        toAdd.push({
-          demoPath: meta.demoPath,
-          demoFilename: meta.demoFilename,
-          targetPlayer: meta.targetPlayer,
-          targetPlayerUserId: meta.targetPlayerUserId,
-          targetSteamId: meta.targetSteamId,
-          clipId: clipData.clip_id,
-          clientClipUid: uid,
-          clipData,
-        });
-      }
-      if (!toAdd.length) {
-        setProgressText(t("app.enqueueTimelineBatchAllIn"), { autoDismissMs: 2000 });
-        return;
-      }
-      addToQueue(toAdd);
-      setProgressText(t("app.enqueueTimelineBatchDone", { n: toAdd.length }), { autoDismissMs: 2000, queueLink: true });
-    },
-    [
-      currentParsed,
-      currentMatchIndex,
-      queueItemMetaForIndex,
-      matchMeta,
-      addToQueue,
-      queuedClientClipUidsGlobal,
-      setProgressText,
-      t,
-      locale,
-    ],
-  );
-
-  const handleAddWeaponKillsToQueue = useCallback(
-    (clipData) => {
-      if (!currentParsed || !clipData?.client_clip_uid || !clipData?.kill_ticks?.length) return;
-      const meta = queueItemMetaForIndex(currentMatchIndex);
-      const uid = clipData.client_clip_uid;
-      const qk = queueItemClientUid({
-        clientClipUid: uid,
-        clipData,
-        demoFilename: meta.demoFilename,
-        clipId: clipData.clip_id,
-      });
-      if (queuedClientClipUidsGlobal.has(qk)) {
-        setProgressText(t("app.enqueueTimelineAlreadyIn"), { autoDismissMs: 2000 });
-        return;
-      }
-      addToQueue({
-        demoPath: meta.demoPath,
-        demoFilename: meta.demoFilename,
-        targetPlayer: meta.targetPlayer,
-        targetPlayerUserId: meta.targetPlayerUserId,
-        targetSteamId: meta.targetSteamId,
-        clipId: clipData.clip_id,
-        clientClipUid: uid,
-        clipData,
-      });
-      setProgressText(t("app.enqueueWeaponKillsDone"), { autoDismissMs: 2000, queueLink: true });
-    },
-    [
-      currentParsed,
-      currentMatchIndex,
-      queueItemMetaForIndex,
-      queuedClientClipUidsGlobal,
-      addToQueue,
-      setProgressText,
-      t,
-    ],
-  );
-
-  const handleDequeueClip = useCallback(
-    (clientClipUid) => {
-      removeByClientClipUid(clientClipUid);
-    },
-    [removeByClientClipUid],
-  );
-
-  const handleRemoveTimelineEventFromQueue = useCallback(
-    (event, roundRow) => {
-      if (!currentParsed) return;
-      const meta = queueItemMetaForIndex(currentMatchIndex);
-      const mapName = matchMeta?.map_name || "";
-      const clipData = buildTimelineEventClipData({
-        event,
-        mapName,
-        targetPlayer: meta.targetPlayer,
-        round: roundRow?.round ?? event?.round,
-        t,
-        locale,
-      });
-      removeByClientClipUid(clipData.client_clip_uid);
-    },
-    [currentParsed, currentMatchIndex, queueItemMetaForIndex, matchMeta, removeByClientClipUid, t, locale],
-  );
-
-  const handleRemoveTimelineRoundFromQueue = useCallback(
-    (roundRow) => {
-      if (!currentParsed || !roundRow) return;
-      const meta = queueItemMetaForIndex(currentMatchIndex);
-      const mapName = matchMeta?.map_name || "";
-      const clipData = buildTimelineRoundClipData({
-        roundRow,
-        mapName,
-        targetPlayer: meta.targetPlayer,
-        demoFilename: meta.demoFilename,
-        t,
-      });
-      removeByClientClipUid(clipData.client_clip_uid);
-    },
-    [currentParsed, currentMatchIndex, queueItemMetaForIndex, matchMeta, removeByClientClipUid],
-  );
-
-  const persistCs2RecordExtras = useCallback(async (payload) => {
-    try {
-      await API.put("config", payload);
-    } catch {
-      /* silent */
-    }
-  }, []);
-
   savedRecordWarmupDefaultsRef.current = savedRecordWarmupDefaults;
-
-  const persistWarmupDefaults = useCallback(async (obj) => {
-    const merged = { ...(savedRecordWarmupDefaultsRef.current ?? {}), ...obj };
-    setSavedRecordWarmupDefaults(merged);
-    try {
-      await API.put("config", { default_record_warmup: merged });
-    } catch {
-      /* silent */
-    }
-  }, []);
-
-  const persistObsTransition = useCallback(async (data) => {
-    const enabled = !!data.obs_transition_enabled;
-    const name = data.obs_transition_name ?? "Fade";
-    const ms = Number(data.obs_transition_duration_ms) || 100;
-    setObsTransitionEnabled(enabled);
-    setObsTransitionName(name);
-    setObsTransitionDurationMs(ms);
-    try {
-      await API.put("config", {
-        obs_transition_enabled: enabled,
-        obs_transition_name: name,
-        obs_transition_duration_ms: ms,
-      });
-    } catch {
-      /* silent */
-    }
-  }, []);
-
-  const persistExperimentalPov = useCallback(async (enabled) => {
-    try {
-      await API.put("config", { experimental: { pov_enabled: enabled } });
-      setExperimentalPovEnabled(!!enabled);
-    } catch {
-      /* silent */
-    }
-  }, []);
 
   /** 常用参数页：一次性写入配置文件（替代分项防抖保存） */
   const saveAllCommonParams = useCallback(async (payload) => {
@@ -1982,295 +617,6 @@ export default function App() {
       return { ok: false, error: msg };
     }
   }, [setProgressText, refreshCommonParamsFromServer, t]);
-
-  const openBatchWarmup = useCallback(async () => {
-    if (!queue.length) return;
-    // 每次点击开始录制时现场拉取最新状态，避免程序刚启动时 state 尚未加载而漏检
-    setProgressText(t("app.checkingPlayerConfig"), { loading: true });
-    try {
-      const { data: cfgStatus } = await API.get("/config-backup/status");
-      setConfigBackupStatus(cfgStatus && typeof cfgStatus === "object" ? cfgStatus : null);
-      if (cfgStatus?.restore_required) {
-        setProgressText("");
-        setRecordingBlockedMessage(t("app.recordBlockedConfigNotRestored"));
-        setRecordingBlockedCode("RECORDING_CONFIG_RESTORE_REQUIRED");
-        return;
-      }
-    } catch {
-      // 获取失败时退回本地缓存，不阻断流程
-      if (configBackupStatus?.restore_required) {
-        setProgressText("");
-        setRecordingBlockedMessage(t("app.recordBlockedConfigNotRestored"));
-        setRecordingBlockedCode("RECORDING_CONFIG_RESTORE_REQUIRED");
-        return;
-      }
-    }
-    // 调用后端配置检查：自动拉起 OBS + 15s 内重试 WebSocket 连接
-    setProgressText(t("app.checkingObsConnection"), { loading: true });
-    try {
-      const { data } = await API.post("/obs/config-check", obsConfig);
-      if (!data?.connected) {
-        setProgressText(t("app.obsConnectFail"), { isError: true });
-        return;
-      }
-    } catch (e) {
-      setProgressText(t("app.obsCheckFail", { msg: e.response?.data?.detail || e.message }), { isError: true });
-      return;
-    }
-    setQueueDrawerOpen(false);
-    setWarmupIntent("batch");
-    setRecordWarmupOpen(true);
-    setProgressText("");
-  }, [queue.length, configBackupStatus, setConfigBackupStatus, setProgressText, obsConfig, t]);
-
-  const handleWarmupConfirm = useCallback(
-    async (warmupPayload) => {
-      const intent = warmupIntent;
-      const { warmupForApi, session } = splitRecordWarmupConfirmPayload(warmupPayload);
-      // 录制前参数为一次性配置：Overlay 仅作用于本次录制（见 applySessionKbOverlayToRequests），
-      // 不写入配置文件。持久化仅由「录制参数配置」页的 saveAllCommonParams 负责。
-
-      setRecordWarmupOpen(false);
-      if (intent === "batch") {
-        setWarmupIntent(null);
-        if (!queue.length) return;
-        recordingAbortRequestedRef.current = false;
-        setRecordingAbortRequested(false);
-        setRecordingRecoveryPrompt({ configRecoveryNeeded: null, povRecoveryNeeded: false });
-        setBatchRecording(true);
-        setProgressText(t("app.preparingRecording"), { loading: true });
-
-        // 如果启用了任一事件轨道 Overlay，轮询预构建进度并更新提示文字。
-        const _overlayPrebuildOn = session.kb_overlay_enabled || session.kill_fx_enabled;
-        let _kbPollTimer = null;
-        if (_overlayPrebuildOn) {
-          _kbPollTimer = setInterval(async () => {
-            if (recordingAbortRequestedRef.current) return;
-            try {
-              const { data: kbst } = await API.get("recording/kb-prebuild-status");
-              if (recordingAbortRequestedRef.current) return;
-              if (kbst?.active) {
-                setProgressText(
-                  t("app.overlayPrebuildProgress", { done: kbst.done, total: kbst.total }),
-                  { loading: true }
-                );
-              } else if (kbst?.done > 0 && !kbst?.active) {
-                setProgressText(t("app.overlayPrebuildReady"), { loading: true });
-              }
-            } catch { /* ignore */ }
-          }, 1000);
-        }
-
-        try {
-          let requests = buildRecordingQueueRequestsFromQueue(
-            queue,
-            useRecordingQueue.getState().globalPacing,
-            uploadedDemos,
-            parsedMatches,
-            demoLibraryItems,
-          );
-          if (!requests.length) {
-            setProgressText(t("app.queueNoRecordableClips"));
-            return;
-          }
-          requests = applySessionObsTransitionToRequests(requests, session);
-          requests = applySessionKbOverlayToRequests(requests, session);
-          const povHud = session.experimental_pov_enabled
-            ? {
-                enabled: true,
-                radar_mode: Number(warmupForApi?.pov_radar_mode ?? 0),
-                teamcounter_numeric: Boolean(warmupForApi?.pov_teamcounter_numeric),
-                voice_disabled: Boolean(warmupForApi?.pov_voice_disabled),
-              }
-            : undefined;
-          const body = {
-            requests,
-            warmup: warmupForApi,
-            obs: obsConfig,
-            cs2_extra_launch_args: session.cs2_extra_launch_args,
-            record_inject_console_lines: session.record_inject_console_lines,
-            ...(povHud ? { pov_hud: povHud } : {}),
-          };
-          if (!recordingAbortRequestedRef.current) {
-            setProgressText(t("app.batchRecording"), { loading: true });
-          }
-          const { data } = await API.post("recording/queue", body);
-          const results = Array.isArray(data) ? data : [];
-
-          // Build request_id → queue item mapping for friendly names in the result modal
-          const reqIdToQueueItem = {};
-          requests.forEach((req) => {
-            const qid = req.source_ref?.queue_item_id;
-            if (qid) {
-              const found = queue.find((q) => q.id === qid);
-              if (found) reqIdToQueueItem[req.request_id] = found;
-            }
-          });
-
-          const annotated = results.map((r, i) => ({
-            ...r,
-            _queueItem: reqIdToQueueItem[r?.request_id] ?? null,
-            _index: i,
-          }));
-          const allSucceeded = results.length > 0 && results.every((r) => r && r.success);
-          if (allSucceeded) clearQueue();
-          setRecordingResults(annotated);
-          setRecordingResultModalOpen(true);
-          const hadUnexpectedCs2Exit = recordingQueueHadUnexpectedCs2Exit(results);
-          const wasAborted = recordingQueueWasAborted(
-            results,
-            recordingAbortRequestedRef.current,
-          );
-          if (hadUnexpectedCs2Exit) {
-            const unexpectedExitResult = results.find(
-              (item) => item?.error_code === "RECORDING_CS2_EXITED" ||
-                String(item?.error || "").toLowerCase() === "cs2_exited_unexpectedly",
-            );
-            const reportedRecovery = unexpectedExitResult?.recovery;
-            const backupStatus = await refreshConfigBackupStatus();
-            let povStatus = null;
-            if (session.experimental_pov_enabled) {
-              try {
-                const { data: nextPovStatus } = await API.get("experimental/pov/status");
-                povStatus = nextPovStatus && typeof nextPovStatus === "object"
-                  ? nextPovStatus
-                  : { fetch_failed: true };
-              } catch {
-                povStatus = { fetch_failed: true };
-              }
-            }
-            const configRecoveryNeeded = reportedRecovery?.player_config_restore_verified
-              ? reportedRecovery.player_config_restored !== true
-              : Boolean(backupStatus?.restore_required || backupStatus?.fetch_failed);
-            const povRecoveryNeeded = !session.experimental_pov_enabled
-              ? false
-              : reportedRecovery?.pov_restore_verified
-                ? reportedRecovery.pov_restored !== true
-                : Boolean(povStatus?.needs_restore || povStatus?.fetch_failed);
-            setRecordingRecoveryPrompt({ configRecoveryNeeded, povRecoveryNeeded });
-            setRecordingBlockedMessage(t(unexpectedCs2ExitRecoveryMessageKey({
-              configRecoveryNeeded,
-              povEnabled: session.experimental_pov_enabled,
-              povRecoveryNeeded,
-              povRecoveryMode: reportedRecovery?.pov_restore?.verification_mode,
-            })));
-            setRecordingBlockedCode("RECORDING_CS2_EXITED");
-            setProgressText(t("app.unexpectedCs2ExitToast"), { isError: true });
-          } else if (wasAborted) {
-            const backupStatus = await refreshConfigBackupStatus();
-            const toastKind = recordingAbortToastKind(backupStatus, results);
-            if (toastKind === "restore_pending") {
-              setProgressText(t("app.abortRestorePending"), { isError: true });
-            } else if (toastKind === "unverified") {
-              setProgressText(t("app.abortRestoreUnverified"), { isError: true });
-            } else if (toastKind === "not_needed") {
-              setProgressText(t("app.abortConfigNotModified"), { autoDismissMs: 5000 });
-            } else {
-              setProgressText(t("app.abortCompleted"), { autoDismissMs: 5000 });
-            }
-          } else {
-            setProgressText("", { autoDismissMs: 100 });
-          }
-        } catch (e) {
-          const { text: detail, code: blockedCode } = parseRecordingApiError(
-            e,
-            t,
-            t("common.requestFail"),
-          );
-          if (e.response?.status === 409 || e.response?.status === 422) {
-            setRecordingBlockedMessage(detail || t("app.recordStartFailed"));
-            setRecordingBlockedCode(blockedCode);
-          }
-          const toastKey = recordingAbortRequestedRef.current
-            ? "app.abortFail"
-            : "app.batchRecordFail";
-          setProgressText(t(toastKey, { msg: detail }), { isError: true });
-        } finally {
-          if (_kbPollTimer) clearInterval(_kbPollTimer);
-          recordingAbortRequestedRef.current = false;
-          setRecordingAbortRequested(false);
-          setBatchRecording(false);
-          void refreshConfigBackupStatus();
-        }
-        return;
-      }
-      setWarmupIntent(null);
-    },
-    [
-      warmupIntent,
-      queue,
-      clearQueue,
-      obsConfig,
-      refreshConfigBackupStatus,
-      uploadedDemos,
-      parsedMatches,
-      demoLibraryItems,
-      t,
-    ]
-  );
-
-  const handleRestorePlayerConfig = useCallback(async () => {
-    setProgressText(t("app.restoringPlayerConfig"), { loading: true });
-    try {
-      const { data } = await API.post("/config-backup/restore");
-      if (data?.ok) {
-        setProgressText(
-          messageFromApiCode(data?.code, t) || t("app.playerConfigRestored"),
-          { autoDismissMs: 3000 },
-        );
-      } else {
-        setProgressText(
-          messageFromApiCode(data?.code, t) || t("app.playerConfigRestorePartial"),
-          { autoDismissMs: 4000 },
-        );
-      }
-      await refreshConfigBackupStatus();
-    } catch (e) {
-      const st = e.response?.status;
-      const det = e.response?.data?.detail;
-      if (st === 409 && det?.code === "CS2_RUNNING") {
-        setRecordingBlockedMessage(t("app.restoreBlockedCs2Running"));
-        setRecordingBlockedCode("CS2_RUNNING");
-      } else {
-        setProgressText(t("app.restoreFail", { msg: formatRecordingApiError(e, t, t("common.requestFail")) }), { autoDismissMs: 5000, isError: true });
-      }
-      await refreshConfigBackupStatus();
-    }
-  }, [refreshConfigBackupStatus, t]);
-
-  const handleOpenConfigBackupDir = useCallback(async () => {
-    try {
-      const { data } = await API.post("/config-backup/open-dir");
-      if (data && data.ok === false && data.backup_dir) {
-        setProgressText(
-          `${messageFromApiCode(data?.code, t) || t("app.openDirManual")} ${data.backup_dir}`,
-        );
-      }
-    } catch (e) {
-      setProgressText(t("app.openBackupDirFail", { msg: formatRecordingApiError(e, t, t("common.requestFail")) }), { isError: true });
-    }
-  }, [t]);
-
-  const handleAbortBatchRecording = useCallback(async () => {
-    if (recordingAbortRequestedRef.current) return;
-    try {
-      const { data } = await API.post("recording/abort");
-      if (data?.status === "idle") {
-        setProgressText(t("app.abortNoActive"), { autoDismissMs: 3000 });
-        return;
-      }
-      recordingAbortRequestedRef.current = true;
-      setRecordingAbortRequested(true);
-      setProgressText(t("app.abortingRecording"), { loading: true });
-    } catch (e) {
-      setProgressText(
-        t("app.abortFail", {
-          msg: formatRecordingApiError(e, t, t("common.requestFail")),
-        }),
-        { isError: true },
-      );
-    }
-  }, [t]);
 
   const handleSaveConfig = useCallback(async (config) => {
     try {
@@ -2416,13 +762,11 @@ export default function App() {
     setCurrentMatchIndex(0);
     setSelectedPlayers({});
     setActivePlayerTabs({});
-    setAiReviewingPlayers({});
-    aiReviewInFlightRef.current.clear();
     setFreezeToDeathRoundsByMatch({});
     setSelectedClientClipUids(new Set());
     setProgressText("");
-    setAnalysisInlineProgress(null);
-  }, []);
+    resetAnalysisWorkflow();
+  }, [resetAnalysisWorkflow, setLibraryDemoIdsByIndex, setProgressText]);
 
   const handleDetectCs2 = useCallback(async () => {
     try {
@@ -2717,7 +1061,7 @@ export default function App() {
 
       let currentVersion = "";
       try {
-        currentVersion = String((await getDesktopAppVersion()) || "");
+        currentVersion = String((await desktopBridge?.getVersion()) || "");
       } catch {
         currentVersion = "";
       }
@@ -2989,7 +1333,9 @@ export default function App() {
     handleDeselectAll,
     handleAddSelectedToQueue,
     handleAddCurrentPlayerHighlights,
+    handleAddCurrentPlayerFails,
     canAddCurrentPlayerHighlights,
+    canAddCurrentPlayerFails,
     handleResetDemo,
     removeFromQueue,
     clearQueue,
@@ -3048,10 +1394,14 @@ export default function App() {
     location.pathname === "/analysis" &&
     (parsing || anyDemoParsing || analysisInlineProgress?.active === true);
 
-  const showGlobalNotice =
-    batchRecording ||
+  const showGlobalNotice = !batchRecording && (
     (Boolean(progressText?.trim()) && !parsingShownInline) ||
-    (anyDemoParsing && !parsingShownInline);
+    (anyDemoParsing && !parsingShownInline)
+  );
+  const globalNoticeText = progressText
+    || (batchRecording ? t("app.batchRecording") : "")
+    || (analysisInlineProgress?.active === true ? analysisInlineProgress.text : "")
+    || (anyDemoParsing ? t("analysis.parsing") : "");
   const isStandalonePreview = [
     "/obs-ai-preview",
     "/obs-ai-entry-preview",
@@ -3084,9 +1434,9 @@ export default function App() {
                     <h2 className="text-xl font-bold tracking-tight text-dynamic-white">{t("app.backendConnecting")}</h2>
                     <p className="text-sm text-dynamic-zinc-400">{t("app.backendStarting")}</p>
                   </div>
-                  <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-black/40 border border-white/5">
-                    <div className="w-1.5 h-1.5 rounded-full bg-cs2-orange animate-pulse" />
-                    <span className="text-[10px] font-mono text-zinc-500 uppercase tracking-widest">
+                  <div className="flex items-center gap-2 rounded-full border border-cs2-border bg-cs2-bg-input px-3 py-1.5">
+                    <div className="h-1.5 w-1.5 animate-pulse rounded-full bg-cs2-accent" />
+                    <span className="font-mono text-[10px] uppercase tracking-widest text-cs2-text-secondary">
                       Attempting to connect: {BACKEND_CONNECT_LABEL}
                     </span>
                   </div>
@@ -3113,7 +1463,7 @@ export default function App() {
               <Routes>
                 <Route path="/" element={<GuidePage />} />
                 <Route path="/library" element={<DemoLibraryPage />} />
-                <Route path="/analysis" element={<DemoAnalysisPreviewPage />} />
+                <Route path="/analysis" element={<DemoAnalysisPage />} />
                 <Route path="/demo-analysis-preview" element={<Navigate to="/analysis" replace />} />
                 <Route path="/queue" element={<RecordingQueuePage />} />
                 <Route path="/montage" element={<MontageWorkbenchPage />} />
@@ -3141,9 +1491,9 @@ export default function App() {
             className="pointer-events-none fixed inset-x-0 bottom-0 z-[100] flex justify-center px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-2 sm:px-6"
             aria-live="polite"
           >
-            <div className="pointer-events-auto w-full max-w-lg shadow-2xl shadow-black/50">
+            <div className="pointer-events-auto w-full max-w-lg rounded-xl shadow-2xl shadow-black/50">
               <ProgressBar
-                text={progressText || (batchRecording ? t("app.batchRecording") : "")}
+                text={globalNoticeText}
                 active={progressToastShowsBusy(progressText, {
                   parsing: anyDemoParsing,
                   loading: progressToastMeta?.loading === true,
@@ -3162,12 +1512,17 @@ export default function App() {
           </div>
         ) : null}
 
+        <RecordingProgressModal
+          open={batchRecording}
+          statusText={progressText}
+          queueLength={queue.length}
+          abortRequested={recordingAbortRequested}
+          onAbort={recordingAbortRequested ? undefined : handleAbortBatchRecording}
+        />
+
         <RecordWarmupModal
           open={recordWarmupOpen}
-          onClose={() => {
-            setRecordWarmupOpen(false);
-            setWarmupIntent(null);
-          }}
+          onClose={dismissWarmup}
           onConfirm={handleWarmupConfirm}
           defaultOverrides={savedRecordWarmupDefaults ?? undefined}
           experimentalPovEnabled={experimentalPovEnabled}
@@ -3192,11 +1547,8 @@ export default function App() {
 
         <RecordingResultModal
           open={recordingResultModalOpen}
-          onClose={() => setRecordingResultModalOpen(false)}
-          onClearQueue={() => {
-            clearQueue();
-            setRecordingResultModalOpen(false);
-          }}
+          onClose={closeRecordingResults}
+          onClearQueue={clearRecordingResultsAndQueue}
           results={recordingResults ?? []}
         />
 
@@ -3205,11 +1557,7 @@ export default function App() {
           errorCode={recordingBlockedCode}
           configRecoveryNeeded={recordingRecoveryPrompt.configRecoveryNeeded}
           povRecoveryNeeded={recordingRecoveryPrompt.povRecoveryNeeded}
-          onClose={() => {
-            setRecordingBlockedMessage("");
-            setRecordingBlockedCode(null);
-            setRecordingRecoveryPrompt({ configRecoveryNeeded: null, povRecoveryNeeded: false });
-          }}
+          onClose={clearRecordingBlock}
         />
 
         <UpdateCheckModal

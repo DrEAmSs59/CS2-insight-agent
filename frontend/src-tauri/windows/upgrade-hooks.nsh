@@ -142,6 +142,30 @@ Function CS2_RemoveBundledDemoparser
   Pop $0
 FunctionEnd
 
+; Older desktop runtimes bundled httptools, while the current lean runtime
+; uses h11. Tauri's in-place installer does not remove packages that disappear
+; from a newer bundle, so an incomplete stale httptools directory can make
+; Uvicorn auto-select a parser whose native extension no longer exists.
+Function CS2_RemoveStaleHttpTools
+  Push $0
+  Push $1
+
+  RMDir /r "$INSTDIR\python\Lib\site-packages\httptools"
+  FindFirst $0 $1 "$INSTDIR\python\Lib\site-packages\httptools-*.dist-info"
+  cs2_remove_httptools_metadata_loop:
+    StrCmp $1 "" cs2_remove_httptools_metadata_done
+    RMDir /r "$INSTDIR\python\Lib\site-packages\$1"
+    ClearErrors
+    FindNext $0 $1
+    IfErrors cs2_remove_httptools_metadata_done
+    Goto cs2_remove_httptools_metadata_loop
+  cs2_remove_httptools_metadata_done:
+    FindClose $0
+
+  Pop $1
+  Pop $0
+FunctionEnd
+
 ; In: $R0 = raw InstallLocation, $R8 = raw UninstallString.
 ; Out: $CS2ElectronDir, $CS2ElectronUninsExe.
 Function CS2_ResolveElectronDir
@@ -392,6 +416,7 @@ FunctionEnd
   ; Delete every previous patched-parser generation before NSIS copies the
   ; newly staged runtime. This also makes same-version repair installs clean.
   Call CS2_RemoveBundledDemoparser
+  Call CS2_RemoveStaleHttpTools
 
   ; GNU builds import WebView2Loader.dll dynamically. Keep it beside the main
   ; executable so Windows can resolve the dependency before Rust/Tauri starts.

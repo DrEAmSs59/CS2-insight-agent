@@ -1,0 +1,503 @@
+import { useCallback, useMemo, useRef, useState } from "react";
+import API from "../../api/api";
+import { LayoutGrid, List } from "lucide-react";
+import PageContainer from "../../components/PageContainer";
+import { useAppShell } from "../../context/AppShellContext";
+import DemoAdvancedFilters from "./components/DemoAdvancedFilters";
+import DemoLibraryQueryBar from "./components/DemoLibraryQueryBar";
+import DemoLibraryToolbar from "./components/DemoLibraryToolbar";
+import DemoWatchPathsModal from "./components/DemoWatchPathsModal";
+import DemoPagination from "./components/DemoPagination";
+import MatchCard, { MatchListRow } from "./components/MatchCard";
+import IngestModal from "./components/IngestModal";
+import Modal from "../../components/ui/Modal";
+import Button from "../../components/ui/Button";
+import {
+  applyClientSideDemoFilters,
+  filterByPathAndTags,
+  sortDemoRows,
+} from "../../utils/demoLibraryDisplay";
+import { useDemoPlaybackDialog } from "../../hooks/useDemoPlaybackDialog.jsx";
+import { useT } from "../../i18n/useT.js";
+import { desktopBridge } from "../../desktop/desktopBridge.js";
+
+const INITIAL_ADV_FILTERS = {
+  mapName: "",
+  status: "all",
+  playerQuery: "",
+  steamQuery: "",
+  minKills: "",
+  maxDeaths: "",
+  minAssists: "",
+  minKd: "",
+  roundsMin: "",
+  roundsMax: "",
+  durationMin: "",
+  durationMax: "",
+  dateFrom: "",
+  dateTo: "",
+};
+
+export default function DemoLibraryPage() {
+  const t = useT();
+  const s = useAppShell();
+
+  const [viewMode, setViewMode] = useState("grid"); // "grid" | "list"
+  const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [sortKey, setSortKey] = useState("library");
+  const [sortDir, setSortDir] = useState("desc");
+  const [watchPathsModalOpen, setWatchPathsModalOpen] = useState(false);
+  const [ingestModalOpen, setIngestModalOpen] = useState(false);
+  const [batchDeleteCount, setBatchDeleteCount] = useState(0);
+  const [openingDemoId, setOpeningDemoId] = useState(null);
+  const openingDemoIdRef = useRef(null);
+  const { requestPlayDemo, DemoPlaybackUi } = useDemoPlaybackDialog();
+
+  const expectedPlayers = useMemo(() => {
+    const raw = s.expectedParsePlayersText || "";
+    return raw.split(/[\n,]+/).map((p) => p.trim()).filter(Boolean);
+  }, [s.expectedParsePlayersText]);
+
+  const handleBatchIngest = useCallback(async (ids) => {
+    const { data } = await API.post("/demos/batch-ingest", { demo_ids: ids });
+    await s.refreshDemoLibrary(s.libraryPage, { manageLoading: false });
+    if (!data?.failed?.length) {
+      s.setProgressText(t("library.ingestSuccess", { count: data?.ingested ?? ids.length }));
+    }
+    return data;
+  }, [s, t]);
+
+  const handleUpdateRemark = useCallback(async (demoId, remark) => {
+    try {
+      await API.patch(`/demos/${demoId}/remark`, { remark: remark || "" });
+      void s.refreshDemoLibrary(s.libraryPage, { manageLoading: false });
+    } catch (e) {
+      console.error("Update remark failed", e);
+    }
+  }, [s]);
+
+  const handleCardPlay = useCallback((demoId) => {
+    const item = s.demoLibraryItems.find((it) => it.id === demoId);
+    const label = (item?.display_name && String(item.display_name).trim()) || item?.filename || `#${demoId}`;
+    void requestPlayDemo({ id: demoId, label });
+  }, [requestPlayDemo, s.demoLibraryItems]);
+
+  const handleOpenAnalysis = useCallback(async (demoId) => {
+    if (openingDemoIdRef.current !== null) return;
+    openingDemoIdRef.current = demoId;
+    setOpeningDemoId(demoId);
+    try {
+      await s.handleLoadSelectedLibraryDemos([demoId], {
+        showLoadingOverlay: false,
+      });
+    } finally {
+      openingDemoIdRef.current = null;
+      setOpeningDemoId(null);
+    }
+  }, [s.handleLoadSelectedLibraryDemos]);
+
+  const handleOpenFile = useCallback(
+    async (demoId) => {
+      const row = s.demoLibraryItems.find((it) => it.id === demoId);
+      let p = row?.path;
+      if (!p || typeof p !== "string" || !String(p).trim()) {
+        try {
+          const { data } = await API.get(`/demos/${demoId}`);
+          p = data?.path;
+        } catch {
+          p = null;
+        }
+      }
+      if (!p || typeof p !== "string" || !String(p).trim()) {
+        s.setProgressText(t("library.openFileError"));
+        return;
+      }
+      try {
+        await API.post("/reveal-file-in-explorer", { path: String(p).trim() });
+      } catch (e) {
+        const d = e?.response?.data?.detail;
+        const msg = Array.isArray(d)
+          ? d.map((x) => (typeof x === "object" && x?.msg ? x.msg : String(x))).join("；")
+          : typeof d === "string"
+            ? d
+            : e?.message || t("library.actionDelete");
+        s.setProgressText(t("library.openFileFailPrefix", { msg }));
+      }
+    },
+    [s, t],
+  );
+
+  const filteredRows = useMemo(() => {
+    const searchQ = s.librarySearchInput.trim() || s.librarySearchQ;
+    let rows = s.demoLibraryItems;
+    rows = applyClientSideDemoFilters(rows, s.libraryAdvFilters);
+    rows = filterByPathAndTags(rows, searchQ);
+    return sortDemoRows(rows, sortKey, sortDir);
+  }, [s.demoLibraryItems, s.libraryAdvFilters, s.librarySearchInput, s.librarySearchQ, sortKey, sortDir]);
+
+  const onColumnSort = useCallback((col) => {
+    setSortKey((prevKey) => {
+      if (prevKey !== col) {
+        setSortDir(col === "filename" || col === "map" ? "asc" : "desc");
+        return col;
+      }
+      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+      return prevKey;
+    });
+  }, []);
+
+  const handleSelectVisiblePage = useCallback(() => {
+    s.setSelectedLibraryDemoIds((prev) => {
+      const next = new Set(prev);
+      for (const it of filteredRows) {
+        next.add(it.id);
+      }
+      return next;
+    });
+  }, [filteredRows, s.setSelectedLibraryDemoIds]);
+
+  const onToggleSelect = useCallback(
+    (id) => {
+      s.setSelectedLibraryDemoIds((prev) => {
+        const next = new Set(prev);
+        if (next.has(id)) next.delete(id);
+        else next.add(id);
+        return next;
+      });
+    },
+    [s.setSelectedLibraryDemoIds]
+  );
+
+  const clearAllFilters = useCallback(() => {
+    s.setLibrarySearchInput("");
+    s.setLibrarySearchQ("");
+    s.setLibraryAdvFilters({ ...INITIAL_ADV_FILTERS });
+    setAdvancedOpen(false);
+    s.setLibraryPage(1);
+    void s.refreshDemoLibrary(1, { manageLoading: true, searchQ: "" });
+  }, [s]);
+
+  const hasQuickOrAdvancedFilters = useMemo(() => {
+    return !!(s.librarySearchInput.trim() || s.hasLibraryAdvancedFilters);
+  }, [s.librarySearchInput, s.hasLibraryAdvancedFilters]);
+
+  const emptyMessage = useMemo(() => {
+    if (s.libraryLoading) return null;
+    if (s.demoLibraryItems.length > 0 && filteredRows.length === 0) {
+      return t("library.emptyNoMatch");
+    }
+    if (s.demoLibraryItems.length === 0) {
+      if (hasQuickOrAdvancedFilters || s.librarySearchQ) {
+        return t("library.emptyNoMatch");
+      }
+      return t("library.emptyNoDemo");
+    }
+    return null;
+  }, [
+    s.libraryLoading,
+    s.demoLibraryItems.length,
+    filteredRows.length,
+    hasQuickOrAdvancedFilters,
+    s.librarySearchQ,
+    t,
+  ]);
+
+  const handleBatchDelete = useCallback(() => {
+    const ids = Array.from(s.selectedLibraryDemoIds);
+    if (!ids.length) return;
+    setBatchDeleteCount(ids.length);
+  }, [s]);
+
+  const closeBatchDeleteConfirm = useCallback(() => {
+    setBatchDeleteCount(0);
+  }, []);
+
+  const confirmBatchDelete = useCallback(() => {
+    const ids = Array.from(s.selectedLibraryDemoIds);
+    setBatchDeleteCount(0);
+    if (!ids.length) return;
+    void s.handleLibraryBatchDelete(ids);
+  }, [s]);
+
+  const onPageChange = useCallback(
+    (page) => {
+      s.setLibraryPage(page);
+      void s.refreshDemoLibrary(page, { manageLoading: false });
+    },
+    [s]
+  );
+
+  const onRename = useCallback(
+    (it) => {
+      s.setLibraryRename({
+        id: it.id,
+        draft: (it.display_name && String(it.display_name).trim()) || "",
+      });
+    },
+    [s]
+  );
+
+  const onDeleteRow = useCallback(
+    (it) => {
+      s.setLibraryDeletePrompt({
+        id: it.id,
+        label: (it.display_name && String(it.display_name).trim()) || it.filename || `#${it.id}`,
+      });
+    },
+    [s]
+  );
+
+  const handleOpenLocalDemo = useCallback(async () => {
+    const paths = await desktopBridge?.chooseDemoFiles?.();
+    if (paths?.length) await s.handleUpload(paths);
+  }, [s]);
+
+  return (
+    <PageContainer className="demo-library-page flex h-full min-h-0 w-full flex-col gap-2 overflow-hidden">
+      <DemoLibraryToolbar
+        onOpenWatchPaths={() => setWatchPathsModalOpen(true)}
+        onScan={s.handleScanDemos}
+        onOpenIngest={() => setIngestModalOpen(true)}
+        onOpenLocalDemo={handleOpenLocalDemo}
+        libraryLoading={s.libraryLoading}
+        libraryScanning={s.libraryScanning}
+        pageSelectableCount={filteredRows.length}
+        libraryTotal={s.libraryTotal}
+        onSelectPage={handleSelectVisiblePage}
+        onSelectAllLibrary={() => void s.selectAllLibraryDemos()}
+        selectedCount={s.selectedLibraryDemoIds.size}
+        onLoadSelected={() => void s.handleLoadSelectedLibraryDemos()}
+        onBatchDelete={handleBatchDelete}
+        onClearSelection={s.clearLibrarySelection}
+        viewMode={viewMode}
+        onViewModeChange={setViewMode}
+      />
+
+      <DemoLibraryQueryBar
+        librarySearchInput={s.librarySearchInput}
+        onSearchChange={s.setLibrarySearchInput}
+        onSearchSubmit={() => s.handleLibrarySearchSubmit()}
+        libraryAdvFilters={s.libraryAdvFilters}
+        setLibraryAdvFilters={s.setLibraryAdvFilters}
+        sortKey={sortKey}
+        sortDir={sortDir}
+        onSortKeyChange={setSortKey}
+        onSortDirChange={setSortDir}
+        advancedOpen={advancedOpen}
+        onToggleAdvanced={() => setAdvancedOpen((v) => !v)}
+        onClearQuickFilters={clearAllFilters}
+        hasQuickOrAdvancedFilters={hasQuickOrAdvancedFilters}
+      />
+
+      {advancedOpen ? (
+        <DemoAdvancedFilters libraryAdvFilters={s.libraryAdvFilters} setLibraryAdvFilters={s.setLibraryAdvFilters} />
+      ) : null}
+
+      <section className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border border-cs2-border bg-cs2-bg-card">
+        <div className="demo-library-results min-h-0 flex-1 overflow-x-hidden overflow-y-auto p-4 custom-scrollbar">
+          {s.libraryLoading ? (
+            <div className="flex h-32 items-center justify-center text-cs2-text-muted text-sm">{t("library.loading")}</div>
+          ) : filteredRows.length === 0 ? (
+            <div className="flex h-32 items-center justify-center text-cs2-text-muted text-sm">{emptyMessage || t("library.noDemo")}</div>
+          ) : viewMode === "grid" ? (
+            <div className="demo-library-grid grid gap-4">
+              {filteredRows.map((it) => (
+                <MatchCard
+                  key={it.id}
+                  demo={it}
+                  isSelected={s.selectedLibraryDemoIds.has(it.id)}
+                  onSelect={(id, checked) => {
+                    s.setSelectedLibraryDemoIds((prev) => {
+                      const next = new Set(prev);
+                      if (checked) next.add(id); else next.delete(id);
+                      return next;
+                    });
+                  }}
+                  onPlay={handleCardPlay}
+                  onOpenFile={handleOpenFile}
+                  onDelete={(id, filename) => s.setLibraryDeletePrompt({ id, label: filename || `#${id}` })}
+                  onUpdateRemark={handleUpdateRemark}
+                  onLoad={(id) => void handleOpenAnalysis(id)}
+                  isLoading={openingDemoId === it.id}
+                  loadDisabled={openingDemoId !== null}
+                  expectedPlayers={expectedPlayers}
+                />
+              ))}
+            </div>
+          ) : (
+            <div className="demo-library-list flex flex-col gap-2">
+              {filteredRows.map((it) => (
+                <MatchListRow
+                  key={it.id}
+                  demo={it}
+                  isSelected={s.selectedLibraryDemoIds.has(it.id)}
+                  onSelect={(id, checked) => {
+                    s.setSelectedLibraryDemoIds((prev) => {
+                      const next = new Set(prev);
+                      if (checked) next.add(id); else next.delete(id);
+                      return next;
+                    });
+                  }}
+                  onPlay={handleCardPlay}
+                  onOpenFile={handleOpenFile}
+                  onDelete={(id, filename) => s.setLibraryDeletePrompt({ id, label: filename || `#${id}` })}
+                  onUpdateRemark={handleUpdateRemark}
+                  onLoad={(id) => void handleOpenAnalysis(id)}
+                  isLoading={openingDemoId === it.id}
+                  loadDisabled={openingDemoId !== null}
+                  expectedPlayers={expectedPlayers}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div
+          data-testid="demo-library-pagination-region"
+          className="flex shrink-0 justify-end border-t border-cs2-border bg-cs2-bg-card px-3 py-2"
+        >
+          <DemoPagination
+            libraryPage={s.libraryPage}
+            libraryTotalPages={s.libraryTotalPages}
+            libraryHasNextPage={s.libraryHasNextPage}
+            libraryPageSize={s.libraryPageSize}
+            onPageSizeChange={s.setLibraryPageSize}
+            libraryJumpDraft={s.libraryJumpDraft}
+            onPageChange={onPageChange}
+            onJumpDraftChange={s.setLibraryJumpDraft}
+            onJumpSubmit={s.handleLibraryPageJump}
+          />
+        </div>
+      </section>
+
+      <Modal
+        open={batchDeleteCount > 0}
+        onClose={closeBatchDeleteConfirm}
+        title={t("library.batchDelete")}
+        maxWidth="max-w-md"
+        maxHeight="max-h-[70vh]"
+        zIndex={110}
+        className="!h-auto"
+        footer={(
+          <div className="flex justify-end gap-2">
+            <Button variant="secondary" size="sm" onClick={closeBatchDeleteConfirm}>
+              {t("common.cancel")}
+            </Button>
+            <Button variant="danger" size="sm" onClick={confirmBatchDelete}>
+              {t("common.confirm")}
+            </Button>
+          </div>
+        )}
+      >
+        <p className="px-5 py-4 text-[12px] leading-relaxed text-cs2-text-secondary">
+          {t("library.batchDeleteConfirm", { count: batchDeleteCount })}
+        </p>
+      </Modal>
+
+      <Modal
+        open={Boolean(s.libraryDeletePrompt)}
+        onClose={() => s.setLibraryDeletePrompt(null)}
+        title={t("library.deleteTitle")}
+        maxWidth="max-w-md"
+        maxHeight="max-h-[70vh]"
+        zIndex={110}
+        className="!h-auto"
+        footer={(
+          <div className="flex justify-end gap-2">
+            <Button variant="secondary" size="sm" onClick={() => s.setLibraryDeletePrompt(null)}>
+              {t("common.cancel")}
+            </Button>
+            <Button
+              variant="danger"
+              size="sm"
+              onClick={() => {
+                const id = s.libraryDeletePrompt?.id;
+                if (id != null) void s.handleDeleteDemo(id);
+              }}
+            >
+              {t("common.confirm")}
+            </Button>
+          </div>
+        )}
+      >
+        <div className="space-y-2 px-5 py-4">
+          {s.libraryDeletePrompt?.label ? (
+            <p className="font-mono text-[12px] text-cs2-text-secondary">{s.libraryDeletePrompt.label}</p>
+          ) : null}
+          <p className="text-[12px] leading-relaxed text-cs2-text-secondary">
+            {t("library.deleteConfirm")}
+          </p>
+        </div>
+      </Modal>
+
+      <DemoWatchPathsModal
+        open={watchPathsModalOpen}
+        onClose={() => setWatchPathsModalOpen(false)}
+        demoWatchPaths={s.demoWatchPaths}
+        demoWatchScanDepth={s.demoWatchScanDepth}
+        onDemoWatchPathsChange={s.setDemoWatchPaths}
+        onDemoWatchScanDepthChange={s.setDemoWatchScanDepth}
+        onSaveConfig={s.handleSaveConfig}
+        onScan={s.handleScanDemos}
+        onOpenIngest={() => {
+          setWatchPathsModalOpen(false);
+          setIngestModalOpen(true);
+        }}
+      />
+
+      <DemoPlaybackUi />
+
+      {s.libraryRename ? (
+        <div
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-cs2-bg-page/85 px-4"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="library-rename-title"
+          onClick={() => s.setLibraryRename(null)}
+        >
+          <div
+            className="w-full max-w-sm rounded-lg border border-cs2-border bg-cs2-bg-card p-4 shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h4 id="library-rename-title" className="mb-2 text-xs font-semibold text-cs2-text-secondary">
+              {t("library.renameTitle")}
+            </h4>
+            <p className="mb-2 text-[11px] leading-relaxed text-cs2-text-secondary">
+              {t("library.renameDesc")}
+            </p>
+            <input
+              type="text"
+              className="mb-3 w-full rounded border border-cs2-border bg-cs2-bg-input px-2 py-1.5 font-mono text-[12px] text-cs2-text-primary outline-none focus:border-cs2-accent/50"
+              value={s.libraryRename.draft}
+              onChange={(e) => s.setLibraryRename((prev) => (prev ? { ...prev, draft: e.target.value } : null))}
+              maxLength={512}
+              autoFocus
+            />
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                className="rounded border border-cs2-border px-2 py-1 text-[11px] text-cs2-text-secondary hover:text-cs2-text-primary"
+                onClick={() => s.setLibraryRename(null)}
+              >
+                {t("library.renameCancel")}
+              </button>
+              <button
+                type="button"
+                className="rounded border border-cs2-accent/50 bg-cs2-accent/15 px-2 py-1 text-[11px] font-semibold text-cs2-accent hover:bg-cs2-accent/25"
+                onClick={() => void s.handleSaveLibraryRename()}
+              >
+                {t("library.renameSave")}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      <IngestModal
+        isOpen={ingestModalOpen}
+        onClose={() => setIngestModalOpen(false)}
+        onIngest={handleBatchIngest}
+      />
+    </PageContainer>
+  );
+}

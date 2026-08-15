@@ -92,7 +92,7 @@ export default function RecordingPlanPreview({ item, globalPacing, compact = fal
   }
 
   return (
-    <div className="rounded border border-cs2-border-subtle bg-cs2-bg-input/60 p-2">
+    <div className="rounded-lg border border-cs2-border-subtle bg-cs2-bg-input/60 p-2">
       <div className="mb-1 flex items-center gap-1.5 text-[10px] font-semibold text-cs2-text-primary">
         <Clapperboard className="h-3 w-3 shrink-0 text-cs2-text-muted" />
         {t("queue.planPreviewTitle")}

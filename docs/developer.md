@@ -20,7 +20,7 @@ git checkout -b feat/my-change
 | Frontend | React 19 + React Router 7 + Ant Design 5 + TailwindCSS 4 + Vite 6 + Zustand 5 |
 | Desktop | Tauri 2 + Rust + 系统 WebView2（Windows NSIS 安装包与 Tauri updater） |
 | Backend | Python 3.12 + FastAPI + uvicorn（API、任务编排与业务分析） |
-| 解析 / 回放引擎 | 定制 `demoparser2 0.41.4+cs2insight8`（PyO3/Rust）；整场 32 Hz 回放直接写 Parquet，并由 Rust 按回合读取二进制帧；烟雾体素也由 Rust 解码 |
+| 解析 / 回放引擎 | 定制 `demoparser2 0.41.4+cs2insight9`（PyO3/Rust）；整场 32 Hz 回放直接写 Parquet，并由 Rust 按回合读取二进制帧；烟雾体素也由 Rust 解码 |
 | Python 表数据 | 项目内置的轻量 `native_table`；生产依赖不包含 pandas、NumPy、Polars 或 PyArrow |
 | 包管理 | Python 使用 `uv` + 根目录 `uv.lock`；前端使用 `pnpm` + `frontend/pnpm-lock.yaml`；Rust 使用 Cargo + `frontend/src-tauri/Cargo.lock` |
 | AI 网关 | OpenAI 兼容 SDK（DeepSeek / Qwen / GLM / MiniMax / OpenAI / Ollama 等） |
@@ -115,7 +115,7 @@ CS2-insight-agent/
 ```
 
 发行版内置的 Python 运行时为 `3.12`。2D 回放依赖项目固定的
-`demoparser2 0.41.4+cs2insight8` PyO3/Rust 扩展，不能用 PyPI 原版替代。
+`demoparser2 0.41.4+cs2insight9` PyO3/Rust 扩展，不能用 PyPI 原版替代。
 如果需要重建 wheel，已安装 Rust 工具链的开发者可以执行：
 
 ```powershell

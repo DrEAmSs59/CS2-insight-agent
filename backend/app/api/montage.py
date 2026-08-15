@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import asyncio
+import logging
+import time
 import uuid
 from pathlib import Path
 from typing import Any, Optional
 
-from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi import APIRouter, File, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
@@ -19,8 +21,19 @@ from ..name_card_meta import (
     resolve_name_card_eyebrow,
 )
 from ..player_names import normalize_player_key
+from ..video_export_log import (
+    export_event,
+    set_video_export_database_id,
+    video_export_endpoint,
+)
+from ..montage_export_runtime import (
+    MontageExportJob,
+    montage_export_job_snapshot,
+    montage_export_jobs,
+)
 
 router = APIRouter(tags=["montage"])
+logger = logging.getLogger(__name__)
 
 
 # ─── Montage (V2) ─────────────────────────────────────────────
@@ -51,6 +64,50 @@ class MontageProjectBody(BaseModel):
     player_avatars: list[PlayerAvatar] = Field(default_factory=list)
     name_cards_enabled: bool = False
     framemeld_enabled: bool = False
+
+
+class MontageMediaFpsProbeBody(BaseModel):
+    paths: list[str] = Field(default_factory=list, max_length=2)
+
+
+@router.post("/api/montage/media-fps")
+async def probe_montage_media_fps(body: MontageMediaFpsProbeBody):
+    """Probe optional intro/outro videos for the project-level FrameMeld gate."""
+    from ..video_composer import (
+        _is_image_path,
+        probe_video_audio_summary,
+        resolve_ffmpeg_binary,
+        resolve_ffprobe_binary,
+    )
+
+    cfg = load_config()
+    ffmpeg_bin = resolve_ffmpeg_binary(getattr(cfg, "ffmpeg_path", None))
+    ffprobe_bin = resolve_ffprobe_binary(ffmpeg_bin)
+    items: list[dict[str, Any]] = []
+    for raw_path in body.paths:
+        normalized = str(raw_path or "").strip()
+        if not normalized:
+            continue
+        media_path = Path(normalized).expanduser()
+        if _is_image_path(media_path):
+            items.append({"path": normalized, "kind": "image", "fps": None, "status": "ok"})
+            continue
+        if not media_path.is_file():
+            items.append({"path": normalized, "kind": "video", "fps": None, "status": "missing"})
+            continue
+        try:
+            summary = await asyncio.to_thread(probe_video_audio_summary, media_path, ffprobe_bin)
+            fps = float(summary.get("fps") or 0.0)
+            items.append({
+                "path": normalized,
+                "kind": "video",
+                "fps": fps if fps >= 1.0 else None,
+                "status": "ok" if fps >= 1.0 else "unknown",
+            })
+        except Exception:
+            logger.warning("failed to probe montage media fps path=%s", media_path, exc_info=True)
+            items.append({"path": normalized, "kind": "video", "fps": None, "status": "error"})
+    return {"items": items}
 
 
 
@@ -109,6 +166,35 @@ async def save_montage_project(body: MontageProjectBody):
     return item
 
 
+@router.get("/api/montage/projects")
+async def list_montage_projects(
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+):
+    items, total = await montage_db.list_projects(limit=limit, offset=offset)
+    return {"items": items, "total": total}
+
+
+@router.get("/api/montage/projects/{project_id}")
+async def get_montage_project(project_id: int):
+    item = await montage_db.get_project(project_id)
+    if not item:
+        from ..api_errors import error_detail
+
+        raise HTTPException(404, error_detail("MONTAGE_PROJECT_NOT_FOUND"))
+    return item
+
+
+@router.delete("/api/montage/projects/{project_id}")
+async def delete_montage_project(project_id: int):
+    deleted = await montage_db.delete_project(project_id)
+    if not deleted:
+        from ..api_errors import error_detail
+
+        raise HTTPException(404, error_detail("MONTAGE_PROJECT_NOT_FOUND"))
+    return {"status": "ok", "id": project_id}
+
+
 class MontageExportBody(BaseModel):
     project_id: Optional[int] = None
     recorded_clip_ids: Optional[list[int]] = None
@@ -128,7 +214,127 @@ class MontageExportBody(BaseModel):
     framemeld_enabled: Optional[bool] = None
 
 
+async def _run_montage_export_job(job: MontageExportJob, prepared: dict[str, Any]) -> None:
+    from ..montage_errors import montage_detail_from_exception
+    from ..video_composer import MontageComposerError, compose_montage
+
+    async def finish_cancelled() -> None:
+        job.status = "cancelled"
+        job.stage = "cancelled"
+        job.error = ""
+        await montage_db.update_export(
+            job.export_id,
+            status="cancelled",
+            error_msg="",
+            output_path=job.output_path,
+        )
+        export_event("pipeline_cancelled", status="cancelled")
+        logger.info(
+            "video export summary feature=montage export_id=%s status=cancelled",
+            job.export_id,
+        )
+
+    if job.cancel_event.is_set():
+        await finish_cancelled()
+        return
+
+    job.status = "running"
+    job.stage = "starting"
+    job.progress = 0.01
+    job.started_at_monotonic = time.monotonic()
+    job.stage_started_at_monotonic = job.started_at_monotonic
+    await montage_db.update_export(job.export_id, status="running", output_path=job.output_path)
+
+    def on_progress(progress: float, stage: str, detail: dict[str, Any] | None = None) -> None:
+        if job.cancel_event.is_set():
+            raise MontageComposerError("MONTAGE_EXPORT_CANCELLED")
+        next_progress = max(0.0, min(1.0, float(progress or 0.0)))
+        next_stage = str(stage or job.stage or "running")
+        if next_stage != job.stage:
+            job.stage_started_at_monotonic = time.monotonic()
+            job.stage_progress = None
+        if next_stage.startswith("fallback_"):
+            job.progress = next_progress
+        else:
+            job.progress = max(job.progress, next_progress)
+        job.stage = next_stage
+        if isinstance(detail, dict) and detail.get("stage_progress") is not None:
+            job.stage_progress = max(0.0, min(1.0, float(detail["stage_progress"])))
+
+    try:
+        await asyncio.to_thread(
+            compose_montage,
+            **prepared,
+            progress_callback=on_progress,
+            cancel_event=job.cancel_event,
+        )
+    except MontageComposerError as e:
+        if e.code == "MONTAGE_EXPORT_CANCELLED" or job.cancel_event.is_set():
+            await finish_cancelled()
+            return
+        detail = montage_detail_from_exception(e)
+        error_code = str(detail.get("code") or "MONTAGE_EXPORT_FAILED")
+        job.status = "error"
+        job.stage = "error"
+        job.error = error_code
+        await montage_db.update_export(
+            job.export_id,
+            status="error",
+            error_msg=error_code,
+        )
+        export_event(
+            "pipeline_failed",
+            level=logging.ERROR,
+            status="error",
+            error_code=error_code,
+            failure_domain=detail.get("failure_domain"),
+            encoder=detail.get("encoder"),
+            branch=detail.get("branch"),
+        )
+        logger.error(
+            "video export summary feature=montage export_id=%s status=error code=%s",
+            job.export_id,
+            error_code,
+        )
+        return
+    except Exception:
+        logger.exception("montage background export failed export_id=%s", job.export_id)
+        job.status = "error"
+        job.stage = "error"
+        job.error = "MONTAGE_EXPORT_FAILED"
+        await montage_db.update_export(
+            job.export_id,
+            status="error",
+            error_msg=job.error,
+        )
+        return
+
+    job.status = "done"
+    job.stage = "done"
+    job.progress = 1.0
+    job.stage_progress = 1.0
+    job.error = ""
+    await montage_db.update_export(
+        job.export_id,
+        status="done",
+        error_msg="",
+        output_path=job.output_path,
+    )
+    export_event(
+        "pipeline_completed",
+        status="done",
+        database_export_id=job.export_id,
+        output_name=Path(job.output_path).name,
+    )
+    logger.info(
+        "video export summary feature=montage export_id=%s status=done output=%s",
+        job.export_id,
+        Path(job.output_path).name,
+    )
+
+
 @router.post("/api/montage/export")
+@video_export_endpoint("montage")
 async def montage_export(body: MontageExportBody):
     cfg = load_config()
     try:
@@ -322,41 +528,46 @@ async def montage_export(body: MontageExportBody):
     export_id = await montage_db.create_export(
         project_id=int(body.project_id) if body.project_id is not None else None,
         body=snap,
-        status="running",
+        status="queued",
+        output_path=str(out),
+    )
+    set_video_export_database_id(export_id)
+    export_event(
+        "background_job_queued",
+        status="queued",
+        database_export_id=export_id,
+        project_id=body.project_id,
+        output_name=out.name,
+        clip_count=len(clip_paths),
+        requested_encoder=cfg.montage_encoder or "auto",
+        framemeld_enabled=framemeld_enabled_eff,
     )
 
-    try:
-        from ..video_composer import MontageComposerError, compose_montage
-
-        await asyncio.to_thread(
-            compose_montage,
-            ffmpeg_bin=ffmpeg_bin,
-            clip_paths=clip_paths,
-            intro_path=intro_p,
-            outro_path=outro_p,
-            bgm_path=bgm_p,
-            output_path=out,
-            transitions=transitions_eff if isinstance(transitions_eff, dict) else None,
-            clip_row_ids=[int(x) for x in clip_ids],
-            bgm_volume=bgm_volume_eff,
-            bgm_start_sec=bgm_start_eff,
-            intro_image_duration=intro_img_dur_eff,
-            outro_image_duration=outro_img_dur_eff,
-            montage_encoder=cfg.montage_encoder or "auto",
-            name_cards=name_cards_arg,
-            framemeld_enabled=framemeld_enabled_eff,
-        )
-    except MontageComposerError as e:
-        from ..montage_errors import montage_detail_from_exception
-
-        detail = montage_detail_from_exception(e)
-        await montage_db.update_export(
-            export_id, status="error", error_msg=str(detail.get("code") or "MONTAGE_EXPORT_FAILED"), output_path=None,
-        )
-        raise HTTPException(400, detail) from e
-
-    await montage_db.update_export(export_id, status="done", error_msg="", output_path=str(out))
-    return {"export_id": export_id, "status": "done", "output_path": str(out)}
+    job = MontageExportJob(
+        export_id=export_id,
+        project_id=int(body.project_id) if body.project_id is not None else None,
+        output_path=str(out),
+    )
+    montage_export_jobs[export_id] = job
+    prepared = {
+        "ffmpeg_bin": ffmpeg_bin,
+        "clip_paths": clip_paths,
+        "intro_path": intro_p,
+        "outro_path": outro_p,
+        "bgm_path": bgm_p,
+        "output_path": out,
+        "transitions": transitions_eff if isinstance(transitions_eff, dict) else None,
+        "clip_row_ids": [int(x) for x in clip_ids],
+        "bgm_volume": bgm_volume_eff,
+        "bgm_start_sec": bgm_start_eff,
+        "intro_image_duration": intro_img_dur_eff,
+        "outro_image_duration": outro_img_dur_eff,
+        "montage_encoder": cfg.montage_encoder or "auto",
+        "name_cards": name_cards_arg,
+        "framemeld_enabled": framemeld_enabled_eff,
+    }
+    job.task = asyncio.create_task(_run_montage_export_job(job, prepared))
+    return montage_export_job_snapshot(job)
 
 
 _AVATAR_MAX_BYTES = 5 * 1024 * 1024  # 5 MB

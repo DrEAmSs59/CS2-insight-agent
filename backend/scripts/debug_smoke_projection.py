@@ -26,14 +26,14 @@ from typing import Any
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from app import native_table as pd
-from app.parser.replay_effects import SMOKE_EXTRA
-from app.parser.smoke_voxel_decode import (
+from app.features.demo_analysis.replay_effects import SMOKE_EXTRA
+from app.features.demo_analysis.smoke_voxel_decode import (
     SmokeVoxel,
     SmokeVoxelDecodeError,
     decode_smoke_voxel_journal,
     get_smoke_occupancy_at,
 )
-from app.parser.smoke_voxel_diagnostics import (
+from app.features.demo_analysis.smoke_voxel_diagnostics import (
     build_projection_snapshot,
     demo_fingerprint,
     state_byte_histograms,

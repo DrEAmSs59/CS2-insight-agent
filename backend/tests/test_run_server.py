@@ -34,6 +34,7 @@ def test_portable_launcher_uses_supported_uvicorn_config(monkeypatch):
         "host": "127.0.0.1",
         "port": 19871,
         "loop": "asyncio",
+        "http": "h11",
         "log_level": "info",
         "access_log": True,
     }

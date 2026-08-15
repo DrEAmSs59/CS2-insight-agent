@@ -21,14 +21,14 @@ from typing import Any
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from app import native_table as pd
-from app.parser.replay_effects import SMOKE_EXTRA
-from app.parser.smoke_voxel_decode import (
+from app.features.demo_analysis.replay_effects import SMOKE_EXTRA
+from app.features.demo_analysis.smoke_voxel_decode import (
     VOXEL_AXIS_SIGN,
     VOXEL_BYTE_PACKING,
     VOXEL_GRID_CENTER,
     decode_smoke_voxel_journal,
 )
-from app.parser.smoke_voxel_diagnostics import rank_axis_candidates
+from app.features.demo_analysis.smoke_voxel_diagnostics import rank_axis_candidates
 
 DEFAULT_DEMO = r"C:\soft\cs2_demo_lib\liquid-vs-vitality-m1-anubis.dem"
 

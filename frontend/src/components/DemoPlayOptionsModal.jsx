@@ -34,9 +34,11 @@ export default function DemoPlayOptionsModal({
       icon={<Play className="h-4 w-4 text-cs2-accent" />}
       maxWidth="max-w-lg"
       maxHeight="max-h-[82vh]"
+      className="!h-auto"
+      contentClassName="overflow-y-auto"
       zIndex={150}
     >
-      <div className="space-y-4 px-5 py-5">
+      <div className="space-y-3 px-5 py-4">
         {checking ? (
           <div className="flex min-h-36 flex-col items-center justify-center gap-3 text-cs2-text-muted">
             <Loader2 className="h-6 w-6 animate-spin text-cs2-accent" />
@@ -77,31 +79,33 @@ export default function DemoPlayOptionsModal({
           <>
             <p className="text-[12px] leading-relaxed text-cs2-text-muted">{t("playDemo.chooseMode")}</p>
 
-            <div className="grid gap-3 sm:grid-cols-2">
+            <div className="grid items-stretch gap-3 sm:grid-cols-2">
               <button
                 type="button"
                 disabled={launching}
                 onClick={onPlayNormal}
-                className="group rounded-xl border border-cs2-border bg-cs2-bg-input/45 p-4 text-left transition-colors hover:border-cs2-accent/50 hover:bg-cs2-bg-hover disabled:opacity-50"
+                data-testid="demo-play-normal-option"
+                className="group flex min-h-[112px] flex-col items-stretch justify-start rounded-lg border border-cs2-border bg-cs2-bg-input/45 p-3.5 text-left transition-colors hover:border-cs2-accent/50 hover:bg-cs2-bg-hover disabled:opacity-50"
               >
-                <div className="flex items-center gap-2">
-                  {launchingMode === "normal" ? <Loader2 className="h-5 w-5 animate-spin text-cs2-accent" /> : <Play className="h-5 w-5 text-cs2-accent" />}
-                  <span className="text-sm font-bold text-cs2-text-primary">{t("playDemo.normalTitle")}</span>
+                <div className="flex h-5 shrink-0 items-center gap-2">
+                  {launchingMode === "normal" ? <Loader2 className="h-4 w-4 animate-spin text-cs2-accent" /> : <Play className="h-4 w-4 text-cs2-accent" />}
+                  <span className="text-[13px] font-bold leading-5 text-cs2-text-primary">{t("playDemo.normalTitle")}</span>
                 </div>
-                <p className="mt-2 text-[11px] leading-relaxed text-cs2-text-muted">{t("playDemo.normalDesc")}</p>
+                <p className="mt-1.5 text-[11px] leading-[1.55] text-cs2-text-muted">{t("playDemo.normalDesc")}</p>
               </button>
 
               <button
                 type="button"
                 disabled={launching}
                 onClick={onPlayPov}
-                className="group rounded-xl border border-amber-500/30 bg-cs2-amber-surface p-4 text-left transition-colors hover:border-amber-400/60 disabled:opacity-50"
+                data-testid="demo-play-pov-option"
+                className="group flex min-h-[112px] flex-col items-stretch justify-start rounded-lg border border-amber-500/30 bg-cs2-amber-surface p-3.5 text-left transition-colors hover:border-amber-400/60 disabled:opacity-50"
               >
-                <div className="flex items-center gap-2">
-                  {launchingMode === "pov" ? <Loader2 className="h-5 w-5 animate-spin text-cs2-amber-on-surface" /> : <Eye className="h-5 w-5 text-cs2-amber-on-surface" />}
-                  <span className="text-sm font-bold text-cs2-amber-on-surface">{t("playDemo.povTitle")}</span>
+                <div className="flex h-5 shrink-0 items-center gap-2">
+                  {launchingMode === "pov" ? <Loader2 className="h-4 w-4 animate-spin text-cs2-amber-on-surface" /> : <Eye className="h-4 w-4 text-cs2-amber-on-surface" />}
+                  <span className="text-[13px] font-bold leading-5 text-cs2-amber-on-surface">{t("playDemo.povTitle")}</span>
                 </div>
-                <p className="mt-2 text-[11px] leading-relaxed text-cs2-text-secondary">{t("playDemo.povDesc")}</p>
+                <p className="mt-1.5 text-[11px] leading-[1.55] text-cs2-text-secondary">{t("playDemo.povDesc")}</p>
               </button>
             </div>
 

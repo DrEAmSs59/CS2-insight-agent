@@ -58,14 +58,14 @@ export default function RecordingStatsStrip({
         <span className="font-mono text-[18px] tabular-nums leading-none text-cs2-text-primary">{demoCount}</span>
         <span className="text-[11px] leading-none text-cs2-text-muted">Demo</span>
       </div>
-      <span className="rounded-full border border-cs2-accent/30 bg-cs2-accent/10 px-2 py-0.5 text-[11px] font-medium leading-none text-cs2-accent">
+      <span className="rounded-full bg-cs2-accent px-3 py-1 text-[11px] font-medium leading-none text-white">
         {queueStatusLabel}
       </span>
       <span
         className={
           obsConfigured
-            ? "rounded-full border border-emerald-500/25 bg-emerald-500/10 px-2 py-0.5 text-[11px] font-medium leading-none text-emerald-300"
-            : "rounded-full border border-cs2-border bg-cs2-bg-hover px-2 py-0.5 text-[11px] font-medium leading-none text-cs2-text-muted"
+            ? "rounded-full bg-cs2-highlight px-3 py-1 text-[11px] font-medium leading-none text-white"
+            : "rounded-full bg-cs2-fail px-3 py-1 text-[11px] font-medium leading-none text-white"
         }
       >
         {obsConfigured ? t("queue.obsConfigured") : t("queue.obsNotConfigured")}

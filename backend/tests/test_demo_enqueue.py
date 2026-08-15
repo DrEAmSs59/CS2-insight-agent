@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, Mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from app import main
+from app.features.demo_library import ingestion
 
 
 def _fake_db(*, inserted: bool = True):
@@ -26,14 +26,14 @@ def test_enqueue_with_md5_disabled_never_hashes_or_rewrites_pending_row(tmp_path
     hash_mock = Mock(side_effect=AssertionError("MD5 must stay disabled"))
     notify = AsyncMock()
 
-    monkeypatch.setattr(main, "demo_db", fake_db)
-    monkeypatch.setattr(main, "_demo_ingest_md5_enabled", lambda: False)
-    monkeypatch.setattr(main, "file_md5_hex", hash_mock)
-    monkeypatch.setattr(main, "demo_library_hub", SimpleNamespace(notify=notify))
-    monkeypatch.setattr(main.application_state, "demo_watcher", None)
-    monkeypatch.setattr(main, "_enqueue_striped_locks", [])
+    monkeypatch.setattr(ingestion, "demo_db", fake_db)
+    monkeypatch.setattr(ingestion, "_demo_ingest_md5_enabled", lambda: False)
+    monkeypatch.setattr(ingestion, "file_md5_hex", hash_mock)
+    monkeypatch.setattr(ingestion, "demo_library_hub", SimpleNamespace(notify=notify))
+    monkeypatch.setattr(ingestion.application_state, "demo_watcher", None)
+    monkeypatch.setattr(ingestion, "_enqueue_striped_locks", [])
 
-    asyncio.run(main._enqueue_demo_path(demo_path))
+    asyncio.run(ingestion.enqueue_demo_path(demo_path))
 
     hash_mock.assert_not_called()
     assert fake_db.add_demo.await_args.kwargs["content_md5"] is None
@@ -48,13 +48,13 @@ def test_existing_row_reuses_the_single_computed_md5(tmp_path: Path, monkeypatch
     fake_db = _fake_db(inserted=False)
     hash_mock = Mock(return_value="abc123")
 
-    monkeypatch.setattr(main, "demo_db", fake_db)
-    monkeypatch.setattr(main, "_demo_ingest_md5_enabled", lambda: True)
-    monkeypatch.setattr(main, "file_md5_hex", hash_mock)
-    monkeypatch.setattr(main.application_state, "demo_watcher", None)
-    monkeypatch.setattr(main, "_enqueue_striped_locks", [])
+    monkeypatch.setattr(ingestion, "demo_db", fake_db)
+    monkeypatch.setattr(ingestion, "_demo_ingest_md5_enabled", lambda: True)
+    monkeypatch.setattr(ingestion, "file_md5_hex", hash_mock)
+    monkeypatch.setattr(ingestion.application_state, "demo_watcher", None)
+    monkeypatch.setattr(ingestion, "_enqueue_striped_locks", [])
 
-    asyncio.run(main._enqueue_demo_path(demo_path, "archive.zip"))
+    asyncio.run(ingestion.enqueue_demo_path(demo_path, "archive.zip"))
 
     hash_mock.assert_called_once_with(demo_path)
     fake_db.update_demo_content_md5_if_absent.assert_awaited_once_with(

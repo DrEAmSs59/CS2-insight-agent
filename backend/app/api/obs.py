@@ -129,13 +129,19 @@ def _configured_ffmpeg_toolkit_report(raw_path: str) -> dict[str, object]:
 def config_quick_check():
     """Return setup flags without opening an OBS WebSocket connection."""
     cfg = ensure_cs2_path(load_config())
+    obs_path = str(cfg.obs.obs_path or "").strip()
+    obs_configured = bool(
+        cfg.obs.obs_config_verified
+        and obs_path
+        and Path(obs_path).is_file()
+    )
     cs2_path_ok = bool(cfg.cs2_path and Path(cfg.cs2_path).is_file())
     ffmpeg_ok = bool(_configured_ffmpeg_toolkit_report(cfg.ffmpeg_path).get("ok"))
     ai_key_ok = llm_api_key_configured(cfg.llm.api_key) or llm_base_url_is_local_host(
         cfg.llm.base_url
     )
     return {
-        "obs_configured": cfg.obs.obs_config_verified,
+        "obs_configured": obs_configured,
         "cs2_path_ok": cs2_path_ok,
         "ffmpeg_ok": ffmpeg_ok,
         "ai_key_ok": ai_key_ok,

@@ -33,7 +33,7 @@ function WorkflowSection({ title, subtitle, badge, defaultOpen = true, accentCla
   const [open, setOpen] = useState(defaultOpen);
   return (
     <section
-      className={`rounded-xl border border-cs2-border bg-cs2-bg-card shadow-sm transition-all ${accentClass}`.trim()}
+      className={`rounded-xl border border-cs2-border bg-cs2-bg-card transition-all ${accentClass}`.trim()}
     >
       <button
         type="button"
@@ -70,6 +70,16 @@ function PacingSlider({
   onCommit,
   accentClass = "accent-cs2-orange",
 }) {
+  const range = Math.max(Number(max) - Number(min), 0);
+  const progress = range > 0
+    ? Math.min(100, Math.max(0, ((Number(value) - Number(min)) / range) * 100))
+    : 0;
+  const rangeAccent = accentClass.includes("cyan")
+    ? "var(--cs2-info)"
+    : accentClass.includes("amber")
+      ? "var(--cs2-compilation)"
+      : "var(--cs2-accent)";
+
   return (
     <label className="block text-xs font-medium text-cs2-text-secondary">
       {label}
@@ -82,7 +92,11 @@ function PacingSlider({
           disabled={disabled}
           value={value}
           onChange={(e) => onCommit(parseFloat(e.target.value))}
-          className={`min-w-0 flex-1 disabled:opacity-40 cursor-pointer ${accentClass}`}
+          className="cs2-data-slider min-w-0 flex-1 disabled:cursor-not-allowed disabled:opacity-40"
+          style={{
+            "--cs2-range-progress": `${progress}%`,
+            "--cs2-range-accent": rangeAccent,
+          }}
         />
         <input
           type="number"
@@ -474,14 +488,17 @@ export default function CommonParamsModal({
         </div>
         ) : null}
 
-        <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-y-contain px-3 py-3 sm:px-5 sm:py-4">
+        <div
+          className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-y-contain px-3 py-3 sm:px-5 sm:py-4"
+          style={{ scrollbarGutter: "stable both-edges" }}
+        >
           <div className="@container/params mx-auto w-full max-w-4xl min-w-0">
-            <div className="mb-3 flex flex-col gap-3 rounded-xl border border-cs2-accent/25 bg-cs2-accent/[0.05] p-3 sm:mb-4 sm:flex-row sm:items-center sm:justify-between sm:p-4">
+            <div className="mb-3 flex flex-col gap-3 rounded-xl border border-cs2-border bg-cs2-bg-elevated p-3 sm:mb-4 sm:flex-row sm:items-center sm:justify-between sm:p-4">
               <div className="min-w-0">
                 <p className="text-sm font-bold text-cs2-text-primary">{t("record.presetShareTitle")}</p>
                 <p className="mt-0.5 text-xs leading-relaxed text-cs2-text-muted">{t("record.presetShareDesc")}</p>
                 {shareMessage ? (
-                  <p className={`mt-1.5 text-xs ${shareMessage.tone === "ok" ? "text-emerald-400" : "text-rose-400"}`} role="status">
+                  <p className={`mt-1.5 text-xs ${shareMessage.tone === "ok" ? "text-cs2-emerald-on-surface" : "text-cs2-rose-on-surface"}`} role="status">
                     {shareMessage.text}
                   </p>
                 ) : null}
@@ -507,7 +524,7 @@ export default function CommonParamsModal({
                   type="button"
                   disabled={!configReady}
                   onClick={handleExportPreset}
-                  className="inline-flex items-center gap-2 rounded-lg border border-cs2-accent/40 bg-cs2-accent/10 px-3 py-2 text-xs font-semibold text-cs2-accent hover:bg-cs2-accent/15 disabled:opacity-40"
+                  className="inline-flex items-center gap-2 rounded-lg border border-cs2-accent bg-cs2-accent-soft px-3 py-2 text-xs font-semibold text-cs2-accent transition-colors hover:bg-cs2-bg-active disabled:opacity-40"
                 >
                   <Download className="h-3.5 w-3.5" aria-hidden />
                   {t("record.presetExportBtn")}
@@ -529,7 +546,7 @@ export default function CommonParamsModal({
               <div className="mb-2 flex min-h-[3rem] w-full overflow-hidden rounded-md">
                 <div
                   style={{ flex: preFlex }}
-                  className="flex min-w-0 flex-col justify-center border-r border-cs2-border-subtle bg-gradient-to-br from-cs2-accent/35 to-cs2-accent/10 px-2 py-1.5"
+                  className="flex min-w-0 flex-col justify-center border-r border-cs2-border-subtle bg-cs2-accent-soft px-2 py-1.5"
                 >
                   <span className="text-[10px] font-bold uppercase tracking-wide text-cs2-text-primary/90">
                     {t("record.commonPacingPreLabel")}
@@ -549,7 +566,7 @@ export default function CommonParamsModal({
                 </div>
                 <div
                   style={{ flex: postFlex }}
-                  className="flex min-w-0 flex-col justify-center bg-gradient-to-bl from-cyan-500/25 to-cyan-500/5 px-2 py-1.5"
+                  className="flex min-w-0 flex-col justify-center bg-cs2-cyan-surface px-2 py-1.5"
                 >
                   <span className="text-[10px] font-bold uppercase tracking-wide text-cs2-text-primary/90">
                     {t("record.commonPacingPostLabel")}
@@ -726,9 +743,9 @@ export default function CommonParamsModal({
             <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-cs2-text-muted">
               {t("record.commonSecFovPov")}
             </p>
-            <div className="mb-5 rounded-xl border border-amber-500/30 bg-gradient-to-br from-cs2-surface-1 to-cs2-surface-2 p-4 shadow-md">
+            <div className="mb-5 rounded-xl border border-cs2-border bg-cs2-amber-surface p-4">
               <div className="mb-3 flex flex-wrap items-center gap-2">
-                <span className="rounded-md bg-amber-500/20 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-cs2-amber-on-surface">
+                <span className="rounded-md border border-cs2-border bg-cs2-bg-card px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-cs2-amber-on-surface">
                   {t("record.commonExpBadge")}
                 </span>
                 <h4 className="text-sm font-bold text-cs2-text-primary">{t("record.commonExpTitle")}</h4>
@@ -755,7 +772,7 @@ export default function CommonParamsModal({
                 povVoiceDisabled={warmupOpts.pov_voice_disabled}
                 onPovVoiceDisabledChange={(v) => patchWarmup({ pov_voice_disabled: v })}
                 omitEyebrow
-                className="rounded-lg border border-amber-500/20 bg-cs2-bg-input/60 p-3"
+                className="rounded-lg border border-cs2-border bg-cs2-bg-card p-3"
               />
             </div>
 
@@ -807,7 +824,7 @@ export default function CommonParamsModal({
                 code="viewmodel_fov 68"
               />
               {warmupOpts.viewmodel_fov_68 ? (
-                <p className="-mt-1 ml-1 text-xs leading-relaxed text-emerald-400/85">
+                <p className="-mt-1 ml-1 text-xs leading-relaxed text-cs2-emerald-on-surface">
                   {t("record.commonViewmodelOutcome")}
                 </p>
               ) : null}
@@ -818,7 +835,7 @@ export default function CommonParamsModal({
                 code="cam_command 1; cam_idealdist 30; c_thirdpersonshoulder 1"
               />
               {warmupOpts.third_person_camera ? (
-                <p className="-mt-1 ml-1 text-xs leading-relaxed text-emerald-400/85">
+                <p className="-mt-1 ml-1 text-xs leading-relaxed text-cs2-emerald-on-surface">
                   {t("record.commonThirdPersonOutcome")}
                 </p>
               ) : null}
@@ -931,7 +948,7 @@ export default function CommonParamsModal({
                 defaultOpen
               >
                 <div className="grid gap-4 xl:grid-cols-2">
-                  <div className="rounded-lg border border-cs2-border bg-cs2-bg-input/35 p-4">
+                  <div className="rounded-lg border border-cs2-border bg-cs2-bg-input p-4">
                     <h4 className="text-sm font-semibold text-cs2-text-primary">{t("record.commonSecKb")}</h4>
                     <p className="mt-1 mb-3 text-xs leading-relaxed text-cs2-text-muted">
                       {t("record.commonSecKbSubtitle")}
@@ -996,7 +1013,7 @@ export default function CommonParamsModal({
                     )}
                   </div>
 
-                  <div className="rounded-lg border border-cs2-border bg-cs2-bg-input/35 p-4">
+                  <div className="rounded-lg border border-cs2-border bg-cs2-bg-input p-4">
                     <h4 className="text-sm font-semibold text-cs2-text-primary">{t("record.warmupSecKillFx")}</h4>
                     <p className="mt-1 mb-3 text-xs leading-relaxed text-cs2-text-muted">
                       {t("record.commonKillFxSubtitle")}
@@ -1152,7 +1169,7 @@ export default function CommonParamsModal({
                       onClick={() => patchWarmup({ aspect_ratio: ar })}
                       className={`rounded-xl border p-3 text-left transition-all ${
                         selected
-                          ? "border-cs2-accent bg-cs2-accent-soft shadow-sm"
+                          ? "border-cs2-accent bg-cs2-accent-soft"
                           : "border-cs2-border bg-cs2-bg-input hover:border-cs2-border-focus"
                       }`}
                     >
@@ -1223,7 +1240,7 @@ export default function CommonParamsModal({
                 />
               </div>
               {warmupResolutionError ? (
-                <p className="mt-2.5 text-xs leading-snug text-rose-400">{warmupResolutionError}</p>
+                <p className="mt-2.5 text-xs leading-snug text-cs2-rose-on-surface">{warmupResolutionError}</p>
               ) : (
                 <p className="mt-2.5 text-xs leading-relaxed text-cs2-text-muted">
                   {t("record.commonResLeaveBlankHint")}
@@ -1238,7 +1255,7 @@ export default function CommonParamsModal({
         </div>
 
         {isModal ? (
-          <div className="shrink-0 border-t border-cs2-border bg-cs2-bg-input/60 px-4 py-3 sm:px-5">
+          <div className="shrink-0 border-t border-cs2-border bg-cs2-bg-input px-4 py-3 sm:px-5">
             <button
               type="button"
               onClick={onClose}
@@ -1255,14 +1272,14 @@ export default function CommonParamsModal({
   if (isPage) {
     return (
       <div className="flex h-full min-h-0 w-full flex-col bg-cs2-bg-page">
-        <header className="shrink-0 border-b border-cs2-border bg-cs2-bg-page/95 px-4 py-3 backdrop-blur-sm sm:px-5">
+        <header className="shrink-0 border-b border-cs2-border bg-cs2-bg-page px-4 py-3 sm:px-5">
           <div className="min-w-0">
             <h1 className="text-lg font-bold tracking-tight text-cs2-text-primary">{t("record.commonPageTitle")}</h1>
             <p className="mt-1 max-w-3xl text-[12px] leading-relaxed text-cs2-text-muted">
               {t("record.commonPageSubtitle")}
             </p>
             {saveError ? (
-              <p className="mt-2 text-xs leading-snug text-rose-400">{saveError}</p>
+              <p className="mt-2 text-xs leading-snug text-cs2-rose-on-surface">{saveError}</p>
             ) : null}
             {!configReady ? (
               <p className="mt-2 text-xs text-cs2-text-muted">{t("record.commonLoadingConfig")}</p>
@@ -1271,7 +1288,7 @@ export default function CommonParamsModal({
         </header>
         <div className="flex min-h-0 flex-1 flex-col overflow-hidden">{body}</div>
         <div className="shrink-0 px-3 pb-3 sm:px-5 sm:pb-4">
-          <div className="flex flex-col items-stretch gap-3 rounded-xl border border-cs2-orange/25 bg-cs2-orange/[0.06] p-3 sm:flex-row sm:items-center sm:justify-between sm:p-4">
+          <div className="flex flex-col items-stretch gap-3 rounded-xl border border-cs2-border bg-cs2-bg-card p-3 sm:flex-row sm:items-center sm:justify-between sm:p-4">
             <p className="text-[11px] leading-relaxed text-dynamic-zinc-400">
               {t("record.commonSaveFooterDesc")}
             </p>

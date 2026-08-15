@@ -12,7 +12,7 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from app.parser.clip_builder import build_rival_compilations
+from app.features.demo_analysis.clip_builder import build_rival_compilations
 
 TICK_RATE = 64
 

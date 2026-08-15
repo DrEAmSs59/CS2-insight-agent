@@ -11,7 +11,7 @@ import asyncio
 from pathlib import Path
 
 import pytest
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
 from app.api import cosmetics_skin
@@ -20,6 +20,27 @@ from app.skin_core_client import SkinCoreError
 
 
 STEAM_ID = "76561198000000001"
+
+
+def test_same_demo_rewrite_claim_rejects_overlap_and_releases_afterwards():
+    async def scenario():
+        demo_id = 987654321
+        first = cosmetics_skin._claim_demo_rewrite(demo_id)
+        assert await anext(first) is None
+        try:
+            second = cosmetics_skin._claim_demo_rewrite(demo_id)
+            with pytest.raises(HTTPException) as exc_info:
+                await anext(second)
+            assert exc_info.value.status_code == 409
+            assert "COSMETICS_SKIN_REWRITE_IN_PROGRESS" in str(exc_info.value.detail)
+        finally:
+            await first.aclose()
+
+        third = cosmetics_skin._claim_demo_rewrite(demo_id)
+        assert await anext(third) is None
+        await third.aclose()
+
+    asyncio.run(scenario())
 
 
 def _inventory_row(**overrides):
@@ -96,8 +117,8 @@ def api_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(cosmetics_skin, "demo_db", db)
     monkeypatch.setattr(
         cosmetics_skin,
-        "ensure_demo_compatible",
-        lambda path: type("R", (), {"cached": True, "path": path})(),
+        "ensure_compatible_baseline",
+        lambda source, _cache_dir: Path(source).resolve(),
     )
 
     app = FastAPI()
@@ -185,6 +206,111 @@ def test_post_custom_plan_rewrites_cache_only_and_persists_plan(api_env, monkeyp
     expected_md5 = hashlib.md5(b"REWRITTEN-DEMO").hexdigest()
     row = asyncio.run(api_env["db"].get_demo_by_id(demo_id))
     assert row["content_md5"] == expected_md5
+
+
+def test_post_keeps_distinct_t_ct_rules_for_zero_id_deagle(api_env, monkeypatch):
+    """Regression: CT Hypnotic must not replace the T-side Blaze rule."""
+    client = api_env["client"]
+    demo_id = api_env["demo_id"]
+    db = api_env["db"]
+    original: Path = api_env["original"]
+    asyncio.run(
+        db.save_result(
+            str(original),
+            {
+                "analysis_workspace": {
+                    "cosmetics": {
+                        "players": {
+                            STEAM_ID: [
+                                _inventory_row(
+                                    catalog_id=0,
+                                    item_id=None,
+                                    def_index=1,
+                                    paint_index=0,
+                                    paint_seed=0,
+                                    paint_wear=0,
+                                    model="deagle",
+                                    name_en="Desert Eagle",
+                                    name_zh="沙漠之鹰",
+                                    observed_teams=["ct", "t"],
+                                )
+                            ]
+                        }
+                    }
+                }
+            },
+        )
+    )
+
+    def fake_rewrite(
+        *, input_dem, output_dem, steam_id64, items, demoparser2_python, timeout=600.0
+    ):
+        assert steam_id64 == STEAM_ID
+        assert [
+            (
+                row.get("item_id64"),
+                row.get("definition_index"),
+                row.get("team"),
+                row.get("paint_kit"),
+            )
+            for row in items
+        ] == [
+            ("0", 1, "CT", 61),
+            ("0", 1, "T", 37),
+        ]
+        Path(output_dem).write_bytes(b"SIDE-SCOPED-DEAGLE")
+        return {
+            "ok": True,
+            "sha256": "side-scoped",
+            "items_rewritten": 2,
+            "succeeded": [
+                {"item_id64": "0", "definition_index": 1, "team": "CT"},
+                {"item_id64": "0", "definition_index": 1, "team": "T"},
+            ],
+            "failed": [],
+        }
+
+    monkeypatch.setattr(cosmetics_skin, "run_rewrite_owned_batch", fake_rewrite)
+    response = client.post(
+        f"/api/demos/{demo_id}/cosmetics/custom-plan",
+        json={
+            "steamid": STEAM_ID,
+            "replacements": {
+                "ct:def:1:0:0:0": _replacement(
+                    catalog_id=69,
+                    def_index=1,
+                    paint_index=61,
+                    paint_seed=0,
+                    paint_wear=0,
+                    model="deagle",
+                    name_en="Desert Eagle | Hypnotic",
+                    name_zh="沙漠之鹰 | 蛊惑之色",
+                ),
+                "t:def:1:0:0:0": _replacement(
+                    catalog_id=67,
+                    def_index=1,
+                    paint_index=37,
+                    paint_seed=0,
+                    paint_wear=0,
+                    model="deagle",
+                    name_en="Desert Eagle | Blaze",
+                    name_zh="沙漠之鹰 | 炽烈之炎",
+                ),
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["ok"] is True
+    assert [row["slot_key"] for row in body["succeeded"]] == [
+        "ct:def:1:0:0:0",
+        "t:def:1:0:0:0",
+    ]
+    assert [entry["slot_key"] for entry in body["plan"]["items"]] == [
+        "ct:def:1:0:0:0",
+        "t:def:1:0:0:0",
+    ]
 
 
 def test_post_custom_plan_restores_cache_from_original_before_rewrite(api_env, monkeypatch):
@@ -755,16 +881,16 @@ def test_get_unknown_demo_returns_404(api_env):
 def test_post_calls_ensure_demo_compatible_before_rewrite(api_env, monkeypatch):
     order: list[str] = []
 
-    def fake_compat(path):
+    def fake_compat(source, _cache_dir):
         order.append("compat")
-        return type("R", (), {"cached": False, "path": path})()
+        return Path(source).resolve()
 
     def fake_rewrite(*, input_dem, output_dem, steam_id64, items, demoparser2_python, timeout=600.0):
         order.append("rewrite")
         Path(output_dem).write_bytes(b"OUT")
         return {"ok": True, "sha256": "x", "items_rewritten": 1}
 
-    monkeypatch.setattr(cosmetics_skin, "ensure_demo_compatible", fake_compat)
+    monkeypatch.setattr(cosmetics_skin, "ensure_compatible_baseline", fake_compat)
     monkeypatch.setattr(cosmetics_skin, "run_rewrite_owned_batch", fake_rewrite)
 
     response = api_env["client"].post(
@@ -773,3 +899,44 @@ def test_post_calls_ensure_demo_compatible_before_rewrite(api_env, monkeypatch):
     )
     assert response.status_code == 200
     assert order == ["compat", "rewrite"]
+
+
+def test_post_falls_back_to_one_shot_compat_when_baseline_cache_fails(
+    api_env,
+    monkeypatch,
+):
+    order: list[str] = []
+    original: Path = api_env["original"]
+    seen_input: Path | None = None
+
+    def broken_baseline(_source, _cache_dir):
+        order.append("baseline-failed")
+        raise OSError("cache unavailable")
+
+    def fake_compat(path):
+        order.append("fallback-compat")
+        candidate = Path(path)
+        assert candidate.read_bytes() == original.read_bytes()
+        candidate.write_bytes(candidate.read_bytes() + b"-COMPAT")
+        return type("R", (), {"cached": False, "path": path})()
+
+    def fake_rewrite(*, input_dem, output_dem, **_kwargs):
+        nonlocal seen_input
+        order.append("rewrite")
+        seen_input = Path(input_dem)
+        assert seen_input.read_bytes() == original.read_bytes() + b"-COMPAT"
+        Path(output_dem).write_bytes(b"OUT")
+        return {"ok": True, "sha256": "x", "items_rewritten": 1}
+
+    monkeypatch.setattr(cosmetics_skin, "ensure_compatible_baseline", broken_baseline)
+    monkeypatch.setattr(cosmetics_skin, "ensure_demo_compatible", fake_compat)
+    monkeypatch.setattr(cosmetics_skin, "run_rewrite_owned_batch", fake_rewrite)
+
+    response = api_env["client"].post(
+        f"/api/demos/{api_env['demo_id']}/cosmetics/custom-plan",
+        json={"steamid": STEAM_ID, "replacements": {"id:10": _replacement()}},
+    )
+
+    assert response.status_code == 200
+    assert order == ["baseline-failed", "fallback-compat", "rewrite"]
+    assert seen_input is not None and not seen_input.exists()

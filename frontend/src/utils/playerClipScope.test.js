@@ -33,6 +33,9 @@ describe("getPlayerClipScope", () => {
     expect(scope.queueableHighlights.map((clip) => clip.client_clip_uid)).toEqual([
       "sh1ro-h1",
     ]);
+    expect(scope.queueableFails.map((clip) => clip.client_clip_uid)).toEqual([
+      "sh1ro-f1",
+    ]);
   });
 
   it("recomputes the selection and highlight scope when the active tab changes", () => {
@@ -40,6 +43,7 @@ describe("getPlayerClipScope", () => {
 
     expect(scope.selectableClips.map((clip) => clip.client_clip_uid)).toEqual(["donk-h2"]);
     expect(scope.queueableHighlights.map((clip) => clip.client_clip_uid)).toEqual(["donk-h2"]);
+    expect(scope.queueableFails).toEqual([]);
   });
 
   it("returns an empty scope for a player without cached results", () => {
@@ -48,5 +52,6 @@ describe("getPlayerClipScope", () => {
     expect(scope.clips).toEqual([]);
     expect(scope.selectableClips).toEqual([]);
     expect(scope.queueableHighlights).toEqual([]);
+    expect(scope.queueableFails).toEqual([]);
   });
 });

@@ -11,11 +11,12 @@ import asyncio
 import logging
 import os
 import sys
+import threading
 import uuid
 from pathlib import Path
-from typing import Any
+from typing import Any, AsyncIterator
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from ..api_errors import error_detail
@@ -28,7 +29,7 @@ from ..cosmetics_skin_plan import (
 )
 from ..databases import demo_db
 from ..demo_cache import copy_original_to_temp_input, ensure_row_cached, file_md5
-from ..demo_compat_service import ensure_demo_compatible
+from ..demo_compat_service import ensure_compatible_baseline, ensure_demo_compatible
 from ..skin_core_client import SkinCoreError, SkinCoreNotFound, run_rewrite_owned_batch
 
 router = APIRouter(tags=["cosmetics-skin"])
@@ -38,6 +39,10 @@ _ERR_SKIN_CORE_UNAVAILABLE = "COSMETICS_SKIN_CORE_UNAVAILABLE"
 _ERR_SKIN_REWRITE_FAILED = "COSMETICS_SKIN_REWRITE_FAILED"
 _ERR_SKIN_ITEM_FAILED = "COSMETICS_SKIN_ITEM_FAILED"
 _ERR_DEMO_INCOMPLETE_FOR_SKIN_REWRITE = "COSMETICS_DEMO_INCOMPLETE_FOR_SKIN_REWRITE"
+_ERR_SKIN_REWRITE_IN_PROGRESS = "COSMETICS_SKIN_REWRITE_IN_PROGRESS"
+
+_active_demo_rewrites: set[int] = set()
+_active_demo_rewrites_lock = threading.Lock()
 
 _MISSING_REWRITE_METADATA_ERRORS = (
     "DEM_FileInfo header offset 0 is outside the demo",
@@ -52,6 +57,27 @@ class CustomSkinPlanBody(BaseModel):
     replacements: dict[str, Any] = Field(..., min_length=1)
     # First-seen demo skins per slot (UI snapshots). Optional; used for plan display.
     originals: dict[str, Any] | None = None
+
+
+async def _claim_demo_rewrite(demo_id: int) -> AsyncIterator[None]:
+    """Reject overlapping cache rewrites for the same demo.
+
+    The browser overlay prevents ordinary duplicate actions, while this server
+    guard also covers multiple windows/clients. Waiting would be unsafe because
+    a queued request may have been built from inventory that predates the first
+    rewrite, so concurrent attempts fail fast instead.
+    """
+
+    key = int(demo_id)
+    with _active_demo_rewrites_lock:
+        if key in _active_demo_rewrites:
+            raise HTTPException(409, error_detail(_ERR_SKIN_REWRITE_IN_PROGRESS))
+        _active_demo_rewrites.add(key)
+    try:
+        yield
+    finally:
+        with _active_demo_rewrites_lock:
+            _active_demo_rewrites.discard(key)
 
 
 def _inventory_for_steamid(result: dict[str, Any] | None, steamid: str) -> list[dict[str, Any]]:
@@ -80,6 +106,34 @@ def _cleanup_temp(path: Path) -> None:
         path.unlink(missing_ok=True)
     except OSError:
         logger.warning("Failed to remove skin rewrite temp: %s", path)
+
+
+def _prepare_compatible_skin_input(original: Path, cache_dir: Path) -> Path:
+    """Copy the persistent compatible baseline into an isolated skin-core input.
+
+    Baseline storage is an optimization only. If it cannot be read or published,
+    preserve the prior behavior by copying and repairing the library original.
+    """
+
+    try:
+        baseline = ensure_compatible_baseline(original, cache_dir)
+        return copy_original_to_temp_input(baseline, cache_dir)
+    except Exception:  # noqa: BLE001 - cache failures must not disable rewriting
+        if not original.is_file():
+            raise FileNotFoundError(f"Demo original missing: {original}")
+        logger.warning(
+            "Compatibility baseline unavailable; falling back to one-shot skin input: %s",
+            original,
+            exc_info=True,
+        )
+
+    temp_input = copy_original_to_temp_input(original, cache_dir)
+    try:
+        ensure_demo_compatible(temp_input)
+        return temp_input
+    except Exception:
+        _cleanup_temp(temp_input)
+        raise
 
 
 def _run_one_owned_batch(
@@ -181,11 +235,16 @@ async def get_custom_skin_plan(
 
 
 @router.post("/api/demos/{demo_id}/cosmetics/custom-plan")
-async def post_custom_skin_plan(demo_id: int, body: CustomSkinPlanBody):
+async def post_custom_skin_plan(
+    demo_id: int,
+    body: CustomSkinPlanBody,
+    _rewrite_claim: None = Depends(_claim_demo_rewrite),
+):
     """Rewrite the demo working cache for one player and upsert the display plan.
 
-    Always rebuilds from the library original so prior cache pollution cannot
-    compound. Re-applies every other stored plan for this demo first, then the
+    Always rebuilds from a source-bound compatible baseline of the library
+    original so prior cache pollution cannot compound. Re-applies every other
+    stored plan for this demo first, then the
     current player's batch — otherwise a second player's save would wipe the
     first player's demo edits.
 
@@ -270,14 +329,12 @@ async def post_custom_skin_plan(demo_id: int, body: CustomSkinPlanBody):
     try:
         try:
             temp_in = await asyncio.to_thread(
-                copy_original_to_temp_input,
+                _prepare_compatible_skin_input,
                 original,
                 cached_path.parent,
             )
         except FileNotFoundError as exc:
             raise HTTPException(404, str(exc)) from exc
-
-        await asyncio.to_thread(ensure_demo_compatible, temp_in)
 
         current_input = temp_in
         for other_steamid, other_batch in prior_passes:

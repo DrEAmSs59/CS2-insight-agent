@@ -11,7 +11,7 @@ import logging
 import math
 from typing import Any
 
-from .parser.cs2_item_catalog import resolve_cs2_item, resolve_cs2_item_by_catalog_id
+from .features.demo_analysis.cs2_item_catalog import resolve_cs2_item, resolve_cs2_item_by_catalog_id
 
 logger = logging.getLogger(__name__)
 
@@ -467,43 +467,11 @@ def build_batch_and_plan(
         "steamid": str(steamid),
         "items": plan_entries,
     }
-    return _dedupe_zero_id_weapon_batch_items(batch_items), plan_json
-
-
-def _dedupe_zero_id_weapon_batch_items(
-    batch_items: list[dict[str, Any]],
-) -> list[dict[str, Any]]:
-    """Collapse duplicate vanilla gun rules that only differ by T/CT team.
-
-    Cosmetics UI can show the same zero-id weapon on both sides; skin-core binds
-    one provenance entity. Keep the first paint and drop ``team`` when multiple
-    sides were requested so resolve matches whichever entity exists. Knife/glove
-    zero-id rules stay team-scoped (defs >= 500).
-    """
-    seen_def_index: dict[int, int] = {}
-    out: list[dict[str, Any]] = []
-    for item in batch_items:
-        if str(item.get("item_id64") or "") != "0":
-            out.append(item)
-            continue
-        try:
-            def_index = int(item["definition_index"])
-        except (KeyError, TypeError, ValueError):
-            out.append(item)
-            continue
-        # Knives (500–599) and gloves (>=5000) keep per-side materialize rules.
-        if def_index >= 500:
-            out.append(item)
-            continue
-        prior_idx = seen_def_index.get(def_index)
-        if prior_idx is None:
-            seen_def_index[def_index] = len(out)
-            out.append(dict(item))
-            continue
-        prior = out[prior_idx]
-        if prior.get("team") != item.get("team"):
-            prior.pop("team", None)
-    return out
+    # Keep every side-qualified rule, including vanilla weapons whose demo Econ
+    # item ID is zero. skin-core resolves those materialized slots by source
+    # definition + Pawn provenance + team, so collapsing CT/T here would discard
+    # one requested finish and apply the surviving finish to both sides.
+    return batch_items, plan_json
 
 
 def build_batch_from_plan_json(

@@ -17,6 +17,7 @@ from .env_utils import LLMConfig, llm_base_url_is_local_host
 from .llm_compat import (
     ai_review_fallback_message,
     completion_extra_body,
+    completion_temperature,
     message_text,
     normalize_llm_base_url,
 )
@@ -230,7 +231,7 @@ class AIReviewer:
                 {"role": "system", "content": select_reviewer_prompt(self._locale)},
                 {"role": "user", "content": user_content},
             ],
-            "temperature": 0.88,
+            "temperature": completion_temperature(self._model, self._base_url, 0.88),
             "max_tokens": 256,
         }
         extra_body = completion_extra_body(self._model, self._base_url)
@@ -299,7 +300,7 @@ class AIReviewer:
                         {"role": "system", "content": select_meme_montage_prompt(self._locale)},
                         {"role": "user", "content": user_content},
                     ],
-                    "temperature": 0.9,
+                    "temperature": completion_temperature(self._model, self._base_url, 0.9),
                     "max_tokens": 256,
                 }
                 extra_body = completion_extra_body(self._model, self._base_url)
@@ -361,7 +362,7 @@ class AIReviewer:
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_content},
             ],
-            "temperature": 0.4,
+            "temperature": completion_temperature(self._model, self._base_url, 0.4),
             "max_tokens": 300,
         }
         extra_body = completion_extra_body(self._model, self._base_url)

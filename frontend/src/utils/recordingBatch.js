@@ -82,7 +82,7 @@ export function buildBatchGroupsFromQueue(queue, globalPacing = {}) {
  * @param {unknown[]} [demoLibraryItems]
  */
 export function resolveMatchMetaForQueueItem(item, uploadedDemos, parsedMatches, demoLibraryItems) {
-  // 队列项自身携带了 match_meta（如从库页 DemoInfoModal 加入时），直接优先使用
+  // 队列项自身携带了 match_meta 时直接优先使用。
   if (item?.matchMeta && typeof item.matchMeta === "object") return item.matchMeta;
 
   const df = String(item.demoFilename || "").trim();

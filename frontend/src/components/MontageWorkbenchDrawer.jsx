@@ -1,13 +1,17 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import API, { API_BASE_URL } from "../api/api";
+import { desktopBridge } from "../desktop/desktopBridge.js";
 import { useMontageStore } from "../stores/montageStore";
+import MontageDraftPanel from "./montage/MontageDraftPanel";
 import MontageHistoryPanel from "./montage/MontageHistoryPanel";
 import FfmpegRequiredDialog from "./FfmpegRequiredDialog";
-import { Loader2 } from "lucide-react";
+import LiteCutExportProgressDialog from "../features/lite-cut/editor/LiteCutExportProgressDialog.jsx";
+import { ChevronDown, Loader2, SlidersHorizontal } from "lucide-react";
 import { useT } from "../i18n/useT.js";
 import { formatMontageApiError, humanizeMontageError } from "../utils/formatMontageApiError.js";
 import { ffmpegGateSubtitle } from "../utils/ffmpegGateMessages.js";
+import { isFrameMeldImagePath, summarizeFrameMeldSources } from "../utils/framemeld.js";
 import {
   MontageWorkbenchToolbar,
   MontageOrchestrationTimeline,
@@ -18,244 +22,13 @@ import {
   sortClipsByStrategy,
   ensureMp4Filename,
   stripMp4Extension,
-  normalizeClipType,
   getClipTitle,
   getClipDurationSeconds,
   formatMontageEstimate,
-  mapNameFromClip,
   getMontageTimelineVariant,
-  isTimelineSourceClip,
   derivePlayerAssetsFromClips,
 } from "../utils/montageUtils";
-
-const FILTER_TABS = [
-  { id: "all", labelKey: "montage.filterAll" },
-  { id: "highlight", labelKey: "montage.filterHighlight" },
-  { id: "timeline", labelKey: "montage.filterTimeline" },
-  { id: "fail", labelKey: "montage.filterFail" },
-  { id: "compilation", labelKey: "montage.filterCompilation" },
-  { id: "joined", labelKey: "montage.filterJoined" },
-  { id: "unjoined", labelKey: "montage.filterUnjoined" },
-];
-
-const DEFAULT_REL_EXPORT_DIR = "exports/montage";
-
-const TRANSITION_TYPES = [
-  { id: "none", labelKey: "montage.transitionNone" },
-  { id: "cut", labelKey: "montage.transitionCut" },
-  { id: "fade", labelKey: "montage.transitionFade" },
-  { id: "flash", labelKey: "montage.transitionFlash" },
-  { id: "dip_black", labelKey: "montage.transitionDipBlack" },
-  { id: "zoom", labelKey: "montage.transitionZoom" },
-];
-
-const DEFAULT_TRANSITION = { type: "cut", duration: 0.25 };
-
-/** 全局一键类型 /「统一时长」使用的固定秒数（不再单独暴露滑条） */
-const GLOBAL_TRANSITION_PRESET_SEC = 0.4;
-
-const GLOBAL_TRANSITION_TEMPLATES = [
-  { id: "esports", labelKey: "montage.templateEsports" },
-  { id: "film", labelKey: "montage.templateFilm" },
-  { id: "funny", labelKey: "montage.templateFunny" },
-  { id: "clean", labelKey: "montage.templateClean" },
-];
-
-const VALID_TRANSITION_TYPES = new Set(TRANSITION_TYPES.map((t) => t.id));
-
-function transitionTypeLabel(type, t) {
-  const found = TRANSITION_TYPES.find((tr) => tr.id === type);
-  return found ? t(found.labelKey) : t("montage.transitionCut");
-}
-
-function normalizeTransition(raw) {
-  const type = VALID_TRANSITION_TYPES.has(raw?.type) ? raw.type : DEFAULT_TRANSITION.type;
-  let duration = Number(raw?.duration);
-  if (!Number.isFinite(duration)) duration = DEFAULT_TRANSITION.duration;
-  if (type === "none") duration = 0;
-  else duration = Math.min(1.5, Math.max(0, duration));
-  return { type, duration };
-}
-
-function getEffectiveTransition(map, sourceClipId) {
-  const key = String(sourceClipId);
-  const raw = map?.[key];
-  return raw ? normalizeTransition(raw) : { ...DEFAULT_TRANSITION };
-}
-
-function formatTransitionNodeLine(map, sourceClipId, t) {
-  const tr = getEffectiveTransition(map, sourceClipId);
-  if (tr.type === "none") return t("montage.transitionNone");
-  const d = tr.duration;
-  const ds = Number.isInteger(d) ? String(d) : String(Math.round(d * 100) / 100);
-  return `${transitionTypeLabel(tr.type, t)} · ${ds}s`;
-}
-
-/** Only gaps between consecutive ordered clips (source = clip at index i). */
-function buildTransitionsPayload(orderedIds, transitionByClipId) {
-  const out = {};
-  for (let i = 0; i < orderedIds.length - 1; i++) {
-    const sid = orderedIds[i];
-    const key = String(sid);
-    out[key] = normalizeTransition(getEffectiveTransition(transitionByClipId, sid));
-  }
-  return out;
-}
-
-function hydrateTransitionsFromApi(raw) {
-  if (!raw || typeof raw !== "object") return {};
-  const out = {};
-  for (const [k, v] of Object.entries(raw)) {
-    if (v && typeof v === "object") out[String(k)] = normalizeTransition(v);
-  }
-  return out;
-}
-
-function pruneTransitionsToOrderedIds(prev, orderedIds) {
-  const allowed = new Set(orderedIds.map((id) => String(id)));
-  const next = {};
-  for (const [k, v] of Object.entries(prev || {})) {
-    if (allowed.has(k)) next[k] = v;
-  }
-  return next;
-}
-
-function buildGlobalTransitionStyleMap(styleId, orderedIds) {
-  const next = {};
-  const n = orderedIds.length;
-  for (let i = 0; i < n - 1; i++) {
-    const key = String(orderedIds[i]);
-    if (styleId === "esports") {
-      const useFlash = (i + 1) % 3 === 0;
-      next[key] = useFlash ? { type: "flash", duration: 0.25 } : { type: "cut", duration: 0.15 };
-    } else if (styleId === "film") {
-      next[key] = { type: "fade", duration: 0.4 };
-    } else if (styleId === "funny") {
-      next[key] = { type: "dip_black", duration: 0.6 };
-    } else if (styleId === "clean") {
-      next[key] = { type: "none", duration: 0 };
-    }
-  }
-  return next;
-}
-
-function buildTimestampMontageFilename() {
-  const now = new Date();
-  const y = now.getFullYear();
-  const m = String(now.getMonth() + 1).padStart(2, "0");
-  const d = String(now.getDate()).padStart(2, "0");
-  const h = String(now.getHours()).padStart(2, "0");
-  const min = String(now.getMinutes()).padStart(2, "0");
-  return `montage_${y}${m}${d}_${h}${min}.mp4`;
-}
-
-function clipBasename(clip) {
-  const p = clip?.output_path || "";
-  if (!p) return "";
-  const parts = String(p).split(/[/\\]/);
-  return parts[parts.length - 1] || "";
-}
-
-function dirnamePath(p) {
-  const s = String(p || "");
-  const i = Math.max(s.lastIndexOf("/"), s.lastIndexOf("\\"));
-  return i >= 0 ? s.slice(0, i) : "";
-}
-
-function joinPathSegments(base, ...segments) {
-  if (!base) return segments.join("/");
-  const sep = String(base).includes("\\") ? "\\" : "/";
-  let out = String(base).replace(/[/\\]+$/, "");
-  for (const seg of segments) {
-    const t = String(seg).replace(/^[/\\]+/, "");
-    if (t) out += sep + t;
-  }
-  return out;
-}
-
-/** Lowercase blob for weak template / filter matching (tolerates missing API fields). */
-function clipWeakBlob(clip) {
-  if (!clip || typeof clip !== "object") return "";
-  return [
-    clip.clip_id,
-    clipBasename(clip),
-    clip.demo_filename,
-    clip.timeline_source,
-    clip.category,
-    clip.compilation_kind,
-    clip.clip_type,
-    clip.type,
-    Array.isArray(clip.tags) ? clip.tags.join(" ") : clip.tags,
-  ]
-    .filter(Boolean)
-    .join(" ")
-    .toLowerCase();
-}
-
-function librarySearchMatch(clip, q) {
-  const k = (q || "").trim().toLowerCase();
-  if (!k) return true;
-  const idStr = clip?.clip_id != null ? String(clip.clip_id).toLowerCase() : "";
-  const fn = clipBasename(clip).toLowerCase();
-  const player = String(clip?.player_name || "").toLowerCase();
-  const map = String(mapNameFromClip(clip) || "").toLowerCase();
-  const tags = Array.isArray(clip?.context_tags) ? clip.context_tags.join(" ").toLowerCase() : "";
-  return fn.includes(k) || idStr.includes(k) || player.includes(k) || map.includes(k) || tags.includes(k);
-}
-
-function clipMatchesLibraryFilter(clip, filterKey, orderedIdSet) {
-  if (!clip || typeof clip !== "object") return false;
-  const id = clip.id;
-  if (filterKey === "joined") return orderedIdSet.has(id);
-  if (filterKey === "unjoined") return !orderedIdSet.has(id);
-  if (filterKey === "all") return true;
-  const t = normalizeClipType(clip);
-  const b = clipWeakBlob(clip);
-  const fn = clipBasename(clip);
-  if (filterKey === "highlight") {
-    if (isTimelineSourceClip(clip)) return false;
-    if (clip.category === "highlight") return true;
-    if (t === "高光") return true;
-    if (/\bhighlight\b|高光/.test(b)) return true;
-    const km = fn.match(/(\d+)k/i);
-    if (km) {
-      const n = parseInt(km[1], 10);
-      if (n >= 3 && n < 48) return true;
-    }
-    return false;
-  }
-  if (filterKey === "timeline") {
-    return isTimelineSourceClip(clip);
-  }
-  if (filterKey === "fail") {
-    if (clip.category === "fail" || clip.category === "meme_death") return true;
-    if (t === "下饭" || t === "梗死亡") return true;
-    if (/\bfail\b|下饭|meme_death|meme|funny|1d|电击/.test(b)) return true;
-    if (/[_-]1d[_-]/i.test(fn)) return true;
-    return false;
-  }
-  if (filterKey === "compilation") {
-    if (clip.category === "compilation") return true;
-    if (b.includes("compilation") || b.includes("合集")) return true;
-    if (/_\d+d_/i.test(fn)) return true;
-    const mk = fn.match(/(\d+)k/i);
-    if (mk && parseInt(mk[1], 10) >= 10) return true;
-    return false;
-  }
-  return true;
-}
-
-function montageToastFromError(e, t) {
-  return formatMontageApiError(e, t, t("montage.exportErrorGeneric"));
-}
-
-const FFMPEG_GATE_IDLE = {
-  loading: true,
-  blocked: false,
-  subtitle: "",
-  message: "",
-  framemeldAvailable: false,
-};
+import { DEFAULT_REL_EXPORT_DIR, FFMPEG_GATE_IDLE, FILTER_TABS, GLOBAL_TRANSITION_PRESET_SEC, GLOBAL_TRANSITION_TEMPLATES, TRANSITION_TYPES, buildGlobalTransitionStyleMap, buildTimestampMontageFilename, buildTransitionsPayload, clipBasename, clipMatchesLibraryFilter, dirnamePath, formatTransitionNodeLine, getEffectiveTransition, hydrateTransitionsFromApi, joinPathSegments, librarySearchMatch, montageToastFromError, normalizeTransition, transitionTypeLabel } from "./montage/montageWorkbenchUtils.js";
 
 export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer" }) {
   const t = useT();
@@ -273,11 +46,10 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
   const [outroPath, setOutroPath] = useState("");
   const [outroDuration, setOutroDuration] = useState(3);
   const [framemeldEnabled, setFrameMeldEnabled] = useState(false);
-  const handleFrameMeldEnabledChange = useCallback((enabled) => {
-    setFrameMeldEnabled(Boolean(enabled));
-  }, []);
   const [outputFilename, setOutputFilename] = useState(() => buildTimestampMontageFilename());
   const [outputDir, setOutputDir] = useState("");
+  const outputDirTouchedRef = useRef(false);
+  const persistedOutputDirRef = useRef(null);
   const exporting = useMontageStore((s) => s.exporting);
   const setExporting = useMontageStore((s) => s.setExporting);
   const lastExport = useMontageStore((s) => s.lastExport);
@@ -289,11 +61,13 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
   const [bgmVolume, setBgmVolume] = useState(70);
   const [filterKey, setFilterKey] = useState("all");
   const [searchQ, setSearchQ] = useState("");
+  const [poolControlsOpen, setPoolControlsOpen] = useState(false);
   const [toast, setToast] = useState(null);
   const [savingDraft, setSavingDraft] = useState(false);
   const [dragId, setDragId] = useState(null);
   const [transitionByClipId, setTransitionByClipId] = useState({});
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [draftsOpen, setDraftsOpen] = useState(false);
   const [deleteClipPrompt, setDeleteClipPrompt] = useState(null);
   const [batchDeleteLibraryPrompt, setBatchDeleteLibraryPrompt] = useState(null);
   const [librarySelectedIds, setLibrarySelectedIds] = useState(() => new Set());
@@ -305,12 +79,16 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
   const draftDirtyBoot = useRef(true);
   const [playerAvatars, setPlayerAvatars] = useState({}); // { [player_key]: { avatar_path, avatar_url } }
   const [nameCardsEnabled, setNameCardsEnabled] = useState(false);
+  const [exportJob, setExportJob] = useState(null);
+  const [exportDialog, setExportDialog] = useState({ phase: "idle", result: null, error: "" });
 
   const toastTimer = useRef(null);
 
-  const checkFfmpegGate = useCallback(async () => {
+  const checkFfmpegGate = useCallback(async ({ showLoading = true } = {}) => {
     if (!open && !isPage) return;
-    setFfmpegGate((prev) => ({ ...prev, loading: true }));
+    if (showLoading) {
+      setFfmpegGate((prev) => ({ ...prev, loading: true }));
+    }
     try {
       const { data } = await API.get("config/ffmpeg-check");
       if (data?.ok) {
@@ -346,14 +124,10 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
   }, [checkFfmpegGate, location.pathname]);
 
   useEffect(() => {
-    if (!ffmpegGate.loading && !ffmpegGate.framemeldAvailable && framemeldEnabled) {
-      setFrameMeldEnabled(false);
-    }
-  }, [ffmpegGate.framemeldAvailable, ffmpegGate.loading, framemeldEnabled]);
-
-  useEffect(() => {
     if (!open && !isPage) return;
-    const onFocus = () => void checkFfmpegGate();
+    // Restoring the app or returning from a native file picker should refresh
+    // FFmpeg capabilities without briefly covering the workbench.
+    const onFocus = () => void checkFfmpegGate({ showLoading: false });
     window.addEventListener("focus", onFocus);
     return () => window.removeEventListener("focus", onFocus);
   }, [open, isPage, checkFfmpegGate]);
@@ -366,6 +140,69 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
       toastTimer.current = null;
     }, 3200);
   }, []);
+
+  useEffect(() => {
+    if (!open && !isPage) return undefined;
+    let cancelled = false;
+    void API.get("/config")
+      .then(({ data }) => {
+        if (cancelled) return;
+        const savedDir = String(data?.montage_export_dir || "").trim();
+        persistedOutputDirRef.current = savedDir;
+        if (!outputDirTouchedRef.current) setOutputDir(savedDir);
+      })
+      .catch(() => {
+        // Export can still use its automatic directory when config loading fails.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, isPage]);
+
+  const persistOutputDir = useCallback(async (value) => {
+    const normalized = String(value || "").trim().replace(/[/\\]+$/, "");
+    if (persistedOutputDirRef.current === normalized) return true;
+    try {
+      await API.put("/config", { montage_export_dir: normalized });
+      persistedOutputDirRef.current = normalized;
+      return true;
+    } catch {
+      showToast(t("montage.toastExportDirPreferenceSaveFail"));
+      return false;
+    }
+  }, [showToast, t]);
+
+  const handleOutputDirChange = useCallback((value) => {
+    outputDirTouchedRef.current = true;
+    setOutputDir(value);
+  }, []);
+
+  const handleOutputDirCommit = useCallback(
+    () => persistOutputDir(outputDir),
+    [outputDir, persistOutputDir],
+  );
+
+  const handleOutputDirClear = useCallback(() => {
+    outputDirTouchedRef.current = true;
+    setOutputDir("");
+    void persistOutputDir("");
+  }, [persistOutputDir]);
+
+  const handleOutputDirBrowse = useCallback(async () => {
+    try {
+      const selected = await desktopBridge?.chooseDirectory(
+        outputDir.trim(),
+        t("montage.consoleExportDirBrowse"),
+      );
+      const selectedDir = String(selected || "").trim().replace(/[/\\]+$/, "");
+      if (!selectedDir) return;
+      outputDirTouchedRef.current = true;
+      setOutputDir(selectedDir);
+      await persistOutputDir(selectedDir);
+    } catch (e) {
+      showToast(montageToastFromError(e, t) || t("montage.toastDirectoryPickerUnavailable"));
+    }
+  }, [outputDir, persistOutputDir, showToast, t]);
 
   const handlePlayerAvatarChange = useCallback((playerKey, avatarPath, avatarUrl) => {
     setPlayerAvatars((prev) => ({
@@ -466,7 +303,6 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
     outroPath,
     outroDuration,
     outputFilename,
-    outputDir,
     selectedThemeId,
     draftName,
     bgmVolume,
@@ -484,6 +320,81 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
   const orderedIdSet = useMemo(() => new Set(orderedIds), [orderedIds]);
 
   const orderedClips = useMemo(() => orderedIds.map((id) => byId.get(id)).filter(Boolean), [orderedIds, byId]);
+
+  const supplementalFrameMeldPaths = useMemo(
+    () => [introPath, outroPath]
+      .map((value) => String(value || "").trim())
+      .filter((value) => value && !isFrameMeldImagePath(value)),
+    [introPath, outroPath],
+  );
+  const supplementalFrameMeldKey = useMemo(
+    () => JSON.stringify(supplementalFrameMeldPaths),
+    [supplementalFrameMeldPaths],
+  );
+  const [supplementalFrameMeldProbe, setSupplementalFrameMeldProbe] = useState({ key: "[]", items: [] });
+
+  useEffect(() => {
+    let cancelled = false;
+    if (supplementalFrameMeldPaths.length === 0) {
+      setSupplementalFrameMeldProbe({ key: supplementalFrameMeldKey, items: [] });
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    const pendingItems = supplementalFrameMeldPaths.map((path) => ({ path, fps: null }));
+    setSupplementalFrameMeldProbe({ key: supplementalFrameMeldKey, items: pendingItems });
+    const timerId = window.setTimeout(() => {
+      void API.post("/montage/media-fps", { paths: supplementalFrameMeldPaths })
+        .then(({ data }) => {
+          if (cancelled) return;
+          const probedByPath = new Map(
+            (Array.isArray(data?.items) ? data.items : []).map((item) => [String(item?.path || ""), item]),
+          );
+          setSupplementalFrameMeldProbe({
+            key: supplementalFrameMeldKey,
+            items: supplementalFrameMeldPaths.map((path) => ({
+              path,
+              fps: probedByPath.get(path)?.fps ?? null,
+            })),
+          });
+        })
+        .catch(() => {
+          if (!cancelled) {
+            setSupplementalFrameMeldProbe({ key: supplementalFrameMeldKey, items: pendingItems });
+          }
+        });
+    }, 150);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timerId);
+    };
+  }, [supplementalFrameMeldKey, supplementalFrameMeldPaths]);
+
+  const supplementalFrameMeldItems = useMemo(
+    () => supplementalFrameMeldProbe.key === supplementalFrameMeldKey
+      ? supplementalFrameMeldProbe.items
+      : supplementalFrameMeldPaths.map((path) => ({ path, fps: null })),
+    [supplementalFrameMeldKey, supplementalFrameMeldPaths, supplementalFrameMeldProbe],
+  );
+  const framemeldSourceSummary = useMemo(
+    () => summarizeFrameMeldSources([...orderedClips, ...supplementalFrameMeldItems]),
+    [orderedClips, supplementalFrameMeldItems],
+  );
+  const framemeldCanEnable = !ffmpegGate.loading
+    && ffmpegGate.framemeldAvailable
+    && framemeldSourceSummary.compatible;
+  const effectiveFrameMeldEnabled = framemeldCanEnable && framemeldEnabled;
+
+  useEffect(() => {
+    if (framemeldEnabled && !framemeldCanEnable) {
+      setFrameMeldEnabled(false);
+    }
+  }, [framemeldCanEnable, framemeldEnabled]);
+
+  const handleFrameMeldEnabledChange = useCallback((enabled) => {
+    setFrameMeldEnabled(Boolean(enabled) && framemeldCanEnable);
+  }, [framemeldCanEnable]);
 
   const unknownDurationHint = useMemo(() => {
     if (orderedClips.length === 0) return null;
@@ -782,12 +693,13 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
     return null;
   }, [orderedIds.length, outputFilename, effectiveOutputDir, t]);
 
-  const saveDraft = useCallback(async () => {
+  const saveDraft = useCallback(async (nameOverride = "") => {
+    const requestedName = String(nameOverride || "").trim();
     const effectiveName =
-      draftName.trim() || stripMp4Extension(outputFilename).trim() || outputFilename.trim();
+      requestedName || draftName.trim() || stripMp4Extension(outputFilename).trim() || outputFilename.trim();
     if (!effectiveName) {
       showToast(t("montage.toastNeedDraftName"));
-      return;
+      return false;
     }
     setSavingDraft(true);
     try {
@@ -815,7 +727,7 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
         bgm_volume: bgmVolume / 100,
         player_avatars: playerAvatarsPayload,
         name_cards_enabled: nameCardsEnabled,
-        framemeld_enabled: framemeldEnabled,
+        framemeld_enabled: effectiveFrameMeldEnabled,
       });
       setProjectId(data.id);
       if (data?.body?.transitions && typeof data.body.transitions === "object") {
@@ -850,13 +762,16 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
         setNameCardsEnabled(data.body.name_cards_enabled);
       }
       if (typeof data?.body?.framemeld_enabled === "boolean") {
-        setFrameMeldEnabled(data.body.framemeld_enabled);
+        setFrameMeldEnabled(Boolean(data.body.framemeld_enabled) && framemeldCanEnable);
       }
+      if (requestedName) setDraftName(requestedName);
       setDraftDirty(false);
       setLastDraftSavedAt(Date.now());
       showToast(t("montage.toastDraftSaved"));
+      return true;
     } catch (e) {
       showToast(montageToastFromError(e, t) || t("montage.toastDraftSaveFail"));
+      return false;
     } finally {
       setSavingDraft(false);
     }
@@ -878,9 +793,80 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
     bgmVolume,
     playerAvatars,
     nameCardsEnabled,
-    framemeldEnabled,
+    effectiveFrameMeldEnabled,
+    framemeldCanEnable,
     t,
   ]);
+
+  const loadDraft = useCallback(async (draft) => {
+    const body = draft?.body && typeof draft.body === "object" ? draft.body : null;
+    if (!body) {
+      showToast(t("montage.draftsOpenFailed"));
+      return false;
+    }
+    if (draftDirty && !window.confirm(t("montage.draftsReplaceConfirm"))) return false;
+
+    const draftClipIds = Array.isArray(body.recorded_clip_ids)
+      ? body.recorded_clip_ids
+        .map((value) => Number(value))
+        .filter((value) => Number.isInteger(value) && value > 0)
+      : [];
+    const uniqueClipIds = [...new Set(draftClipIds)];
+    const availableClipIds = uniqueClipIds.filter((id) => byId.has(id));
+    const missingClipCount = uniqueClipIds.length - availableClipIds.length;
+    const nextAvatars = {};
+    if (Array.isArray(body.player_avatars)) {
+      for (const avatar of body.player_avatars) {
+        if (!avatar?.player_key) continue;
+        const filename = String(avatar.avatar_path || "")
+          .replace(/\\/g, "/")
+          .split("/")
+          .pop();
+        nextAvatars[avatar.player_key] = {
+          avatar_path: avatar.avatar_path || null,
+          avatar_url: filename ? `${API_BASE_URL}/api/montage/avatars/${filename}` : null,
+        };
+      }
+    }
+    const numberOr = (value, fallback, minimum = 0) => {
+      const parsed = Number(value);
+      return Number.isFinite(parsed) && parsed >= minimum ? parsed : fallback;
+    };
+
+    // Applying a saved project changes many controlled fields at once. Skip the
+    // dirty-state effect for this render so the freshly opened draft is clean.
+    draftDirtyBoot.current = true;
+    setProjectId(Number(draft.id));
+    setDraftName(String(draft.name || ""));
+    setOrderedIds(availableClipIds);
+    setTransitionByClipId(hydrateTransitionsFromApi(body.transitions));
+    setBgmPath(String(body.bgm_path || ""));
+    setBgmStartSec(numberOr(body.bgm_start_sec, 0));
+    setIntroPath(String(body.intro_path || ""));
+    setIntroDuration(numberOr(body.intro_image_duration, 3, 1));
+    setOutroPath(String(body.outro_path || ""));
+    setOutroDuration(numberOr(body.outro_image_duration, 3, 1));
+    setOutputFilename(String(body.output_filename || "montage_export.mp4"));
+    setSelectedThemeId(String(body.theme_id || "custom"));
+    setBgmVolume(Math.round(Math.max(0, Math.min(2, numberOr(body.bgm_volume, 0.7))) * 100));
+    setPlayerAvatars(nextAvatars);
+    setNameCardsEnabled(Boolean(body.name_cards_enabled));
+    setFrameMeldEnabled(Boolean(body.framemeld_enabled));
+    setSelectedTimelineClipId(null);
+    setTimelineMultiSelectedIds(new Set());
+    setTransitionEdgeSourceId(null);
+    setLastExport(null);
+    setDraftDirty(false);
+    const updatedAt = Date.parse(String(draft.updated_at || ""));
+    setLastDraftSavedAt(Number.isFinite(updatedAt) ? updatedAt : Date.now());
+
+    showToast(
+      missingClipCount > 0
+        ? t("montage.draftsLoadedWithMissing", { n: missingClipCount })
+        : t("montage.draftsLoaded"),
+    );
+    return true;
+  }, [byId, draftDirty, setLastExport, showToast, t]);
 
   const runExport = useCallback(async () => {
     const err = validateExport();
@@ -892,8 +878,15 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
     const fn = ensureMp4Filename(outputFilename.trim());
     const sep = dir.includes("\\") ? "\\" : "/";
     const outPath = dir.replace(/[/\\]+$/, "") + sep + fn;
+    await persistOutputDir(outputDir);
     setExporting(true);
     setLastExport(null);
+    setExportJob(null);
+    setExportDialog({
+      phase: "running",
+      result: { progress: 0, stage: "queued", output_path: outPath },
+      error: "",
+    });
     try {
       const playerList = derivePlayerAssetsFromClips(orderedClips);
       const playerAvatarsPayload = playerList.map((p) => ({
@@ -919,15 +912,16 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
         theme_id: selectedThemeId,
         player_avatars: playerAvatarsPayload,
         name_cards_enabled: nameCardsEnabled,
-        framemeld_enabled: framemeldEnabled,
+        framemeld_enabled: effectiveFrameMeldEnabled,
       });
-      setLastExport({ ok: true, ...data });
-      showToast(t("montage.toastExportComplete"));
+      const next = { ...data, output_path: data?.output_path || outPath };
+      setExportJob(next);
+      setExportDialog({ phase: "running", result: next, error: "" });
     } catch (e) {
       const errMsg = formatMontageApiError(e, t, t("montage.exportErrorGeneric"));
       setLastExport({ ok: false, err: errMsg });
+      setExportDialog({ phase: "error", result: null, error: errMsg });
       showToast(errMsg);
-    } finally {
       setExporting(false);
     }
   }, [
@@ -944,15 +938,82 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
     outroPath,
     outroDuration,
     effectiveOutputDir,
+    outputDir,
     outputFilename,
+    persistOutputDir,
     selectedThemeId,
     bgmVolume,
     playerAvatars,
     nameCardsEnabled,
-    framemeldEnabled,
+    effectiveFrameMeldEnabled,
     showToast,
     t,
   ]);
+
+  useEffect(() => {
+    if (!exporting || !exportJob?.export_id) return undefined;
+    let stopped = false;
+    let intervalId = null;
+
+    const poll = async () => {
+      try {
+        const { data: next } = await API.get(`/montage/exports/${encodeURIComponent(String(exportJob.export_id))}`);
+        if (stopped) return;
+        setExportJob(next);
+        if (next?.status === "done") {
+          setExporting(false);
+          setLastExport({ ok: true, ...next });
+          setExportDialog({ phase: "done", result: next, error: "" });
+          showToast(t("montage.toastExportComplete"));
+          return;
+        }
+        if (next?.status === "error") {
+          const errMsg = humanizeMontageError(next?.error, t);
+          setExporting(false);
+          setLastExport({ ok: false, err: errMsg });
+          setExportDialog({ phase: "error", result: next, error: errMsg });
+          showToast(errMsg);
+          return;
+        }
+        if (next?.status === "cancelled") {
+          setExporting(false);
+          setLastExport(null);
+          setExportDialog({ phase: "cancelled", result: next, error: "" });
+          return;
+        }
+        setExportDialog({ phase: "running", result: next, error: "" });
+      } catch (e) {
+        if (stopped) return;
+        const errMsg = formatMontageApiError(e, t, t("montage.exportErrorGeneric"));
+        setExporting(false);
+        setLastExport({ ok: false, err: errMsg });
+        setExportDialog({ phase: "error", result: null, error: errMsg });
+        showToast(errMsg);
+      }
+    };
+
+    void poll();
+    intervalId = window.setInterval(() => void poll(), 1000);
+    return () => {
+      stopped = true;
+      if (intervalId) window.clearInterval(intervalId);
+    };
+  }, [exporting, exportJob?.export_id, setExporting, setLastExport, showToast, t]);
+
+  const handleCancelExport = useCallback(async () => {
+    const exportId = exportJob?.export_id || exportDialog.result?.export_id;
+    if (!exportId) return;
+    try {
+      const { data: next } = await API.post(
+        `/montage/exports/${encodeURIComponent(String(exportId))}/cancel`,
+      );
+      setExportJob(next);
+      setExportDialog({ phase: "running", result: next, error: "" });
+    } catch (e) {
+      const errMsg = formatMontageApiError(e, t, t("montage.exportErrorGeneric"));
+      showToast(errMsg);
+    }
+  }, [exportDialog.result?.export_id, exportJob?.export_id, showToast, t]);
 
   const copyText = useCallback(
     async (text) => {
@@ -1198,7 +1259,7 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
   const exportDirForButton = exportOk ? dirnamePath(lastExport.output_path) : "";
 
   const shellClass = isPage
-    ? "montage-workbench-shell flex h-full min-h-0 w-full min-w-0 flex-1 flex-col overflow-hidden rounded-lg border border-cs2-border"
+    ? "montage-workbench-shell flex h-full min-h-0 w-full min-w-0 flex-1 flex-col gap-2 overflow-hidden"
     : "flex h-full w-[min(1680px,99vw)] flex-col border-l border-cs2-border bg-cs2-bg-card shadow-2xl";
 
   const inner = (
@@ -1228,50 +1289,61 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
           montageTitle={displayMontageTitle}
           subtitle={t("montage.workbenchSubtitle")}
           autosaveLabel={autosaveStatusLabel}
+          poolSelectedCount={librarySelectedIds.size}
+          poolStats={libraryPoolStats}
           onClose={onClose}
           onAutoSort={() => handleSort("highlight_first")}
           onTimelineSort={() => handleSort("timeline")}
           onRhythmSort={() => handleSort("rhythm")}
           onRandomSort={() => handleSort("random")}
           onReverseOrder={handleReverseOrder}
-          onSaveDraft={() => void saveDraft()}
+          onSaveDraft={saveDraft}
           savingDraft={savingDraft}
+          saveDraftNameFallback={displayMontageTitle}
           onHistory={() => setHistoryOpen(true)}
+          onDrafts={() => setDraftsOpen(true)}
         />
         <MontageHistoryPanel open={historyOpen} onClose={() => setHistoryOpen(false)} />
+        <MontageDraftPanel
+          open={draftsOpen}
+          onClose={() => setDraftsOpen(false)}
+          onOpenDraft={loadDraft}
+          onDeleteDraft={(deletedId) => {
+            if (Number(deletedId) === projectId) setProjectId(null);
+          }}
+        />
 
-        {toast ? (
-          <div className="border-b border-emerald-500/30 bg-cs2-emerald-surface px-4 py-2.5 text-center text-xs font-medium text-cs2-emerald-on-surface">
-            {toast}
-          </div>
-        ) : null}
-
-        <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-          <div className="montage-workbench-grid min-h-0 min-w-0 flex-1 gap-0">
+        <div
+          data-testid="montage-workbench-content-card"
+          className="flex min-h-0 min-w-0 flex-1 flex-col gap-2 overflow-hidden"
+        >
+          {toast ? (
+            <div className="border-b border-emerald-500/30 bg-cs2-emerald-surface px-4 py-2.5 text-center text-xs font-medium text-cs2-emerald-on-surface">
+              {toast}
+            </div>
+          ) : null}
+          <div className="montage-workbench-grid min-h-0 min-w-0 flex-1 gap-2">
             {/* 左侧素材池 */}
-            <aside className="montage-workbench-panel montage-workbench-pool flex min-h-0 min-w-0 flex-col border-cs2-border bg-cs2-bg-card xl:border-r">
-              <div className="shrink-0 border-b border-cs2-border p-4">
-                <div className="flex items-baseline justify-between gap-2">
-                  <p className="text-xs font-bold uppercase tracking-wide text-cs2-text-muted">{t("montage.poolTitle")}</p>
-                  {librarySelectedIds.size > 0 ? (
-                    <span className="rounded-md border border-cs2-accent/40 bg-cs2-accent/12 px-2 py-0.5 text-xs font-bold text-cs2-accent">
-                      {t("montage.poolSelectedCount", { n: librarySelectedIds.size })}
-                    </span>
-                  ) : (
-                    <span className="text-xs text-cs2-text-muted font-medium">{t("montage.poolMultiSelectReady")}</span>
-                  )}
-                </div>
-                <p className="mt-2.5 rounded-lg border border-cs2-border-subtle bg-cs2-surface-1 p-3 text-xs leading-relaxed text-cs2-text-secondary">
-                  <span className="font-bold text-cs2-text-primary">{t("montage.poolBatchHintTitle")}</span>
-                  <kbd className="rounded border border-cs2-border bg-cs2-bg-input px-1.5 py-0.5 font-mono text-xs">Ctrl</kbd>{" / "}
-                  <kbd className="rounded border border-cs2-border bg-cs2-bg-input px-1.5 py-0.5 font-mono text-xs">⌘</kbd>{" "}
-                  {t("montage.poolBatchHintBody")}
-                </p>
-                <p className="mt-2.5 font-mono text-xs text-cs2-text-muted">
-                  {t("montage.poolStats", { count: libraryPoolStats.count, total: libraryPoolStats.totalLabel, avg: libraryPoolStats.avgLabel })}
-                </p>
-              </div>
-              <div className="shrink-0 space-y-3 border-b border-cs2-border p-3.5">
+            <aside className="montage-workbench-panel montage-workbench-pool flex min-h-0 min-w-0 flex-col gap-2">
+              <div data-testid="montage-pool-filters-card" className="shrink-0 overflow-hidden rounded-[10px] border border-cs2-border bg-cs2-bg-card">
+                <button
+                  type="button"
+                  data-testid="montage-pool-controls-toggle"
+                  aria-expanded={poolControlsOpen}
+                  onClick={() => setPoolControlsOpen((value) => !value)}
+                  className="flex w-full items-center justify-between gap-3 px-3.5 py-3 text-left transition-colors hover:bg-cs2-bg-hover"
+                >
+                  <span className="flex min-w-0 items-center gap-2 text-xs font-bold text-cs2-text-primary">
+                    <SlidersHorizontal className="h-3.5 w-3.5 shrink-0 text-cs2-accent" />
+                    <span className="truncate">{t("montage.poolControlsTitle")}</span>
+                  </span>
+                  <span className="flex shrink-0 items-center gap-2">
+                    <span className="font-mono text-[10px] text-cs2-text-muted">{t("montage.poolControlsCount", { n: filteredLibrary.length })}</span>
+                    <ChevronDown className={`h-4 w-4 text-cs2-text-muted transition-transform ${poolControlsOpen ? "rotate-180" : ""}`} />
+                  </span>
+                </button>
+                {poolControlsOpen ? (
+                  <div data-testid="montage-pool-controls-body" className="space-y-3 border-t border-cs2-border p-3.5">
                 <div className="flex flex-wrap gap-1.5">
                   {FILTER_TABS.map((f) => (
                     <button
@@ -1330,8 +1402,10 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
                     {t("montage.poolBatchDeleteBtn", { n: librarySelectedIds.size })}
                   </button>
                 </div>
+                  </div>
+                ) : null}
               </div>
-              <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-3 pt-2">
+              <div data-testid="montage-pool-list-card" className="min-h-0 flex-1 overflow-y-auto rounded-[10px] border border-cs2-border bg-cs2-bg-card px-2 pb-3 pt-2">
                 {loading ? (
                   <div className="flex items-center gap-2 py-10 text-xs text-cs2-text-secondary">
                     <Loader2 className="h-4 w-4 animate-spin" />
@@ -1368,9 +1442,9 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
             </aside>
 
             {/* 中间：合集结构（编排主线） */}
-            <section className="montage-workbench-panel montage-workbench-orchestration flex min-h-0 min-w-0 flex-1 flex-col gap-2 overflow-hidden border-cs2-border bg-cs2-bg-page px-3 py-3 xl:border-r">
+            <section data-testid="montage-orchestration-card" className="montage-workbench-panel montage-workbench-orchestration flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-[10px] border border-cs2-border bg-cs2-bg-card">
               {unknownDurationHint ? (
-                <p className="shrink-0 text-xs font-medium text-cs2-amber-on-surface bg-amber-500/10 px-3 py-1.5 rounded-lg border border-amber-500/20">{unknownDurationHint}</p>
+                <p className="mx-3 mt-3 shrink-0 rounded-lg border border-amber-500/20 bg-amber-500/10 px-3 py-1.5 text-xs font-medium text-cs2-amber-on-surface">{unknownDurationHint}</p>
               ) : null}
               <MontageOrchestrationTimeline
                 clips={orderedClips}
@@ -1406,7 +1480,7 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
             </section>
 
             {/* 右侧：合辑成片控制台 */}
-            <div className="montage-workbench-panel montage-workbench-console flex min-h-0 min-w-0 flex-col overflow-hidden border-cs2-border xl:border-l xl:bg-cs2-bg-card">
+            <div data-testid="montage-console-card" className="montage-workbench-panel montage-workbench-console flex min-h-0 min-w-0 flex-col overflow-hidden rounded-[10px] border border-cs2-border bg-cs2-bg-card">
               <MontageStyleConsole
                 bgmPath={bgmPath}
                 onBgmPathChange={setBgmPath}
@@ -1432,21 +1506,17 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
                 resolutionLabel={t("montage.resolutionLabel")}
                 exporting={exporting}
                 onExport={() => void runExport()}
-                onSaveDraft={() => void saveDraft()}
-                savingDraft={savingDraft}
                 exportReady={exportReady}
                 fullOutputPathPreview={fullOutputPathPreview}
                 outputFilename={outputFilename}
                 onOutputFilenameChange={setOutputFilename}
                 defaultFilenamePlaceholder={buildTimestampMontageFilename()}
-                draftName={draftName}
-                onDraftNameChange={setDraftName}
-                draftNamePlaceholder={stripMp4Extension(outputFilename) || t("montage.exportDraftNamePlaceholderDefault")}
                 outputDir={outputDir}
-                onOutputDirChange={setOutputDir}
-                onOutputDirClear={() => setOutputDir("")}
+                onOutputDirChange={handleOutputDirChange}
+                onOutputDirCommit={handleOutputDirCommit}
+                onOutputDirBrowse={handleOutputDirBrowse}
+                onOutputDirClear={handleOutputDirClear}
                 effectiveOutputDirHint={!outputDir.trim() && effectiveOutputDir ? effectiveOutputDir : ""}
-                exportingBanner={exporting}
                 exportOk={exportOk}
                 lastExport={lastExport}
                 exportDirForButton={exportDirForButton}
@@ -1457,8 +1527,9 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
                 nameCardsEnabled={nameCardsEnabled}
                 onPlayerAvatarChange={handlePlayerAvatarChange}
                 onNameCardsEnabledChange={setNameCardsEnabled}
-                framemeldEnabled={framemeldEnabled}
+                framemeldEnabled={effectiveFrameMeldEnabled}
                 framemeldRuntimeAvailable={ffmpegGate.framemeldAvailable}
+                framemeldSourceSummary={framemeldSourceSummary}
                 onFrameMeldEnabledChange={handleFrameMeldEnabledChange}
               />
             </div>
@@ -1555,6 +1626,14 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
           </div>
         </div>
       ) : null}
+      <LiteCutExportProgressDialog
+        variant="montage"
+        phase={exportDialog.phase}
+        result={exportDialog.result}
+        error={exportDialog.error}
+        onClose={() => setExportDialog({ phase: "idle", result: null, error: "" })}
+        onCancel={() => void handleCancelExport()}
+      />
     </>
   );
 

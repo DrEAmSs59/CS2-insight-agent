@@ -3,6 +3,9 @@ import {
   Copy,
   Check,
   CheckCircle2,
+  ChevronDown,
+  CircleAlert,
+  FileOutput,
   FolderOpen,
   Loader2,
   Music,
@@ -92,7 +95,7 @@ function MediaVideoSlotCard({
               const v = parseFloat(e.target.value);
               if (Number.isFinite(v) && v >= 1) onImageDurationChange?.(v);
             }}
-            className="w-16 rounded-lg border border-cs2-border-subtle bg-cs2-bg-input px-2 py-1 font-mono text-xs text-cs2-text-primary outline-none focus:border-violet-400"
+            className="w-16 rounded-lg border border-cs2-border-subtle bg-cs2-bg-input px-2 py-1 font-mono text-xs text-cs2-text-primary outline-none focus:border-cs2-accent"
           />
           <span className="text-xs text-cs2-text-muted">{t("montage.consoleMediaSlotSec")}</span>
         </div>
@@ -128,20 +131,19 @@ function MediaVideoSlotCard({
   );
 }
 
-function ExportCheckRow({ ok, optional, label }) {
+function ExportCheckRow({ ok, label }) {
   const t = useT();
-  const dot =
-    ok === true ? "bg-emerald-400" : optional ? "bg-amber-400" : "bg-zinc-500";
-  const text = ok === true
-    ? t("montage.exportCheckDone")
-    : optional
-      ? t("montage.exportCheckOptionalEmpty")
-      : t("montage.exportCheckRequiredEmpty");
   return (
-    <div className="flex items-center gap-2.5 text-xs text-cs2-text-secondary py-0.5">
-      <span className={`h-2 w-2 shrink-0 rounded-full ${dot}`} title={text} />
-      <span className="text-cs2-text-secondary font-medium">{label}</span>
-      <span className="ml-auto text-cs2-text-muted">{text}</span>
+    <div className="flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-xs">
+      {ok ? (
+        <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-400" aria-hidden />
+      ) : (
+        <CircleAlert className="h-4 w-4 shrink-0 text-amber-400" aria-hidden />
+      )}
+      <span className={ok ? "font-medium text-cs2-text-secondary" : "font-medium text-cs2-text-primary"}>{label}</span>
+      <span className={`ml-auto shrink-0 ${ok ? "text-emerald-400" : "text-amber-300"}`}>
+        {ok ? t("montage.exportCheckDone") : t("montage.exportCheckRequiredEmpty")}
+      </span>
     </div>
   );
 }
@@ -173,19 +175,16 @@ export function MontageStyleConsole({
   resolutionLabel,
   exporting,
   onExport,
-  onSaveDraft,
-  savingDraft,
   exportReady,
   fullOutputPathPreview,
   // technical / collapsed
   outputFilename,
   onOutputFilenameChange,
   defaultFilenamePlaceholder,
-  draftName,
-  onDraftNameChange,
-  draftNamePlaceholder,
   outputDir,
   onOutputDirChange,
+  onOutputDirCommit,
+  onOutputDirBrowse,
   onOutputDirClear,
   effectiveOutputDirHint,
   exportingBanner,
@@ -202,10 +201,11 @@ export function MontageStyleConsole({
   onNameCardsEnabledChange,
   framemeldEnabled,
   framemeldRuntimeAvailable = false,
+  framemeldSourceSummary: providedFrameMeldSourceSummary,
   onFrameMeldEnabledChange,
 }) {
   const t = useT();
-  const framemeldSourceSummary = summarizeFrameMeldSources(clips || []);
+  const framemeldSourceSummary = providedFrameMeldSourceSummary || summarizeFrameMeldSources(clips || []);
   const framemeldAvailable = framemeldRuntimeAvailable && framemeldSourceSummary.compatible;
   const framemeldActive = framemeldAvailable && Boolean(framemeldEnabled);
   const framemeldBlockedReason = !framemeldRuntimeAvailable
@@ -223,6 +223,19 @@ export function MontageStyleConsole({
   const nameCardsFilled = Boolean(nameCardsEnabled);
   const readyTag =
     exportReady !== undefined && exportReady !== null ? Boolean(exportReady) : dirOk && nameOk && Number(clipCount) > 0;
+  const requiredChecks = [
+    { id: "clips", ok: Number(clipCount) > 0, label: t("montage.consoleExportCheckClips") },
+    { id: "name", ok: nameOk, label: t("montage.consoleExportCheckName") },
+    { id: "dir", ok: dirOk, label: t("montage.consoleExportCheckDir") },
+  ];
+  const requiredDone = requiredChecks.filter((item) => item.ok).length;
+  const optionalItems = [
+    { id: "bgm", active: bgmFilled, label: t("montage.exportChecklistBgm") },
+    { id: "intro", active: introFilled, label: t("montage.exportChecklistIntro") },
+    { id: "outro", active: outroFilled, label: t("montage.exportChecklistOutro") },
+    { id: "cards", active: nameCardsFilled, label: t("montage.consoleExportOptionalNameCards") },
+  ];
+  const optionalActiveCount = optionalItems.filter((item) => item.active).length;
 
   const [activeTab, setActiveTab] = useState("media");
   const tabItems = [
@@ -232,7 +245,7 @@ export function MontageStyleConsole({
   ];
 
   return (
-    <aside className="flex min-h-0 w-full min-w-0 flex-col border-cs2-border bg-cs2-surface-1 xl:border-l">
+    <aside className="flex min-h-0 w-full min-w-0 flex-col bg-transparent">
       <div className="shrink-0 border-b border-cs2-border-subtle p-4">
         <p className="text-sm font-bold text-cs2-text-primary tracking-wide">{t("montage.consoleTitle")}</p>
         <div className="mt-3 flex gap-1.5">
@@ -329,7 +342,7 @@ export function MontageStyleConsole({
               }}
             >
               <div className="flex items-center gap-2">
-                <Music className="h-4 w-4 shrink-0 text-violet-400" aria-hidden />
+                <Music className="h-4 w-4 shrink-0 text-cs2-accent" aria-hidden />
                 <p className="text-xs font-bold text-cs2-text-secondary">{t("montage.consoleBgmTitle")}</p>
                 {bgmPath.trim() ? (
                   <p className="ml-auto max-w-[14rem] truncate font-mono text-xs text-cs2-text-secondary" title={bgmPath}>
@@ -342,7 +355,7 @@ export function MontageStyleConsole({
               <div className="mt-3">
                 <div className="flex items-center justify-between gap-2 text-xs text-cs2-text-muted">
                   <span>{t("montage.consoleBgmVolume")}</span>
-                  <span className="font-mono font-bold text-violet-400">{bgmVolume}%</span>
+                  <span className="font-mono font-bold text-cs2-accent">{bgmVolume}%</span>
                 </div>
                 <input
                   type="range"
@@ -350,7 +363,11 @@ export function MontageStyleConsole({
                   max={100}
                   value={bgmVolume}
                   onChange={(e) => onBgmVolumeChange(Number(e.target.value))}
-                  className="mt-1.5 h-2 w-full rounded-lg bg-cs2-bg-input accent-violet-400 cursor-pointer"
+                  className="cs2-data-slider mt-1.5"
+                  style={{
+                    "--cs2-range-progress": `${Math.min(100, Math.max(0, Number(bgmVolume) || 0))}%`,
+                    "--cs2-range-accent": "var(--cs2-accent)",
+                  }}
                 />
               </div>
               <div className="mt-3 flex items-center gap-2">
@@ -364,7 +381,7 @@ export function MontageStyleConsole({
                     const v = parseFloat(e.target.value);
                     onBgmStartSecChange?.(Number.isFinite(v) && v >= 0 ? v : 0);
                   }}
-                  className="w-16 rounded-lg border border-cs2-border-subtle bg-cs2-bg-input px-2.5 py-1 font-mono text-xs text-cs2-text-primary outline-none focus:border-violet-400 transition-all"
+                  className="w-16 rounded-lg border border-cs2-border-subtle bg-cs2-bg-input px-2.5 py-1 font-mono text-xs text-cs2-text-primary outline-none focus:border-cs2-accent transition-all"
                 />
                 <span className="text-xs text-cs2-text-muted">{t("montage.consoleBgmSec")}</span>
               </div>
@@ -373,7 +390,7 @@ export function MontageStyleConsole({
                   value={bgmPath}
                   onChange={(e) => onBgmPathChange(e.target.value)}
                   placeholder={t("montage.consoleBgmPlaceholder")}
-                  className="min-w-0 flex-1 rounded-lg border border-cs2-border-subtle bg-cs2-bg-input px-2.5 py-1.5 font-mono text-xs text-cs2-text-primary outline-none focus:border-cs2-accent transition-all"
+                  className="min-w-0 flex-1 rounded-lg border border-cs2-border-subtle bg-cs2-bg-input px-2.5 py-1.5 font-mono text-xs text-cs2-text-primary placeholder:text-cs2-text-muted outline-none focus:border-cs2-accent transition-all"
                 />
                 {onFilePick ? (
                   <button
@@ -437,43 +454,41 @@ export function MontageStyleConsole({
             />
           )}
 
-          {activeTab === "export" && (<CollapsibleSection
-            title={
-              <span className="inline-flex flex-wrap items-center gap-2">
-                <span>{t("montage.consoleExportSectionTitle")}</span>
-                <span
-                  className={`rounded-md px-2 py-0.5 text-xs font-bold tracking-wide ${
-                    readyTag
-                      ? "bg-emerald-500/10 text-emerald-300"
-                      : "bg-amber-500/10 text-amber-300"
-                  }`}
-                >
-                  {readyTag ? t("montage.consoleExportReady") : t("montage.consoleExportNotReady")}
+          {activeTab === "export" && (<div>
+            <section
+              className={`rounded-xl border p-3.5 ${
+                readyTag
+                  ? "border-emerald-500/30 bg-emerald-500/10"
+                  : "border-cs2-accent/25 bg-cs2-accent-soft"
+              }`}
+            >
+              <div className="flex items-start gap-2.5">
+                {readyTag ? (
+                  <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-emerald-400" aria-hidden />
+                ) : (
+                  <CircleAlert className="mt-0.5 h-5 w-5 shrink-0 text-cs2-accent" aria-hidden />
+                )}
+                <div className="min-w-0">
+                  <p className={`text-sm font-bold ${readyTag ? "text-cs2-text-primary" : "text-cs2-accent"}`}>
+                    {readyTag ? t("montage.consoleExportSummaryReady") : t("montage.consoleExportSummaryPending")}
+                  </p>
+                  <p className={`mt-1 text-xs ${readyTag ? "text-cs2-text-muted" : "text-cs2-accent"}`}>
+                    {t("montage.consoleExportSummary", { clips: Number(clipCount) || 0, duration: durationText })}
+                  </p>
+                </div>
+                <span className={`ml-auto shrink-0 rounded-md px-2 py-1 text-[10px] font-bold ${readyTag ? "bg-emerald-500/15 text-emerald-300" : "bg-cs2-accent/15 text-cs2-accent"}`}>
+                  {requiredDone}/{requiredChecks.length}
                 </span>
-              </span>
-            }
-            hint={t("montage.consoleExportSectionHint")}
-            defaultOpen
-          >
-            <div className="grid grid-cols-2 gap-2.5">
-              <div className="rounded-xl border border-cs2-border-subtle bg-cs2-surface-1 p-3">
-                <p className="text-xs font-bold text-cs2-text-muted">{t("montage.consoleExportQueueCount")}</p>
-                <div className="mt-1 flex items-baseline gap-1">
-                  <span className="font-mono text-base font-bold text-cs2-text-primary">{Number(clipCount) || 0}</span>
-                  <span className="text-xs text-cs2-text-muted">{t("montage.consoleExportQueueUnit")}</span>
-                </div>
               </div>
-              <div className="rounded-xl border border-cs2-border-subtle bg-cs2-surface-1 p-3">
-                <p className="text-xs font-bold text-cs2-text-muted">{t("montage.consoleExportTotalDuration")}</p>
-                <div className="mt-1 flex items-baseline gap-1">
-                  <span className="font-mono text-base font-bold text-cs2-accent">{durationText}</span>
-                  <span className="text-xs text-cs2-text-muted">{t("montage.consoleExportDurationUnit")}</span>
-                </div>
-              </div>
-            </div>
+            </section>
 
-            <label className="mt-4 block space-y-1.5">
-              <span className="text-xs font-bold text-cs2-text-muted">{t("montage.consoleExportFilenameLabel")}</span>
+            <section className="mt-3 rounded-xl border border-cs2-border-subtle bg-cs2-surface-1 p-3.5">
+              <div className="mb-3 flex items-center gap-2">
+                <FileOutput className="h-4 w-4 text-cs2-accent" aria-hidden />
+                <p className="text-xs font-bold text-cs2-text-primary">{t("montage.consoleExportOutputTitle")}</p>
+              </div>
+            <label className="block space-y-1.5">
+              <span className="text-xs font-medium text-cs2-text-muted">{t("montage.consoleExportFilenameLabel")}</span>
               <input
                 value={outputFilename}
                 onChange={(e) => onOutputFilenameChange(e.target.value)}
@@ -482,34 +497,74 @@ export function MontageStyleConsole({
               />
             </label>
 
-            <div className="mt-4 space-y-1.5">
-              <span className="text-xs font-bold text-cs2-text-secondary">{t("montage.consoleExportDirLabel")}</span>
+            <div className="mt-3 space-y-1.5">
+              <span className="text-xs font-medium text-cs2-text-muted">{t("montage.consoleExportDirLabel")}</span>
               <div className="flex gap-2">
                 <input
                   value={outputDir}
                   onChange={(e) => onOutputDirChange(e.target.value)}
+                  onBlur={() => onOutputDirCommit?.()}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") e.currentTarget.blur();
+                  }}
                   placeholder={t("montage.consoleExportDirPlaceholder")}
                   className="min-w-0 flex-1 rounded-lg border border-cs2-border-subtle bg-cs2-bg-input px-3 py-2 font-mono text-xs text-cs2-text-primary outline-none focus:border-cs2-accent transition-all"
                 />
+                {onOutputDirBrowse ? (
+                  <button
+                    type="button"
+                    aria-label={t("montage.consoleExportDirBrowse")}
+                    title={t("montage.consoleExportDirBrowse")}
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={onOutputDirBrowse}
+                    className="inline-flex shrink-0 items-center justify-center rounded-lg border border-cs2-border-subtle px-2.5 text-cs2-text-secondary transition-all hover:border-cs2-border-focus hover:bg-cs2-surface-2 hover:text-cs2-text-primary"
+                  >
+                    <FolderOpen className="h-3.5 w-3.5" aria-hidden />
+                  </button>
+                ) : null}
                 {outputDir ? (
                   <button
                     type="button"
+                    aria-label={t("montage.consoleExportDirClear")}
+                    onMouseDown={(e) => e.preventDefault()}
                     onClick={onOutputDirClear}
-                    className="shrink-0 rounded-lg border border-cs2-border-subtle px-3 py-2 text-cs2-text-muted hover:bg-cs2-surface-2 hover:text-cs2-text-secondary transition-all"
+                    className="inline-flex shrink-0 items-center justify-center rounded-lg border border-cs2-border-subtle px-2.5 text-cs2-text-muted transition-all hover:bg-cs2-surface-2 hover:text-cs2-text-secondary"
                   >
-                    ✕
+                    <X className="h-3.5 w-3.5" aria-hidden />
                   </button>
                 ) : null}
               </div>
               {effectiveOutputDirHint ? (
-                <p className="text-xs text-cs2-text-muted mt-1 bg-cs2-surface-1/60 p-2 rounded-lg border border-cs2-border-subtle">
+                <p className="mt-1 rounded-lg bg-cs2-bg-input/60 p-2 text-[11px] text-cs2-text-muted">
                   <span>{t("montage.consoleExportDirTarget")}</span>
                   <span className="break-all font-mono text-cs2-text-secondary select-all">{effectiveOutputDirHint}</span>
                 </p>
               ) : null}
             </div>
+            {fullOutputPathPreview ? (
+              <div className="mt-3 flex items-center gap-2 rounded-lg border border-cs2-border-subtle bg-cs2-bg-input/70 px-2.5 py-2">
+                <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-cs2-text-muted" title={fullOutputPathPreview}>
+                  {fullOutputPathPreview}
+                </span>
+                <button
+                  type="button"
+                  aria-label={t("montage.consoleExportCopyBtn")}
+                  onClick={() => onCopyText?.(fullOutputPathPreview)}
+                  className="shrink-0 text-cs2-text-muted transition-colors hover:text-cs2-text-primary"
+                >
+                  <Copy className="h-3.5 w-3.5" aria-hidden />
+                </button>
+              </div>
+            ) : null}
+            </section>
 
-            <div className="mt-4 rounded-xl border border-cs2-border-subtle bg-cs2-surface-1 p-3.5">
+            <details className="group mt-3 rounded-xl border border-cs2-border-subtle bg-cs2-surface-1">
+              <summary className="flex cursor-pointer list-none items-center gap-2 px-3.5 py-3 text-xs font-bold text-cs2-text-secondary">
+                <span>{t("montage.consoleExportAdvancedTitle")}</span>
+                <span className="ml-auto text-[10px] font-medium text-cs2-text-muted">{t("montage.consoleExportAdvancedOptional")}</span>
+                <ChevronDown className="h-4 w-4 text-cs2-text-muted transition-transform group-open:rotate-180" aria-hidden />
+              </summary>
+              <div className="border-t border-cs2-border-subtle p-3.5">
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
                   <p className="text-xs font-bold text-cs2-text-primary">
@@ -543,87 +598,78 @@ export function MontageStyleConsole({
                   {t("montage.consoleFrameMeldLockedPlan")}
                 </p>
               ) : null}
-            </div>
+              </div>
+            </details>
 
-            <div className="mt-4 rounded-xl border border-cs2-border-subtle bg-cs2-surface-1 p-3.5">
-              <p className="text-xs font-bold text-cs2-text-primary border-b border-cs2-border-subtle pb-2 mb-2">{t("montage.consoleExportCheckTitle")}</p>
-              <div className="space-y-1">
-                <ExportCheckRow ok={dirOk} optional={false} label={t("montage.consoleExportCheckDir")} />
-                <ExportCheckRow ok={nameOk} optional={false} label={t("montage.consoleExportCheckName")} />
-                <ExportCheckRow ok={bgmFilled} optional label={t("montage.consoleExportCheckBgm")} />
-                <ExportCheckRow ok={introFilled} optional label={t("montage.consoleExportCheckIntro")} />
-                <ExportCheckRow ok={outroFilled} optional label={t("montage.consoleExportCheckOutro")} />
-                <ExportCheckRow ok={nameCardsFilled} optional label={t("montage.consoleExportCheckNameCards")} />
+            <div className="mt-3 rounded-xl border border-cs2-border-subtle bg-cs2-surface-1 p-3.5">
+              <div className="flex items-center justify-between gap-3">
+                <p className="text-xs font-bold text-cs2-text-primary">{t("montage.consoleExportCheckTitle")}</p>
+                <span className="text-[10px] font-medium text-cs2-text-muted">{requiredDone}/{requiredChecks.length}</span>
+              </div>
+              <div className="mt-2 space-y-0.5">
+                {requiredChecks.map((item) => (
+                  <ExportCheckRow key={item.id} ok={item.ok} label={item.label} />
+                ))}
+              </div>
+              <div className="mt-3 border-t border-cs2-border-subtle pt-3">
+                <div className="mb-2 flex items-center justify-between gap-2">
+                  <span className="text-[11px] font-medium text-cs2-text-muted">{t("montage.consoleExportOptionalTitle")}</span>
+                  <span className="text-[10px] text-cs2-text-muted">{optionalActiveCount}/{optionalItems.length}</span>
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  {optionalItems.map((item) => (
+                    <span
+                      key={item.id}
+                      className={`rounded-md px-2 py-1 text-[10px] font-medium ${
+                        item.active
+                          ? "bg-emerald-500/10 text-emerald-300"
+                          : "bg-cs2-bg-input text-cs2-text-muted"
+                      }`}
+                    >
+                      {item.label}
+                    </span>
+                  ))}
+                </div>
               </div>
             </div>
 
-            <div className="mt-4 space-y-1.5">
-              <span className="text-xs font-bold text-cs2-text-secondary">{t("montage.consoleExportDraftLabel")}</span>
-              <input
-                value={draftName}
-                onChange={(e) => onDraftNameChange(e.target.value)}
-                placeholder={draftNamePlaceholder}
-                className="w-full rounded-lg border border-cs2-border-subtle bg-cs2-bg-input px-3 py-2 text-xs text-cs2-text-primary outline-none focus:border-cs2-accent transition-all"
-              />
-            </div>
+          </div>)}
+        </div>
+      </div>
 
+      <div className="shrink-0 border-t border-cs2-border-subtle bg-cs2-surface-1 p-3.5">
+        {activeTab === "export" ? (
+          <div>
+            {!readyTag ? (
+              <p className="mb-2.5 text-center text-[11px] font-medium text-amber-300">
+                {t("montage.consoleExportBlockedCount", { n: requiredChecks.length - requiredDone })}
+              </p>
+            ) : null}
             <button
               type="button"
-              disabled={savingDraft}
-              onClick={() => onSaveDraft?.()}
-              className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-lg border border-cs2-border-subtle bg-cs2-surface-1 px-4 py-2.5 text-xs font-bold text-cs2-text-secondary hover:border-cs2-border-focus hover:text-cs2-text-primary transition-all shadow-sm disabled:opacity-45"
-            >
-              {t("montage.consoleExportSaveDraftBtn")}
-            </button>
-
-            <button
-              type="button"
-              disabled={exporting}
+              disabled={!readyTag || exporting}
               onClick={onExport}
-              className="mt-2.5 inline-flex w-full items-center justify-center gap-2 rounded-lg bg-cs2-accent px-4 py-3 text-sm font-bold text-cs2-text-on-accent shadow-glow-accent hover:opacity-95 transition-all disabled:opacity-45"
+              className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-cs2-accent px-4 py-3 text-sm font-bold text-cs2-text-on-accent shadow-glow-accent transition-all hover:opacity-95 disabled:cursor-not-allowed disabled:shadow-none disabled:opacity-40"
             >
               {exporting ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
               {t("montage.consoleExportStartBtn")}
             </button>
-
-            <div className="mt-4 space-y-1.5">
-              <span className="text-xs font-bold text-cs2-text-muted">{t("montage.consoleExportPathPreviewLabel")}</span>
-              <div className="flex gap-2">
-                <input
-                  readOnly
-                  value={fullOutputPathPreview || ""}
-                  placeholder={t("montage.consoleExportPathPreviewPlaceholder")}
-                  className="min-w-0 flex-1 rounded-lg border border-cs2-border-subtle bg-cs2-surface-2 px-3 py-2 font-mono text-xs text-cs2-text-muted select-all outline-none"
-                />
-                <button
-                  type="button"
-                  disabled={!fullOutputPathPreview}
-                  onClick={() => fullOutputPathPreview && onCopyText?.(fullOutputPathPreview)}
-                  className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-cs2-border-subtle bg-cs2-surface-1 px-3 py-2 text-xs font-bold text-cs2-text-secondary hover:border-cs2-border-focus hover:text-cs2-text-primary transition-all shadow-sm disabled:opacity-35"
-                >
-                  <Copy className="h-3.5 w-3.5" />
-                  {t("montage.consoleExportCopyBtn")}
-                </button>
+          </div>
+        ) : (
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <p className="text-xs font-bold text-cs2-text-muted">{t("montage.consoleFooterDuration")}</p>
+              <div className="mt-0.5 flex items-baseline gap-1.5">
+                <span className="font-mono text-sm font-bold text-cs2-text-primary">{durationText}</span>
+                <span className="text-xs font-medium text-cs2-text-muted">{t("montage.consoleFooterClipCount", { n: clipCount })}</span>
               </div>
             </div>
-          </CollapsibleSection>)}
-        </div>
-      </div>
-
-      <div className="shrink-0 border-t border-cs2-border-subtle bg-cs2-surface-1 p-4">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <div>
-            <p className="text-xs font-bold text-cs2-text-muted">{t("montage.consoleFooterDuration")}</p>
-            <div className="flex items-baseline gap-1.5 mt-0.5">
-              <span className="font-mono text-sm font-bold text-cs2-text-primary">{durationText}</span>
-              <span className="text-xs text-cs2-text-muted font-medium">{t("montage.consoleFooterClipCount", { n: clipCount })}</span>
+            <div className="text-right">
+              <p className="text-xs font-bold text-cs2-text-muted">{t("montage.consoleFooterQuality")}</p>
+              <p className="mt-0.5 text-xs font-bold text-cs2-text-secondary">{resolutionLabel}</p>
             </div>
           </div>
-          <div className="text-right">
-            <p className="text-xs font-bold text-cs2-text-muted">{t("montage.consoleFooterQuality")}</p>
-            <p className="text-xs font-bold text-cs2-text-secondary mt-0.5">{resolutionLabel}</p>
-          </div>
-        </div>
+        )}
       </div>
     </aside>
   );

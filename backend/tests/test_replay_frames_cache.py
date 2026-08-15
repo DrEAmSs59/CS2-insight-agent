@@ -4,7 +4,7 @@ import gzip
 import json
 from pathlib import Path
 
-from app.parser.replay_frames_cache import (
+from app.features.demo_analysis.replay_frames_cache import (
     REPLAY_FRAMES_CACHE_VERSION,
     demo_fingerprint,
     frames_cache_key,
@@ -28,7 +28,7 @@ def test_frames_cache_roundtrip(tmp_path: Path, monkeypatch):
     dem.write_bytes(b"demo")
     monkeypatch.setenv("CS2_INSIGHT_DATA_DIR", str(tmp_path))
     # Force cache root under tmp via monkeypatch of get_data_dir if needed
-    import app.parser.replay_frames_cache as mod
+    import app.features.demo_analysis.replay_frames_cache as mod
 
     monkeypatch.setattr(mod, "_cache_root", lambda: tmp_path / "replay-frames")
 

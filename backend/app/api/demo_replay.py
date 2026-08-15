@@ -49,7 +49,7 @@ class PlayerClipReviewRequest(BaseModel):
 @router.get("/api/demo/replay/cache")
 async def get_demo_replay_cache():
     """Report the persistent 2D replay cache managed under application data."""
-    from ..parser.replay_cache_storage import replay_cache_summary
+    from ..features.demo_analysis.replay_cache_storage import replay_cache_summary
 
     return await asyncio.to_thread(replay_cache_summary)
 
@@ -57,7 +57,7 @@ async def get_demo_replay_cache():
 @router.delete("/api/demo/replay/cache")
 async def delete_demo_replay_cache():
     """Release all generated 2D replay assets without touching source Demos."""
-    from ..parser.replay_cache_storage import clear_replay_cache, replay_cache_summary
+    from ..features.demo_analysis.replay_cache_storage import clear_replay_cache, replay_cache_summary
 
     removed = await asyncio.to_thread(clear_replay_cache)
     return {**removed, "cache": await asyncio.to_thread(replay_cache_summary)}
@@ -117,7 +117,7 @@ async def get_demo_replay(req: DemoReplayRequest):
             422,
             f"Replay request would generate about {estimated_frame_count} frames; maximum is 6000",
         )
-    from ..parser.replay_frames_cache import (
+    from ..features.demo_analysis.replay_frames_cache import (
         REPLAY_FRAMES_CACHE_VERSION,
         demo_fingerprint,
         frames_cache_key,
@@ -186,7 +186,7 @@ async def get_demo_replay(req: DemoReplayRequest):
         }
 
     try:
-        from ..parser.replay_match_cache import load_match_replay_round
+        from ..features.demo_analysis.replay_match_cache import load_match_replay_round
 
         match_cached = await asyncio.to_thread(
             load_match_replay_round,
@@ -334,7 +334,7 @@ async def get_demo_replay_binary(req: DemoReplayRequest):
         )
 
     dem_path = await resolve_working_demo_path(req.path, demo_db=demo_db)
-    from ..parser.replay_match_cache import load_match_replay_round_binary
+    from ..features.demo_analysis.replay_match_cache import load_match_replay_round_binary
 
     async def _load_packet() -> bytes | None:
         return await asyncio.to_thread(

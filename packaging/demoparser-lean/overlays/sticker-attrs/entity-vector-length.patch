@@ -1,0 +1,303 @@
+diff --git a/src/parser/src/second_pass/entities.rs b/src/parser/src/second_pass/entities.rs
+index 1adcd0f..1b74c04 100644
+--- a/src/parser/src/second_pass/entities.rs
++++ b/src/parser/src/second_pass/entities.rs
+@@ -1,12 +1,16 @@
+ use crate::first_pass::prop_controller::ITEM_PURCHASE_DEF_IDX;
+ use crate::first_pass::prop_controller::is_grenade_or_weapon;
++use crate::first_pass::prop_controller::{
++    FLATTENED_VEC_MAX_LEN, WEAPON_ATTRIBUTE_DEF_INDEX_ID, WEAPON_SKIN_ID,
++};
+ use crate::first_pass::read_bits::Bitreader;
+ use crate::first_pass::read_bits::DemoParserError;
+ use crate::first_pass::sendtables::find_field;
+ use crate::first_pass::sendtables::get_decoder_from_field;
+-use crate::first_pass::sendtables::get_propinfo;
++use crate::first_pass::sendtables::get_resolved_propinfo;
+ use crate::first_pass::sendtables::Field;
+ use crate::first_pass::sendtables::FieldInfo;
++use crate::first_pass::sendtables::{ResolvedField, VectorElementKind, VectorRootInfo};
+ use crate::second_pass::game_events::GameEventInfo;
+ use crate::second_pass::other_netmessages::Class;
+ use crate::second_pass::parser_settings::SecondPassParser;
+@@ -25,9 +29,52 @@ pub struct Entity {
+     pub cls_id: u32,
+     pub entity_id: i32,
+     pub props: AHashMap<u32, Variant>,
++    pub vector_lengths: AHashMap<VectorRootInfo, usize>,
++    pub cosmetic_revision: u64,
+     pub entity_type: EntityType,
+ }
+ 
++impl Entity {
++    pub fn weapon_econ_attribute_length(&self) -> Option<usize> {
++        self.vector_lengths
++            .iter()
++            .filter_map(|(info, length)| {
++                (info.element_kind == VectorElementKind::WeaponEconAttribute).then_some(*length)
++            })
++            .min()
++    }
++
++    fn update_vector_length(&mut self, info: VectorRootInfo, new_length: usize) {
++        let new_length = new_length.min(FLATTENED_VEC_MAX_LEN as usize);
++        let old_length = self.vector_lengths.insert(info, new_length);
++        let mut removed_any = false;
++        if let Some(old_length) = old_length {
++            if new_length < old_length {
++                for index in new_length..old_length {
++                    let Ok(index) = u32::try_from(index) else {
++                        break;
++                    };
++                    match info.element_kind {
++                        VectorElementKind::WeaponEconAttribute => {
++                            removed_any |= self.props.remove(&(WEAPON_ATTRIBUTE_DEF_INDEX_ID + index)).is_some();
++                            removed_any |= self.props.remove(&(WEAPON_SKIN_ID + index)).is_some();
++                        }
++                    }
++                }
++            }
++        }
++        if old_length != Some(new_length) || removed_any {
++            self.cosmetic_revision = self.cosmetic_revision.wrapping_add(1);
++        }
++    }
++
++    fn is_weapon_econ_property(prop_id: u32) -> bool {
++        (WEAPON_ATTRIBUTE_DEF_INDEX_ID..WEAPON_ATTRIBUTE_DEF_INDEX_ID + FLATTENED_VEC_MAX_LEN)
++            .contains(&prop_id)
++            || (WEAPON_SKIN_ID..WEAPON_SKIN_ID + FLATTENED_VEC_MAX_LEN).contains(&prop_id)
++    }
++}
++
+ #[derive(Debug, Clone, PartialEq)]
+ pub struct PlayerMetaData {
+     pub player_entity_id: Option<i32>,
+@@ -247,7 +294,8 @@ impl<'a> SecondPassParser<'a> {
+ 
+         for path in self.paths.iter().take(n_updates) {
+             let field = find_field(&path, &class.serializer)?;
+-            let field_info = get_propinfo(&field, path);
++            let resolved_field = get_resolved_propinfo(&field, path);
++            let field_info = resolved_field.and_then(ResolvedField::property);
+             let decoder = get_decoder_from_field(field)?;
+             let result = bitreader.decode(&decoder, self.qf_mapper)?;
+ 
+@@ -278,7 +326,7 @@ impl<'a> SecondPassParser<'a> {
+                     &entity_id,
+                 );
+             }
+-            SecondPassParser::insert_field(entity, result, field_info);
++            SecondPassParser::insert_resolved_field(entity, result, resolved_field);
+         }
+         Ok(n_updates)
+     }
+@@ -303,8 +351,24 @@ impl<'a> SecondPassParser<'a> {
+     pub fn insert_field(entity: &mut Entity, result: Variant, field_info: Option<FieldInfo>) {
+         if let Some(fi) = field_info {
+             if fi.should_parse {
++                let changed = entity.props.get(&fi.prop_id) != Some(&result);
+                 entity.props.insert(fi.prop_id, result);
++                if changed && Entity::is_weapon_econ_property(fi.prop_id) {
++                    entity.cosmetic_revision = entity.cosmetic_revision.wrapping_add(1);
++                }
++            }
++        }
++    }
++
++    pub fn insert_resolved_field(entity: &mut Entity, result: Variant, resolved_field: Option<ResolvedField>) {
++        match resolved_field {
++            Some(ResolvedField::Property(field_info)) => Self::insert_field(entity, result, Some(field_info)),
++            Some(ResolvedField::VectorLength(vector_info)) => {
++                if let Variant::U32(length) = result {
++                    entity.update_vector_length(vector_info, length as usize);
++                }
+             }
++            None => {}
+         }
+     }
+ 
+@@ -353,6 +417,8 @@ impl<'a> SecondPassParser<'a> {
+             entity_id: *entity_id,
+             cls_id,
+             props: AHashMap::with_capacity(0),
++            vector_lengths: AHashMap::with_capacity(0),
++            cosmetic_revision: 0,
+             entity_type,
+         };
+         if self.entities.len() as i32 <= *entity_id {
+@@ -399,6 +465,174 @@ impl<'a> SecondPassParser<'a> {
+     }
+ }
+ 
++#[cfg(test)]
++mod econ_vector_tests {
++    use super::*;
++    use crate::first_pass::sendtables::VectorId;
++
++    const ECON_VECTOR_INFO: VectorRootInfo = VectorRootInfo {
++        vector_id: VectorId {
++            path: [4, 0, 0, 0, 0, 0, 0],
++            last: 0,
++        },
++        element_kind: VectorElementKind::WeaponEconAttribute,
++    };
++
++    fn entity(entity_id: i32) -> Entity {
++        Entity {
++            cls_id: 1,
++            entity_id,
++            props: AHashMap::new(),
++            vector_lengths: AHashMap::new(),
++            cosmetic_revision: 0,
++            entity_type: EntityType::Normal,
++        }
++    }
++
++    fn apply_length(entity: &mut Entity, length: u32) {
++        SecondPassParser::insert_resolved_field(
++            entity,
++            Variant::U32(length),
++            Some(ResolvedField::VectorLength(ECON_VECTOR_INFO)),
++        );
++    }
++
++    fn put_slot(entity: &mut Entity, index: u32, definition: u32, raw: f32) {
++        entity
++            .props
++            .insert(WEAPON_ATTRIBUTE_DEF_INDEX_ID + index, Variant::U32(definition));
++        entity
++            .props
++            .insert(WEAPON_SKIN_ID + index, Variant::F32(raw));
++    }
++
++    fn assert_slot_absent(entity: &Entity, index: u32) {
++        assert!(!entity.props.contains_key(&(WEAPON_ATTRIBUTE_DEF_INDEX_ID + index)));
++        assert!(!entity.props.contains_key(&(WEAPON_SKIN_ID + index)));
++    }
++
++    #[test]
++    fn econ_vector_shrinks_from_11_to_3_without_baseline_tail() {
++        let mut entity = entity(1);
++        apply_length(&mut entity, 11);
++        for index in 0..11 {
++            put_slot(&mut entity, index, 100 + index, index as f32);
++        }
++
++        apply_length(&mut entity, 3);
++        for index in 0..3 {
++            put_slot(&mut entity, index, 200 + index, 20.0 + index as f32);
++        }
++
++        assert_eq!(entity.weapon_econ_attribute_length(), Some(3));
++        for index in 0..3 {
++            assert_eq!(
++                entity.props.get(&(WEAPON_ATTRIBUTE_DEF_INDEX_ID + index)),
++                Some(&Variant::U32(200 + index))
++            );
++        }
++        for index in 3..11 {
++            assert_slot_absent(&entity, index);
++        }
++    }
++
++    #[test]
++    fn econ_vector_equal_length_preserves_valid_baseline_slots() {
++        let mut entity = entity(1);
++        apply_length(&mut entity, 5);
++        for index in 0..5 {
++            put_slot(&mut entity, index, 100 + index, index as f32);
++        }
++
++        apply_length(&mut entity, 5);
++        put_slot(&mut entity, 0, 200, 20.0);
++
++        assert_eq!(
++            entity.props.get(&WEAPON_ATTRIBUTE_DEF_INDEX_ID),
++            Some(&Variant::U32(200))
++        );
++        for index in 1..5 {
++            assert_eq!(
++                entity.props.get(&(WEAPON_ATTRIBUTE_DEF_INDEX_ID + index)),
++                Some(&Variant::U32(100 + index))
++            );
++        }
++    }
++
++    #[test]
++    fn econ_vector_shrinks_to_zero() {
++        let mut entity = entity(1);
++        apply_length(&mut entity, 5);
++        for index in 0..5 {
++            put_slot(&mut entity, index, 100 + index, index as f32);
++        }
++
++        apply_length(&mut entity, 0);
++
++        assert_eq!(entity.weapon_econ_attribute_length(), Some(0));
++        for index in 0..5 {
++            assert_slot_absent(&entity, index);
++        }
++    }
++
++    #[test]
++    fn econ_vector_growth_then_shrink_drops_history() {
++        let mut entity = entity(1);
++        apply_length(&mut entity, 3);
++        for index in 0..3 {
++            put_slot(&mut entity, index, 100 + index, index as f32);
++        }
++        apply_length(&mut entity, 11);
++        for index in 3..11 {
++            put_slot(&mut entity, index, 100 + index, index as f32);
++        }
++
++        apply_length(&mut entity, 3);
++
++        for index in 3..11 {
++            assert_slot_absent(&entity, index);
++        }
++    }
++
++    #[test]
++    fn econ_vector_length_change_invalidates_cosmetic_revision() {
++        let mut entity = entity(1);
++        apply_length(&mut entity, 11);
++        for index in 0..11 {
++            put_slot(&mut entity, index, 100 + index, index as f32);
++        }
++        let cached_revision = entity.cosmetic_revision;
++
++        apply_length(&mut entity, 3);
++
++        assert_ne!(entity.cosmetic_revision, cached_revision);
++        for index in 3..11 {
++            assert_slot_absent(&entity, index);
++        }
++    }
++
++    #[test]
++    fn econ_vector_lengths_are_isolated_between_entities() {
++        let mut item_a = entity(1);
++        let mut item_b = entity(2);
++        for item in [&mut item_a, &mut item_b] {
++            apply_length(item, 11);
++            for index in 0..11 {
++                put_slot(item, index, 100 + index, index as f32);
++            }
++        }
++
++        apply_length(&mut item_b, 3);
++
++        assert_eq!(item_a.weapon_econ_attribute_length(), Some(11));
++        assert_eq!(item_b.weapon_econ_attribute_length(), Some(3));
++        for index in 3..11 {
++            assert!(item_a.props.contains_key(&(WEAPON_ATTRIBUTE_DEF_INDEX_ID + index)));
++            assert_slot_absent(&item_b, index);
++        }
++    }
++}
++
+ fn should_emit_prop_to_listen(prop_name: &str) -> bool {
+     match prop_name.split(".").next() {
+         Some("CCSGameRulesProxy") => return true,

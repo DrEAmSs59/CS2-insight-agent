@@ -979,7 +979,15 @@ def _scan_stream(
     drop_win_panel_match: bool = False,
     win_panel_match_tick: Optional[int] = None,
     logical_end_offset: Optional[int] = None,
-) -> tuple[_PatchStats, tuple[int, int]]:
+    allow_truncated_packet_tail: bool = False,
+) -> tuple[
+    _PatchStats,
+    tuple[int, int],
+    Optional[TruncatedPacketTailRepair],
+]:
+    if allow_truncated_packet_tail and logical_end_offset is not None:
+        raise ValueError("truncated-tail capture cannot use a logical EOF")
+    file_size = int(os.fstat(reader.fileno()).st_size)
     header = _read_exact(reader, 16, context="PBDEMS2 short header")
     if header[:8] != _MAGIC:
         raise _fail("expected PBDEMS2 short header")
@@ -988,6 +996,8 @@ def _scan_stream(
     old_pos = 16
     offset_commands: dict[int, int] = {}
     stats = _PatchStats()
+    max_tick = 0
+    inspection_complete = False
 
     while True:
         if logical_end_offset is not None:
@@ -1009,16 +1019,53 @@ def _scan_stream(
         size, raw_size_bytes = size_result
         if size > _MAX_OUTER_FRAME_SIZE:
             raise _fail(f"outer frame exceeds size limit: {size}")
+        command = raw_command & ~_COMPRESSED_COMMAND_FLAG
+        if allow_truncated_packet_tail:
+            payload_offset = reader.tell()
+            available = file_size - payload_offset
+            if size > available:
+                missing = size - available
+                _validate_header_offsets(old_offset_a, old_offset_b, offset_commands)
+                if stats.outer_frames <= 0:
+                    raise _fail("refusing to discard the first outer frame")
+                if command not in _PACKET_COMMANDS:
+                    raise _fail(
+                        f"truncated terminal frame is command {command}, not a packet"
+                    )
+                if int(tick) == _U32_MAX or int(tick) < max_tick:
+                    raise _fail("truncated terminal packet has an invalid or backward tick")
+                if available <= 0:
+                    raise _fail("truncated terminal packet has no payload bytes")
+                if missing > _MAX_TRUNCATED_PACKET_TAIL_MISSING_BYTES:
+                    raise _fail(
+                        "truncated terminal packet exceeds the safe missing-byte limit: "
+                        f"{missing}"
+                    )
+                return (
+                    stats,
+                    (old_offset_a, old_offset_b),
+                    TruncatedPacketTailRepair(
+                        frame_offset=int(old_pos),
+                        tick=int(tick),
+                        declared_payload_size=int(size),
+                        available_payload_size=int(available),
+                        missing_payload_bytes=int(missing),
+                        discarded_bytes=int(file_size - old_pos),
+                    ),
+                )
         payload = _read_exact(reader, size, context="outer frame payload")
         if logical_end_offset is not None and reader.tell() > logical_end_offset:
             raise _fail("outer frame crosses the validated logical EOF")
 
-        command = raw_command & ~_COMPRESSED_COMMAND_FLAG
         if old_pos in (old_offset_a, old_offset_b):
             offset_commands[old_pos] = command
         stats.outer_frames += 1
-        inspect_packet = drop_legacy_type138 or drop_win_panel_match or (
-            win_panel_match_tick is not None and tick == win_panel_match_tick
+        if int(tick) != _U32_MAX:
+            max_tick = max(max_tick, int(tick))
+        inspect_packet = not inspection_complete and (
+            drop_legacy_type138
+            or drop_win_panel_match
+            or (win_panel_match_tick is not None and tick == win_panel_match_tick)
         )
         if command in _PACKET_COMMANDS and inspect_packet:
             decoded = (
@@ -1038,7 +1085,12 @@ def _scan_stream(
             if stop_after_first_selected and (
                 stats.removed_messages or stats.removed_win_panel_events
             ):
-                return stats, (old_offset_a, old_offset_b)
+                if allow_truncated_packet_tail:
+                    # Keep validating outer framing through physical EOF, but
+                    # stop decompressing packets after the repair decision is known.
+                    inspection_complete = True
+                else:
+                    return stats, (old_offset_a, old_offset_b), None
         old_pos += (
             len(raw_command_bytes)
             + len(raw_tick_bytes)
@@ -1047,7 +1099,7 @@ def _scan_stream(
         )
 
     _validate_header_offsets(old_offset_a, old_offset_b, offset_commands)
-    return stats, (old_offset_a, old_offset_b)
+    return stats, (old_offset_a, old_offset_b), None
 
 
 def scan_demo_legacy_type138(source_path: os.PathLike[str] | str) -> DemoCompatibilityScan:
@@ -1055,7 +1107,7 @@ def scan_demo_legacy_type138(source_path: os.PathLike[str] | str) -> DemoCompati
 
     source = Path(source_path)
     with source.open("rb") as reader:
-        stats, _offsets = _scan_stream(reader)
+        stats, _offsets, _truncated_tail = _scan_stream(reader)
     return DemoCompatibilityScan(
         selected_messages=stats.removed_messages,
         affected_frames=stats.changed_frames,
@@ -1078,7 +1130,7 @@ def scan_demo_playback_messages(
 
     source = Path(source_path)
     with source.open("rb") as reader:
-        stats, _offsets = _scan_stream(
+        stats, _offsets, _truncated_tail = _scan_stream(
             reader,
             drop_legacy_type138=scan_legacy_type138,
             drop_win_panel_match=scan_win_panel_match,
@@ -2045,43 +2097,30 @@ def repair_demo_in_place(
     if not source.is_file():
         raise FileNotFoundError(f"Demo file not found: {source}")
     source_before = _stat_fingerprint(source.stat())
-    truncated_tail: Optional[TruncatedPacketTailRepair] = None
     recovered_plan: Optional[_UnfinalizedDemoRecoveryPlan] = None
 
-    if allow_truncated_packet_tail:
-        with source.open("rb") as reader:
-            if _stat_fingerprint(os.fstat(reader.fileno())) != source_before:
-                raise _fail("source demo changed before terminal-tail scan started")
-            truncated_tail = _find_truncated_packet_tail(reader)
+    # Complete demos now share one pass for strict terminal-tail classification
+    # and compatibility-message detection. Without tail recovery, retain the
+    # early exit for legacy messages near the beginning of a Demo.
+    with source.open("rb") as reader:
+        if _stat_fingerprint(os.fstat(reader.fileno())) != source_before:
+            raise _fail("source demo changed before compatibility scan started")
+        initial_stats, _, truncated_tail = _scan_stream(
+            reader,
+            stop_after_first_selected=True,
+            drop_legacy_type138=True,
+            drop_win_panel_match=True,
+            allow_truncated_packet_tail=allow_truncated_packet_tail,
+        )
+    if _stat_fingerprint(source.stat()) != source_before:
+        raise _fail("source demo changed while compatibility scan was running")
+    if truncated_tail is not None:
+        recovered_plan = _classify_unfinalized_demo_recovery(
+            source,
+            truncated_tail,
+        )
         if _stat_fingerprint(source.stat()) != source_before:
-            raise _fail("source demo changed while terminal-tail scan was running")
-        if truncated_tail is not None:
-            recovered_plan = _classify_unfinalized_demo_recovery(
-                source,
-                truncated_tail,
-            )
-            if _stat_fingerprint(source.stat()) != source_before:
-                raise _fail(
-                    "source demo changed while terminal recovery was classified"
-                )
-
-    # A clean demo needs only one read pass and no full-size temporary copy.
-    # Legacy demos normally expose the first selected message near the start.
-    # A panel-only demo requires one full scan to find its terminal event, then
-    # continues through the same rewrite + full verification path.
-    if recovered_plan is None:
-        with source.open("rb") as reader:
-            if _stat_fingerprint(os.fstat(reader.fileno())) != source_before:
-                raise _fail("source demo changed before compatibility scan started")
-            initial_stats, _ = _scan_stream(
-                reader,
-                stop_after_first_selected=True,
-                drop_legacy_type138=True,
-                drop_win_panel_match=True,
-            )
-        if _stat_fingerprint(source.stat()) != source_before:
-            raise _fail("source demo changed while compatibility scan was running")
-    else:
+            raise _fail("source demo changed while terminal recovery was classified")
         # Recovery always changes the suffix, so the rewrite pass can perform
         # the compatibility scan and patch without a redundant packet decode.
         initial_stats = _PatchStats(outer_frames=recovered_plan.complete_frames)

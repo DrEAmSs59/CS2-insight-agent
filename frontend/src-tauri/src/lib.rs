@@ -14,6 +14,8 @@ use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
 
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
+#[cfg(windows)]
+use webview2_com::{CallDevToolsProtocolMethodCompletedHandler, CoTaskMemPWSTR};
 
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
@@ -78,6 +80,218 @@ fn read_legacy_ui_state() -> Result<Option<String>, String> {
 
     #[cfg(not(windows))]
     Ok(None)
+}
+
+#[tauri::command]
+async fn resolve_dropped_file_paths(
+    window: tauri::WebviewWindow,
+    token: String,
+) -> Result<Vec<String>, String> {
+    #[cfg(windows)]
+    {
+        tauri::async_runtime::spawn_blocking(move || {
+            resolve_dropped_file_paths_windows(&window, &token)
+        })
+        .await
+        .map_err(|error| format!("file path resolver task failed: {error}"))?
+    }
+
+    #[cfg(not(windows))]
+    {
+        let _ = (window, token);
+        Ok(Vec::new())
+    }
+}
+
+#[cfg(windows)]
+fn call_webview2_devtools(
+    window: &tauri::WebviewWindow,
+    method: &str,
+    params: serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    let method_name = method.to_string();
+    let params_json = params.to_string();
+    let (sender, receiver) = std::sync::mpsc::sync_channel(1);
+    let dispatch_sender = sender.clone();
+    window
+        .with_webview(move |platform_webview| {
+            let result = (|| -> Result<(), String> {
+                let webview = unsafe { platform_webview.controller().CoreWebView2() }
+                    .map_err(|error| error.to_string())?;
+                let method = CoTaskMemPWSTR::from(method_name.as_str());
+                let params = CoTaskMemPWSTR::from(params_json.as_str());
+                let completion_sender = dispatch_sender.clone();
+                let callback = CallDevToolsProtocolMethodCompletedHandler::create(Box::new(
+                    move |status, payload| {
+                        let result = status.map(|_| payload).map_err(|error| error.to_string());
+                        let _ = completion_sender.send(result);
+                        Ok(())
+                    },
+                ));
+                unsafe {
+                    webview.CallDevToolsProtocolMethod(
+                        *method.as_ref().as_pcwstr(),
+                        *params.as_ref().as_pcwstr(),
+                        &callback,
+                    )
+                }
+                .map_err(|error| error.to_string())
+            })();
+            if let Err(error) = result {
+                let _ = dispatch_sender.send(Err(error));
+            }
+        })
+        .map_err(|error| error.to_string())?;
+
+    let payload = receiver
+        .recv_timeout(Duration::from_secs(5))
+        .map_err(|error| format!("{method} timed out: {error}"))??;
+    let response: serde_json::Value = serde_json::from_str(&payload)
+        .map_err(|error| format!("invalid {method} response: {error}"))?;
+    if let Some(error) = response.get("error") {
+        return Err(format!("{method} failed: {error}"));
+    }
+    Ok(response)
+}
+
+#[cfg(windows)]
+fn devtools_remote_object_id(response: &serde_json::Value) -> Option<&str> {
+    response
+        .pointer("/result/objectId")
+        .and_then(serde_json::Value::as_str)
+}
+
+#[cfg(windows)]
+fn devtools_indexed_object_ids(response: &serde_json::Value) -> Vec<String> {
+    let mut indexed = response
+        .pointer("/result")
+        .and_then(serde_json::Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|property| {
+            let index = property.get("name")?.as_str()?.parse::<usize>().ok()?;
+            let object_id = property.pointer("/value/objectId")?.as_str()?.to_string();
+            Some((index, object_id))
+        })
+        .collect::<Vec<_>>();
+    indexed.sort_unstable_by_key(|(index, _)| *index);
+    indexed
+        .into_iter()
+        .map(|(_, object_id)| object_id)
+        .collect()
+}
+
+#[cfg(windows)]
+fn devtools_file_path(response: &serde_json::Value) -> Option<&str> {
+    response.get("path").and_then(serde_json::Value::as_str)
+}
+
+#[cfg(windows)]
+fn resolve_dropped_file_paths_windows(
+    window: &tauri::WebviewWindow,
+    token: &str,
+) -> Result<Vec<String>, String> {
+    if token.is_empty()
+        || token.len() > 128
+        || !token
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_')
+    {
+        return Err("invalid file drop token".to_string());
+    }
+
+    let object_group = format!("litecut-file-drop-{token}");
+    let token_json = serde_json::to_string(token).map_err(|error| error.to_string())?;
+    let evaluated = call_webview2_devtools(
+        window,
+        "Runtime.evaluate",
+        serde_json::json!({
+            "expression": format!(
+                "globalThis.__LITECUT_DROPPED_FILES__?.[{token_json}] ?? null"
+            ),
+            "objectGroup": object_group,
+            "returnByValue": false,
+            "awaitPromise": false,
+        }),
+    )?;
+    let object_id = devtools_remote_object_id(&evaluated)
+        .ok_or_else(|| "dropped FileList is unavailable".to_string())?
+        .to_string();
+
+    let result = (|| {
+        let properties = call_webview2_devtools(
+            window,
+            "Runtime.getProperties",
+            serde_json::json!({
+                "objectId": object_id,
+                "ownProperties": true,
+                "generatePreview": false,
+            }),
+        )?;
+        let mut paths = Vec::new();
+        let mut seen = std::collections::HashSet::new();
+        for file_object_id in devtools_indexed_object_ids(&properties) {
+            let file_info = call_webview2_devtools(
+                window,
+                "DOM.getFileInfo",
+                serde_json::json!({ "objectId": file_object_id }),
+            )?;
+            let Some(path) = devtools_file_path(&file_info)
+                .map(str::trim)
+                .filter(|path| !path.is_empty())
+            else {
+                continue;
+            };
+            if seen.insert(path.to_ascii_lowercase()) {
+                paths.push(path.to_string());
+            }
+        }
+        Ok(paths)
+    })();
+
+    let _ = call_webview2_devtools(
+        window,
+        "Runtime.releaseObjectGroup",
+        serde_json::json!({ "objectGroup": object_group }),
+    );
+    result
+}
+
+#[cfg(all(test, windows))]
+mod dropped_file_path_tests {
+    use super::{devtools_file_path, devtools_indexed_object_ids, devtools_remote_object_id};
+
+    #[test]
+    fn reads_runtime_evaluate_object_id() {
+        let response = serde_json::json!({
+            "result": { "type": "object", "objectId": "list-7" }
+        });
+        assert_eq!(devtools_remote_object_id(&response), Some("list-7"));
+    }
+
+    #[test]
+    fn orders_file_objects_and_ignores_non_index_properties() {
+        let response = serde_json::json!({
+            "result": [
+                { "name": "length", "value": { "value": 2 } },
+                { "name": "1", "value": { "objectId": "file-b" } },
+                { "name": "0", "value": { "objectId": "file-a" } }
+            ]
+        });
+        assert_eq!(
+            devtools_indexed_object_ids(&response),
+            vec!["file-a".to_string(), "file-b".to_string()]
+        );
+    }
+
+    #[test]
+    fn reads_dom_get_file_info_path() {
+        let response = serde_json::json!({ "path": "C:\\captures\\match.mp4" });
+        assert_eq!(
+            devtools_file_path(&response),
+            Some("C:\\captures\\match.mp4")
+        );
+    }
 }
 
 fn writable_data_root(_app: &AppHandle, root: &Path, python: &Path) -> Result<PathBuf, String> {
@@ -366,7 +580,10 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .manage(BackendProcess::new())
-        .invoke_handler(tauri::generate_handler![read_legacy_ui_state])
+        .invoke_handler(tauri::generate_handler![
+            read_legacy_ui_state,
+            resolve_dropped_file_paths
+        ])
         .setup(|app| {
             // Start the backend on a worker thread so the window (and its
             // "connecting to backend" splash) appears immediately instead of

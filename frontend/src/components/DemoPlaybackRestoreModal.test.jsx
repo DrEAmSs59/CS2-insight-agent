@@ -33,6 +33,7 @@ describe("DemoPlaybackRestoreModal", () => {
     expect(screen.getByText("POV 文件已按备份完整恢复")).toBeTruthy();
     expect(screen.getByText(/SHA-256 一致/)).toBeTruthy();
     expect(screen.getByText("临时文件已删除。")).toBeTruthy();
+    expect(screen.getByTestId("demo-playback-restore-content").className).toContain("space-y-3");
     fireEvent.click(screen.getByRole("button", { name: "关闭" }));
     expect(onClose).toHaveBeenCalledTimes(1);
   });

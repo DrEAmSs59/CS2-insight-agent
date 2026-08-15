@@ -390,6 +390,8 @@ class AppConfig(BaseModel):
     ffmpeg_path: str = ""
     # 合辑 H.264：auto=独显优先选择主 GPU 对应硬编，按实际输出规格实测，失败时回退 libx264；亦可指定编码器名
     montage_encoder: str = "auto"
+    # 合辑工作台最近一次明确选择的导出目录；留空时按素材位置使用 exports/montage。
+    montage_export_dir: str = ""
     # LiteCut 导入素材、预览代理和工程导出的独立存储根目录；留空时沿用应用 data/lite_cut_assets。
     lite_cut_assets_dir: str = ""
     # LiteCut 浏览器预览代理的最长边（像素）。更低的值节省空间并提升预览流畅度；

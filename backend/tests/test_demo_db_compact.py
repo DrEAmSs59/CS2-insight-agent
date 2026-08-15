@@ -92,6 +92,83 @@ async def _seed_demo(
     return demo_id
 
 
+def test_persist_demo_ingest_writes_metadata_roster_and_status_atomically(tmp_path: Path):
+    async def scenario():
+        db = DemoDB(tmp_path / "ingest.sqlite3")
+        await db.init_db()
+        demo_path = str(tmp_path / "match.dem")
+        demo_id, _ = await db.add_demo(demo_path, status="pending")
+        await db.persist_demo_ingest(
+            demo_id,
+            demo_path,
+            meta={"map_name": "de_nuke", "total_rounds": 24},
+            source="Faceit",
+            players=[{"name": "alpha", "kills": 12, "deaths": 6}],
+            roster_demo_path=demo_path,
+            roster_cache_version=3,
+            source_file_size=123,
+            source_mtime_ns=456,
+            parsed_at="2026-08-13T00:00:00+00:00",
+        )
+        return (
+            await db.get_demo_by_id(demo_id),
+            await db.list_demo_player_stats(demo_id),
+            await db.get_demo_roster_cache(demo_id),
+        )
+
+    row, players, roster_cache = _run(scenario())
+    assert row["status"] == "loaded"
+    assert row["map_name"] == "de_nuke"
+    assert row["source"] == "Faceit"
+    assert players[0]["player_name"] == "alpha"
+    assert roster_cache["state"] == "ready"
+    assert roster_cache["row_count"] == 1
+
+
+def test_persist_demo_ingest_rolls_back_every_field_on_roster_failure(tmp_path: Path):
+    async def scenario():
+        db = DemoDB(tmp_path / "ingest-rollback.sqlite3")
+        await db.init_db()
+        demo_path = str(tmp_path / "match.dem")
+        demo_id, _ = await db.add_demo(demo_path, status="pending")
+        async with aiosqlite.connect(db.db_path) as conn:
+            await conn.execute(
+                """
+                CREATE TRIGGER fail_ingest_player
+                BEFORE INSERT ON demo_player_stats
+                BEGIN
+                    SELECT RAISE(ABORT, 'forced ingest failure');
+                END
+                """
+            )
+            await conn.commit()
+        with pytest.raises(sqlite3.IntegrityError, match="forced ingest failure"):
+            await db.persist_demo_ingest(
+                demo_id,
+                demo_path,
+                meta={"map_name": "de_nuke", "total_rounds": 24},
+                source="Faceit",
+                players=[{"name": "alpha"}],
+                roster_demo_path=demo_path,
+                roster_cache_version=3,
+                source_file_size=123,
+                source_mtime_ns=456,
+                parsed_at="2026-08-13T00:00:00+00:00",
+            )
+        return (
+            await db.get_demo_by_id(demo_id),
+            await db.list_demo_player_stats(demo_id),
+            await db.get_demo_roster_cache(demo_id),
+        )
+
+    row, players, roster_cache = _run(scenario())
+    assert row["status"] == "pending"
+    assert row["map_name"] is None
+    assert row["source"] is None
+    assert players == []
+    assert roster_cache is None
+
+
 def test_compact_list_uses_materialized_summary_and_two_selects(tmp_path: Path, monkeypatch):
     async def scenario():
         db = DemoDB(tmp_path / "compact.sqlite3")
@@ -152,6 +229,60 @@ def test_find_existing_filenames_uses_one_batch_result(tmp_path: Path):
         assert existing == {"match730_1.dem", "match730_2.dem"}
 
     _run(scenario())
+
+
+def test_keyboard_input_flag_is_migrated_persisted_listed_and_cleared(tmp_path: Path):
+    async def scenario():
+        db_path = tmp_path / "keyboard-flag.sqlite3"
+        with sqlite3.connect(db_path) as conn:
+            conn.execute(
+                """
+                CREATE TABLE demo_files (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    path TEXT UNIQUE NOT NULL,
+                        filename TEXT NOT NULL,
+                        file_size INTEGER,
+                        map_name TEXT,
+                        total_rounds INTEGER,
+                        team_a_score INTEGER,
+                        team_b_score INTEGER,
+                        team_a_name TEXT,
+                        team_b_name TEXT,
+                        duration_mins REAL,
+                        match_date TEXT,
+                        status TEXT NOT NULL DEFAULT 'pending',
+                        added_at TEXT NOT NULL,
+                        parsed_at TEXT,
+                        error_msg TEXT,
+                        display_name TEXT,
+                        source TEXT,
+                        watch_root TEXT,
+                        remark TEXT
+                )
+                """
+            )
+        db = DemoDB(db_path)
+        await db.init_db()
+        demo_path = str(tmp_path / "missing-input.dem")
+        demo_id, _ = await db.add_demo(demo_path, status="done")
+        await db.save_result(
+            demo_path,
+            {
+                "auto_target_player": "alpha",
+                "clips": [],
+                "has_player_keyboard_input": False,
+            },
+        )
+        full = await db.get_demo_list_item(demo_id)
+        compact = (await db.list_demos_compact())[0]
+        await db.clear_result(demo_path)
+        cleared = await db.get_demo_by_id(demo_id)
+        return full, compact, cleared
+
+    full, compact, cleared = _run(scenario())
+    assert full["has_player_keyboard_input"] == 0
+    assert compact["has_player_keyboard_input"] == 0
+    assert cleared["has_player_keyboard_input"] is None
 
 
 def test_init_backfills_summary_for_legacy_match_results(tmp_path: Path):

@@ -1,7 +1,7 @@
 import pytest
 
-from app.lite_cut.db import LiteCutDB
-from app.lite_cut.models import empty_project
+from app.features.lite_cut.db import LiteCutDB
+from app.features.lite_cut.models import empty_project
 
 
 def test_track_custom_name_survives_project_body_round_trip():
@@ -32,6 +32,43 @@ async def test_list_exports_filters_project_and_orders_updated(tmp_path):
     assert [row["id"] for row in project_rows] == [first, second]
     assert project_rows[0]["output_path"] == "C:/out/first-updated.mp4"
     assert project_rows[1]["error_msg"] == "MONTAGE_EXPORT_FAILED"
+
+
+@pytest.mark.anyio
+async def test_startup_recovery_marks_interrupted_exports_and_is_idempotent(tmp_path):
+    db = LiteCutDB(tmp_path / "lite_cut.db")
+    await db.init_tables()
+    body = empty_project().model_dump(mode="json")
+    active_ids = [
+        await db.create_export(
+            project_id=None,
+            body=body,
+            status=status,
+            output_path=f"C:/out/{status}.mp4",
+        )
+        for status in ("queued", "running", "cancelling", "pending")
+    ]
+    done_id = await db.create_export(
+        project_id=None,
+        body=body,
+        status="done",
+        output_path="C:/out/done.mp4",
+    )
+
+    stale_paths = await db.recover_interrupted_exports()
+
+    assert set(stale_paths) == {
+        "C:/out/queued.mp4",
+        "C:/out/running.mp4",
+        "C:/out/cancelling.mp4",
+        "C:/out/pending.mp4",
+    }
+    rows = {row["id"]: row for row in await db.list_exports(limit=10)}
+    for export_id in active_ids:
+        assert rows[export_id]["status"] == "interrupted"
+        assert rows[export_id]["error_msg"] == "LITECUT_EXPORT_INTERRUPTED"
+    assert rows[done_id]["status"] == "done"
+    assert await db.recover_interrupted_exports() == []
 
 
 @pytest.mark.anyio

@@ -68,7 +68,7 @@ export default function ExperimentalPovSection({
       {!omitEyebrow ? (
         <p className="mb-2 text-[10px] font-bold uppercase tracking-wider text-cs2-amber-on-surface">{t("pov.eyebrowLabel")}</p>
       ) : null}
-      <label className="flex cursor-pointer items-start gap-2 rounded-lg border border-cs2-border bg-cs2-bg-input/50 px-3 py-2">
+      <label className="flex cursor-pointer items-start gap-2 rounded-lg border border-cs2-border bg-cs2-bg-card px-3 py-2">
         <input
           type="checkbox"
           disabled={checkboxDisabled || !onExperimentalPovChange}
@@ -90,8 +90,8 @@ export default function ExperimentalPovSection({
       ) : null}
 
       {experimentalPovEnabled && onPovRadarModeChange && onPovTeamcounterNumericChange ? (
-        <div className="mt-3 space-y-4 rounded-lg border border-cs2-border bg-cs2-bg-input/30 px-3 py-2.5">
-          <label className="flex cursor-pointer items-start gap-2 rounded-md border border-cs2-border bg-cs2-bg-input/40 px-2 py-2">
+        <div className="mt-3 space-y-4 rounded-lg border border-cs2-border bg-cs2-bg-elevated px-3 py-2.5">
+          <label className="flex cursor-pointer items-start gap-2 rounded-md border border-cs2-border bg-cs2-bg-card px-2 py-2">
             <input
               type="checkbox"
               disabled={!onPovVoiceDisabledChange}
@@ -122,7 +122,7 @@ export default function ExperimentalPovSection({
             </span>
           </label>
 
-          <label className="flex cursor-pointer items-start gap-2 rounded-md border border-cs2-border bg-cs2-bg-input/40 px-2 py-2">
+          <label className="flex cursor-pointer items-start gap-2 rounded-md border border-cs2-border bg-cs2-bg-card px-2 py-2">
             <input
               type="checkbox"
               checked={!!povTeamcounterNumeric}
@@ -140,7 +140,7 @@ export default function ExperimentalPovSection({
         </div>
       ) : null}
 
-      <div className="mt-2 rounded border border-cs2-border bg-cs2-bg-input/40 px-2.5 py-2 text-[11px] leading-relaxed text-cs2-text-muted">
+      <div className="mt-2 rounded border border-cs2-border bg-cs2-bg-card px-2.5 py-2 text-[11px] leading-relaxed text-cs2-text-muted">
         {t("pov.disclaimer")}
       </div>
 
@@ -165,7 +165,7 @@ export default function ExperimentalPovSection({
             {povStatus?.cs2_running ? t("pov.restoreCloseCs2") : t("pov.restoreReady")}
           </p>
           {povRestoreResult?.tone === "error" ? (
-            <p className="mt-2 break-all rounded border border-rose-400/30 bg-black/10 px-2 py-1.5 text-[10px]">
+            <p className="mt-2 break-all rounded border border-rose-400/30 bg-cs2-rose-surface px-2 py-1.5 text-[10px]">
               {t("pov.restoreFailed", { msg: povRestoreResult.message })}
             </p>
           ) : null}
@@ -216,7 +216,7 @@ export default function ExperimentalPovSection({
       ) : null}
 
       {!povNeedsRestore && povRestoreResult?.tone === "success" ? (
-        <div className="mt-3 rounded border border-emerald-500/35 bg-emerald-500/10 px-2.5 py-2 text-[11px] text-emerald-400">
+        <div className="mt-3 rounded border border-emerald-500/35 bg-cs2-emerald-surface px-2.5 py-2 text-[11px] text-cs2-emerald-on-surface">
           {t(povRestoreResult.messageKey)}
         </div>
       ) : null}

@@ -83,41 +83,41 @@ export function isClipPacingAndPovLocked(clip) {
  * @param {Record<string, unknown>} clip
  */
 export function queueBlockBadgeClass(clip) {
-  if (!clip || typeof clip !== "object") return "border-cs2-border bg-zinc-900/80 text-cs2-text-primary";
+  if (!clip || typeof clip !== "object") return "border-cs2-border bg-cs2-bg-elevated text-cs2-text-secondary";
   if (isTimelineSourceClip(clip)) {
-    return "border-cyan-500/45 bg-cs2-cyan-surface text-cyan-100";
+    return "border-cs2-border bg-cs2-cyan-surface text-cs2-cyan-on-surface";
   }
   const cat = String(clip.category || "").toLowerCase();
-  if (cat === "fail") return "border-cs2-fail/30 bg-cs2-fail/10 text-cs2-fail";
-  if (cat === "meme_death") return "border-fuchsia-500/35 bg-fuchsia-500/10 text-fuchsia-300";
-  if (cat === "compilation") return "border-cs2-compilation/35 bg-cs2-compilation/10 text-cs2-compilation";
-  if (cat === "highlight") return "border-cs2-highlight/30 bg-cs2-highlight/10 text-cs2-highlight";
-  return "border-cs2-border bg-zinc-900/80 text-cs2-text-primary";
+  if (cat === "fail") return "border-cs2-border bg-cs2-rose-surface text-cs2-rose-on-surface";
+  if (cat === "meme_death") return "border-cs2-border bg-cs2-fuchsia-surface text-cs2-fuchsia-on-surface";
+  if (cat === "compilation") return "border-cs2-border bg-cs2-amber-surface text-cs2-amber-on-surface";
+  if (cat === "highlight") return "border-cs2-border bg-cs2-emerald-surface text-cs2-emerald-on-surface";
+  return "border-cs2-border bg-cs2-bg-elevated text-cs2-text-secondary";
 }
 
 export const MONTAGE_NEUTRAL_TYPE_BADGE_CLASS =
-  "bg-zinc-500/15 text-cs2-text-secondary ring-1 ring-white/10";
+  "bg-cs2-bg-elevated text-cs2-text-secondary ring-1 ring-cs2-border";
 
 /** @param {string} tag `normalizeClipType` 返回值 */
 export function montageTypeTagBadgeClass(tag) {
   switch (tag) {
     case "高光":
     case "击杀":
-      return "bg-cs2-highlight/10 text-cs2-highlight ring-1 ring-cs2-highlight/35";
+      return "bg-cs2-emerald-surface text-cs2-emerald-on-surface ring-1 ring-cs2-border";
     case "下饭":
-      return "bg-cs2-fail/10 text-cs2-fail ring-1 ring-cs2-fail/35";
+      return "bg-cs2-rose-surface text-cs2-rose-on-surface ring-1 ring-cs2-border";
     case "梗死亡":
-      return "bg-fuchsia-500/15 text-cs2-fuchsia-on-surface ring-1 ring-fuchsia-500/40";
+      return "bg-cs2-fuchsia-surface text-cs2-fuchsia-on-surface ring-1 ring-cs2-border";
     case "合集":
     case "击杀合集":
     case "死亡合集":
     case "回合合集":
-      return "bg-cs2-compilation/10 text-cs2-compilation ring-1 ring-cs2-compilation/40";
+      return "bg-cs2-amber-surface text-cs2-amber-on-surface ring-1 ring-cs2-border";
     case "时间线":
     case "时间线击杀":
     case "时间线死亡":
     case "时间线整回合":
-      return "bg-cyan-500/15 text-cyan-100 ring-1 ring-cyan-500/35";
+      return "bg-cs2-cyan-surface text-cs2-cyan-on-surface ring-1 ring-cs2-border";
     default:
       return MONTAGE_NEUTRAL_TYPE_BADGE_CLASS;
   }

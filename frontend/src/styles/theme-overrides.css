@@ -1,0 +1,42 @@
+
+.dark { color-scheme: dark; }
+
+/* 浅色主题使用柔和灰色画布，白色只留给需要抬升的内容表面。 */
+.light {
+  color-scheme: light;
+  --cs2-bg-page: #ebebeb;
+  --cs2-bg-card: #f5f5f5;
+  --cs2-bg-sidebar: #f5f5f5;
+  --cs2-bg-input: var(--sand-3);
+  --cs2-bg-elevated: var(--sand-1);
+  --cs2-bg-hover: var(--sand-4);
+  --cs2-bg-active: var(--sand-5);
+  --cs2-border: var(--sand-7);
+  --cs2-border-subtle: var(--sand-6);
+  --cs2-shadow: rgba(34, 32, 29, 0.12);
+  --cs2-shadow-sm: 0 1px 2px rgba(34, 32, 29, 0.08);
+  --cs2-shadow-md: 0 6px 18px rgba(34, 32, 29, 0.10);
+  --cs2-shadow-lg: 0 12px 36px rgba(34, 32, 29, 0.14);
+}
+
+.app-topbar {
+  height: 36px;
+}
+
+.app-sidebar {
+  transition: width 180ms cubic-bezier(0.2, 0, 0, 1);
+}
+
+.app-sidebar[data-resizing="true"] {
+  transition: none;
+}
+
+/* 饰品预览使用明确的主题实体底，避免渐变和透明叠色在亮暗模式下产生色偏。 */
+.cosmetic-preview-surface {
+  background: #2b2b2b;
+  box-shadow: none;
+}
+
+.light .cosmetic-preview-surface {
+  background: #77797a;
+}

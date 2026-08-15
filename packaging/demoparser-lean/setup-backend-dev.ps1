@@ -13,13 +13,33 @@ $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
 $metadata = Get-Content -LiteralPath (Join-Path $PSScriptRoot "demoparser-runtime.json") -Raw |
     ConvertFrom-Json
 
-function Remove-BundledDemoparser {
+function Remove-DemoparserInstall {
     param([Parameter(Mandatory)][string]$PythonExe)
 
-    $sitePackages = Join-Path (Split-Path -Parent $PythonExe) "Lib\site-packages"
-    Remove-Item -LiteralPath (Join-Path $sitePackages "demoparser2") -Recurse -Force -ErrorAction SilentlyContinue
-    Get-ChildItem -LiteralPath $sitePackages -Directory -Filter "demoparser2-*.dist-info" -ErrorAction SilentlyContinue |
-        ForEach-Object { Remove-Item -LiteralPath $_.FullName -Recurse -Force }
+    $resolvedPython = (Resolve-Path -LiteralPath $PythonExe).Path
+    $pythonDir = Split-Path -Parent $resolvedPython
+    $runtimeRoot = if ((Split-Path -Leaf $pythonDir) -ieq "Scripts") {
+        Split-Path -Parent $pythonDir
+    } else {
+        $pythonDir
+    }
+    $sitePackages = (Resolve-Path -LiteralPath (Join-Path $runtimeRoot "Lib\site-packages")).Path
+    $expectedPrefix = $sitePackages.TrimEnd('\') + '\'
+    $targets = @()
+    $packageDir = Join-Path $sitePackages "demoparser2"
+    if (Test-Path -LiteralPath $packageDir -PathType Container) {
+        $targets += Get-Item -LiteralPath $packageDir
+    }
+    $targets += Get-ChildItem -LiteralPath $sitePackages -Directory `
+        -Filter "demoparser2-*.dist-info" -ErrorAction SilentlyContinue
+
+    foreach ($target in $targets) {
+        $resolvedTarget = (Resolve-Path -LiteralPath $target.FullName).Path
+        if (-not $resolvedTarget.StartsWith($expectedPrefix, [StringComparison]::OrdinalIgnoreCase)) {
+            throw "Refusing to remove demoparser outside site-packages: $resolvedTarget"
+        }
+        Remove-Item -LiteralPath $resolvedTarget -Recurse -Force
+    }
 }
 
 & $UvExe --version
@@ -49,13 +69,19 @@ if ($WheelPath.Trim() -or $BuildFromSource) {
     if (-not $runtimeWheel -or -not (Test-Path -LiteralPath $runtimeWheel -PathType Leaf)) {
         throw "Patched demoparser wheel was not produced."
     }
-    & $UvExe pip install --python $python --reinstall --no-deps $runtimeWheel
-    if ($LASTEXITCODE -ne 0) { throw "Installing the patched demoparser wheel failed." }
 } else {
     $wheelName = "demoparser2-$($metadata.distribution_version)-cp312-cp312-win_amd64.whl"
     $escapedWheelName = [Uri]::EscapeDataString($wheelName)
     $runtimeWheel = "https://github.com/$($metadata.release_repo)/releases/download/$($metadata.release_tag)/$escapedWheelName"
 }
+
+# Release trimming can leave a RECORD-less dist-info directory behind. Package
+# managers cannot reliably replace that broken install, and importlib.metadata
+# may select the stale directory before the new version. Always clean the exact
+# parser package roots before installing the selected runtime.
+Remove-DemoparserInstall -PythonExe $python
+& $UvExe pip install --python $python --reinstall --no-deps $runtimeWheel
+if ($LASTEXITCODE -ne 0) { throw "Installing the patched demoparser wheel failed." }
 
 $backend = Join-Path $repoRoot "backend"
 & $python -c "import sys; sys.path.insert(0, sys.argv[1]); from app.demoparser_runtime import main; raise SystemExit(main())" $backend
@@ -72,7 +98,7 @@ if (Test-Path -LiteralPath $desktopPython -PathType Leaf) {
         Write-Host "Repairing the existing desktop Python runtime..."
         # Release trimming removes wheel RECORD files, so package managers
         # cannot reliably uninstall an older parser from this runtime.
-        Remove-BundledDemoparser -PythonExe $desktopPython
+        Remove-DemoparserInstall -PythonExe $desktopPython
         & $UvExe pip install --python $desktopPython --reinstall --no-deps --compile-bytecode $runtimeWheel
         if ($LASTEXITCODE -ne 0) { throw "Repairing the desktop demoparser runtime failed." }
         & $desktopPython -c "import sys; sys.path.insert(0, sys.argv[1]); from app.demoparser_runtime import main; raise SystemExit(main())" $backend

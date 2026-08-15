@@ -1,3 +1,5 @@
+import { desktopBridge } from "../desktop/desktopBridge.js";
+
 const EXACT_KEYS = new Set([
   "cs2-insight-theme",
   "liteCut:panelLayout",
@@ -36,10 +38,9 @@ export function applyLegacyElectronUiState(raw, storage = globalThis.localStorag
 }
 
 export async function restoreLegacyElectronUiState() {
-  if (!globalThis.__TAURI_INTERNALS__) return [];
+  if (!desktopBridge) return [];
   try {
-    const { invoke } = await import("@tauri-apps/api/core");
-    const raw = await invoke("read_legacy_ui_state");
+    const raw = await desktopBridge.readLegacyUiState();
     return applyLegacyElectronUiState(raw);
   } catch {
     return [];

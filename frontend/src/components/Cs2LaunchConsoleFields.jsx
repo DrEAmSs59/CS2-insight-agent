@@ -1,4 +1,5 @@
 import { useCallback, useMemo, useState } from "react";
+import { LockKeyhole, Search, X } from "lucide-react";
 import { useT } from "../i18n/useT.js";
 
 /** 程序内置、始终生效、不可删除的启动参数（仅展示，不写配置）。 */
@@ -74,6 +75,72 @@ function TagListAddRow({ draft, onDraftChange, onAdd, placeholder, addLabel, dis
   );
 }
 
+function CommandCollection({
+  query,
+  onQueryChange,
+  countLabel,
+  searchPlaceholder,
+  emptyLabel,
+  hasMatches,
+  children,
+}) {
+  return (
+    <div className="overflow-hidden rounded-lg border border-cs2-border bg-cs2-bg-input/55">
+      <div className="flex flex-col gap-2 border-b border-cs2-border px-2 py-2 @min-[32rem]/params:flex-row @min-[32rem]/params:items-center">
+        <span className="shrink-0 text-[10px] font-semibold text-cs2-text-muted">{countLabel}</span>
+        <label className="relative min-w-0 flex-1 @min-[32rem]/params:ml-auto @min-[32rem]/params:max-w-64">
+          <Search aria-hidden className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-cs2-text-muted" />
+          <input
+            type="search"
+            value={query}
+            onChange={(event) => onQueryChange(event.target.value)}
+            aria-label={searchPlaceholder}
+            placeholder={searchPlaceholder}
+            spellCheck={false}
+            className="h-8 w-full rounded-md border border-cs2-border bg-cs2-bg-card pl-8 pr-3 text-[11px] text-cs2-text-primary outline-none placeholder:text-cs2-text-muted focus:border-cs2-accent/50"
+          />
+        </label>
+      </div>
+      <div className="max-h-48 overflow-y-auto p-2 custom-scrollbar">
+        {hasMatches ? (
+          <div className="grid gap-1.5 @min-[42rem]/params:grid-cols-2">{children}</div>
+        ) : (
+          <p className="px-1 py-3 text-center text-[11px] text-cs2-text-muted">{emptyLabel}</p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function CommandListItem({ line, index, builtIn = false, builtInLabel, tone = "accent", removeLabel, onRemove }) {
+  const toneClass = builtIn
+    ? "border-cs2-border bg-cs2-bg-elevated text-cs2-text-secondary"
+    : tone === "console"
+      ? "border-cs2-border bg-cs2-cyan-surface text-cs2-cyan-on-surface"
+      : "border-cs2-accent/45 bg-cs2-accent-soft text-cs2-accent";
+
+  return (
+    <div className={`group flex min-w-0 items-center gap-2 rounded-md border px-2 py-1.5 ${toneClass}`}>
+      <span className="flex h-5 min-w-5 shrink-0 items-center justify-center rounded bg-cs2-bg-card/70 px-1 font-mono text-[9px] text-cs2-text-muted">
+        {builtIn ? <LockKeyhole aria-hidden className="h-3 w-3" /> : index}
+      </span>
+      <code className="min-w-0 flex-1 truncate text-[11px] font-semibold" title={line}>{line}</code>
+      {builtIn ? (
+        <span className="shrink-0 text-[9px] font-semibold text-cs2-text-muted">{builtInLabel}</span>
+      ) : (
+        <button
+          type="button"
+          className="shrink-0 rounded p-1 text-cs2-text-muted transition-colors hover:bg-cs2-bg-card hover:text-cs2-text-primary"
+          aria-label={removeLabel}
+          onClick={onRemove}
+        >
+          <X aria-hidden className="h-3 w-3" />
+        </button>
+      )}
+    </div>
+  );
+}
+
 /**
  * 额外启动参数 + 附加预热控制台（与常用参数页同一套交互）。
  */
@@ -86,6 +153,8 @@ export default function Cs2LaunchConsoleFields({
   const t = useT();
   const [launchArgDraft, setLaunchArgDraft] = useState("");
   const [consoleLineDraft, setConsoleLineDraft] = useState("");
+  const [launchQuery, setLaunchQuery] = useState("");
+  const [consoleQuery, setConsoleQuery] = useState("");
 
   const injectExtraCount = useMemo(
     () => countInjectConsoleLines(recordInjectConsoleLines),
@@ -98,6 +167,24 @@ export default function Cs2LaunchConsoleFields({
     [launchChips],
   );
   const consoleChips = useMemo(() => consoleChipsFromStored(recordInjectConsoleLines), [recordInjectConsoleLines]);
+  const normalizedLaunchQuery = launchQuery.trim().toLowerCase();
+  const normalizedConsoleQuery = consoleQuery.trim().toLowerCase();
+  const filteredFixedLaunchArgs = useMemo(
+    () => FIXED_LAUNCH_ARGS.filter((line) => !normalizedLaunchQuery || line.toLowerCase().includes(normalizedLaunchQuery)),
+    [normalizedLaunchQuery],
+  );
+  const filteredEditableLaunchChips = useMemo(
+    () => editableLaunchChips
+      .map((line, customIndex) => ({ line, index: launchChips.indexOf(line), customIndex }))
+      .filter(({ line }) => !normalizedLaunchQuery || line.toLowerCase().includes(normalizedLaunchQuery)),
+    [editableLaunchChips, launchChips, normalizedLaunchQuery],
+  );
+  const filteredConsoleChips = useMemo(
+    () => consoleChips
+      .map((line, index) => ({ line, index }))
+      .filter(({ line }) => !normalizedConsoleQuery || line.toLowerCase().includes(normalizedConsoleQuery)),
+    [consoleChips, normalizedConsoleQuery],
+  );
 
   const addLaunchChip = useCallback(() => {
     const trimmed = launchArgDraft.trim();
@@ -145,41 +232,32 @@ export default function Cs2LaunchConsoleFields({
         <label className="block text-[10px] font-semibold uppercase tracking-wider text-cs2-text-secondary">
           {t("record.launchSectionLabel")}
         </label>
-        <div className="flex min-h-[3rem] flex-wrap content-start gap-2 overflow-y-auto rounded-lg border border-cs2-border bg-cs2-bg-input/40 p-2">
-          {FIXED_LAUNCH_ARGS.map((line) => (
-            <span
+        <CommandCollection
+          query={launchQuery}
+          onQueryChange={setLaunchQuery}
+          countLabel={t("record.launchCount", { builtIn: FIXED_LAUNCH_ARGS.length, custom: editableLaunchChips.length })}
+          searchPlaceholder={t("record.launchSearchPlaceholder")}
+          emptyLabel={t("record.commandNoResults")}
+          hasMatches={filteredFixedLaunchArgs.length + filteredEditableLaunchChips.length > 0}
+        >
+          {filteredFixedLaunchArgs.map((line) => (
+            <CommandListItem
               key={`fixed-${line}`}
-              title={t("record.launchFixedArgTitle")}
-              className="inline-flex max-w-full items-center gap-1 rounded-md border border-cs2-border bg-cs2-bg-input/60 px-2 py-1 text-[11px] font-semibold text-cs2-text-muted"
-            >
-              <span aria-hidden className="shrink-0">🔒</span>
-              <span className="min-w-0 max-w-[min(100%,18rem)] truncate font-mono" title={line}>
-                {line}
-              </span>
-            </span>
+              line={line}
+              builtIn
+              builtInLabel={t("record.commandBuiltIn")}
+            />
           ))}
-          {editableLaunchChips.map((line) => {
-            const idx = launchChips.indexOf(line);
-            return (
-              <span
-                key={`lc-${idx}`}
-                className="group inline-flex max-w-full items-center gap-1 rounded-md border border-cs2-accent/30 bg-cs2-accent/10 pl-2 pr-1 py-1 text-[11px] font-semibold text-cs2-accent"
-              >
-                <span className="min-w-0 max-w-[min(100%,18rem)] truncate font-mono" title={line}>
-                  {line}
-                </span>
-                <button
-                  type="button"
-                  className="shrink-0 rounded p-0.5 text-cs2-text-muted hover:bg-cs2-bg-input/50 hover:text-cs2-text-primary"
-                  aria-label={t("record.launchRemoveAriaLabel", { arg: line })}
-                  onClick={() => removeLaunchChip(idx)}
-                >
-                  ✕
-                </button>
-              </span>
-            );
-          })}
-        </div>
+          {filteredEditableLaunchChips.map(({ line, index, customIndex }) => (
+            <CommandListItem
+              key={`lc-${index}`}
+              line={line}
+              index={FIXED_LAUNCH_ARGS.length + customIndex + 1}
+              removeLabel={t("record.launchRemoveAriaLabel", { arg: line })}
+              onRemove={() => removeLaunchChip(index)}
+            />
+          ))}
+        </CommandCollection>
         <TagListAddRow
           draft={launchArgDraft}
           onDraftChange={setLaunchArgDraft}
@@ -197,30 +275,25 @@ export default function Cs2LaunchConsoleFields({
         <label className="block text-[10px] font-semibold uppercase tracking-wider text-cs2-text-secondary">
           {t("record.consoleSectionLabel")}
         </label>
-        <div className="flex min-h-[3rem] flex-wrap content-start gap-2 overflow-y-auto rounded-lg border border-cs2-border bg-cs2-bg-input/40 p-2">
-          {consoleChips.length === 0 ? (
-            <span className="py-1 text-[12px] text-cs2-text-muted">{t("record.consoleEmpty")}</span>
-          ) : (
-            consoleChips.map((line, idx) => (
-              <span
-                key={`cc-${idx}`}
-                className="group inline-flex max-w-full items-center gap-1 rounded-md border border-cyan-500/35 bg-cs2-cyan-surface pl-2 pr-1 py-1 text-[11px] font-semibold text-cyan-100/95"
-              >
-                <span className="min-w-0 max-w-[min(100%,20rem)] truncate font-mono" title={line}>
-                  {line}
-                </span>
-                <button
-                  type="button"
-                  className="shrink-0 rounded p-0.5 text-cs2-text-muted hover:bg-cs2-bg-input/50 hover:text-cs2-text-primary"
-                  aria-label={t("record.consoleRemoveAriaLabel", { arg: line })}
-                  onClick={() => removeConsoleChip(idx)}
-                >
-                  ✕
-                </button>
-              </span>
-            ))
-          )}
-        </div>
+        <CommandCollection
+          query={consoleQuery}
+          onQueryChange={setConsoleQuery}
+          countLabel={t("record.consoleCount", { n: consoleChips.length })}
+          searchPlaceholder={t("record.consoleSearchPlaceholder")}
+          emptyLabel={consoleQuery.trim() ? t("record.commandNoResults") : t("record.consoleEmpty")}
+          hasMatches={filteredConsoleChips.length > 0}
+        >
+          {filteredConsoleChips.map(({ line, index }) => (
+            <CommandListItem
+              key={`cc-${index}`}
+              line={line}
+              index={index + 1}
+              tone="console"
+              removeLabel={t("record.consoleRemoveAriaLabel", { arg: line })}
+              onRemove={() => removeConsoleChip(index)}
+            />
+          ))}
+        </CommandCollection>
         <TagListAddRow
           draft={consoleLineDraft}
           onDraftChange={setConsoleLineDraft}

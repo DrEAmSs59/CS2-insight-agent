@@ -113,7 +113,7 @@ export function OptionRow({ checked, onChange, title, code, disabled = false, di
   return (
     <label
       title={disabled && disabledReason ? t(disabledReason) : undefined}
-      className={`flex items-start gap-3 rounded-lg border border-cs2-border bg-cs2-bg-input/40 px-3 py-2.5 transition-colors ${
+      className={`flex items-start gap-3 rounded-lg border border-cs2-border bg-cs2-bg-input px-3 py-2.5 transition-colors ${
         disabled
           ? "cursor-not-allowed opacity-45"
           : "cursor-pointer hover:border-cs2-accent/25"

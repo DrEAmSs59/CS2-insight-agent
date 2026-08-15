@@ -29,6 +29,10 @@ def test_installer_hook_covers_electron_upgrade_surfaces():
     assert 'taskkill.exe" /IM "cs2-insight-agent-desktop.exe" /F /T' in hook
     # An orphaned backend must not keep port 19871 busy after an upgrade.
     assert "LocalPort 19871" in hook
+    # In-place upgrades must remove the obsolete native HTTP parser; the lean
+    # runtime pins Uvicorn to h11 and no longer ships httptools.
+    assert 'RMDir /r "$INSTDIR\\python\\Lib\\site-packages\\httptools"' in hook
+    assert "Call CS2_RemoveStaleHttpTools" in hook
     # Same-directory Electron installs are retired before file copy,
     # different-directory ones only after migration (postinstall).
     assert 'StrCpy $CS2ElectronScope "samedir"' in hook

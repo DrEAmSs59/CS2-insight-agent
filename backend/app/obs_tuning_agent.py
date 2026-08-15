@@ -18,7 +18,7 @@ from openai import APIConnectionError, APIError, APITimeoutError, AsyncOpenAI, R
 from pydantic import BaseModel, Field, ValidationError
 
 from .env_utils import LLMConfig, llm_base_url_is_local_host
-from .llm_compat import completion_extra_body, message_text, normalize_llm_base_url
+from .llm_compat import completion_extra_body, completion_temperature, message_text, normalize_llm_base_url
 from .obs_tuning import ObsTuningGoal
 
 logger = logging.getLogger(__name__)
@@ -180,7 +180,7 @@ async def review_tuning_plan(
             {"role": "system", "content": OBS_TUNING_SYSTEM_PROMPT},
             {"role": "user", "content": user_message},
         ],
-        "temperature": 0.15,
+        "temperature": completion_temperature(model, base_url, 0.15),
         "max_tokens": 900,
     }
     if _supports_json_object_output(model, base_url):

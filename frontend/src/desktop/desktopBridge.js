@@ -1,12 +1,16 @@
 import { getVersion } from "@tauri-apps/api/app";
+import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { open } from "@tauri-apps/plugin-dialog";
 import { openUrl, revealItemInDir } from "@tauri-apps/plugin-opener";
+import { relaunch } from "@tauri-apps/plugin-process";
+import { check } from "@tauri-apps/plugin-updater";
 
 export const isDesktopApp = Boolean(window.__TAURI_INTERNALS__);
 
 const currentWindow = isDesktopApp ? getCurrentWindow() : null;
+let fileDropSequence = 0;
 
 export const desktopBridge = isDesktopApp
   ? {
@@ -26,6 +30,22 @@ export const desktopBridge = isDesktopApp
         };
       },
       getVersion,
+      checkForUpdate: () => check(),
+      relaunch: () => relaunch(),
+      readLegacyUiState: () => invoke("read_legacy_ui_state"),
+      resolveDroppedFilePaths(files) {
+        const droppedFiles = Array.from(files || []);
+        if (!droppedFiles.length) return Promise.resolve([]);
+        const token = `${Date.now().toString(36)}_${(++fileDropSequence).toString(36)}`;
+        const registry = window.__LITECUT_DROPPED_FILES__
+          || (window.__LITECUT_DROPPED_FILES__ = Object.create(null));
+        registry[token] = droppedFiles;
+        return invoke("resolve_dropped_file_paths", { token })
+          .then((paths) => (Array.isArray(paths) ? paths : []))
+          .finally(() => {
+            delete registry[token];
+          });
+      },
       writeClipboardText: (text) => writeText(String(text ?? "")),
       async showOpenDialog(options = {}) {
         const properties = Array.isArray(options.properties) ? options.properties : [];
@@ -38,6 +58,27 @@ export const desktopBridge = isDesktopApp
         });
         const filePaths = selected == null ? [] : Array.isArray(selected) ? selected : [selected];
         return { canceled: filePaths.length === 0, filePaths };
+      },
+      onFileDragDrop(callback) {
+        let active = true;
+        let scaleFactor = window.devicePixelRatio || 1;
+        void currentWindow.scaleFactor().then((value) => {
+          if (Number.isFinite(value) && value > 0) scaleFactor = value;
+        }).catch(() => {});
+        const unlistenPromise = currentWindow.onDragDropEvent(({ payload }) => {
+          if (!active) return;
+          const logicalPosition = payload.position?.toLogical?.(scaleFactor);
+          callback({
+            ...payload,
+            position: logicalPosition
+              ? { x: logicalPosition.x, y: logicalPosition.y }
+              : null,
+          });
+        });
+        return () => {
+          active = false;
+          void unlistenPromise.then((unlisten) => unlisten());
+        };
       },
       async chooseDemoFiles() {
         try {

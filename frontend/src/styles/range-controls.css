@@ -1,0 +1,102 @@
+
+/* 录制队列节奏滑块：进度使用业务强调色，未填充轨道跟随亮/暗主题边框灰。 */
+.cs2-data-slider {
+  --cs2-range-progress: 0%;
+  --cs2-range-accent: var(--cs2-accent);
+  width: 100%;
+  height: 6px;
+  margin: 0;
+  border-radius: 999px;
+  outline: none;
+  appearance: none;
+  cursor: pointer;
+  background: linear-gradient(
+    to right,
+    var(--cs2-range-accent) 0 var(--cs2-range-progress),
+    var(--cs2-border) var(--cs2-range-progress) 100%
+  );
+}
+
+.cs2-data-slider::-webkit-slider-thumb {
+  width: 14px;
+  height: 14px;
+  border: 0;
+  border-radius: 50%;
+  appearance: none;
+  background: var(--cs2-range-accent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--cs2-range-accent) 28%, transparent);
+}
+
+.cs2-data-slider:focus-visible::-webkit-slider-thumb {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--cs2-range-accent) 28%, transparent);
+}
+
+.cs2-data-slider::-moz-range-track {
+  height: 6px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--cs2-border);
+}
+
+.cs2-data-slider::-moz-range-progress {
+  height: 6px;
+  border-radius: 999px;
+  background: var(--cs2-range-accent);
+}
+
+.cs2-data-slider::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--cs2-range-accent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--cs2-range-accent) 28%, transparent);
+}
+
+.litecut-selected-media {
+  background: var(--cs2-bg-card);
+}
+
+.litecut-property-control-row + .litecut-property-control-row {
+  margin-top: 2px;
+}
+
+.litecut-property-panel {
+  container-name: litecut-property;
+  container-type: inline-size;
+}
+
+@container litecut-property (max-width: 370px) {
+  .litecut-property-control-row {
+    grid-template-columns: minmax(0, 1fr) 56px 24px;
+    row-gap: 2px;
+  }
+
+  .litecut-property-control-row > span:first-child {
+    grid-column: 1 / -1;
+  }
+
+  .litecut-property-collapse-content {
+    padding-inline: 7px;
+  }
+}
+
+@container litecut-property (max-width: 310px) {
+  .litecut-property-control-row {
+    grid-template-columns: minmax(0, 1fr) 50px 20px;
+    column-gap: 2px;
+    padding-inline: 0;
+  }
+
+  .litecut-property-control-row > button:last-child {
+    width: 20px;
+  }
+
+}
+
+/* 极窄检查器只保留页签图标，完整名称继续由 title 提供。 */
+@container litecut-property (max-width: 220px) {
+  .litecut-inspector-tab-label {
+    display: none;
+  }
+}

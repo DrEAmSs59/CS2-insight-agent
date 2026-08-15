@@ -532,7 +532,7 @@ class RecordingExecutor:
         self._obs = obs_client
         self._abort_event = abort_event
         self._fade: Optional[OBSFadeController] = fade_controller
-        # record_inject 行中需在每片段 spec_player 锁定后补注入的子集（依赖观战目标的 cvar，如 cl_demo_predict）。
+        # 本次实际 warmup 命令中需在每片段 spec_player 锁定后补注入的白名单子集。
         self._post_spec_console_lines: list[str] = list(post_spec_console_lines or [])
         # Controller is created per-execute call so it always holds the current client.
         self._ctrl: Optional[OBSRecordingController] = None

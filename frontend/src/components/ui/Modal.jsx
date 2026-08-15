@@ -17,6 +17,8 @@ import { X } from "lucide-react";
  *   contentClassName?: string;
  *   zIndex?: number;
  *   contained?: boolean;
+ *   fillHeight?: boolean;
+ *   closable?: boolean;
  * }} props
  */
 export default function Modal({
@@ -34,6 +36,8 @@ export default function Modal({
   contentClassName = "flex-1 overflow-y-auto",
   zIndex = 90,
   contained = false,
+  fillHeight = true,
+  closable = true,
 }) {
   if (!open) return null;
 
@@ -44,11 +48,11 @@ export default function Modal({
       role="dialog"
       aria-modal="true"
       onClick={(e) => {
-        if (e.target === e.currentTarget) onClose();
+        if (closable && e.target === e.currentTarget) onClose();
       }}
     >
       <div
-        className={`flex h-full ${maxHeight} w-full ${maxWidth} flex-col overflow-hidden rounded-xl border border-cs2-border bg-cs2-bg-card shadow-lg ${className}`}
+        className={`flex ${fillHeight ? "h-full" : ""} ${maxHeight} w-full ${maxWidth} flex-col overflow-hidden rounded-xl border border-cs2-border bg-cs2-bg-card shadow-lg ${className}`}
       >
         {/* Header */}
         {(title || icon || subtitle) && (
@@ -70,13 +74,15 @@ export default function Modal({
             </div>
             <div className="flex items-center gap-2">
               {headerRight}
-              <button
-                type="button"
-                onClick={onClose}
-                className="rounded-full p-1.5 text-cs2-text-muted transition-colors hover:bg-cs2-bg-hover hover:text-cs2-text-primary"
-              >
-                <X className="h-4 w-4" />
-              </button>
+              {closable ? (
+                <button
+                  type="button"
+                  onClick={onClose}
+                  className="rounded-full p-1.5 text-cs2-text-muted transition-colors hover:bg-cs2-bg-hover hover:text-cs2-text-primary"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              ) : null}
             </div>
           </div>
         )}

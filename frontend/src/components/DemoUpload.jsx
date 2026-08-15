@@ -93,7 +93,7 @@ export default function DemoUpload({ onUpload, loading = false, loadingText = ""
         validationError
           ? "border-red-500/60 bg-cs2-red-surface shadow-[0_0_30px_rgba(239,68,68,0.08)]"
           : dragOver
-          ? "border-cs2-accent bg-cs2-accent/5 shadow-[0_0_30px_rgba(255,140,0,0.1)]"
+          ? "border-cs2-accent bg-cs2-accent/5 shadow-[0_0_30px_rgba(224,127,10,0.1)]"
           : "border-cs2-border hover:border-cs2-accent/40 bg-cs2-bg-card"
       }`}
     >

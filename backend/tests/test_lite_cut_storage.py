@@ -2,10 +2,10 @@ import asyncio
 from pathlib import Path
 from types import SimpleNamespace
 
-from app.lite_cut import runtime as runtime_mod
-from app.lite_cut import storage_api as api_mod
-from app.lite_cut import assets as assets_mod
-from app.lite_cut.db import LiteCutDB
+from app.features.lite_cut import runtime as runtime_mod
+from app.features.lite_cut import storage_api as api_mod
+from app.features.lite_cut import assets as assets_mod
+from app.features.lite_cut.db import LiteCutDB
 
 
 def test_migrate_asset_storage_paths_updates_assets_projects_and_exports(tmp_path):

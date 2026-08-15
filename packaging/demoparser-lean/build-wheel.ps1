@@ -77,6 +77,14 @@ try {
         -Destination (Join-Path $sourceRoot "src\parser\src\first_pass\sendtables.rs") -Force
     Copy-Item -LiteralPath (Join-Path $overlayRoot "src\parser\src\second_pass\collect_data.rs") `
         -Destination (Join-Path $sourceRoot "src\parser\src\second_pass\collect_data.rs") -Force
+    $entityVectorPatch = Join-Path $overlayRoot "entity-vector-length.patch"
+    if (-not (Test-Path -LiteralPath $entityVectorPatch -PathType Leaf)) {
+        throw "Entity vector-length patch missing: $entityVectorPatch"
+    }
+    & git -C $sourceRoot apply --check $entityVectorPatch
+    if ($LASTEXITCODE -ne 0) { throw "Entity vector-length patch no longer applies cleanly" }
+    & git -C $sourceRoot apply $entityVectorPatch
+    if ($LASTEXITCODE -ne 0) { throw "Applying entity vector-length patch failed" }
 
     $manifest = Join-Path $sourceRoot "src\python\Cargo.toml"
     $lockPath = Join-Path $sourceRoot "src\python\Cargo.lock"

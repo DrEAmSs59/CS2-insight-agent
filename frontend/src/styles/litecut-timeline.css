@@ -1,0 +1,314 @@
+
+/* LiteCut 时间轴采用同一组低饱和冷色，避免素材与状态标记互相抢色。 */
+.litecut-timeline-clip {
+  --litecut-clip-rgb: 55, 91, 126;
+  --litecut-clip-fill: #1f2d38;
+  --litecut-clip-border: #466b87;
+  --litecut-clip-text: #eaf2f7;
+  border-color: var(--litecut-clip-border);
+  background: var(--litecut-clip-fill);
+  color: var(--litecut-clip-text);
+  box-shadow: none;
+}
+
+.litecut-timeline-clip--video {
+  --litecut-clip-rgb: 55, 91, 126;
+  --litecut-clip-fill: #1f2d38;
+  --litecut-clip-border: #466b87;
+  --litecut-clip-text: #eaf2f7;
+}
+
+.litecut-timeline-clip--audio {
+  --litecut-clip-rgb: 54, 112, 75;
+  --litecut-clip-fill: #1c3428;
+  --litecut-clip-border: #3b7955;
+  --litecut-clip-text: #dff4e7;
+}
+
+.litecut-timeline-clip--text {
+  --litecut-clip-rgb: 156, 116, 45;
+  --litecut-clip-fill: #3b3020;
+  --litecut-clip-border: #8b6e36;
+  --litecut-clip-text: #f5ead2;
+}
+
+.litecut-timeline-clip--image {
+  --litecut-clip-rgb: 112, 76, 126;
+  --litecut-clip-fill: #31273c;
+  --litecut-clip-border: #72588b;
+  --litecut-clip-text: #eee4f5;
+}
+
+.litecut-timeline-clip--selected {
+  border-color: var(--cs2-accent) !important;
+}
+
+.litecut-timeline-clip--invalid {
+  border-color: #d85b76 !important;
+  background: #3f2028 !important;
+  color: #ffdce4;
+}
+
+.litecut-speed-ramp {
+  border-color: rgba(var(--litecut-clip-rgb), 0.72);
+  background: color-mix(in srgb, rgb(var(--litecut-clip-rgb)) 28%, rgba(12, 14, 16, 0.96));
+}
+
+.litecut-speed-ramp-segment {
+  border-color: rgba(var(--litecut-clip-rgb), 0.52);
+}
+
+.litecut-speed-ramp-segment--even { background: rgba(var(--litecut-clip-rgb), 0.72); }
+.litecut-speed-ramp-segment--odd  { background: rgba(var(--litecut-clip-rgb), 0.52); }
+
+.litecut-timeline-track-header {
+  background: #181919;
+  color: #e5e5e2;
+}
+
+.litecut-timeline-lane {
+  background: #151718;
+}
+
+.litecut-timeline-lane--selected,
+.litecut-timeline-track-header--selected {
+  /* The sticky header must stay opaque while clips scroll underneath it. */
+  background: #211d18;
+}
+
+.litecut-timeline-root {
+  background: #151718;
+  container-name: litecut-timeline;
+  container-type: inline-size;
+}
+
+.litecut-timeline-toolbar,
+.litecut-timeline-ruler {
+  background: #181919;
+}
+
+/* 英文标签在窄工作区不再挤出按钮；图标与 title 仍保留完整操作含义。 */
+@container litecut-timeline (max-width: 900px) {
+  .litecut-timeline-toolbar {
+    flex-wrap: wrap;
+  }
+
+  .litecut-timeline-tool-label {
+    display: none;
+  }
+}
+
+.litecut-timeline-ruler {
+  color: #d7d7d2;
+  box-shadow: none;
+}
+
+.litecut-timeline-tick {
+  border-color: #5a4633;
+}
+
+.litecut-timeline-track-icon {
+  border-color: #474744;
+  background: #242424;
+  color: #b8b8b3;
+}
+
+.litecut-timeline-track-icon--selected {
+  border-color: #96500f;
+  background: #4a2a0d;
+  color: #ff941f;
+}
+
+.litecut-timeline-auto-row {
+  --litecut-auto-fill: #1c191e;
+  --litecut-auto-border: #554758;
+  --litecut-auto-text: #cdbbd2;
+  border-color: var(--litecut-auto-border);
+  background: var(--litecut-auto-fill);
+}
+
+.litecut-timeline-auto-row--video {
+  --litecut-auto-fill: #1c1b17;
+  --litecut-auto-border: #5e5234;
+  --litecut-auto-text: #d2bf83;
+}
+
+.litecut-timeline-auto-label,
+.litecut-timeline-auto-lane {
+  border-color: var(--litecut-auto-border);
+  background: var(--litecut-auto-fill);
+  color: var(--litecut-auto-text);
+}
+
+.litecut-timeline-auto-lane--active {
+  border-color: #b96516;
+  background: #3a260f;
+  color: #ffa044;
+}
+
+.light .litecut-timeline-clip--video {
+  --litecut-clip-fill: #c6d6e2;
+  --litecut-clip-border: #6689a3;
+  --litecut-clip-text: #17364d;
+}
+
+.light .litecut-timeline-clip--audio {
+  --litecut-clip-fill: #d2e5d8;
+  --litecut-clip-border: #6e9b7d;
+  --litecut-clip-text: #214b31;
+}
+
+.light .litecut-timeline-clip--text {
+  --litecut-clip-fill: #eadfca;
+  --litecut-clip-border: #a58448;
+  --litecut-clip-text: #594117;
+}
+
+.light .litecut-timeline-clip--image {
+  --litecut-clip-fill: #ded3e6;
+  --litecut-clip-border: #8e72a4;
+  --litecut-clip-text: #4b365b;
+}
+
+.light .litecut-timeline-clip--invalid {
+  border-color: #c7546d !important;
+  background: #f0cfd6 !important;
+  color: #652236;
+}
+
+.light .litecut-timeline-lane--selected,
+.light .litecut-timeline-track-header--selected {
+  background: #f1ebe5;
+}
+
+.light .litecut-timeline-track-header,
+.light .litecut-timeline-toolbar,
+.light .litecut-timeline-ruler {
+  background: #f5f5f5;
+  color: #292825;
+}
+
+.light .litecut-timeline-root {
+  background: #ebebeb;
+}
+
+.light .litecut-timeline-lane {
+  background: #f0f0ef;
+}
+
+.light .litecut-timeline-lane--selected,
+.light .litecut-timeline-track-header--selected {
+  background: #f1e8df;
+}
+
+.light .litecut-timeline-tick {
+  border-color: #c8a789;
+}
+
+.light .litecut-timeline-track-icon {
+  border-color: #c8c7c4;
+  background: #ebebea;
+  color: #66645f;
+}
+
+.light .litecut-timeline-track-icon--selected {
+  border-color: #d58b48;
+  background: #f4dbc3;
+  color: #bd5500;
+}
+
+.light .litecut-timeline-auto-row {
+  --litecut-auto-fill: #f2edf2;
+  --litecut-auto-border: #bea9c2;
+  --litecut-auto-text: #68466d;
+}
+
+.light .litecut-timeline-auto-row--video {
+  --litecut-auto-fill: #f2efe6;
+  --litecut-auto-border: #c7b47b;
+  --litecut-auto-text: #70591b;
+}
+
+.light .litecut-timeline-auto-lane--active {
+  border-color: #d46a12;
+  background: #f6ddc5;
+  color: #a84400;
+}
+
+.litecut-transition-marker {
+  color: color-mix(in srgb, rgb(var(--litecut-clip-rgb)) 22%, white);
+  border-color: rgba(var(--litecut-clip-rgb), 0.82);
+  background-color: rgba(var(--litecut-clip-rgb), 0.88);
+  box-shadow: 0 -1px 4px rgba(var(--litecut-clip-rgb), 0.34), inset 0 1px 0 rgba(255, 255, 255, 0.22);
+}
+
+.litecut-transition-marker--in {
+  background-image: repeating-linear-gradient(135deg, rgba(255, 255, 255, 0.18) 0 2px, transparent 2px 5px);
+  border-radius: 0 3px 0 0;
+}
+
+.litecut-transition-marker--out {
+  background-image: repeating-linear-gradient(45deg, rgba(255, 255, 255, 0.18) 0 2px, transparent 2px 5px);
+  border-radius: 3px 0 0 0;
+}
+
+/* The filled strip is the true, zoom-scaled duration. Its caption remains
+   attached to that strip instead of becoming a separate timeline object. */
+.litecut-transition-marker__label {
+  display: block;
+  line-height: 15px;
+  color: inherit;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.85);
+}
+
+/* A very short transition still owns a real, zoom-scaled strip.  Keep its
+   caption readable by letting it extend across the parent clip, rather than
+   silently replacing the caption with an unexplained three-pixel bar. */
+.litecut-transition-marker {
+  overflow: visible !important;
+}
+
+.litecut-transition-marker > span {
+  display: none;
+}
+
+.litecut-transition-marker::after {
+  content: attr(title);
+  position: absolute;
+  top: 0;
+  z-index: 1;
+  max-width: 112px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 0 4px;
+  line-height: 15px;
+  color: inherit;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.92);
+}
+
+.litecut-transition-marker--in::after { left: 0; }
+.litecut-transition-marker--out::after { right: 0; text-align: right; }
+
+.litecut-transition-marker--compact::after {
+  display: none;
+}
+
+.litecut-transition-label-layout {
+  color: color-mix(in srgb, rgb(var(--litecut-clip-rgb)) 18%, white);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.92);
+}
+
+.light .litecut-transition-marker {
+  color: color-mix(in srgb, rgb(var(--litecut-clip-rgb)) 72%, #111827);
+  border-color: color-mix(in srgb, rgb(var(--litecut-clip-rgb)) 62%, white);
+  background-color: color-mix(in srgb, rgb(var(--litecut-clip-rgb)) 22%, white);
+  box-shadow: none;
+}
+
+.light .litecut-transition-marker__label,
+.light .litecut-transition-marker::after,
+.light .litecut-transition-label-layout {
+  color: color-mix(in srgb, rgb(var(--litecut-clip-rgb)) 72%, #111827);
+  text-shadow: none;
+}

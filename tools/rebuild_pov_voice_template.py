@@ -17,7 +17,14 @@ from backend.app.demo_voice_hud import (  # noqa: E402
 
 
 TEMPLATE = ROOT / "pov" / "pov_voice_template.vpk"
+STATIC_PACKAGE = ROOT / "pov" / "pov_default.vpk"
 INJECTION = ROOT / "pov" / "voice_hud_injection.js"
+STOCK_HUD_ALERTS_STYLE_PATH = "panorama/styles/hud/hudalerts.vcss_c"
+HUD_ALERTS_RESOURCES = {
+    "panorama/layout/hud/hudalerts.vxml_c": ROOT / "pov" / "hudalerts.vxml_c",
+    "panorama/scripts/hud/hudalerts_insight.vjs_c": ROOT / "pov" / "hudalerts_insight.vjs_c",
+    "panorama/styles/hud/hudalerts_insight.vcss_c": ROOT / "pov" / "hudalerts_insight.vcss_c",
+}
 PAYLOAD_CAPACITY = 8_000_000
 
 
@@ -112,8 +119,19 @@ def main() -> None:
     )
     combined_source = stock_source + b"\n" + injection
     entries[VOICE_SCRIPT_PATH] = replace_data_block(compiled, combined_source)
+    entries.pop(STOCK_HUD_ALERTS_STYLE_PATH, None)
+    for resource_path, source_path in HUD_ALERTS_RESOURCES.items():
+        entries[resource_path] = source_path.read_bytes()
     TEMPLATE.write_bytes(write_inline_vpk(entries))
+
+    static_entries = read_inline_vpk(STATIC_PACKAGE.read_bytes())
+    static_entries.pop(STOCK_HUD_ALERTS_STYLE_PATH, None)
+    for resource_path, source_path in HUD_ALERTS_RESOURCES.items():
+        static_entries[resource_path] = source_path.read_bytes()
+    STATIC_PACKAGE.write_bytes(write_inline_vpk(static_entries))
     print(f"template={TEMPLATE}")
+    print(f"static_package={STATIC_PACKAGE}")
+    print("hudalerts_resources=" + ",".join(HUD_ALERTS_RESOURCES))
     print(f"payload_capacity={PAYLOAD_CAPACITY}")
     print(f"panorama_source_bytes={len(combined_source)}")
     print(f"vpk_bytes={TEMPLATE.stat().st_size}")

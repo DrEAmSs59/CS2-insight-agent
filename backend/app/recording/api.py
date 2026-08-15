@@ -453,7 +453,7 @@ async def execute_recording(
     if _kb_overlay_req is None:
         _kb_overlay_req = load_config().kb_overlay_enabled
     if _kb_overlay_req:
-        from ..parser.input_track import (
+        from ..features.demo_analysis.input_track import (
             extract_input_track as _extract_kb,
             prepare_input_track_batch as _prepare_kb_batch,
         )
@@ -492,7 +492,7 @@ async def execute_recording(
     if _fx_req is None:
         _fx_req = _exec_cfg.kill_fx_enabled
     if _fx_req:
-        from ..parser.kill_track import extract_kill_track as _extract_fx
+        from ..features.demo_analysis.kill_track import extract_kill_track as _extract_fx
         _ctx_tags = list(dto.source_ref.context_tags or [])
         for _seg in plan.segments:
             # 受害者视角片段不展示目标玩家的击杀特效。

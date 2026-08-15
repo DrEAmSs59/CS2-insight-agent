@@ -834,10 +834,18 @@ def test_in_place_clean_demo_is_not_replaced(tmp_path: Path, monkeypatch):
     )
     original = source.read_bytes()
     original_stat = compat._stat_fingerprint(source.stat())
+    original_scan = compat._scan_stream
+    scan_calls = 0
+
+    def counted_scan(*args, **kwargs):
+        nonlocal scan_calls
+        scan_calls += 1
+        return original_scan(*args, **kwargs)
 
     def unexpected_rewrite(*_args, **_kwargs):
         raise AssertionError("clean demo should not create a rewritten candidate")
 
+    monkeypatch.setattr(compat, "_scan_stream", counted_scan)
     monkeypatch.setattr(compat, "_rewrite_stream", unexpected_rewrite)
 
     report = compat.repair_demo_in_place(
@@ -846,6 +854,7 @@ def test_in_place_clean_demo_is_not_replaced(tmp_path: Path, monkeypatch):
     )
 
     assert report.outcome == "clean"
+    assert scan_calls == 1
     assert source.read_bytes() == original
     assert compat._stat_fingerprint(source.stat()) == original_stat
     assert not list(tmp_path.glob(".source.dem.compat-*.tmp"))

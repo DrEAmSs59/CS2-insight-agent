@@ -34,7 +34,7 @@ def _run(payload: dict) -> object:
         workspace = payload.get("workspace")
         if not isinstance(workspace, dict):
             raise ValueError("workspace must be an object")
-        from app.parser.replay_match_cache import materialize_match_replay_parquet_impl
+        from app.features.demo_analysis.replay_match_cache import materialize_match_replay_parquet_impl
 
         return materialize_match_replay_parquet_impl(
             demo_path=dem_path,
@@ -57,7 +57,10 @@ def _run(payload: dict) -> object:
                 except (TypeError, ValueError) as e:
                     raise ValueError(f"freeze_to_death_rounds must be integers: {x!r}") from e
             ftd_list = out_ftd
-        return DemoAnalyzer(dem_path).analyze(target, freeze_to_death_rounds=ftd_list).to_dict()
+        analyzer = DemoAnalyzer(dem_path)
+        result = analyzer.analyze(target, freeze_to_death_rounds=ftd_list).to_dict()
+        result["has_player_keyboard_input"] = analyzer.has_player_keyboard_input
+        return result
     if action == "analyze_batch":
         raw_players = payload.get("target_players") or []
         if not isinstance(raw_players, list) or not raw_players:
@@ -79,7 +82,7 @@ def _run(payload: dict) -> object:
         if isinstance(analysis_workspace, dict) and analysis_workspace.get("rounds"):
             analysis_workspace = dict(analysis_workspace)
             try:
-                from app.parser.replay_match_cache import materialize_match_replay_parquet_impl
+                from app.features.demo_analysis.replay_match_cache import materialize_match_replay_parquet_impl
 
                 analysis_workspace["replay_cache"] = materialize_match_replay_parquet_impl(
                     demo_path=dem_path,
@@ -92,6 +95,7 @@ def _run(payload: dict) -> object:
                 }
         return {
             "__analysis_workspace__": analysis_workspace,
+            "__has_player_keyboard_input__": analyzer.has_player_keyboard_input,
             **{player: result.to_dict() for player, result in results.items()},
         }
     if action == "players":

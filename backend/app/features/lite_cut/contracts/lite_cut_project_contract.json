@@ -1,0 +1,120 @@
+{
+  "contract_schema_version": 2,
+  "project_schema_version": 3,
+  "compatibility": {
+    "accepted_project_schema_versions": [3],
+    "legacy_project_migration": false
+  },
+  "transition_events": {
+    "version_field": "transition_model_version",
+    "version": 1,
+    "collection_field": "transitions",
+    "ownership": "edit_point",
+    "endpoint_fields": ["from", "to"],
+    "endpoint_kinds": ["clip", "overlay"]
+  },
+  "timeline": {
+    "version": 1,
+    "track_layout": {
+      "ordered_types": ["video", "audio"],
+      "linked_av_pairing": "same_ordinal",
+      "auto_create_counterpart": true
+    },
+    "limits": {
+      "time_sec": { "min": 0, "max": 86400, "ui_max": 60, "default": 0 },
+      "duration_sec": { "exclusive_min": 0, "max": 86400, "ui_min": 0.1, "default": 3 }
+    }
+  },
+  "output": {
+    "defaults": {
+      "dir": "",
+      "filename": "lite_cut_export.mp4",
+      "width": 1920,
+      "height": 1080,
+      "fps": 60,
+      "encoder": "auto",
+      "encoder_tier": "quality",
+      "framemeld_enabled": false,
+      "canvas_fit": "contain",
+      "background_color": "#000000",
+      "blur_amount": 24,
+      "range_mode": "full",
+      "range_start_sec": 0,
+      "range_end_sec": null
+    },
+    "limits": {
+      "width": { "integer_min": 320, "integer_max": 7680 },
+      "height": { "integer_min": 180, "integer_max": 4320 },
+      "fps": { "min": 1, "max": 1000 }
+    },
+    "encoders": ["auto", "h264_nvenc", "h264_qsv", "h264_amf", "libx264"],
+    "encoder_tiers": ["quality", "fast"],
+    "range_modes": ["full", "custom"],
+    "resolution_presets": [
+      { "id": "720p", "width": 1280, "height": 720 },
+      { "id": "1080p", "width": 1920, "height": 1080 },
+      { "id": "1440p", "width": 2560, "height": 1440 },
+      { "id": "4K", "width": 3840, "height": 2160 }
+    ]
+  },
+  "range_owners": {
+    "frontend_editor_repair": {
+      "width": { "integer_min": 320, "integer_max": 7680, "fallback": 1920 },
+      "height": { "integer_min": 180, "integer_max": 4320, "fallback": 1080 },
+      "fps": { "integer_min": 1, "integer_max": 1000, "fallback": 60 },
+      "master_volume": { "min": 0, "max": 2, "fallback": 1 }
+    },
+    "backend_schema_validation": {
+      "width": { "min": 320, "max": 7680 },
+      "height": { "min": 180, "max": 4320 },
+      "fps": { "min": 1, "max": 1000 },
+      "master_volume": { "min": 0, "max": 2 },
+      "blur_amount": { "min": 4, "max": 80 },
+      "crop_axis": { "min": 0, "max": 1, "size_min": 0.05 },
+      "text_font_size": { "owner": "backend_schema", "current_constraint": "integer_only" }
+    },
+    "backend_export_projection": {
+      "width": { "min": 320, "max": 7680 },
+      "height": { "min": 180, "max": 4320 },
+      "fps": { "min": 1, "max": 1000 }
+    }
+  },
+  "diagnostic_cases": [
+    {
+      "name": "reports-open-reference-problems-without-rejecting-the-project",
+      "body": {
+        "schema_version": 3,
+        "tracks": [
+          {
+            "id": "v1",
+            "type": "video",
+            "label": "V1",
+            "clips": [
+              { "id": "clip-a", "source_type": "recorded_clip", "source_id": 42 },
+              { "id": "clip-a", "source_type": "file", "file_path": "" }
+            ]
+          },
+          { "id": "v1", "type": "audio", "label": "A1", "clips": [] }
+        ],
+        "overlays": [
+          { "id": "overlay-a", "type": "webm", "asset_path": "" },
+          { "id": "overlay-a", "type": "text", "text": { "content": "ok" } }
+        ],
+        "markers": [
+          { "id": "marker-a", "time_sec": 1 },
+          { "id": "marker-a", "time_sec": 2 }
+        ]
+      },
+      "available_asset_ids": [7],
+      "expected_codes": [
+        "duplicate_clip_id",
+        "duplicate_marker_id",
+        "duplicate_overlay_id",
+        "duplicate_track_id",
+        "missing_file_path",
+        "missing_overlay_asset_path",
+        "unresolved_source_id"
+      ]
+    }
+  ]
+}

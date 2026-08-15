@@ -9,7 +9,20 @@ import { desktopBridge } from "../desktop/desktopBridge.js";
 import RecordingParamsPage from "./RecordingParamsPage";
 import SponsorModal from "../components/SponsorModal";
 import ObsAiSettingsPanel from "../components/ObsAiSettingsPanel";
+import ObsHostField from "../components/settings/ObsHostField.jsx";
 import { formatFileSize } from "../utils/demoLibraryDisplay.js";
+import {
+  FieldRow,
+  NumberInput,
+  PathPicker,
+  SectionCard,
+  SectionHeader,
+  SelectInput,
+  TagList,
+  TextArea,
+  TextInput,
+  Toggle,
+} from "./settings/SettingsControls.jsx";
 import {
   Settings as SettingsIcon,
   Search,
@@ -66,255 +79,6 @@ const ISSUE_TEMPLATE_URLS = {
 function openIssueTemplate(type) {
   const { effectiveLocale } = useLocaleStore.getState();
   openExternalLink(ISSUE_TEMPLATE_URLS[effectiveLocale]?.[type] ?? ISSUE_TEMPLATE_URLS.zh[type]);
-}
-
-/* ---------------------------------------------------------------------------
- * Reusable field-row primitives
- * ------------------------------------------------------------------------ */
-
-function SectionCard({ title, hint, children, search, className }) {
-  if (search) return null;
-  return (
-    <div className={`rounded-xl border border-cs2-border/70 bg-cs2-bg-card px-4 py-3.5 ${className ?? ""}`}>
-      <div className="mb-2.5 flex items-baseline gap-2">
-        <h2 className="text-sm font-bold uppercase tracking-wide text-cs2-text-secondary">{title}</h2>
-        {hint && <span className="text-xs text-cs2-text-muted">{hint}</span>}
-      </div>
-      <div className="divide-y divide-cs2-border/40">
-        {children}
-      </div>
-    </div>
-  );
-}
-
-function SectionHeader({ title, hint, search, sectionId }) {
-  if (search) return null;
-  return (
-    <div id={sectionId} className="mt-5 first:mt-1">
-      <h2 className="text-sm font-bold uppercase tracking-wide text-cs2-text-secondary">{title}</h2>
-      {hint && <p className="mt-0.5 text-xs text-cs2-text-muted">{hint}</p>}
-      <div className="mt-1.5 border-b border-cs2-border/50" />
-    </div>
-  );
-}
-
-function FieldRow({ label, hint, children, search }) {
-  if (search) return null;
-  return (
-    <div className="py-2.5">
-      <label className="block text-xs font-semibold text-cs2-text-secondary">{label}</label>
-      {hint && <p className="mb-1 text-xs text-cs2-text-muted">{hint}</p>}
-      <div className="mt-1">{children}</div>
-    </div>
-  );
-}
-
-function TextInput({ value, onChange, placeholder, type, className }) {
-  return (
-    <input
-      type={type ?? "text"}
-      value={value ?? ""}
-      onChange={(e) => onChange(e.target.value)}
-      placeholder={placeholder}
-      className={`w-full rounded-md border border-cs2-border bg-cs2-bg-input px-3 py-2 text-xs text-cs2-text-primary placeholder:text-cs2-text-muted focus-visible:border-cs2-accent focus-visible:outline-none ${className ?? ""}`}
-    />
-  );
-}
-
-function TextArea({ value, onChange, placeholder, rows, className }) {
-  return (
-    <textarea
-      value={value ?? ""}
-      onChange={(e) => onChange(e.target.value)}
-      placeholder={placeholder}
-      rows={rows ?? 3}
-      className={`w-full rounded-md border border-cs2-border bg-cs2-bg-input px-3 py-2 text-xs font-mono text-cs2-text-primary placeholder:text-cs2-text-muted focus-visible:border-cs2-accent focus-visible:outline-none resize-y ${className ?? ""}`}
-    />
-  );
-}
-
-function NumberInput({ value, onChange, min, max, step, className }) {
-  return (
-    <input
-      type="number"
-      value={value ?? ""}
-      onChange={(e) => {
-        const v = e.target.value;
-        onChange(v === "" ? "" : Number(v));
-      }}
-      min={min}
-      max={max}
-      step={step ?? 1}
-      className={`w-32 rounded-md border border-cs2-border bg-cs2-bg-input px-3 py-2 text-xs text-cs2-text-primary focus-visible:border-cs2-accent focus-visible:outline-none ${className ?? ""}`}
-    />
-  );
-}
-
-function SelectInput({ value, onChange, options, className }) {
-  return (
-    <select
-      value={value ?? ""}
-      onChange={(e) => onChange(e.target.value)}
-      className={`w-full rounded-md border border-cs2-border bg-cs2-bg-input px-3 py-2 text-xs text-cs2-text-primary focus-visible:border-cs2-accent focus-visible:outline-none ${className ?? ""}`}
-    >
-      {options.map((o) => (
-        <option key={o.value} value={o.value}>
-          {o.label}
-        </option>
-      ))}
-    </select>
-  );
-}
-
-function Toggle({ value, onChange, onLabel, offLabel, ariaLabel }) {
-  return (
-    <div className="flex items-center gap-2">
-      <button
-        type="button"
-        onClick={() => onChange(!value)}
-        aria-label={ariaLabel ?? (value ? (onLabel ?? "On") : (offLabel ?? "Off"))}
-        aria-pressed={value}
-        className={`relative inline-flex h-5 w-9 shrink-0 rounded-full border-2 border-transparent transition-colors ${
-          value ? "bg-cs2-accent" : "bg-cs2-bg-input"
-        }`}
-      >
-        <span
-          className={`pointer-events-none inline-block h-4 w-4 rounded-full bg-cs2-text-on-accent shadow transition-transform ${
-            value ? "translate-x-4" : "translate-x-0.5"
-          }`}
-        />
-      </button>
-      <span className="text-[11px] text-cs2-text-muted">{value ? (onLabel ?? "On") : (offLabel ?? "Off")}</span>
-    </div>
-  );
-}
-
-function PathPicker({ value, onChange, placeholder, exeName, detectApi, detectField, t }) {
-  const fileRef = useRef();
-  const [detecting, setDetecting] = useState(false);
-
-  const handleBrowse = async () => {
-    // 如果没有值，先尝试自动检测
-    if (!value || !value.trim()) {
-      if (detectApi) {
-        setDetecting(true);
-        try {
-          const { data } = await API.post(detectApi);
-          const detectedPath = data[detectField];
-          if (detectedPath) {
-            onChange(detectedPath);
-            return;
-          }
-        } catch {
-          // 检测失败，继续打开文件选择对话框
-        } finally {
-          setDetecting(false);
-        }
-      }
-    }
-
-    // 后端原生文件选择（Windows；浏览器开发模式也可返回完整路径）
-    try {
-      const { data } = await API.post("file-picker", { file_type: "exe" });
-      if (data?.path) {
-        onChange(data.path);
-        return;
-      }
-    } catch {
-      // 非 Windows 或选择器不可用，继续 fallback
-    }
-
-    // 桌面壳文件选择对话框
-    if (desktopBridge) {
-      try {
-        const defaultPath = value && value.trim() ? value : undefined;
-        const result = await desktopBridge.showOpenDialog({
-          title: t("settings.browseFileTitle"),
-          defaultPath,
-          filters: [{ name: exeName, extensions: ["exe"] }],
-          properties: ["openFile"],
-        });
-        if (!result.canceled && result.filePaths?.[0]) {
-          onChange(result.filePaths[0]);
-        }
-        return;
-      } catch (e) {
-        console.error("Desktop dialog error:", e);
-      }
-    }
-
-    // 最后兜底：HTML file input（浏览器中通常只能拿到文件名）
-    fileRef.current?.click();
-  };
-
-  return (
-    <div className="flex gap-2">
-      <input
-        type="text"
-        value={value ?? ""}
-        onChange={(e) => onChange(e.target.value)}
-        placeholder={placeholder}
-        className="flex-1 rounded-md border border-cs2-border bg-cs2-bg-input px-3 py-2 text-xs text-cs2-text-primary placeholder:text-cs2-text-muted focus-visible:border-cs2-accent focus-visible:outline-none"
-      />
-      <button
-        type="button"
-        onClick={handleBrowse}
-        disabled={detecting}
-        className="shrink-0 rounded-md border border-cs2-border bg-cs2-bg-input px-3 py-2 text-xs font-medium text-cs2-text-secondary transition-colors hover:border-cs2-accent/50 hover:text-cs2-accent disabled:opacity-50"
-      >
-        {detecting ? <Loader2 className="h-3 w-3 animate-spin" /> : t("settings.browseBtn")}
-      </button>
-      {/* 浏览器环境的最后兜底 */}
-      <input
-        ref={fileRef}
-        type="file"
-        accept=".exe"
-        className="hidden"
-        onChange={(e) => {
-          const file = e.target.files?.[0];
-          if (file) onChange(file.path ?? file.webkitRelativePath ?? file.name);
-          e.target.value = "";
-        }}
-      />
-    </div>
-  );
-}
-
-function TagList({ items, onChange, placeholder, addLabel, emptyLabel }) {
-  const [draft, setDraft] = useState("");
-  const add = () => {
-    const v = draft.trim();
-    if (!v || items.includes(v)) { setDraft(""); return; }
-    onChange([...items, v]);
-    setDraft("");
-  };
-  const remove = (idx) => onChange(items.filter((_, i) => i !== idx));
-  return (
-    <div className="space-y-2">
-      <div className="flex flex-wrap gap-1.5">
-        {items.length === 0 && <span className="text-[11px] text-cs2-text-muted">{emptyLabel}</span>}
-        {items.map((name, idx) => (
-          <span key={`${name}-${idx}`} className="inline-flex items-center gap-1 rounded-md bg-cs2-bg-input px-2 py-1 text-[11px] text-cs2-text-primary">
-            {name}
-            <button type="button" onClick={() => remove(idx)} className="ml-0.5 text-cs2-text-muted hover:text-red-400">×</button>
-          </span>
-        ))}
-      </div>
-      <div className="flex gap-2">
-        <input
-          type="text"
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); add(); } }}
-          placeholder={placeholder}
-          className="flex-1 rounded-md border border-cs2-border bg-cs2-bg-input px-3 py-2 text-xs text-cs2-text-primary placeholder:text-cs2-text-muted focus-visible:border-cs2-accent focus-visible:outline-none"
-        />
-        <button type="button" onClick={add} className="shrink-0 rounded-md border border-cs2-border bg-cs2-bg-input px-3 py-2 text-xs font-medium text-cs2-text-secondary transition-colors hover:border-cs2-accent/50 hover:text-cs2-accent">
-          {addLabel}
-        </button>
-      </div>
-    </div>
-  );
 }
 
 /* ---------------------------------------------------------------------------
@@ -937,7 +701,10 @@ export default function SettingsPage() {
       </div>
 
       {/* Content */}
-      <div className={`min-h-0 flex-1 ${activeTab === "recording" ? "flex flex-col overflow-hidden" : "overflow-y-auto"}`}>
+      <div
+        className={`min-h-0 flex-1 ${activeTab === "recording" ? "flex flex-col overflow-hidden" : "overflow-y-auto"}`}
+        style={activeTab === "recording" ? undefined : { scrollbarGutter: "stable both-edges" }}
+      >
         <div
           className={
             activeTab === "recording"
@@ -1367,12 +1134,12 @@ export default function SettingsPage() {
                     </div>
                   </div>
                 ) : (
-                  <div className="rounded-lg border border-emerald-500/35 bg-emerald-500/10 px-3 py-2.5">
+                  <div className="rounded-lg border border-emerald-500/35 bg-cs2-emerald-surface px-3 py-2.5">
                     <div className="flex items-start gap-2">
-                      <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-400" aria-hidden />
+                      <CheckCircle2 className="h-4 w-4 shrink-0 text-cs2-emerald-on-surface" aria-hidden />
                       <div className="min-w-0 flex-1">
-                        <p className="font-semibold text-emerald-200">{t("playercfg.okTitle")}</p>
-                        <p className="mt-1 text-xs leading-relaxed text-emerald-100/80">{t("playercfg.okDesc")}</p>
+                        <p className="font-semibold text-cs2-emerald-on-surface">{t("playercfg.okTitle")}</p>
+                        <p className="mt-1 text-xs leading-relaxed text-cs2-emerald-on-surface">{t("playercfg.okDesc")}</p>
                         {playerConfigStatus?.backup_dir && (
                           <p className="mt-1 break-all font-mono text-xs text-cs2-text-muted">
                             {t("playercfg.backupDir")}<span className="text-cs2-text-secondary">{playerConfigStatus.backup_dir}</span>
@@ -1438,7 +1205,12 @@ export default function SettingsPage() {
               {/* OBS: manual controls or AI workspace */}
               {!aiObsRecommendationEnabled ? (
                 <>
-              <SectionCard title={t("settings.sectionObs")} hint={t("settings.sectionObsHint")} search={search && !matches(t("settings.sectionObs") + " " + t("settings.labelObsHost") + " " + t("settings.labelObsPort") + " " + t("settings.labelObsPassword") + " " + t("settings.labelObsVerified"))}>
+              <SectionCard
+                title={t("settings.sectionObs")}
+                hint={t("settings.sectionObsHint")}
+                search={search && !matches(t("settings.sectionObs") + " " + t("settings.labelObsHost") + " " + t("settings.labelObsPort") + " " + t("settings.labelObsPassword") + " " + t("settings.labelObsVerified"))}
+                contentClassName=""
+              >
                 <div className="mb-2 flex items-center justify-between">
                   <span className="text-[11px] font-semibold text-cs2-text-secondary">{t("settings.labelObsVerified")}</span>
                   <button
@@ -1456,8 +1228,8 @@ export default function SettingsPage() {
                   <div className="mb-2 flex items-center gap-2 text-[11px]">
                     {!checkResult.error && checkResult.path_ok && checkResult.connected ? (
                       <>
-                        <CheckCircle2 className="h-3.5 w-3.5 text-green-400 shrink-0" />
-                        <span className="text-green-400">{t("obscfg.connOk")}</span>
+                        <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-cs2-emerald-on-surface" />
+                        <span className="text-cs2-emerald-on-surface">{t("obscfg.connOk")}</span>
                       </>
                     ) : checkResult.error ? (
                       <>
@@ -1472,21 +1244,31 @@ export default function SettingsPage() {
                     )}
                   </div>
                 )}
-                <FieldRow label={t("settings.labelObsHost")} search={search && !matches(t("settings.labelObsHost") + " " + (obs.host ?? ""))}>
-                  <TextInput value={obs.host ?? "localhost"} onChange={(v) => set("obs.host", v)} />
-                </FieldRow>
-                <FieldRow label={t("settings.labelObsPort")} search={search && !matches(t("settings.labelObsPort") + " " + (obs.port ?? ""))}>
-                  <NumberInput value={obs.port ?? 4455} onChange={(v) => set("obs.port", v)} min={1} max={65535} />
-                </FieldRow>
-                <FieldRow label={t("settings.labelObsPassword")} search={search && !matches(t("settings.labelObsPassword"))}>
-                  <TextInput type="password" value={obs.password ?? ""} onChange={(v) => set("obs.password", v)} placeholder="OBS WebSocket password" />
-                </FieldRow>
+                <div className="divide-y divide-cs2-border/40">
+                  <FieldRow label={t("settings.labelObsHost")} search={search && !matches(t("settings.labelObsHost") + " " + (obs.host ?? ""))}>
+                    <ObsHostField value={obs.host ?? "localhost"} onChange={(v) => set("obs.host", v)} />
+                  </FieldRow>
+                  <FieldRow label={t("settings.labelObsPort")} search={search && !matches(t("settings.labelObsPort") + " " + (obs.port ?? ""))}>
+                    <NumberInput value={obs.port ?? 4455} onChange={(v) => set("obs.port", v)} min={1} max={65535} />
+                  </FieldRow>
+                  <FieldRow label={t("settings.labelObsPassword")} search={search && !matches(t("settings.labelObsPassword"))}>
+                    <TextInput type="password" value={obs.password ?? ""} onChange={(v) => set("obs.password", v)} placeholder="OBS WebSocket password" />
+                  </FieldRow>
+                </div>
               </SectionCard>
 
               {/* OBS 校准 */}
-              <SectionCard title={t("obscfg.sectionCalibrate")} hint={t("obscfg.calibrateDesc")} search={search && !matches(t("obscfg.sectionCalibrate") + " " + t("obscfg.rowCanvas") + " " + t("obscfg.rowOutput") + " " + t("obscfg.rowScene"))}>
+              <SectionCard
+                title={t("obscfg.sectionCalibrate")}
+                hint={t("obscfg.calibrateDesc")}
+                search={search && !matches(t("obscfg.sectionCalibrate") + " " + t("obscfg.rowCanvas") + " " + t("obscfg.rowOutput") + " " + t("obscfg.rowScene"))}
+                contentClassName=""
+              >
                 <div className="mb-2 flex items-center justify-between">
-                  <span className="text-[11px] text-cs2-text-muted">{status?.obs_connected ? t("obscfg.connOk") : t("obscfg.connFail")}</span>
+                  <span className={`inline-flex items-center gap-2 text-[11px] font-semibold ${status?.obs_connected ? "text-cs2-emerald-on-surface" : "text-cs2-rose-on-surface"}`}>
+                    {status?.obs_connected ? <CheckCircle2 className="h-3.5 w-3.5 shrink-0" /> : <XCircle className="h-3.5 w-3.5 shrink-0" />}
+                    {status?.obs_connected ? t("obscfg.connOk") : t("obscfg.connFail")}
+                  </span>
                   <button
                     type="button"
                     onClick={() => void handleRefreshStatus()}
@@ -1521,7 +1303,7 @@ export default function SettingsPage() {
                             <span className="text-cs2-text-muted">—</span>
                           )
                         ) : item.ok ? (
-                          <span className="flex items-center gap-1 text-green-400">
+                          <span className="flex items-center gap-1 text-cs2-emerald-on-surface">
                             <CheckCircle2 className="h-3 w-3 shrink-0" />{t("obscfg.statusOk")}
                           </span>
                         ) : (
@@ -1560,7 +1342,7 @@ export default function SettingsPage() {
                 {calibrateResult?.changed?.length > 0 && (
                   <div className="mt-2 space-y-1">
                     {calibrateResult.changed.map((msg, i) => (
-                      <div key={i} className="flex items-start gap-1.5 text-[11px] text-green-400">
+                      <div key={i} className="flex items-start gap-1.5 text-[11px] text-cs2-emerald-on-surface">
                         <CheckCircle2 className="mt-0.5 h-3 w-3 shrink-0" />{msg}
                       </div>
                     ))}
@@ -1686,36 +1468,45 @@ export default function SettingsPage() {
         </div>
       </div>
 
-      {/* Footer save bar */}
-      {
-        <div className="shrink-0 border-t border-cs2-border/60 bg-cs2-bg/90 px-4 py-3 backdrop-blur">
-          <div className={`flex items-center justify-between gap-4 ${activeTab === "video" && aiObsRecommendationEnabled ? "w-full xl:px-2 2xl:px-4" : "mx-auto max-w-4xl"}`}>
-            <div className="min-w-0 flex-1">
-              {activeTab !== "recording" && saveMsg && (
-                <p className={`truncate text-[11px] ${saveMsg.tone === "ok" ? "text-green-400" : "text-red-400"}`}>
-                  {saveMsg.text}
-                </p>
-              )}
+{/* Footer save bar */}
+{
+  <div className="shrink-0 px-4 pb-3 pt-2">
+    <div
+      data-testid="settings-save-footer-card"
+      className={`flex items-center justify-between gap-4 rounded-[10px] border border-cs2-border bg-cs2-bg-card px-4 py-2.5 ${
+        activeTab === "video" && aiObsRecommendationEnabled
+          ? "w-full"
+          : activeTab === "recording"
+            ? "mx-auto w-full max-w-4xl"
+            : "mx-auto w-full max-w-[54rem]"
+      }`}
+    >
+      <div className="min-w-0 flex-1">
+        {activeTab !== "recording" && saveMsg && (
+          <p className={`truncate text-[11px] ${saveMsg.tone === "ok" ? "text-cs2-emerald-on-surface" : "text-cs2-rose-on-surface"}`}>
+            {saveMsg.text}
+          </p>
+        )}
               {activeTab !== "recording" && !saveMsg && <p className="text-xs text-cs2-text-muted">{t("settings.saveFooterDesc")}</p>}
               {activeTab === "recording" && <p className="text-xs text-cs2-text-muted">{t("record.commonSaveFooterDesc")}</p>}
             </div>
             {activeTab === "recording" ? (
               <button
-                type="button"
-                onClick={handleRecordingSave}
-                disabled={recordingSaveUi.disabled}
-                className="shrink-0 inline-flex items-center gap-2 rounded-lg bg-cs2-accent px-4 py-2 text-xs font-semibold text-cs2-bg-dark transition-colors hover:bg-cs2-accent/80 disabled:opacity-50"
-              >
+          type="button"
+          onClick={handleRecordingSave}
+          disabled={recordingSaveUi.disabled}
+          className="inline-flex h-9 shrink-0 items-center gap-2 rounded-[10px] bg-cs2-accent px-4 text-xs font-semibold text-cs2-text-on-accent transition-opacity hover:opacity-90 disabled:opacity-50"
+        >
                 {recordingSaveUi.state === "saving" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
                 {recordingSaveUi.state === "saving" ? t("record.commonSaving") : recordingSaveUi.state === "saved" ? t("record.commonSaved") : t("record.commonSaveBtn")}
               </button>
             ) : (
               <button
-                type="button"
-                onClick={handleSave}
-                disabled={saving}
-                className="shrink-0 inline-flex items-center gap-2 rounded-lg bg-cs2-accent px-4 py-2 text-xs font-semibold text-cs2-bg-dark transition-colors hover:bg-cs2-accent/80 disabled:opacity-50"
-              >
+          type="button"
+          onClick={handleSave}
+          disabled={saving}
+          className="inline-flex h-9 shrink-0 items-center gap-2 rounded-[10px] bg-cs2-accent px-4 text-xs font-semibold text-cs2-text-on-accent transition-opacity hover:opacity-90 disabled:opacity-50"
+        >
                 {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
                 {t("settings.saveAllBtn")}
               </button>

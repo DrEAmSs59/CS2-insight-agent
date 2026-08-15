@@ -13,7 +13,8 @@ if str(_BACKEND_ROOT) not in sys.path:
 
 from app import encoder_planner, video_composer  # noqa: E402
 from app.encoder_planner import EncoderCandidate, GpuAdapter  # noqa: E402
-from app.lite_cut import export_preflight, render_pipeline  # noqa: E402
+from app.ffmpeg_process import run_process_capture  # noqa: E402
+from app.features.lite_cut import export_preflight, render_pipeline  # noqa: E402
 from app.montage_exceptions import HardwareEncoderFailure, MontageComposerError  # noqa: E402
 
 
@@ -482,3 +483,62 @@ def test_montage_hardware_timeout_is_retryable(
     assert caught.value.codec == "h264_amf"
     assert caught.value.stage == "montage_clip_normalize"
     assert caught.value.returncode == 124
+
+
+@pytest.mark.parametrize(
+    ("encoder", "branch"),
+    (("h264_amf", "amd_amf"), ("h264_qsv", "intel_qsv")),
+)
+def test_montage_precise_framemeld_timeout_does_not_trigger_cpu_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    encoder: str,
+    branch: str,
+) -> None:
+    command = [
+        str(tmp_path / "ffmpeg.exe"),
+        "-framemeld",
+        "--status-json-lines",
+        "-c:v",
+        encoder,
+        str(tmp_path / "attempt.mp4"),
+    ]
+
+    def time_out(*_args, **_kwargs):
+        raise subprocess.TimeoutExpired(
+            command,
+            3600,
+            output=b"",
+            stderr=b"framemeld-status:{\"protocol\":\"org.framemeld.status\",\"event\":\"pipeline_started\"}",
+        )
+
+    monkeypatch.setattr(video_composer, "run_process_capture", time_out)
+
+    with pytest.raises(MontageComposerError) as caught:
+        video_composer._run_ffmpeg_capture(
+            command,
+            timeout=3600,
+            stage="montage_framemeld",
+            output_path=tmp_path / "attempt.mp4",
+        )
+
+    assert not isinstance(caught.value, HardwareEncoderFailure)
+    assert caught.value.code == "MONTAGE_FRAMEMELD_TIMEOUT"
+    assert caught.value.params["branch"] == branch
+    assert caught.value.params["encoder"] == encoder
+
+
+def test_montage_capture_reports_last_frame_when_process_stalls() -> None:
+    command = [
+        sys.executable,
+        "-c",
+        (
+            "import sys,time; "
+            "sys.stderr.write('Frame: 7/20\\r'); sys.stderr.flush(); "
+            "time.sleep(5)"
+        ),
+    ]
+    with pytest.raises(subprocess.TimeoutExpired) as caught:
+        run_process_capture(command, timeout=10, stall_timeout=0.25)
+
+    assert "after frame 7" in str(caught.value.stderr)

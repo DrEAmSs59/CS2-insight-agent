@@ -25,11 +25,13 @@ export function getPlayerClipScope(
       !queued.has(clip.client_clip_uid),
   );
   const queueableHighlights = selectableClips.filter((clip) => clip.category === "highlight");
+  const queueableFails = selectableClips.filter((clip) => clip.category === "fail");
 
   return {
     playerData: safePlayerData,
     clips,
     selectableClips,
     queueableHighlights,
+    queueableFails,
   };
 }

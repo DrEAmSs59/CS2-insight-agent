@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "cases": [
+    {
+      "id": "center-full-frame",
+      "canvas": [1920, 1080],
+      "transform": { "x": 0.5, "y": 0.5, "width": 1, "height": 1, "scale": 1, "rotation": 0, "opacity": 1 },
+      "pixels": { "x": 960, "y": 540, "width": 1920, "height": 1080, "rendered_width": 1920, "rendered_height": 1080 }
+    },
+    {
+      "id": "precise-non-uniform-box",
+      "canvas": [1920, 1080],
+      "transform": { "x": 0.333333333333, "y": 0.271604938272, "width": 0.4567890625, "height": 0.234567901235, "scale": 1.375, "rotation": -27.5, "opacity": 0.625 },
+      "pixels": { "x": 639.99999999936, "y": 293.33333333376, "width": 877.035, "height": 253.3333333338, "rendered_width": 1205.923125, "rendered_height": 348.333333333975 }
+    },
+    {
+      "id": "off-canvas-large-image",
+      "canvas": [1080, 1920],
+      "transform": { "x": -0.125, "y": 1.2, "width": 3.5, "height": 2.25, "scale": 0.8, "rotation": 450, "opacity": 0.2 },
+      "pixels": { "x": -135, "y": 2304, "width": 3780, "height": 4320, "rendered_width": 3024, "rendered_height": 3456 }
+    }
+  ]
+}

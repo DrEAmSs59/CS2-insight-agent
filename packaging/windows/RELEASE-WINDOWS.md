@@ -143,10 +143,10 @@ $env:PYTHONDONTWRITEBYTECODE = "1"
 ./packaging/windows/report-runtime-size.ps1 -Root $resources -OutputPath dist/runtime-size-report.json
 ```
 
-CI 预算：嵌入 resources 不超过 `160 MiB`，NSIS 安装包不超过 `70 MiB`，预计安装占用不超过 `190 MiB`。超过上限会中止 release。
+CI 预算：嵌入 resources 不超过 `120 MiB`，NSIS 安装包不超过 `45 MiB`，预计安装占用不超过 `120 MiB`。超过上限会中止 release。
 
 ## skin-core.exe（闭源 sidecar）
 
-`skin-core.exe` **不在本仓库构建**；由闭源 `CS2-demo-anyskin` 产出后在打包时注入。`desktop:stage-resources` 在设置了 `CS2_SKIN_CORE_EXE`，或存在 `../CS2-demo-anyskin/dist/skin-core.exe`（等 well-known 路径）时，会复制到 `frontend/src-tauri/bundle-resources/tools/skin-core.exe`；缺失时跳过，OSS CI 不失败。正式发布前请把本版主程序（及建议包含的 bundled `python.exe`）PE SHA-256 写入 skin-core 的父进程 allowlist，并用 anyskin `release-skin-core.ps1 -ParentPe ... -Pack` 产出 **release-ship + UPX** 的 `dist/skin-core.exe` 再注入（免费加固/加壳；非商业壳替代品）。
+`skin-core.exe` **不在本仓库构建**；由闭源 `CS2-demo-anyskin` 产出后在打包时显式注入。只有设置 `CS2_SKIN_CORE_EXE` 时，`desktop:stage-resources` 才会复制它到 `frontend/src-tauri/bundle-resources/tools/skin-core.exe`；普通构建不会再从同级私有仓库静默拾取旧产物，缺失时 OSS CI 仍可正常构建。正式发布前请把本版主程序（及建议包含的 bundled `python.exe`）PE SHA-256 写入 skin-core 的父进程 allowlist，并用 anyskin `release-skin-core.ps1 -ParentPe ... -Pack` 产出 **release-ship + UPX** 的 `dist/skin-core.exe` 再注入（免费加固/加壳；非商业壳替代品）。
 
 `bootstrap-staging.ps1`、`package_portable.ps1` 与 `CS2InsightAgent.iss` 仍保留为 legacy/manual 工具；Tauri 正式发布仅复用 `package_portable.ps1` 的 Python staging 能力。

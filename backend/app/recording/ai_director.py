@@ -13,7 +13,7 @@ from openai import APIConnectionError, APIError, APITimeoutError, AsyncOpenAI, R
 from pydantic import BaseModel, Field, ValidationError, field_validator
 
 from ..env_utils import LLMConfig, llm_api_key_configured, llm_base_url_is_local_host, load_config, resolve_config_path
-from ..llm_compat import completion_extra_body, message_text, normalize_llm_base_url
+from ..llm_compat import completion_extra_body, completion_temperature, message_text, normalize_llm_base_url
 from .normalizer import NormalizedRequest
 from .models import EventInfo
 
@@ -805,7 +805,7 @@ async def suggest_recording_outline(
                 {"role": "system", "content": DIRECTOR_SYSTEM_PROMPT},
                 {"role": "user", "content": user_msg},
             ],
-            "temperature": 0.35,
+            "temperature": completion_temperature(model, base_url, 0.35),
             "max_tokens": 2048,
         }
         extra_body = _completion_extra_body(model, base_url)
