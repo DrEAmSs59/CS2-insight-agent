@@ -979,6 +979,9 @@ export default function CosmeticsView({ workspace, selectedPlayer, locale = "zh"
   const [pickerTeam, setPickerTeam] = useState(null);
   const [saving, setSaving] = useState(false);
   const [saveResult, setSaveResult] = useState(null);
+  const planScope = `${String(demoId ?? "")}:${String(steamid || "")}`;
+  const planScopeRef = useRef(planScope);
+  planScopeRef.current = planScope;
   const inventory = useMemo(() => {
     const rows = workspace?.cosmetics?.players?.[steamid];
     return Array.isArray(rows) ? rows.filter(isVisibleCosmeticEvidence) : [];
@@ -1199,6 +1202,7 @@ export default function CosmeticsView({ workspace, selectedPlayer, locale = "zh"
 
   const savePlan = async () => {
     if (!canSavePlan) return;
+    const requestedScope = planScope;
     setSaving(true);
     setNotice({ tone: "info", text: t("analysis.cosmetics.savingPlan") });
     try {
@@ -1208,6 +1212,9 @@ export default function CosmeticsView({ workspace, selectedPlayer, locale = "zh"
         replacements: replacementsForApi(localReplacements),
         originals: originalBySlot,
       });
+      // A batch demo can be switched while the rewrite request is in flight.
+      // Never apply demo A's late result to the reused view for demo B.
+      if (planScopeRef.current !== requestedScope) return;
       const succeeded = enrichSaveResultRows(
         Array.isArray(result?.succeeded) ? result.succeeded : [],
         inventory,
@@ -1266,12 +1273,13 @@ export default function CosmeticsView({ workspace, selectedPlayer, locale = "zh"
         });
       }
     } catch (error) {
+      if (planScopeRef.current !== requestedScope) return;
       setNotice({
         tone: "error",
         text: error?.message || t("analysis.cosmetics.saveFailed"),
       });
     } finally {
-      setSaving(false);
+      if (planScopeRef.current === requestedScope) setSaving(false);
     }
   };
 

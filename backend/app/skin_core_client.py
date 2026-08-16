@@ -23,7 +23,6 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 _ENV_EXE = "CS2_SKIN_CORE_EXE"
 _ENV_DEV = "CS2_SKIN_CORE_DEV"
 _ENV_INSIGHT_DEV = "CS2_INSIGHT_DEV"
-_ENV_BUNDLE_DATA = "CS2_INSIGHT_BUNDLE_DATA_DIR"
 
 # Sibling closed-source repo layouts used for local/dev discovery.
 _DEV_ANYSKIN_ROOTS: tuple[Path, ...] = (
@@ -54,10 +53,11 @@ def _candidate_paths() -> list[Path]:
     if env:
         candidates.append(Path(env).expanduser())
 
-    bundle_data = (os.environ.get(_ENV_BUNDLE_DATA) or "").strip()
-    if bundle_data:
-        # Tauri: CS2_INSIGHT_BUNDLE_DATA_DIR -> <resource_dir>/data; tools sit beside data/.
-        candidates.append(Path(bundle_data).expanduser().resolve().parent / "tools" / "skin-core.exe")
+    # In installed and portable builds this module lives at
+    # <install_dir>/backend/app/skin_core_client.py. Resolve the sidecar directly
+    # from the installation root; writable/bundled data directories are unrelated
+    # to executable discovery and may live on a different drive.
+    candidates.append(_REPO_ROOT / "tools" / "skin-core.exe")
 
     # Prefer sibling closed-repo builds over staged bundle-resources so local
     # `release-skin-core` updates are picked up without re-staging.
@@ -73,7 +73,7 @@ def _candidate_paths() -> list[Path]:
 
 
 def resolve_skin_core_exe() -> Path:
-    """Locate skin-core.exe: env → packaged tools → closed-repo dist → staged tools."""
+    """Locate skin-core.exe: env → install tools → closed-repo dist → staged tools."""
     seen: set[str] = set()
     for raw in _candidate_paths():
         try:
@@ -87,7 +87,8 @@ def resolve_skin_core_exe() -> Path:
         if _is_file(path):
             return path
     raise SkinCoreNotFound(
-        "skin-core.exe not found; set CS2_SKIN_CORE_EXE or place tools/skin-core.exe in bundle resources"
+        "skin-core.exe not found; set CS2_SKIN_CORE_EXE or place it at "
+        "<install_dir>/tools/skin-core.exe"
     )
 
 
@@ -105,11 +106,8 @@ def _is_bundled_tools_exe(exe: Path) -> bool:
     text = _path_text(exe)
     if "bundle-resources/tools/" in text:
         return True
-    bundle_data = (os.environ.get(_ENV_BUNDLE_DATA) or "").strip()
-    if not bundle_data:
-        return False
     try:
-        tools_root = Path(bundle_data).expanduser().resolve().parent / "tools"
+        tools_root = _REPO_ROOT.resolve() / "tools"
         return exe.resolve() == (tools_root / "skin-core.exe").resolve() or _path_text(
             exe
         ).startswith(_path_text(tools_root) + "/")

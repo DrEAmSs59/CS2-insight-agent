@@ -43,6 +43,7 @@ describe("QueueWorkspaceRow keyboard input warning", () => {
     const warning = screen.getByTestId("queue-keyboard-input-warning");
     expect(screen.getByText("该 Demo 中缺失玩家键盘输入数据")).toBeTruthy();
     expect(screen.getByText("无法正常显示 OBS 虚拟键盘 Overlay")).toBeTruthy();
+    expect(screen.getByText("其他功能不受影响")).toBeTruthy();
     expect(warning.className).toContain("w-fit");
     expect(warning.className).toContain("max-w-[290px]");
     missing.unmount();
