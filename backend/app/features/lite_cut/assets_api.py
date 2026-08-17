@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field
 from ...api_errors import error_detail
 from .asset_executor import (
     attach_video_facts as _attach_video_fps,
+    build_asset_audio_preview,
     build_asset_waveform,
     linked_asset_identity_matches,
     probe_asset_metadata,
@@ -438,9 +439,7 @@ async def stream_lite_cut_asset(asset_id: int, request: Request):
 
 @router.get("/assets/{asset_id}/preview/audio")
 async def stream_lite_cut_audio_preview(asset_id: int, request: Request):
-    from ...env_utils import load_config
-    from ...video_composer import resolve_ffmpeg_binary
-    from .assets import asset_source_path, asset_source_status, create_audio_preview_proxy
+    from .assets import asset_source_status
     from .stream import stream_file_with_range
 
     row = await service_call(_services().assets.get(int(asset_id)))
@@ -454,15 +453,7 @@ async def stream_lite_cut_audio_preview(asset_id: int, request: Request):
     row = await _ensure_asset_preview_metadata(row)
     segment_directory, _max_edge = await _segment_preview_context(row)
     output = segment_directory.parent / "preview-audio-v1.m4a"
-    source = asset_source_path(row)
-    ffmpeg_bin = resolve_ffmpeg_binary(load_config().ffmpeg_path)
-    preview = await asyncio.to_thread(
-        create_audio_preview_proxy,
-        source,
-        ffmpeg_bin=ffmpeg_bin,
-        output_path=output,
-        audio_codec=str(row.get("audio_codec_name") or ""),
-    )
+    preview = await build_asset_audio_preview(row, output_path=output)
     if preview is None or not preview.is_file():
         raise HTTPException(422, "素材没有可用于预览的音轨")
     return await stream_file_with_range(preview, request)

@@ -271,6 +271,20 @@ async def build_asset_waveform(
     return {**waveform_view(payload, start_sec=start_sec, end_sec=end_sec, buckets=buckets), "cached": cached}
 
 
+async def build_asset_audio_preview(row: dict[str, Any], *, output_path: Path) -> Path | None:
+    """Create the full-duration audio preview without leaking FFmpeg work into HTTP routes."""
+    from ...video_composer import resolve_ffmpeg_binary
+    from .assets import asset_source_path, create_audio_preview_proxy
+
+    return await asyncio.to_thread(
+        create_audio_preview_proxy,
+        asset_source_path(row),
+        ffmpeg_bin=resolve_ffmpeg_binary(load_config().ffmpeg_path),
+        output_path=output_path,
+        audio_codec=str(row.get("audio_codec_name") or ""),
+    )
+
+
 async def quarantine_asset_files(row: dict[str, Any]):
     from .assets import asset_row_bundle_paths
 

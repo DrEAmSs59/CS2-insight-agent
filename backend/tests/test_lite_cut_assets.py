@@ -10,6 +10,7 @@ from types import SimpleNamespace
 import pytest
 from fastapi import HTTPException, UploadFile
 
+from app.features.lite_cut.asset_executor import build_asset_audio_preview
 from app.features.lite_cut.assets import (
     _unlink_with_retry,
     _run_proxy_process,
@@ -135,6 +136,46 @@ def test_audio_preview_copy_falls_back_to_aac_transcode(tmp_path, monkeypatch):
     assert modes == ["copy", "aac"]
     assert result == output.resolve()
     assert output.read_bytes() == b"audio proxy"
+
+
+def test_audio_preview_executor_preserves_source_codec_and_output(tmp_path, monkeypatch):
+    from app import video_composer
+    from app.features.lite_cut import asset_executor as executor_mod
+    from app.features.lite_cut import assets as assets_mod
+
+    source = tmp_path / "large.mp4"
+    output = tmp_path / "preview-audio-v1.m4a"
+    ffmpeg = tmp_path / "ffmpeg.exe"
+    calls = {}
+
+    monkeypatch.setattr(executor_mod, "load_config", lambda: SimpleNamespace(ffmpeg_path="configured-ffmpeg"))
+    monkeypatch.setattr(assets_mod, "asset_source_path", lambda row: source)
+
+    def fake_resolve_ffmpeg(configured_path):
+        calls["configured_path"] = configured_path
+        return ffmpeg
+
+    def fake_create_audio_preview_proxy(source_path, **kwargs):
+        calls["source"] = source_path
+        calls.update(kwargs)
+        return output
+
+    monkeypatch.setattr(video_composer, "resolve_ffmpeg_binary", fake_resolve_ffmpeg)
+    monkeypatch.setattr(assets_mod, "create_audio_preview_proxy", fake_create_audio_preview_proxy)
+
+    result = asyncio.run(build_asset_audio_preview(
+        {"audio_codec_name": "aac"},
+        output_path=output,
+    ))
+
+    assert result == output
+    assert calls == {
+        "configured_path": "configured-ffmpeg",
+        "source": source,
+        "ffmpeg_bin": ffmpeg,
+        "output_path": output,
+        "audio_codec": "aac",
+    }
 
 
 def test_asset_metadata_reports_resolution_fps_codec_and_duration(tmp_path, monkeypatch):
