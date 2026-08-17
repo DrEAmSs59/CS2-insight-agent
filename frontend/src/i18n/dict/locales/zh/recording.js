@@ -46,6 +46,7 @@ export default {
   "queue.rowCatDefault": "片段",
   "queue.keyboardInputMissingTitle": "该 Demo 中缺失玩家键盘输入数据",
   "queue.keyboardInputMissingBody": "无法正常显示 OBS 虚拟键盘 Overlay",
+  "queue.keyboardInputMissingUnaffected": "其他功能不受影响",
   "queue.inspectorTitle": "检查器",
   "queue.inspectorSelectPrompt": "选择一个录制任务",
   "queue.inspectorSelectHint": "在左侧队列中点选片段，可查看剪辑节奏与回放选项。",

@@ -324,6 +324,7 @@ export default function DemoAnalysisPage() {
 
               {activeTab === "cosmetics" && (
                 <CosmeticsView
+                  key={`${currentUpload?.id ?? "no-id"}:${currentUpload?.path || s.currentMatchIndex}`}
                   workspace={workspace}
                   selectedPlayer={selectedPlayer || workspace.players?.find((player) => playerIdentityKey(player) === activePlayer)}
                   locale={locale}

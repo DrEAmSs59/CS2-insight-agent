@@ -148,6 +148,7 @@ export default function QueueWorkspaceRow({
           <div className="min-w-0 text-[11px] leading-4">
             <p className="font-semibold">{t("queue.keyboardInputMissingTitle")}</p>
             <p className="text-cs2-text-secondary">{t("queue.keyboardInputMissingBody")}</p>
+            <p className="text-cs2-text-secondary">{t("queue.keyboardInputMissingUnaffected")}</p>
           </div>
         </div>
       ) : null}

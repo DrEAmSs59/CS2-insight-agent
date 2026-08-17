@@ -485,6 +485,84 @@ describe("CosmeticsView", () => {
     expect(container.querySelectorAll("[data-cosmetic-card]").length).toBeGreaterThan(0);
   });
 
+  test("ignores a save result from the previous demo after switching a batch with the same player", async () => {
+    let resolveSave;
+    vi.mocked(loadCustomSkinPlan).mockResolvedValue({ ok: true, plan: null });
+    vi.mocked(saveCustomSkinPlan).mockImplementationOnce(() => new Promise((resolve) => {
+      resolveSave = resolve;
+    }));
+    const workspace = {
+      cosmetics: {
+        players: {
+          [STEAM_ID]: [
+            cosmetic({
+              item_id: 10,
+              type: "weapon",
+              model: "ak47",
+              def_index: 7,
+              observed_teams: ["t"],
+              name_zh: "AK原皮",
+            }),
+          ],
+        },
+      },
+    };
+
+    const { rerender } = render(
+      <CosmeticsView
+        demoId={42}
+        selectedPlayer={{ name: "JW", steamid: STEAM_ID }}
+        workspace={workspace}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /自定义饰品|Customize skins/i }));
+    fireEvent.click(screen.getByRole("button", { name: /AK原皮/ }));
+    fireEvent.click(within(screen.getByTestId("skin-candidate-list")).getAllByRole("button")[0]);
+    fireEvent.click(screen.getByRole("button", { name: /确认|Confirm/i }));
+    fireEvent.click(screen.getByTestId("cosmetics-save-plan"));
+
+    await waitFor(() => expect(saveCustomSkinPlan).toHaveBeenCalledWith(
+      expect.objectContaining({ demoId: 42, steamid: STEAM_ID }),
+    ));
+
+    rerender(
+      <CosmeticsView
+        demoId={43}
+        selectedPlayer={{ name: "JW", steamid: STEAM_ID }}
+        workspace={workspace}
+      />,
+    );
+    await waitFor(() => {
+      expect(loadCustomSkinPlan).toHaveBeenCalledWith({ demoId: 43, steamid: STEAM_ID });
+      expect(screen.queryByText(/→\s*.+/)).toBeNull();
+    });
+
+    resolveSave({
+      ok: true,
+      plan: {
+        steamid: STEAM_ID,
+        items: [{
+          slot_key: "t:id:10",
+          replacement: {
+            catalog_id: 4797,
+            def_index: 7,
+            paint_index: 340,
+            name_zh: "AK-47 | 迟到的红线",
+            name_en: "AK-47 | Late Redline",
+          },
+        }],
+      },
+      succeeded: [],
+      failed: [],
+    });
+
+    await waitFor(() => {
+      expect(screen.queryByText(/迟到的红线|Late Redline/)).toBeNull();
+      expect(screen.queryByText(/→\s*.+/)).toBeNull();
+    });
+  });
+
   test("custom mode shows clear-X on replaced cards and restore posts original on save", async () => {
     vi.mocked(saveCustomSkinPlan).mockClear();
     vi.mocked(loadCustomSkinPlan).mockClear();

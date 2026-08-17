@@ -46,6 +46,7 @@ export default {
   "queue.rowCatDefault": "Clip",
   "queue.keyboardInputMissingTitle": "This Demo is missing player keyboard input data",
   "queue.keyboardInputMissingBody": "The OBS virtual keyboard Overlay cannot be displayed correctly",
+  "queue.keyboardInputMissingUnaffected": "Other features are unaffected",
   "queue.inspectorTitle": "Inspector",
   "queue.inspectorSelectPrompt": "Select a recording task",
   "queue.inspectorSelectHint": "Click a clip in the queue on the left to view its pacing and playback options.",

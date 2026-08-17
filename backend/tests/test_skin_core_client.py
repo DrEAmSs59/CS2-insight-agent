@@ -44,14 +44,19 @@ def test_resolve_prefers_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     assert resolve_skin_core_exe() == exe.resolve()
 
 
-def test_resolve_bundle_resources(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+def test_resolve_install_tools_without_using_data_dir(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
     monkeypatch.delenv("CS2_SKIN_CORE_EXE", raising=False)
-    bundle_root = tmp_path / "bundle"
-    tools = bundle_root / "tools"
+    install_root = tmp_path / "non-system-drive" / "CS2 Insight Agent"
+    tools = install_root / "tools"
     tools.mkdir(parents=True)
     exe = tools / "skin-core.exe"
     exe.write_bytes(b"MZ")
-    monkeypatch.setenv("CS2_INSIGHT_BUNDLE_DATA_DIR", str(bundle_root / "data"))
+    monkeypatch.setattr("app.skin_core_client._REPO_ROOT", install_root)
+    monkeypatch.setattr("app.skin_core_client._DEV_ANYSKIN_ROOTS", ())
+    monkeypatch.setenv("CS2_INSIGHT_DATA_DIR", str(tmp_path / "appdata" / "data"))
+    monkeypatch.setenv("CS2_INSIGHT_BUNDLE_DATA_DIR", str(tmp_path / "bundle-data"))
     assert resolve_skin_core_exe() == exe.resolve()
 
 
@@ -201,6 +206,13 @@ def test_should_set_dev_env_explicit_and_bundled(tmp_path: Path, monkeypatch: py
     bundled.parent.mkdir(parents=True)
     bundled.write_bytes(b"MZ")
     assert _should_set_dev_env(bundled) is False
+
+    install_root = tmp_path / "installed"
+    installed = install_root / "tools" / "skin-core.exe"
+    installed.parent.mkdir(parents=True)
+    installed.write_bytes(b"MZ")
+    monkeypatch.setattr("app.skin_core_client._REPO_ROOT", install_root)
+    assert _should_set_dev_env(installed) is False
 
     monkeypatch.setenv("CS2_SKIN_CORE_DEV", "1")
     assert _should_set_dev_env(bundled) is True
