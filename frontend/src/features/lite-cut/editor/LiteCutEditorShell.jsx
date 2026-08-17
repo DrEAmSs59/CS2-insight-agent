@@ -19,11 +19,10 @@ import { LITECUT_PROJECT_TEMPLATES } from "./projectTemplates.js";
 import { inspectorTabForTimelineSelection } from "./inspectorSelectionUtils.js";
 import {
   getLiteCutAssetStreamUrl,
-  getRecordedClipStreamUrl,
 } from "../api/liteCutClient.js";
 import { useLiteCutEditorStore } from "../state/editorStore.js";
 import { collectUsedLiteCutAssetIds } from "../state/assetUtils.js";
-import { liteCutClipStreamUrl } from "./clipStreamUrlUtils.js";
+import { liteCutAudioPreviewUrl, liteCutClipStreamUrl } from "./clipStreamUrlUtils.js";
 import { shouldUseSegmentedPreview, useSegmentedPreviewSource } from "./useSegmentedPreviewSource.js";
 import { mapRecordedClipRow } from "../state/mediaUtils.js";
 import { sceneResolvedContentFit, sceneTransformAt, VIDEO_SCENE_TRANSFORM_DEFAULTS } from "../state/sceneTransform.js";
@@ -899,19 +898,16 @@ export default function LiteCutEditorShell({
     [clipStreamUrl, nextClipPrewarmActive, nextClipPrewarmStreamUrl, nextPreviewClip, nextPreviewSegmentedEnabled, nextPreviewSourceTime, nextSegmentedPreview.mediaTimeOffset, outputCanvasFit, outputHeight, outputWidth, playheadSec, transitionCompanionIsNext, transitionCompanionPlayback, transitionPreview.companionOpacity, underlayMediaTimeOffset, underlayPlayback?.clip?.id, underlayPlaybacks, underlaySegmentedPreview.streamUrl, underlayStreamUrl],
   );
   const soloAudioActive = useMemo(() => hasSoloAudioTracks(body), [body]);
+  const videoClipIds = useMemo(() => new Set(
+    (body?.tracks || [])
+      .filter((track) => track?.type === "video")
+      .flatMap((track) => track.clips || [])
+      .map((clip) => String(clip.id)),
+  ), [body?.tracks]);
   const audioPreviewItems = useMemo(
     () => {
       const toPreviewItem = (item) => {
-        const assetId = item.clip?.meta?.asset_id;
-        const recordedId = Number(item.clip?.source_id);
-        const src = assetId != null
-          ? getLiteCutAssetStreamUrl(
-              assetId,
-              assetPreviewVersions?.[Number(assetId)] || item.clip?.meta?.preview_proxy_version || "",
-            )
-          : Number.isFinite(recordedId) && recordedId > 0
-            ? getRecordedClipStreamUrl(recordedId)
-            : null;
+        const src = liteCutAudioPreviewUrl(item, videoClipIds, assetPreviewVersions);
         if (!src) return null;
         return {
           id: item.id,
@@ -941,7 +937,7 @@ export default function LiteCutEditorShell({
       if (!duckingEnabled || !hasForeground) return allItems;
       return allItems.map((item) => (item.trackId === "bgm" && !item.preloadOnly ? { ...item, volume: item.volume * duckingVolume } : item));
     },
-    [assetPreviewVersions, bgm?.ducking_enabled, bgm?.ducking_volume, previewScene.audio, previewScene.audioPreload],
+    [assetPreviewVersions, bgm?.ducking_enabled, bgm?.ducking_volume, previewScene.audio, previewScene.audioPreload, videoClipIds],
   );
   const dedicatedAudioPreviewItems = audioPreviewItems;
 

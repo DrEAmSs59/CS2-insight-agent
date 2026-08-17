@@ -439,6 +439,23 @@ def preview_proxy_command(
     )
 
 
+def audio_preview_command(
+    *,
+    ffmpeg_bin: Path,
+    source: Path,
+    output: Path,
+    copy_audio: bool,
+) -> list[str]:
+    command = [
+        str(ffmpeg_bin), "-y", "-hide_banner", "-loglevel", "error", "-nostdin",
+        "-i", str(source), "-map", "0:a:0", "-vn", "-c:a", "copy" if copy_audio else "aac",
+    ]
+    if not copy_audio:
+        command.extend(["-b:a", "128k"])
+    command.extend(["-map_metadata", "-1", "-movflags", "+faststart", str(output)])
+    return command
+
+
 def _run_proxy_process(
     command: list[str],
     *,
@@ -571,6 +588,49 @@ def create_browser_preview_proxy(
             logger.warning("LiteCut preview proxy failed for %s", source.name, exc_info=True)
             temporary.unlink(missing_ok=True)
             return None
+
+
+def create_audio_preview_proxy(
+    source: Path,
+    *,
+    ffmpeg_bin: Path,
+    output_path: Path,
+    audio_codec: str | None = None,
+) -> Path | None:
+    """Create one full-duration, seekable audio cache without decoding video."""
+    output = output_path.resolve()
+    output.parent.mkdir(parents=True, exist_ok=True)
+    with _proxy_lock_for(output):
+        if output.is_file() and output.stat().st_size > 0:
+            return output
+        temporary = output.with_name(f".{output.stem}.{uuid.uuid4().hex}.partial{output.suffix}")
+        copy_first = str(audio_codec or "").strip().lower() == "aac"
+        modes = [True, False] if copy_first else [False]
+        last_result: subprocess.CompletedProcess[str] | None = None
+        try:
+            for copy_audio in modes:
+                temporary.unlink(missing_ok=True)
+                command = audio_preview_command(
+                    ffmpeg_bin=ffmpeg_bin,
+                    source=source,
+                    output=temporary,
+                    copy_audio=copy_audio,
+                )
+                result = _run_proxy_process(command, timeout_sec=1800)
+                last_result = result
+                if result.returncode == 0 and temporary.is_file() and temporary.stat().st_size > 0:
+                    temporary.replace(output)
+                    return output
+                if copy_audio:
+                    logger.info("LiteCut audio stream copy unavailable for %s; falling back to AAC", source.name)
+            tail = ((last_result.stderr or last_result.stdout) if last_result else "").strip()[-600:]
+            logger.warning("LiteCut audio preview failed for %s: %s", source.name, tail)
+            return None
+        except Exception:
+            logger.warning("LiteCut audio preview failed for %s", source.name, exc_info=True)
+            return None
+        finally:
+            temporary.unlink(missing_ok=True)
 
 
 def alpha_preview_proxy_command(*, ffmpeg_bin: Path, source: Path, output: Path, duration_sec: float | None = None, max_edge: int = 1280) -> list[str]:

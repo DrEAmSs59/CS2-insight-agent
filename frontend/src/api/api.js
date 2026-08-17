@@ -33,6 +33,15 @@ export function getLiteCutAssetStreamUrl(assetId, previewVersion = "") {
   return previewVersion ? `${base}?preview=${encodeURIComponent(String(previewVersion))}` : base;
 }
 
+/** Full, project-owned audio proxy for video-derived LiteCut audio tracks. */
+export function getLiteCutAssetAudioPreviewUrl(assetId, previewVersion = "") {
+  const id = encodeURIComponent(String(assetId));
+  const base = API_BASE_URL
+    ? `${API_BASE_URL}/api/lite-cut/assets/${id}/preview/audio`
+    : `/api/lite-cut/assets/${id}/preview/audio`;
+  return previewVersion ? `${base}?v=${encodeURIComponent(String(previewVersion))}` : base;
+}
+
 export function getLiteCutBuiltinFontUrl(fontName) {
   const name = encodeURIComponent(String(fontName));
   return API_BASE_URL

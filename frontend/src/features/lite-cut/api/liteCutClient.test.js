@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
-import { createLiteCutClient } from "./liteCutClient.js";
+import {
+  createLiteCutClient,
+  getLiteCutAssetAudioPreviewUrl,
+  resolveLiteCutApiUrl,
+} from "./liteCutClient.js";
 
 describe("liteCutClient", () => {
   it("owns project endpoint details and unwraps response bodies", async () => {
@@ -18,19 +22,34 @@ describe("liteCutClient", () => {
     const transport = {
       get: vi.fn().mockResolvedValue({ data: { items: [] } }),
       post: vi.fn()
-        .mockResolvedValueOnce({ data: { saved_path: "D:\\out\\Project.litecut" } })
+        .mockResolvedValueOnce({ data: { saved_path: "D:\\out\\Project.litecut", download_url: "/api/lite-cut/projects/4/project-file" } })
         .mockResolvedValueOnce({ data: { id: 8, offline_asset_count: 2 } }),
     };
     const client = createLiteCutClient(transport);
     const projectFile = new File(["{}"], "Project.litecut", { type: "application/vnd.litecut.project+json" });
 
-    await expect(client.exportProjectFile(4, "D:\\out")).resolves.toEqual({ saved_path: "D:\\out\\Project.litecut" });
+    await expect(client.exportProjectFile(4, "D:\\out")).resolves.toEqual({
+      saved_path: "D:\\out\\Project.litecut",
+      download_url: "/api/lite-cut/projects/4/project-file",
+    });
     await expect(client.importProjectFile(projectFile)).resolves.toEqual({ id: 8, offline_asset_count: 2 });
     expect(transport.post).toHaveBeenNthCalledWith(1, "/lite-cut/projects/4/project-file/export", {
       destination: "D:\\out",
     });
     expect(transport.post.mock.calls[1][0]).toBe("/lite-cut/projects/project-file/import");
     expect(transport.post.mock.calls[1][1]).toBeInstanceOf(FormData);
+  });
+
+  it("resolves backend-relative URLs against the packaged desktop backend", () => {
+    expect(resolveLiteCutApiUrl(
+      "/api/lite-cut/projects/4/project-file",
+      "http://127.0.0.1:19871",
+    )).toBe("http://127.0.0.1:19871/api/lite-cut/projects/4/project-file");
+  });
+
+  it("builds a cache-versioned full audio preview URL", () => {
+    expect(getLiteCutAssetAudioPreviewUrl(12, "source-abc"))
+      .toBe("/api/lite-cut/assets/12/preview/audio?v=source-abc");
   });
 
   it("registers and relinks assets by path without multipart uploads", async () => {

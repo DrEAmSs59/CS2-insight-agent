@@ -400,7 +400,7 @@ class TestFrameMeld(unittest.TestCase):
         self.assertEqual(policy.branch, "intel_qsv")
         self.assertEqual(policy.encoder, "h264_qsv")
 
-    def test_precise_policy_requires_status_flag_and_supported_backend(self):
+    def test_execution_policy_requires_framemeld_route(self):
         self.assertIsNone(
             framemeld_execution_policy(["ffmpeg.exe", "-c:v", "h264_qsv", "output.mp4"])
         )
@@ -415,6 +415,30 @@ class TestFrameMeld(unittest.TestCase):
                 ]
             )
         )
+
+    def test_execution_policy_covers_hardware_and_software_encoders(self):
+        expected = {
+            "h264_amf": "amd_amf",
+            "h264_qsv": "intel_qsv",
+            "h264_nvenc": "nvidia_nvenc",
+            "libx264": "software_x264",
+        }
+        for encoder, branch in expected.items():
+            with self.subTest(encoder=encoder):
+                policy = framemeld_execution_policy(
+                    ["ffmpeg.exe", "-framemeld", "-c:v", encoder, "output.mp4"]
+                )
+                self.assertIsNotNone(policy)
+                self.assertEqual(policy.branch, branch)
+                self.assertEqual(policy.encoder, encoder)
+                self.assertEqual(policy.hard_timeout_seconds, 12 * 60 * 60)
+                self.assertEqual(policy.stall_timeout_seconds, 15 * 60)
+
+        legacy_policy = framemeld_execution_policy(
+            ["ffmpeg.exe", "-blur", "-c:v", "libx264", "output.mp4"]
+        )
+        self.assertIsNotNone(legacy_policy)
+        self.assertEqual(legacy_policy.branch, "software_x264")
 
     def test_structured_failure_parser_returns_domain_and_devices(self):
         payload = {

@@ -37,10 +37,17 @@ FRAMEMELD_DEVICE_INVENTORY_FEATURE = "device-inventory-json-v1"
 FRAMEMELD_RIFE_GPU_SELECTION_FEATURE = "rife-gpu-selection-v1"
 FRAMEMELD_RIFE_BINDING_FEATURE = "rife-binding-json-v1"
 FRAMEMELD_DEVICE_PROTOCOL = "org.framemeld.devices"
-FRAMEMELD_AMD_HARD_TIMEOUT_SECONDS = 12 * 60 * 60
-FRAMEMELD_AMD_STALL_TIMEOUT_SECONDS = 15 * 60
-FRAMEMELD_INTEL_HARD_TIMEOUT_SECONDS = 12 * 60 * 60
-FRAMEMELD_INTEL_STALL_TIMEOUT_SECONDS = 15 * 60
+# FrameMeld is a frame-processing workload regardless of which encoder writes
+# the final stream.  Keep one policy so a healthy long render is not treated
+# differently after an encoder fallback (for example NVENC -> libx264).
+FRAMEMELD_HARD_TIMEOUT_SECONDS = 12 * 60 * 60
+FRAMEMELD_STALL_TIMEOUT_SECONDS = 15 * 60
+# Backward-compatible names for callers that imported the former per-vendor
+# constants. They intentionally point at the same unified policy now.
+FRAMEMELD_AMD_HARD_TIMEOUT_SECONDS = FRAMEMELD_HARD_TIMEOUT_SECONDS
+FRAMEMELD_AMD_STALL_TIMEOUT_SECONDS = FRAMEMELD_STALL_TIMEOUT_SECONDS
+FRAMEMELD_INTEL_HARD_TIMEOUT_SECONDS = FRAMEMELD_HARD_TIMEOUT_SECONDS
+FRAMEMELD_INTEL_STALL_TIMEOUT_SECONDS = FRAMEMELD_STALL_TIMEOUT_SECONDS
 
 # The second marker is accepted only so already-built FrameMeld runtimes remain
 # usable while their public help text still carries the former product name.
@@ -105,30 +112,31 @@ class FrameMeldRifeDevicePlan:
 
 def _framemeld_policy_for_encoder(encoder: object) -> FrameMeldExecutionPolicy | None:
     normalized = str(encoder or "").casefold()
+    if not normalized:
+        return None
     if normalized.endswith("_amf"):
-        return FrameMeldExecutionPolicy(
-            branch="amd_amf",
-            encoder=normalized,
-            hard_timeout_seconds=FRAMEMELD_AMD_HARD_TIMEOUT_SECONDS,
-            stall_timeout_seconds=FRAMEMELD_AMD_STALL_TIMEOUT_SECONDS,
-        )
-    if normalized.endswith("_qsv"):
-        # Intel is deliberately isolated from the AMD policy so either branch
-        # can evolve or be disabled without changing NVIDIA/CPU exports.
-        return FrameMeldExecutionPolicy(
-            branch="intel_qsv",
-            encoder=normalized,
-            hard_timeout_seconds=FRAMEMELD_INTEL_HARD_TIMEOUT_SECONDS,
-            stall_timeout_seconds=FRAMEMELD_INTEL_STALL_TIMEOUT_SECONDS,
-        )
-    return None
+        branch = "amd_amf"
+    elif normalized.endswith("_qsv"):
+        branch = "intel_qsv"
+    elif normalized.endswith("_nvenc"):
+        branch = "nvidia_nvenc"
+    elif normalized in {"libx264", "libx264rgb"}:
+        branch = "software_x264"
+    else:
+        branch = "other"
+    return FrameMeldExecutionPolicy(
+        branch=branch,
+        encoder=normalized,
+        hard_timeout_seconds=FRAMEMELD_HARD_TIMEOUT_SECONDS,
+        stall_timeout_seconds=FRAMEMELD_STALL_TIMEOUT_SECONDS,
+    )
 
 
 def framemeld_execution_policy(command: Sequence[object]) -> FrameMeldExecutionPolicy | None:
-    """Return the opt-in precise policy for an explicit AMF or QSV command."""
+    """Return the unified long-render policy for a FrameMeld command."""
 
     options = [str(item) for item in command]
-    if "--status-json-lines" not in options:
+    if FRAMEMELD_ROUTE not in options and FRAMEMELD_LEGACY_ROUTE not in options:
         return None
     for name in ("-c:v", "-codec:v", "-vcodec"):
         try:
@@ -787,12 +795,13 @@ def build_framemeld_command(
     ]
     if "host-managed-encoder-fallback" in resolved_capability.features:
         command.append("--host-managed-encoder-fallback")
-    # AMF and QSV are separate opt-in policy branches.  The explicit encoder
-    # backend is the boundary; GPU model names are diagnostic metadata only.
-    precise_policy = _framemeld_policy_for_encoder(codec)
+    # Keep the public CLI contract unchanged for older runtimes. Unified host
+    # timeout handling does not require structured status because VSPipe frame
+    # progress is also parsed from stderr.
+    needs_encoder_diagnostics = codec.casefold().endswith(("_amf", "_qsv"))
     needs_rife_diagnostics = bool(rife_device_plan is not None and rife_device_plan.explicit)
     if (
-        (precise_policy is not None or needs_rife_diagnostics)
+        (needs_encoder_diagnostics or needs_rife_diagnostics)
         and FRAMEMELD_STATUS_FEATURE in resolved_capability.features
     ):
         command.append("--status-json-lines")

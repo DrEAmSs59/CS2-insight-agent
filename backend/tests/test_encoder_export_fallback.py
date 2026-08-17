@@ -487,7 +487,12 @@ def test_montage_hardware_timeout_is_retryable(
 
 @pytest.mark.parametrize(
     ("encoder", "branch"),
-    (("h264_amf", "amd_amf"), ("h264_qsv", "intel_qsv")),
+    (
+        ("h264_amf", "amd_amf"),
+        ("h264_qsv", "intel_qsv"),
+        ("h264_nvenc", "nvidia_nvenc"),
+        ("libx264", "software_x264"),
+    ),
 )
 def test_montage_precise_framemeld_timeout_does_not_trigger_cpu_fallback(
     monkeypatch: pytest.MonkeyPatch,
@@ -504,10 +509,13 @@ def test_montage_precise_framemeld_timeout_does_not_trigger_cpu_fallback(
         str(tmp_path / "attempt.mp4"),
     ]
 
-    def time_out(*_args, **_kwargs):
+    run_kwargs: dict[str, object] = {}
+
+    def time_out(*_args, **kwargs):
+        run_kwargs.update(kwargs)
         raise subprocess.TimeoutExpired(
             command,
-            3600,
+            kwargs["timeout"],
             output=b"",
             stderr=b"framemeld-status:{\"protocol\":\"org.framemeld.status\",\"event\":\"pipeline_started\"}",
         )
@@ -526,6 +534,9 @@ def test_montage_precise_framemeld_timeout_does_not_trigger_cpu_fallback(
     assert caught.value.code == "MONTAGE_FRAMEMELD_TIMEOUT"
     assert caught.value.params["branch"] == branch
     assert caught.value.params["encoder"] == encoder
+    assert caught.value.params["timeout_seconds"] == 12 * 60 * 60
+    assert run_kwargs["timeout"] == 12 * 60 * 60
+    assert run_kwargs["stall_timeout"] == 15 * 60
 
 
 def test_montage_capture_reports_last_frame_when_process_stalls() -> None:

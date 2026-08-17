@@ -5,7 +5,7 @@ import { startPendingDrag } from "./timelineInteraction.js";
 import { isHandoffFrameReady, previewMediaIdentity, previewUnderlayOpacity, previewUnderlayPlaybackStateKey, previewUnderlaySyncKey, promotedUnderlayForMain, SEGMENT_HANDOFF_TOLERANCE_SEC, shouldPublishVideoTimeUpdate, shouldUseMediaPreviewClock } from "./previewFrameUtils.js";
 import { normalizeSceneTransform, sceneMaterialLayout, sceneTransformStyle, VIDEO_SCENE_TRANSFORM_DEFAULTS } from "../state/sceneTransform.js";
 import PreviewAudioItem from "./PreviewAudioItem.jsx";
-import { captureThenReleaseMediaElements, createMediaElementRefRegistry, drawVideoFrame, isInterruptedPlaybackError, releaseMediaElement } from "./previewMediaElementUtils.js";
+import { createMediaElementRefRegistry, isInterruptedPlaybackError, releaseMediaElement } from "./previewMediaElementUtils.js";
 import PreviewOverlayItem from "./LiteCutPreviewOverlay.jsx";
 import {
   usePreviewFullscreen,
@@ -13,6 +13,12 @@ import {
   usePreviewViewportFit,
 } from "./usePreviewMediaLifecycle.js";
 import { usePreviewFrameClock, usePreviewSeekGuard } from "./usePreviewMediaClock.js";
+import {
+  advancePreviewVideoHandoff,
+  completePreviewVideoHandoff,
+  createPreviewVideoHandoff,
+  previewVideoSlotVisible,
+} from "./previewVideoHandoff.js";
 import {
   clampSceneScale,
   clampSceneSize,
@@ -36,6 +42,14 @@ function parseTime(value) {
   if (parts.length === 1) return Math.max(0, parts[0]);
   if (parts.length === 2) return Math.max(0, parts[0] * 60 + parts[1]);
   return Math.max(0, parts[0] * 3600 + parts[1] * 60 + parts[2]);
+}
+
+function createVideoSlotRefCallbacks(slotRefs) {
+  return [0, 1].map((index) => (element) => {
+    const detached = slotRefs.current[index];
+    slotRefs.current[index] = element;
+    if (!element && detached) releaseMediaElement(detached);
+  });
 }
 
 export default function LiteCutPreviewPanel({
@@ -114,8 +128,20 @@ export default function LiteCutPreviewPanel({
   onOverlayDragStart,
   onOverlayTransform,
 }) {
+  const hasStream = Boolean(streamUrl);
+  const mediaIdentity = previewMediaIdentity(previewClipId, streamUrl);
   const videoRef = useRef(null);
   const bgVideoRef = useRef(null);
+  const mainVideoSlotRefs = useRef([null, null]);
+  const backgroundVideoSlotRefs = useRef([null, null]);
+  const mainVideoSlotRefCallbacks = useRef(null);
+  const backgroundVideoSlotRefCallbacks = useRef(null);
+  if (!mainVideoSlotRefCallbacks.current) {
+    mainVideoSlotRefCallbacks.current = createVideoSlotRefCallbacks(mainVideoSlotRefs);
+  }
+  if (!backgroundVideoSlotRefCallbacks.current) {
+    backgroundVideoSlotRefCallbacks.current = createVideoSlotRefCallbacks(backgroundVideoSlotRefs);
+  }
   const preloadVideoRef = useRef(null);
   const underlayVideoRefs = useRef(new Map());
   const underlayMediaRegistryRef = useRef(null);
@@ -126,7 +152,18 @@ export default function LiteCutPreviewPanel({
   const previewViewportRef = useRef(null);
   const [videoDuration, setVideoDuration] = useState(null);
   const [playError, setPlayError] = useState(null);
-  const [heldSwitchFrame, setHeldSwitchFrame] = useState(null);
+  const [videoHandoff, setVideoHandoff] = useState(() => createPreviewVideoHandoff(mediaIdentity, streamUrl));
+  const holdingUnavailablePreview = Boolean(
+    !streamUrl
+    && segmentedPreview
+    && previewPending
+    && videoHandoff.slots.some(Boolean),
+  );
+  const nextVideoHandoff = holdingUnavailablePreview
+    ? videoHandoff
+    : advancePreviewVideoHandoff(videoHandoff, mediaIdentity, streamUrl);
+  if (nextVideoHandoff !== videoHandoff) setVideoHandoff(nextVideoHandoff);
+  const hasRetainedVideo = videoHandoff.slots.some(Boolean);
   const [segmentMediaLoading, setSegmentMediaLoading] = useState(false);
   const [dropHover, setDropHover] = useState(false);
   const [mainLayerDragging, setMainLayerDragging] = useState(false);
@@ -138,14 +175,30 @@ export default function LiteCutPreviewPanel({
   const [editingTime, setEditingTime] = useState(false);
   const [alignmentGuides, setAlignmentGuides] = useState({ x: null, y: null });
   const styleCard = TEXT_STYLE_CARDS.find((c) => c.id === textStyleId) || TEXT_STYLE_CARDS.find((c) => c.id === "clutch");
-  const hasStream = Boolean(streamUrl);
   const sourceOffset = Math.max(0, Number(mediaTimeOffset) || 0);
   const playbackStreamReady = hasStream && (!segmentedPreview || !previewPending);
-  const mediaIdentity = previewMediaIdentity(previewClipId, streamUrl);
   const safePlaybackRate = Math.max(0.25, Math.min(4, Number(playbackRate) || 1));
   const inputTimelineTime = Math.max(0, Number(timelinePlayhead ?? playheadSec) || 0);
   const inputLocalTime = Math.max(0, Number(clipLocalTime) || 0);
   const previousUnderlayLayersRef = useRef([]);
+
+  useLayoutEffect(() => {
+    videoRef.current = mainVideoSlotRefs.current[videoHandoff.activeIndex] || null;
+    bgVideoRef.current = backgroundVideoSlotRefs.current[videoHandoff.activeIndex] || null;
+    if (!videoHandoff.pending || videoHandoff.outgoingIndex == null) return;
+    mainVideoSlotRefs.current[videoHandoff.outgoingIndex]?.pause?.();
+    backgroundVideoSlotRefs.current[videoHandoff.outgoingIndex]?.pause?.();
+  }, [videoHandoff.activeIndex, videoHandoff.outgoingIndex, videoHandoff.pending, videoHandoff.targetIdentity]);
+
+  useLayoutEffect(() => {
+    if (!holdingUnavailablePreview) return;
+    mainVideoSlotRefs.current.forEach((element) => element?.pause?.());
+    backgroundVideoSlotRefs.current.forEach((element) => element?.pause?.());
+  }, [holdingUnavailablePreview]);
+
+  const completeMainVideoHandoff = useCallback(() => {
+    setVideoHandoff((current) => completePreviewVideoHandoff(current, mediaIdentity));
+  }, [mediaIdentity]);
 
   usePreviewMediaCleanup({
     videoRef,
@@ -181,7 +234,7 @@ export default function LiteCutPreviewPanel({
     previewClipId,
     reversePlayback,
     safePlaybackRate,
-    setHeldSwitchFrame,
+    onFramePresented: completeMainVideoHandoff,
     streamUrl,
     handoffToleranceSec: segmentedPreview ? SEGMENT_HANDOFF_TOLERANCE_SEC : undefined,
     underlayVideoRefs,
@@ -315,47 +368,15 @@ export default function LiteCutPreviewPanel({
         transform: `${safeTransitionTransform} ${mainFlipTransform || ""} scale(${cropPreviewScale.toFixed(4)})`.trim(),
         willChange: isPlaying ? "transform, opacity, clip-path, filter" : undefined,
       };
-  const switchCaptureConfigRef = useRef(null);
-  switchCaptureConfigRef.current = {
-    background: canvasBg,
-    canvasWidth: Math.max(1, Number(canvasWidth) || 1920),
-    canvasHeight: Math.max(1, Number(canvasHeight) || 1080),
-    fit: fitMode,
-    mainFilter: safeMainFilter,
-    mainOpacity: Math.max(0, Math.min(1, videoOpacity * normalizedMainLayerTransform.opacity)),
-    underlayLayers: resolvedUnderlayLayers,
+  const videoSlotStyle = (baseStyle, index) => {
+    const visible = previewVideoSlotVisible(videoHandoff, index);
+    const baseOpacity = Number(baseStyle?.opacity);
+    return {
+      ...baseStyle,
+      opacity: visible ? (Number.isFinite(baseOpacity) ? baseOpacity : 1) : 0,
+      zIndex: visible ? 2 : 1,
+    };
   };
-
-  const holdCompositedFrame = useCallback((mainElement = videoRef.current, configOverride = null) => {
-    const config = configOverride || switchCaptureConfigRef.current;
-    if (!config || !mainElement || mainElement.readyState < 2) return;
-    try {
-      const canvas = document.createElement("canvas");
-      canvas.width = Math.min(1280, config.canvasWidth);
-      canvas.height = Math.max(1, Math.round(canvas.width * config.canvasHeight / config.canvasWidth));
-      const ctx = canvas.getContext("2d");
-      if (!ctx) return;
-      ctx.fillStyle = config.background;
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-      for (const layer of config.underlayLayers) {
-        const element = underlayVideoRefs.current.get(String(layer.id));
-        if (!element || element.readyState < 2) continue;
-        const rawOpacity = Number(layer.opacity);
-        ctx.globalAlpha = Number.isFinite(rawOpacity) ? Math.max(0, Math.min(1, rawOpacity)) : 1;
-        ctx.filter = String(layer.filter || "none");
-        drawVideoFrame(ctx, element, 0, 0, canvas.width, canvas.height, "contain");
-      }
-      ctx.globalAlpha = config.mainOpacity;
-      ctx.filter = config.mainFilter || "none";
-      drawVideoFrame(ctx, mainElement, 0, 0, canvas.width, canvas.height, config.fit === "cover" ? "cover" : "contain");
-      ctx.globalAlpha = 1;
-      ctx.filter = "none";
-      setHeldSwitchFrame(canvas.toDataURL("image/webp", 0.86));
-    } catch {
-      // Frame holding is best-effort; playback must continue if capture is unavailable.
-    }
-  }, []);
-
   const startMainLayerMove = (e) => {
     if (!mainIsVideoLayer || e.target.closest("[data-main-layer-handle]")) return;
     e.preventDefault();
@@ -451,30 +472,9 @@ export default function LiteCutPreviewPanel({
   }, [mediaIdentity]);
 
   useLayoutEffect(() => {
-    if (!hasStream) setHeldSwitchFrame(null);
-  }, [hasStream]);
-
-  useLayoutEffect(() => {
     handoffStartedAtRef.current = 0;
     handoffSeekAtRef.current = 0;
-    const element = videoRef.current;
-    const background = bgVideoRef.current;
-    const captureConfig = switchCaptureConfigRef.current;
-    return () => {
-      captureThenReleaseMediaElements({
-        main: element,
-        background,
-        capture: (outgoing) => {
-          if (!retainedPromotionLayerRef.current) holdCompositedFrame(outgoing, captureConfig);
-        },
-      });
-    };
-  }, [holdCompositedFrame, mediaIdentity]);
-
-  useLayoutEffect(() => {
-    const background = bgVideoRef.current;
-    return () => releaseMediaElement(background);
-  }, [mediaIdentity, showCanvasBlur]);
+  }, [handoffSeekAtRef, handoffStartedAtRef, mediaIdentity]);
 
   useLayoutEffect(() => {
     setSegmentMediaLoading(Boolean(segmentedPreview && hasStream));
@@ -603,7 +603,7 @@ export default function LiteCutPreviewPanel({
       })) return;
       revealed = true;
       presentedStreamRef.current = mediaIdentity;
-      setHeldSwitchFrame(null);
+      completeMainVideoHandoff();
       setSegmentMediaLoading(false);
       releasePromotedUnderlay();
     };
@@ -619,7 +619,7 @@ export default function LiteCutPreviewPanel({
     } else {
       window.requestAnimationFrame(() => window.requestAnimationFrame(reveal));
     }
-  }, [mediaIdentity, promotedPlaybackTime, releasePromotedUnderlay, segmentedPreview, sourceOffset]);
+  }, [completeMainVideoHandoff, mediaIdentity, promotedPlaybackTime, releasePromotedUnderlay, segmentedPreview, sourceOffset]);
 
   const handleVideoLoaded = useCallback(() => {
     const el = videoRef.current;
@@ -688,8 +688,11 @@ export default function LiteCutPreviewPanel({
     );
   }, [freezePlayback, sourceOffset]);
 
-  const handleVideoError = useCallback(() => {
-    const el = videoRef.current;
+  const handleVideoError = useCallback((event) => {
+    const el = event?.currentTarget || videoRef.current;
+    const active = videoRef.current;
+    const attachedSource = el?.getAttribute?.("src") || "";
+    if (!el || el !== active || !attachedSource || attachedSource !== String(streamUrl || "")) return;
     const code = el?.error?.code;
     if (segmentedPreview) {
       setSegmentMediaLoading(false);
@@ -700,7 +703,7 @@ export default function LiteCutPreviewPanel({
       setPlayError("无法加载视频流，请确认文件存在且后端已启动");
     }
     onTogglePlay?.(false);
-  }, [onTogglePlay, segmentedPreview]);
+  }, [onTogglePlay, segmentedPreview, streamUrl]);
 
   const effectiveTotal = videoDuration ?? totalSec;
   const rulerPlayhead = sequenceMode && timelinePlayhead != null ? timelinePlayhead : playheadSec;
@@ -796,7 +799,7 @@ export default function LiteCutPreviewPanel({
             onPointerDown={handleCanvasPointerDown}
             style={{ backgroundColor: canvasBg, aspectRatio: `${Math.max(1, Number(canvasWidth) || 1920)} / ${Math.max(1, Number(canvasHeight) || 1080)}`, containerType: "size", contain: "layout paint" }}
           >
-            {hasStream || hasPromotedUnderlay ? (
+            {hasStream || hasRetainedVideo || hasPromotedUnderlay ? (
               <>
                 {hasUnderlay
                   ? renderedUnderlayLayers.map((layer) => {
@@ -857,23 +860,24 @@ export default function LiteCutPreviewPanel({
                     })
                   : null}
                 {showCanvasBlur ? (
-                  <video
-                    ref={bgVideoRef}
-                    key={`bg:${mediaIdentity}`}
-                    src={streamUrl}
-                    className="absolute inset-0 z-0 h-full w-full object-cover"
-                    style={{
-                      filter: `${safeMainFilter ? `${safeMainFilter} ` : ""}${blurFilter}`,
-                      objectPosition: `${(cropCenter.x * 100).toFixed(2)}% ${(cropCenter.y * 100).toFixed(2)}%`,
-                      transformOrigin: `${(cropCenter.x * 100).toFixed(2)}% ${(cropCenter.y * 100).toFixed(2)}%`,
-                      transform: `${mainFlipTransform || ""} scale(${cropPreviewScale.toFixed(4)})`.trim(),
-                    }}
-                    playsInline
-                    preload="auto"
-                    muted
-                  />
+                  videoHandoff.slots.map((slot, index) => slot ? (
+                    <video
+                      ref={backgroundVideoSlotRefCallbacks.current[index]}
+                      key={`background-slot:${index}`}
+                      src={slot.streamUrl}
+                      className="absolute inset-0 z-0 h-full w-full object-cover"
+                      style={videoSlotStyle({
+                        filter: `${safeMainFilter ? `${safeMainFilter} ` : ""}${blurFilter}`,
+                        objectPosition: `${(cropCenter.x * 100).toFixed(2)}% ${(cropCenter.y * 100).toFixed(2)}%`,
+                        transformOrigin: `${(cropCenter.x * 100).toFixed(2)}% ${(cropCenter.y * 100).toFixed(2)}%`,
+                        transform: `${mainFlipTransform || ""} scale(${cropPreviewScale.toFixed(4)})`.trim(),
+                      }, index)}
+                      playsInline
+                      preload="auto"
+                      muted
+                    />
+                  ) : null)
                 ) : null}
-                {heldSwitchFrame && !hasPromotedUnderlay && !hasTransitionUnderlay ? <img src={heldSwitchFrame} alt="" className="pointer-events-none absolute inset-0 z-[2] h-full w-full object-contain" /> : null}
                 {mainIsVideoLayer ? (
                   <div
                     data-preview-video-layer
@@ -886,36 +890,44 @@ export default function LiteCutPreviewPanel({
                     <div className="pointer-events-none absolute inset-0 overflow-hidden">
                       {fitMode === "blur" ? (
                         <div style={mainBlurLayout.viewportStyle}>
-                          <video
-                            ref={bgVideoRef}
-                            key={`layer-bg:${mediaIdentity}`}
-                            src={streamUrl}
-                            style={{
-                              ...mainBlurLayout.mediaStyle,
-                              filter: `${safeMainFilter ? `${safeMainFilter} ` : ""}${blurFilter}`,
-                            }}
-                            playsInline
-                            preload="auto"
-                            muted
-                          />
+                          {videoHandoff.slots.map((slot, index) => slot ? (
+                            <video
+                              ref={backgroundVideoSlotRefCallbacks.current[index]}
+                              key={`layer-background-slot:${index}`}
+                              src={slot.streamUrl}
+                              style={videoSlotStyle({
+                                ...mainBlurLayout.mediaStyle,
+                                filter: `${safeMainFilter ? `${safeMainFilter} ` : ""}${blurFilter}`,
+                              }, index)}
+                              playsInline
+                              preload="auto"
+                              muted
+                            />
+                          ) : null)}
                         </div>
                       ) : null}
                       <div style={mainMaterialLayout.viewportStyle}>
-                        <video
-                          ref={videoRef}
-                          key={mediaIdentity}
-                          src={streamUrl}
-                          style={{ ...mainMaterialLayout.mediaStyle, filter: safeMainFilter || undefined }}
-                          playsInline
-                          preload="auto"
-                          muted={mainAudioMuted}
-                          onTimeUpdate={handleVideoTimeUpdate}
-                          onLoadedMetadata={handleVideoLoaded}
-                          onCanPlay={handleVideoCanPlay}
-                          onSeeked={handleVideoSeeked}
-                          onError={handleVideoError}
-                          onEnded={handleVideoEnded}
-                        />
+                        {videoHandoff.slots.map((slot, index) => {
+                          if (!slot) return null;
+                          const active = index === videoHandoff.activeIndex;
+                          return (
+                            <video
+                              ref={mainVideoSlotRefCallbacks.current[index]}
+                              key={`main-layer-slot:${index}`}
+                              src={slot.streamUrl}
+                              style={videoSlotStyle({ ...mainMaterialLayout.mediaStyle, filter: safeMainFilter || undefined }, index)}
+                              playsInline
+                              preload="auto"
+                              muted={active ? mainAudioMuted : true}
+                              onTimeUpdate={active ? handleVideoTimeUpdate : undefined}
+                              onLoadedMetadata={active ? handleVideoLoaded : undefined}
+                              onCanPlay={active ? handleVideoCanPlay : undefined}
+                              onSeeked={active ? handleVideoSeeked : undefined}
+                              onError={active ? handleVideoError : undefined}
+                              onEnded={active ? handleVideoEnded : undefined}
+                            />
+                          );
+                        })}
                       </div>
                     </div>
                     {mainLayerSelected ? (
@@ -934,22 +946,28 @@ export default function LiteCutPreviewPanel({
                   </div>
                 ) : (
                   <>
-                  <video
-                    ref={videoRef}
-                    key={mediaIdentity}
-                    src={streamUrl}
-                    className={`absolute inset-0 z-[1] h-full w-full ${mainObjectFit}`}
-                    style={mainVideoStyle}
-                    playsInline
-                    preload="auto"
-                    muted={mainAudioMuted}
-                    onTimeUpdate={handleVideoTimeUpdate}
-                    onLoadedMetadata={handleVideoLoaded}
-                    onCanPlay={handleVideoCanPlay}
-                    onSeeked={handleVideoSeeked}
-                    onError={handleVideoError}
-                    onEnded={handleVideoEnded}
-                  />
+                  {videoHandoff.slots.map((slot, index) => {
+                    if (!slot) return null;
+                    const active = index === videoHandoff.activeIndex;
+                    return (
+                      <video
+                        ref={mainVideoSlotRefCallbacks.current[index]}
+                        key={`main-slot:${index}`}
+                        src={slot.streamUrl}
+                        className={`absolute inset-0 z-[1] h-full w-full ${mainObjectFit}`}
+                        style={videoSlotStyle(mainVideoStyle, index)}
+                        playsInline
+                        preload="auto"
+                        muted={active ? mainAudioMuted : true}
+                        onTimeUpdate={active ? handleVideoTimeUpdate : undefined}
+                        onLoadedMetadata={active ? handleVideoLoaded : undefined}
+                        onCanPlay={active ? handleVideoCanPlay : undefined}
+                        onSeeked={active ? handleVideoSeeked : undefined}
+                        onError={active ? handleVideoError : undefined}
+                        onEnded={active ? handleVideoEnded : undefined}
+                      />
+                    );
+                  })}
                   </>
                 )}
                 {flashOpacity > 0 ? <div className="pointer-events-none absolute inset-0 z-[3] bg-white" style={{ opacity: flashOpacity }} /> : null}
@@ -1012,7 +1030,7 @@ export default function LiteCutPreviewPanel({
                 </div>
               </div>
             ) : null}
-            {segmentedPreview && segmentMediaLoading && !previewPending && !previewProxyError && !heldSwitchFrame && !hasPromotedUnderlay && !hasTransitionUnderlay ? (
+            {segmentedPreview && segmentMediaLoading && !previewPending && !previewProxyError && !videoHandoff.pending && !hasPromotedUnderlay && !hasTransitionUnderlay ? (
               <div className="pointer-events-none absolute inset-0 z-[30] flex items-center justify-center bg-black/35">
                 <div className="flex items-center gap-2 rounded-lg border border-white/10 bg-zinc-950/90 px-3 py-2 text-xs text-white/85 shadow-xl backdrop-blur">
                   <Loader2 className="h-4 w-4 animate-spin text-cs2-accent" />
@@ -1053,7 +1071,12 @@ export default function LiteCutPreviewPanel({
           </div>
 
           {audioPreviewItems.map((item) => (
-            <PreviewAudioItem key={`${item.trackId}:${item.id}:${item.src}`} item={item} isPlaying={isPlaying} />
+            <PreviewAudioItem
+              key={`${item.trackId}:${item.id}:${item.src}`}
+              item={item}
+              isPlaying={isPlaying}
+              userSeekToken={userSeekToken}
+            />
           ))}
 
           <button

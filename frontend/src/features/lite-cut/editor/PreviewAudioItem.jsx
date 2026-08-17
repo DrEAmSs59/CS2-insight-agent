@@ -4,6 +4,22 @@ import { releaseMediaElement } from "./previewMediaElementUtils.js";
 let previewAudioContext = null;
 const previewAudioNodes = new WeakMap();
 
+export function previewAudioSourceDiscontinuity(previous, { sourceTime, nowMs, playbackRate, isPlaying }) {
+  if (!isPlaying || !previous?.isPlaying) return true;
+  const elapsedSec = Math.max(0, (Number(nowMs) - Number(previous.nowMs || 0)) / 1000);
+  const sourceDelta = Number(sourceTime) - Number(previous.sourceTime || 0);
+  const expectedDelta = elapsedSec * Math.max(0.25, Math.min(4, Number(playbackRate) || 1));
+  return sourceDelta < -0.2 || sourceDelta - expectedDelta > Math.max(0.75, expectedDelta * 2);
+}
+
+export function correctedPreviewAudioRate(baseRate, driftSec) {
+  const rate = Math.max(0.25, Math.min(4, Number(baseRate) || 1));
+  const drift = Number(driftSec) || 0;
+  if (Math.abs(drift) <= 0.06) return rate;
+  const correction = Math.max(-0.05, Math.min(0.05, drift * 0.08));
+  return Math.max(0.25, Math.min(4, rate * (1 + correction)));
+}
+
 function audioContextForPreview() {
   if (previewAudioContext) return previewAudioContext;
   const Context = globalThis.AudioContext || globalThis.webkitAudioContext;
@@ -34,7 +50,7 @@ function gainNodeForElement(element) {
   }
 }
 
-export default function PreviewAudioItem({ item, isPlaying }) {
+export default function PreviewAudioItem({ item, isPlaying, userSeekToken = 0 }) {
   const audioRef = useRef(null);
   const sourceTime = Math.max(0, Number(item?.sourceTime) || 0);
   const safeRate = Math.max(0.25, Math.min(4, Number(item?.playbackRate) || 1));
@@ -44,9 +60,12 @@ export default function PreviewAudioItem({ item, isPlaying }) {
   const reversePlayback = Boolean(item?.reversePlayback);
   const preservePitch = item?.preservePitch !== false;
   const gainNodesRef = useRef(null);
+  const syncSampleRef = useRef(null);
+  const userSeekTokenRef = useRef(userSeekToken);
 
   useLayoutEffect(() => {
     const element = audioRef.current;
+    syncSampleRef.current = null;
     gainNodesRef.current = element ? gainNodeForElement(element) : null;
     return () => {
       try {
@@ -79,20 +98,41 @@ export default function PreviewAudioItem({ item, isPlaying }) {
   useEffect(() => {
     const element = audioRef.current;
     if (!element || !item?.src) return undefined;
-    const seek = () => {
+    const nowMs = globalThis.performance?.now?.() ?? Date.now();
+    const previous = syncSampleRef.current;
+    const explicitUserSeek = userSeekToken !== userSeekTokenRef.current;
+    userSeekTokenRef.current = userSeekToken;
+    const discontinuity = explicitUserSeek || previewAudioSourceDiscontinuity(previous, {
+      sourceTime,
+      nowMs,
+      playbackRate: safeRate,
+      isPlaying,
+    });
+    syncSampleRef.current = { sourceTime, nowMs, isPlaying };
+
+    const hardSync = () => {
       try {
-        if (Math.abs(element.currentTime - sourceTime) > 0.18) element.currentTime = sourceTime;
+        element.playbackRate = safeRate;
+        if (Math.abs(element.currentTime - sourceTime) > 0.08) element.currentTime = sourceTime;
       } catch {
         // Metadata may not be available yet.
       }
     };
-    if (element.readyState >= 1) seek();
-    else {
-      element.addEventListener("loadedmetadata", seek, { once: true });
-      return () => element.removeEventListener("loadedmetadata", seek);
+
+    // Metadata becoming available is the initial synchronization point. After
+    // that, only explicit playhead discontinuities may seek. Continuously
+    // writing currentTime for a large MP4 cancels its Range request on every
+    // timeline update and eventually starves WebView2's audio decoder.
+    if (element.readyState < 1) {
+      element.addEventListener("loadedmetadata", hardSync, { once: true });
+      return () => element.removeEventListener("loadedmetadata", hardSync);
+    }
+    if (discontinuity) hardSync();
+    else if (!element.seeking && element.readyState >= 3) {
+      element.playbackRate = correctedPreviewAudioRate(safeRate, sourceTime - element.currentTime);
     }
     return undefined;
-  }, [item?.src, sourceTime]);
+  }, [isPlaying, item?.src, safeRate, sourceTime, userSeekToken]);
 
   useEffect(() => {
     const element = audioRef.current;
@@ -104,15 +144,5 @@ export default function PreviewAudioItem({ item, isPlaying }) {
     else element.pause();
   }, [isPlaying, item?.src, muted, preloadOnly, reversePlayback]);
 
-  useEffect(() => {
-    const element = audioRef.current;
-    if (!element || !item?.src || isPlaying) return;
-    try {
-      if (Math.abs(element.currentTime - sourceTime) > 0.25) element.currentTime = sourceTime;
-    } catch {
-      // Metadata may not be available yet.
-    }
-  }, [isPlaying, item?.src, sourceTime]);
-
-  return item?.src ? <audio ref={audioRef} src={item.src} preload="auto" aria-hidden="true" /> : null;
+  return item?.src ? <audio ref={audioRef} crossOrigin="anonymous" src={item.src} preload="auto" aria-hidden="true" /> : null;
 }

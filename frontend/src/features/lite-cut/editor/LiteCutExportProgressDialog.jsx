@@ -1,6 +1,7 @@
 import { CheckCircle2, Copy, FolderOpen, Loader2, X } from "lucide-react";
 import { liteCutClient } from "../api/liteCutClient.js";
 import { desktopBridge } from "../../../desktop/desktopBridge.js";
+import { writeLiteCutClipboardText } from "./liteCutClipboard.js";
 
 function basenameFromPath(path) {
   const normalized = String(path || "").replace(/\\/g, "/");
@@ -71,11 +72,7 @@ export default function LiteCutExportProgressDialog({
 
   const copyPath = async () => {
     if (!outputPath) return;
-    try {
-      await navigator.clipboard.writeText(outputPath);
-    } catch {
-      // Clipboard access may be unavailable outside the desktop shell.
-    }
+    await writeLiteCutClipboardText(outputPath);
   };
 
   const revealOutput = async () => {

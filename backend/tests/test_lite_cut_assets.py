@@ -15,6 +15,7 @@ from app.features.lite_cut.assets import (
     _run_proxy_process,
     alpha_preview_proxy_command,
     alpha_preview_proxy_path_for_asset,
+    audio_preview_command,
     asset_exceeds_direct_preview_limits,
     asset_kind_for_path,
     asset_needs_browser_proxy,
@@ -22,6 +23,7 @@ from app.features.lite_cut.assets import (
     delete_asset_row_bundle,
     delete_asset_file_bundle,
     create_browser_preview_proxy,
+    create_audio_preview_proxy,
     preview_proxy_command,
     preview_proxy_remux_command,
     preview_proxy_path_for_asset,
@@ -41,9 +43,98 @@ from app.features.lite_cut.media_policy import (
     webp_is_animated,
 )
 from app.features.lite_cut.proxy_executor import (
+    audio_preview_cache_path,
+    proxy_cache_inventory,
     preview_segment_cache_directory,
     preview_segment_path,
 )
+
+
+def test_audio_preview_command_preserves_aac_timestamps_and_skips_video(tmp_path):
+    source = tmp_path / "large.mp4"
+    output = tmp_path / "preview-audio-v1.m4a"
+    command = audio_preview_command(
+        ffmpeg_bin=tmp_path / "ffmpeg.exe",
+        source=source,
+        output=output,
+        copy_audio=True,
+    )
+
+    assert command[command.index("-map") + 1] == "0:a:0"
+    assert "-vn" in command
+    assert command[command.index("-c:a") + 1] == "copy"
+    assert "-avoid_negative_ts" not in command
+    assert command[-1] == str(output)
+
+
+def test_audio_preview_cache_is_scoped_to_project_and_asset_identity(tmp_path, monkeypatch):
+    from app.features.lite_cut import assets as assets_mod
+
+    storage = tmp_path / "assets"
+    project = storage / "4_Project"
+    project.mkdir(parents=True)
+    monkeypatch.setattr(assets_mod, "lite_cut_assets_dir", lambda: storage)
+
+    path = audio_preview_cache_path(
+        {"id": 10, "fingerprint": "lc-content-v1:fa37838"},
+        project,
+    )
+
+    assert path == project / ".preview" / "asset-10-lc-content-v1fa37838" / "preview-audio-v1.m4a"
+
+
+def test_audio_preview_is_valid_cache_even_when_video_does_not_need_segments(tmp_path, monkeypatch):
+    from app.features.lite_cut import assets as assets_mod
+
+    storage = tmp_path / "assets"
+    audio = storage / "4_Project" / ".preview" / "asset-10-fingerprint" / "preview-audio-v1.m4a"
+    audio.parent.mkdir(parents=True)
+    audio.write_bytes(b"audio proxy")
+    monkeypatch.setattr(assets_mod, "lite_cut_assets_dir", lambda: storage)
+
+    inventory = proxy_cache_inventory([{
+        "id": 10,
+        "kind": "video",
+        "fingerprint": "fingerprint",
+        "storage_mode": "link",
+        "size_bytes": 1024,
+        "codec_name": "h264",
+        "duration_sec": 10,
+        "fps": 30,
+        "file_path": str(tmp_path / "small.mp4"),
+    }])
+
+    assert inventory["proxy_files"] == 1
+    assert inventory["orphan_files"] == 0
+
+
+def test_audio_preview_copy_falls_back_to_aac_transcode(tmp_path, monkeypatch):
+    from app.features.lite_cut import assets as assets_mod
+
+    source = tmp_path / "large.mp4"
+    source.write_bytes(b"source")
+    output = tmp_path / "preview-audio-v1.m4a"
+    modes = []
+
+    def fake_run(command, **_kwargs):
+        mode = command[command.index("-c:a") + 1]
+        modes.append(mode)
+        if mode == "copy":
+            return subprocess.CompletedProcess(command, 1, "", "copy failed")
+        Path(command[-1]).write_bytes(b"audio proxy")
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    monkeypatch.setattr(assets_mod, "_run_proxy_process", fake_run)
+    result = create_audio_preview_proxy(
+        source,
+        ffmpeg_bin=tmp_path / "ffmpeg.exe",
+        output_path=output,
+        audio_codec="aac",
+    )
+
+    assert modes == ["copy", "aac"]
+    assert result == output.resolve()
+    assert output.read_bytes() == b"audio proxy"
 
 
 def test_asset_metadata_reports_resolution_fps_codec_and_duration(tmp_path, monkeypatch):
@@ -471,6 +562,57 @@ async def test_preview_stream_returns_original_source_even_if_legacy_proxy_exist
     response = await api_mod.stream_lite_cut_asset(991, SimpleNamespace())
 
     assert Path(response.path) == source
+
+
+@pytest.mark.anyio
+async def test_full_audio_preview_stream_uses_project_owned_cache(tmp_path, monkeypatch):
+    from app import video_composer
+    from app.features.lite_cut import assets as assets_mod
+    from app.features.lite_cut import assets_api as api_mod
+
+    source = tmp_path / "large.mp4"
+    source.write_bytes(b"source")
+    asset_cache = tmp_path / "4_Project" / ".preview" / "asset-10-fingerprint"
+    segment_cache = asset_cache / "segments-v4-720p"
+    expected_audio = asset_cache / "preview-audio-v1.m4a"
+
+    class FakeDb:
+        async def get_asset(self, asset_id):
+            assert asset_id == 10
+            return {
+                "id": 10,
+                "project_id": 4,
+                "name": source.name,
+                "kind": "video",
+                "file_path": str(source),
+                "original_path": str(source),
+                "storage_mode": "link",
+                "codec_name": "h264",
+                "audio_codec_name": "aac",
+                "has_alpha": False,
+            }
+
+    async def fake_context(_row):
+        return segment_cache, 720
+
+    def fake_create(source_path, *, output_path, audio_codec, **_kwargs):
+        assert source_path == source.resolve()
+        assert output_path == expected_audio
+        assert audio_codec == "aac"
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_bytes(b"audio proxy")
+        return output_path
+
+    monkeypatch.setattr(api_mod, "get_lite_cut_db", lambda: FakeDb())
+    monkeypatch.setattr(api_mod, "_segment_preview_context", fake_context)
+    monkeypatch.setattr(video_composer, "resolve_ffmpeg_binary", lambda _path: tmp_path / "ffmpeg.exe")
+    monkeypatch.setattr(assets_mod, "create_audio_preview_proxy", fake_create)
+
+    response = await api_mod.stream_lite_cut_audio_preview(10, SimpleNamespace())
+
+    assert Path(response.path) == expected_audio
+    assert response.media_type == "audio/mp4"
+    assert response.headers["accept-ranges"] == "bytes"
 
 
 def test_preview_proxy_command_keeps_original_video_and_optional_audio(tmp_path):
