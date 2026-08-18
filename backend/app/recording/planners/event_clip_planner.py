@@ -277,71 +277,100 @@ def _plan_timeline_kill(req: NormalizedRequest) -> list[RecordingSegment]:
 
     pre_ticks = sec_to_ticks(opts.timeline_kill_pre_sec, tick_rate)
     post_ticks = sec_to_ticks(opts.timeline_kill_post_sec, tick_rate)
+    threshold_ticks = sec_to_ticks(opts.kill_jump_cut_threshold_sec, tick_rate)
 
     vic_pre_sec = opts.victim_pov_pre_sec if opts.victim_pov_pre_sec is not None else opts.timeline_kill_pre_sec
     vic_post_sec = opts.victim_pov_post_sec
     vic_pre_ticks = sec_to_ticks(vic_pre_sec, tick_rate)
     vic_post_ticks = sec_to_ticks(vic_post_sec, tick_rate)
 
-    event = req.events[0]
-    start_tick = event.tick - pre_ticks
-    end_tick = event.tick + post_ticks
-    start_tick, end_tick = _clamp(start_tick, end_tick, req)
+    sorted_events = sorted(req.events, key=lambda e: e.tick)
 
-    seg = RecordingSegment(
-        segment_index=0,
-        source_type=SourceType.kill,
-        start_tick=start_tick,
-        end_tick=end_tick,
-        anchor_ticks=[event.tick],
-        round=event.round,
-        target_player_name=req.target_player.name,
-        target_steamid64=req.target_player.steamid64,
-        target_spec_slot=req.target_player.spec_slot,
-        perspective=Perspective.killer,
-        is_final_round=_is_final_round(event.round, req),
-        safe_seek_tick=_prepare_seek_tick(start_tick, tick_rate, first_tick),
-        safe_end_tick=None,
-        disabled=False,
-        disabled_reason=None,
-        metadata={},
-        voice_listen_mask=_mask,
-        voice_listen_mask_enemy=_mask_enemy,
-    )
-    segments = [seg]
+    # 「回合时间线」开关：录制时按阈值把间隔相近的击杀（含击杀后紧跟的死亡）聚为一段连续素材。
+    # 与击杀合集阈值一致（kill_jump_cut_threshold_sec，默认 12s）。
+    groups: list[list] = []
+    current_group: list = []
+    for event in sorted_events:
+        if not current_group:
+            current_group.append(event)
+        else:
+            gap = event.tick - current_group[-1].tick
+            if gap <= threshold_ticks:
+                current_group.append(event)
+            else:
+                groups.append(current_group)
+                current_group = [event]
+    if current_group:
+        groups.append(current_group)
 
-    # ── Optional victim POV segment ──────────────────────────────────────────
-    if opts.enable_victim_pov:
-        victim = event.victim
-        victim_steamid64 = (victim.steamid64 or "").strip() if victim else ""
-        victim_disabled = not victim_steamid64
-        victim_disabled_reason = "missing_victim_steamid64" if victim_disabled else None
+    segments: list[RecordingSegment] = []
+    seg_idx = 0
 
-        v_start = event.tick - vic_pre_ticks
-        v_end = event.tick + vic_post_ticks
-        v_start, v_end = _clamp(v_start, v_end, req)
+    for group in groups:
+        first_event = group[0]
+        last_event = group[-1]
+        start_tick = first_event.tick - pre_ticks
+        end_tick = last_event.tick + post_ticks
+        start_tick, end_tick = _clamp(start_tick, end_tick, req)
 
-        victim_seg = RecordingSegment(
-            segment_index=1,
+        anchor_ticks = [e.tick for e in group]
+        seg = RecordingSegment(
+            segment_index=seg_idx,
             source_type=SourceType.kill,
-            start_tick=v_start,
-            end_tick=v_end,
-            anchor_ticks=[event.tick],
-            round=event.round,
-            target_player_name=victim.name if victim else "",
-            target_steamid64=victim_steamid64,
-            target_spec_slot=victim.spec_slot if victim else None,
-            perspective=Perspective.victim,
-            is_final_round=_is_final_round(event.round, req),
-            safe_seek_tick=_prepare_seek_tick(v_start, tick_rate, first_tick),
+            start_tick=start_tick,
+            end_tick=end_tick,
+            anchor_ticks=anchor_ticks,
+            round=first_event.round,
+            target_player_name=req.target_player.name,
+            target_steamid64=req.target_player.steamid64,
+            target_spec_slot=req.target_player.spec_slot,
+            perspective=Perspective.killer,
+            is_final_round=_is_final_round(first_event.round, req),
+            safe_seek_tick=_prepare_seek_tick(start_tick, tick_rate, first_tick),
             safe_end_tick=None,
-            disabled=victim_disabled,
-            disabled_reason=victim_disabled_reason,
+            disabled=False,
+            disabled_reason=None,
             metadata={},
             voice_listen_mask=_mask,
             voice_listen_mask_enemy=_mask_enemy,
         )
-        segments.append(victim_seg)
+        segments.append(seg)
+        seg_idx += 1
+
+        # ── Optional victim POV segment(s) ─────────────────────────────────────
+        if opts.enable_victim_pov:
+            for event in group:
+                victim = event.victim
+                victim_steamid64 = (victim.steamid64 or "").strip() if victim else ""
+                victim_disabled = not victim_steamid64
+                victim_disabled_reason = "missing_victim_steamid64" if victim_disabled else None
+
+                v_start = event.tick - vic_pre_ticks
+                v_end = event.tick + vic_post_ticks
+                v_start, v_end = _clamp(v_start, v_end, req)
+
+                victim_seg = RecordingSegment(
+                    segment_index=seg_idx,
+                    source_type=SourceType.kill,
+                    start_tick=v_start,
+                    end_tick=v_end,
+                    anchor_ticks=[event.tick],
+                    round=event.round,
+                    target_player_name=victim.name if victim else "",
+                    target_steamid64=victim_steamid64,
+                    target_spec_slot=victim.spec_slot if victim else None,
+                    perspective=Perspective.victim,
+                    is_final_round=_is_final_round(event.round, req),
+                    safe_seek_tick=_prepare_seek_tick(v_start, tick_rate, first_tick),
+                    safe_end_tick=None,
+                    disabled=victim_disabled,
+                    disabled_reason=victim_disabled_reason,
+                    metadata={},
+                    voice_listen_mask=_mask,
+                    voice_listen_mask_enemy=_mask_enemy,
+                )
+                segments.append(victim_seg)
+                seg_idx += 1
 
     return segments
 
@@ -355,65 +384,92 @@ def _plan_timeline_death(req: NormalizedRequest) -> list[RecordingSegment]:
 
     pre_ticks = sec_to_ticks(opts.fail_killer_pre_sec, tick_rate)
     post_ticks = sec_to_ticks(opts.fail_killer_post_sec, tick_rate)
+    threshold_ticks = sec_to_ticks(opts.kill_jump_cut_threshold_sec, tick_rate)
 
-    event = req.events[0]
-    start_tick = event.tick - pre_ticks
-    end_tick = event.tick + post_ticks
-    start_tick, end_tick = _clamp(start_tick, end_tick, req)
+    sorted_events = sorted(req.events, key=lambda e: e.tick)
 
-    seg = RecordingSegment(
-        segment_index=0,
-        source_type=SourceType.death,
-        start_tick=start_tick,
-        end_tick=end_tick,
-        anchor_ticks=[event.tick],
-        round=event.round,
-        target_player_name=req.target_player.name,
-        target_steamid64=req.target_player.steamid64,
-        target_spec_slot=req.target_player.spec_slot,
-        perspective=Perspective.victim,
-        is_final_round=_is_final_round(event.round, req),
-        safe_seek_tick=_prepare_seek_tick(start_tick, tick_rate, first_tick),
-        safe_end_tick=None,
-        disabled=False,
-        disabled_reason=None,
-        metadata={},
-        voice_listen_mask=_mask,
-        voice_listen_mask_enemy=_mask_enemy,
-    )
-    segments = [seg]
+    # 「回合时间线」开关：同回合内间隔相近的死亡合并为一段连续素材（默认单回合单次死亡，多为单事件）。
+    groups: list[list] = []
+    current_group: list = []
+    for event in sorted_events:
+        if not current_group:
+            current_group.append(event)
+        else:
+            gap = event.tick - current_group[-1].tick
+            if gap <= threshold_ticks:
+                current_group.append(event)
+            else:
+                groups.append(current_group)
+                current_group = [event]
+    if current_group:
+        groups.append(current_group)
 
-    # ── Optional killer POV segment ──────────────────────────────────────────
-    if opts.enable_fail_killer_pov:
-        killer = event.killer
-        killer_steamid64 = (killer.steamid64 or "").strip() if killer else ""
-        killer_disabled = not killer_steamid64
-        killer_disabled_reason = "missing_killer_steamid64" if killer_disabled else None
+    segments: list[RecordingSegment] = []
+    seg_idx = 0
 
-        k_start = event.tick - sec_to_ticks(opts.fail_killer_pre_sec, tick_rate)
-        k_end = event.tick + sec_to_ticks(opts.fail_killer_post_sec, tick_rate)
-        k_start, k_end = _clamp(k_start, k_end, req)
+    for group in groups:
+        event = group[0]
+        last_event = group[-1]
+        start_tick = event.tick - pre_ticks
+        end_tick = last_event.tick + post_ticks
+        start_tick, end_tick = _clamp(start_tick, end_tick, req)
 
-        killer_seg = RecordingSegment(
-            segment_index=1,
+        anchor_ticks = [e.tick for e in group]
+        seg = RecordingSegment(
+            segment_index=seg_idx,
             source_type=SourceType.death,
-            start_tick=k_start,
-            end_tick=k_end,
-            anchor_ticks=[event.tick],
+            start_tick=start_tick,
+            end_tick=end_tick,
+            anchor_ticks=anchor_ticks,
             round=event.round,
-            target_player_name=killer.name if killer else "",
-            target_steamid64=killer_steamid64,
-            target_spec_slot=killer.spec_slot if killer else None,
-            perspective=Perspective.killer,
+            target_player_name=req.target_player.name,
+            target_steamid64=req.target_player.steamid64,
+            target_spec_slot=req.target_player.spec_slot,
+            perspective=Perspective.victim,
             is_final_round=_is_final_round(event.round, req),
-            safe_seek_tick=_prepare_seek_tick(k_start, tick_rate, first_tick),
+            safe_seek_tick=_prepare_seek_tick(start_tick, tick_rate, first_tick),
             safe_end_tick=None,
-            disabled=killer_disabled,
-            disabled_reason=killer_disabled_reason,
+            disabled=False,
+            disabled_reason=None,
             metadata={},
             voice_listen_mask=_mask,
             voice_listen_mask_enemy=_mask_enemy,
         )
-        segments.append(killer_seg)
+        segments.append(seg)
+        seg_idx += 1
+
+        # ── Optional killer POV segment ────────────────────────────────────────
+        if opts.enable_fail_killer_pov:
+            killer = event.killer
+            killer_steamid64 = (killer.steamid64 or "").strip() if killer else ""
+            killer_disabled = not killer_steamid64
+            killer_disabled_reason = "missing_killer_steamid64" if killer_disabled else None
+
+            k_start = event.tick - sec_to_ticks(opts.fail_killer_pre_sec, tick_rate)
+            k_end = event.tick + sec_to_ticks(opts.fail_killer_post_sec, tick_rate)
+            k_start, k_end = _clamp(k_start, k_end, req)
+
+            killer_seg = RecordingSegment(
+                segment_index=seg_idx,
+                source_type=SourceType.death,
+                start_tick=k_start,
+                end_tick=k_end,
+                anchor_ticks=[event.tick],
+                round=event.round,
+                target_player_name=killer.name if killer else "",
+                target_steamid64=killer_steamid64,
+                target_spec_slot=killer.spec_slot if killer else None,
+                perspective=Perspective.killer,
+                is_final_round=_is_final_round(event.round, req),
+                safe_seek_tick=_prepare_seek_tick(k_start, tick_rate, first_tick),
+                safe_end_tick=None,
+                disabled=killer_disabled,
+                disabled_reason=killer_disabled_reason,
+                metadata={},
+                voice_listen_mask=_mask,
+                voice_listen_mask_enemy=_mask_enemy,
+            )
+            segments.append(killer_seg)
+            seg_idx += 1
 
     return segments
