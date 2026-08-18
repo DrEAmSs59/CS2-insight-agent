@@ -37,7 +37,9 @@ from ..obs_tuning import (
     ObsTuningPlanRequest,
     ObsTuningRecommendationRequest,
     build_change_plan as build_obs_tuning_plan,
+    detect_hardware as detect_obs_tuning_hardware,
     discover_environment as discover_obs_tuning_environment,
+    preferred_hardware_recording_encoder,
     recommend as recommend_obs_tuning_goal,
 )
 from ..obs_tuning_agent import review_tuning_plan
@@ -300,7 +302,21 @@ def obs_launch():
 
 @router.get("/api/obs-config/status")
 def obs_config_status():
-    return obs_config_center.get_status_payload(load_config().obs)
+    status = obs_config_center.get_status_payload(load_config().obs)
+    recording = status.get("recording") if isinstance(status.get("recording"), dict) else None
+    if recording is None:
+        return status
+    try:
+        hardware = detect_obs_tuning_hardware()
+        recommended = preferred_hardware_recording_encoder(
+            list(hardware.get("gpus") or []),
+            str(recording.get("encoder") or ""),
+        )
+        recording["recommended_encoder"] = recommended
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("OBS encoder recommendation detection failed: %s", exc)
+        recording["recommended_encoder"] = None
+    return status
 
 
 @router.get("/api/obs-tuning/discovery")

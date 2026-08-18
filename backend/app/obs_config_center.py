@@ -394,6 +394,21 @@ def _get_profile_parameter(ws: obsws, category: str, name: str) -> str:
     return str(value or "").strip()
 
 
+def _set_profile_parameter(ws: obsws, category: str, name: str, value: str) -> None:
+    ws.call(
+        obs_requests.SetProfileParameter(
+            parameterCategory=category,
+            parameterName=name,
+            parameterValue=str(value),
+        )
+    )
+
+
+def _encoder_is_hardware(value: str) -> bool:
+    lower = str(value or "").strip().lower()
+    return any(marker in lower for marker in ("nvenc", "qsv", "amf", "amd"))
+
+
 def _scene_item_transform(ws: obsws, scene_name: str, source_name: str) -> Optional[dict]:
     try:
         gtr = getattr(obs_requests, "GetSceneItemTransform", None)
@@ -596,6 +611,7 @@ def get_status_payload(obs_cfg) -> dict[str, Any]:
             "output_mode": "",
             "use_stream_encoder": False,
             "encoder": "",
+            "stream_encoder": "",
             "format": "",
             "output_path": "",
         },
@@ -689,6 +705,11 @@ def get_status_payload(obs_cfg) -> dict[str, Any]:
         except Exception:  # noqa: BLE001
             encoder_value = ""
         base["recording"]["encoder"] = encoder_value or (simple.get("RecEncoder") or simple.get("Encoder") or "").strip()
+        try:
+            stream_encoder_value = _get_profile_parameter(ws, "SimpleOutput", "StreamEncoder")
+        except Exception:  # noqa: BLE001
+            stream_encoder_value = ""
+        base["recording"]["stream_encoder"] = stream_encoder_value or (simple.get("StreamEncoder") or "").strip()
         # 三路兜底：Simple 输出 INI → Advanced 输出 INI → WebSocket GetRecordDirectory
         _ini_path = (obs_root / "basic" / "profiles" / prof_name / "basic.ini") if (obs_root and prof_name) else None
         _out_path = (
@@ -959,6 +980,9 @@ def calibrate(obs_cfg) -> dict[str, Any]:
         changed: list[str] = []
         already_ok: list[str] = []
 
+        configured_output_mode = _get_profile_parameter(ws, "Output", "Mode") or "Simple"
+        switching_to_simple = configured_output_mode.strip().lower() == "advanced"
+
         # Step 1+2: 读显示器分辨率 & OBS 画布
         monitor_w, monitor_h = get_primary_monitor_resolution()
 
@@ -1063,80 +1087,92 @@ def calibrate(obs_cfg) -> dict[str, Any]:
         else:
             already_ok.append("Game Capture 拉伸变换跳过（无法获取 sceneItemId）")
 
-        # Step 7: 修正输出设置（RecQuality / RecFormat2）
-        rec_q_resp = ws.call(obs_requests.GetProfileParameter(
-            parameterCategory="SimpleOutput", parameterName="RecQuality"
-        ))
-        rec_q_data = getattr(rec_q_resp, "datain", None) or {}
-        rec_quality = rec_q_data.get("parameterValue", "")
-
+        # Step 7: 修正输出设置。高级模式先准备完整的 SimpleOutput，最后再切换 Mode；
+        # SetProfileParameter 只会保存 Profile，不会热重建 OBS 输出管线，因此所有此处的
+        # Profile 修改都明确要求重启 OBS 后再录制。
         restart_required = False
 
-        if rec_quality == "Stream":
-            ws.call(obs_requests.SetProfileParameter(
-                parameterCategory="SimpleOutput",
-                parameterName="RecQuality",
-                parameterValue="Small",
-            ))
-            # RecQuality="Stream" 时 OBS 忽略 RecEncoder；改为 "Small" 后必须有有效编码器
-            # 否则 OBS 以空编码器启动录制会报「启动录像失败」
-            rec_enc_resp = ws.call(obs_requests.GetProfileParameter(
-                parameterCategory="SimpleOutput", parameterName="RecEncoder"
-            ))
-            rec_enc_val = ((getattr(rec_enc_resp, "datain", None) or {}).get("parameterValue") or "").strip()
-            if not rec_enc_val or rec_enc_val.lower() in ("none", "null", "stream"):
-                # 1. 优先用当前串流编码器（用户已确认可用的硬件编码器）
-                try:
-                    stream_enc_resp = ws.call(obs_requests.GetProfileParameter(
-                        parameterCategory="SimpleOutput", parameterName="StreamEncoder"
-                    ))
-                    stream_enc = ((getattr(stream_enc_resp, "datain", None) or {}).get("parameterValue") or "").strip()
-                except Exception:  # noqa: BLE001
-                    stream_enc = ""
-                # 2. 串流编码器无效时按硬件优先顺序选取
-                _HW_PRIORITY = [
-                    "jim_nvenc",        # NVENC（新版，推荐）
-                    "ffmpeg_nvenc",     # NVENC（旧版）
-                    "h264_texture_amf", # AMD AMF（新版）
-                    "amd_amf_h264",    # AMD AMF（旧版）
-                    "obs_qsv11_v2",    # Intel QSV（新版）
-                    "obs_qsv11",       # Intel QSV（旧版）
-                ]
-                _INVALID = {"", "none", "null", "stream"}
-                target_enc = stream_enc if stream_enc.lower() not in _INVALID else _HW_PRIORITY[0]
-                ws.call(obs_requests.SetProfileParameter(
-                    parameterCategory="SimpleOutput",
-                    parameterName="RecEncoder",
-                    parameterValue=target_enc,
-                ))
-                changed.append(f"录像编码器已设为「{target_enc}」（原质量为串流一致时未配置）")
-            # 编码器/质量变更写入的是磁盘 Profile，OBS 输出管线不会热重载，必须重启生效
+        if switching_to_simple:
+            advanced_output_path = _get_profile_parameter(ws, "AdvOut", "RecFilePath")
+            simple_output_path = _get_profile_parameter(ws, "SimpleOutput", "FilePath")
+            if advanced_output_path and advanced_output_path != simple_output_path:
+                _set_profile_parameter(ws, "SimpleOutput", "FilePath", advanced_output_path)
+                changed.append(f"已保留高级模式录像目录「{advanced_output_path}」")
+                restart_required = True
+
+        rec_quality = _get_profile_parameter(ws, "SimpleOutput", "RecQuality")
+        if not rec_quality or rec_quality == "Stream":
+            _set_profile_parameter(ws, "SimpleOutput", "RecQuality", "Small")
             restart_required = True
-            changed.append("录像质量已从「与串流一致」改为「高质量，中等文件大小」")
+            if rec_quality == "Stream":
+                changed.append("录像质量已从「与串流一致」改为「高质量，中等文件大小」")
+            else:
+                changed.append("录像质量已设为「高质量，中等文件大小」")
         else:
             already_ok.append("录像质量设置正常")
 
-        rec_f_resp = ws.call(obs_requests.GetProfileParameter(
-            parameterCategory="SimpleOutput", parameterName="RecFormat2"
-        ))
-        rec_f_data = getattr(rec_f_resp, "datain", None) or {}
-        rec_format = rec_f_data.get("parameterValue", "")
+        # SimpleOutput 的编码器选择值由 OBS 根据当前机器和版本维护，不能直接复制
+        # AdvOut 的底层 encoder id（例如 obs_nvenc_av1_tex）。切换自高级模式时，
+        # 优先复用 OBS 已保存的简单模式串流编码器；取不到时使用跨显卡可用的 x264。
+        invalid_encoders = {"", "none", "null", "stream"}
+        rec_encoder = _get_profile_parameter(ws, "SimpleOutput", "RecEncoder")
+        try:
+            stream_encoder = _get_profile_parameter(ws, "SimpleOutput", "StreamEncoder")
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("Get SimpleOutput/StreamEncoder failed: %s", exc)
+            stream_encoder = ""
+        stream_encoder_valid = stream_encoder.strip().lower() not in invalid_encoders
 
+        if switching_to_simple:
+            target_encoder = stream_encoder if stream_encoder_valid else "x264"
+        elif rec_encoder.strip().lower() in invalid_encoders:
+            target_encoder = stream_encoder if stream_encoder_valid else "x264"
+        elif not _encoder_is_hardware(rec_encoder) and _encoder_is_hardware(stream_encoder):
+            target_encoder = stream_encoder
+        else:
+            target_encoder = rec_encoder
+
+        if target_encoder != rec_encoder:
+            _set_profile_parameter(ws, "SimpleOutput", "RecEncoder", target_encoder)
+            if switching_to_simple and stream_encoder_valid:
+                changed.append(f"录像编码器已采用 OBS 简单模式兼容值「{target_encoder}」")
+            elif _encoder_is_hardware(target_encoder):
+                changed.append(f"录像编码器已从「{rec_encoder}」改为本机硬件编码器「{target_encoder}」")
+            elif target_encoder == "x264":
+                changed.append("未找到可确认兼容的硬件编码器，录像编码器已设为「x264」")
+            else:
+                changed.append(f"录像编码器已设为「{target_encoder}」")
+            restart_required = True
+        else:
+            already_ok.append(f"录像编码器设置正常（{rec_encoder}）")
+
+        rec_format = _get_profile_parameter(ws, "SimpleOutput", "RecFormat2")
         if rec_format != "hybrid_mp4":
-            ws.call(obs_requests.SetProfileParameter(
-                parameterCategory="SimpleOutput",
-                parameterName="RecFormat2",
-                parameterValue="hybrid_mp4",
-            ))
+            _set_profile_parameter(ws, "SimpleOutput", "RecFormat2", "hybrid_mp4")
             changed.append("录像格式已改为「混合 MP4」")
+            restart_required = True
         else:
             already_ok.append("录像格式正确（混合 MP4）")
+
+        # Mode 最后写入，避免前面的参数写入失败后留下不完整的简单输出配置。
+        if switching_to_simple:
+            _set_profile_parameter(ws, "Output", "Mode", "Simple")
+            verified_mode = _get_profile_parameter(ws, "Output", "Mode")
+            if verified_mode.strip().lower() != "simple":
+                raise ValueError("OBS 没有接受输出模式修改，请在 OBS 设置→输出中手动选择「简单」")
+            changed.append("输出模式已从「高级」改为「简单」（重启 OBS 后生效）")
+            restart_required = True
+        else:
+            already_ok.append("输出模式正确（简单）")
 
         return {
             "success": True,
             "changed": changed,
             "already_ok": already_ok,
             "restart_obs_required": restart_required,
+            "output_mode_before": "Advanced" if switching_to_simple else "Simple",
+            "output_mode_after_restart": "Simple",
+            "mode_change_pending_restart": switching_to_simple,
         }
 
     finally:

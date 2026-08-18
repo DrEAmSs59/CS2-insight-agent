@@ -5,6 +5,7 @@ from app.obs_tuning import (
     _prioritize_gpu_rows,
     build_change_plan,
     discover_environment,
+    preferred_hardware_recording_encoder,
     recommend,
 )
 
@@ -16,6 +17,19 @@ def test_hybrid_gpu_list_prioritizes_discrete_gpu():
     ])
 
     assert result[0]["name"] == "NVIDIA GeForce RTX 5070"
+
+
+def test_preferred_hardware_recording_encoder_supports_each_vendor():
+    cases = [
+        ("NVIDIA GeForce RTX 5070", "nvenc_h264"),
+        ("AMD Radeon RX 7900 XTX", "amf_h264"),
+        ("Intel Arc A770", "qsv_h264"),
+    ]
+
+    for gpu_name, expected_id in cases:
+        result = preferred_hardware_recording_encoder([{"name": gpu_name}])
+        assert result is not None
+        assert result["id"] == expected_id
 
 
 def _discovery(*, gpu_name="NVIDIA GeForce RTX 4080", connected=True):

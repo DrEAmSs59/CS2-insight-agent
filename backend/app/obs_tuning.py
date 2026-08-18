@@ -261,6 +261,21 @@ def infer_hardware_encoders(gpus: list[dict[str, Any]], current_encoder: str = "
     return sorted(found.values(), key=lambda item: (priority.get(item["id"], 20), item["label"]))
 
 
+def preferred_hardware_recording_encoder(
+    gpus: list[dict[str, Any]],
+    current_encoder: str = "",
+) -> Optional[dict[str, Any]]:
+    """Return the existing tuning engine's preferred H.264 hardware encoder."""
+    return next(
+        (
+            item
+            for item in infer_hardware_encoders(gpus, current_encoder)
+            if str(item.get("codec") or "").lower() == "h264"
+        ),
+        None,
+    )
+
+
 def _nearest_existing_path(raw: str) -> Path:
     path = Path(raw).expanduser() if raw else get_data_dir()
     if path.is_file():
