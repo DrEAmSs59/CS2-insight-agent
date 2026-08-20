@@ -32,6 +32,10 @@ POV_CORE_FORCED_COMMANDS: list[str] = [
     "voice_modenable 1",
     "snd_voipvolume 1",
     "cl_draw_only_deathnotices false",
+    # GOTV demos keep the local controller on spectator team. mp_forcecamera=1
+    # makes native TeamID reject the observed POV's teammates as non-local;
+    # zero lets CCSGO_HudReticle follow the observed player's relationship.
+    "mp_forcecamera 0",
     "cl_trueview_show_status 0",
     "cl_spec_show_bindings 0",
     "r_spectator_flashbang_opacity 1",
@@ -43,4 +47,14 @@ POV_CORE_FORCED_COMMANDS: list[str] = [
     "snd_disable_radar_visualize 0",
     # 0=team color, 12=teammate/player color (HP/ammo accents follow slot colors).
     "cl_hud_color 12",
+    # Native CCSGO_HudReticle owns the world-to-screen placement and pooled
+    # `.playerid` panels. Mode 3 keeps its name and equipment children alive;
+    # the injected demo controller fills the native centered economy line.
+    # Force=1 bypasses cl_draw_only_deathnotices and stale user HUD state.
+    "cl_drawhud_force_teamid_overhead 1",
+    "cl_teamid_overhead_mode 3",
+    "cl_teamid_overhead_colors_show 1",
+    "cl_teamid_overhead_fade_near_crosshair 0",
+    "cl_teamid_overhead_maxdist 9999",
+    "cl_teamid_overhead_maxdist_spec 9999",
 ]

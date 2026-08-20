@@ -54,6 +54,13 @@ def test_filter_picks_cl_demo_predict():
         "switchhandsright;",
         'hud_showtargetid "0";',
         'cl_showloadout "0";',
+        'cl_teamid_overhead_mode "3";',
+        'cl_teamid_overhead_colors_show "1";',
+        'cl_teamid_overhead_fade_near_crosshair "0";',
+        'cl_teamid_overhead_maxdist "9999";',
+        'cl_teamid_overhead_maxdist_spec "9999";',
+        'cl_drawhud_force_teamid_overhead "1";',
+        'mp_forcecamera "0";',
         "apply_crosshair_code CSGO-xxxxx-xxxxx-xxxxx-xxxxx-xxxxx",
     ],
 )

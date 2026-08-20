@@ -10,8 +10,13 @@ from app.demo_voice_hud import (
     VOICE_DATA_BEGIN,
     VOICE_DATA_END,
     VOICE_SCRIPT_PATH,
+    _build_player_sound_track,
+    _kill_cash_award,
+    _weapon_fire_sound_radius,
+    add_flash_blind_track_to_payload,
     add_input_tracks_to_payload,
     add_kill_feedback_track_to_payload,
+    add_radio_track_to_payload,
     add_radar_track_to_payload,
     build_demo_voice_hud_vpk,
     build_voice_payload,
@@ -285,41 +290,177 @@ def test_checked_in_voice_template_contains_only_an_empty_payload():
         b'ConsoleCommand("snd_sos_start_soundevent " + KILL_CONFIRMATION_EVENT)'
         in script
     )
-    assert b"FLASH_FULL_DURATION_TICKS = 288" in script
-    assert b"FLASH_FULL_OPAQUE_THRESHOLD_TICKS" not in script
-    assert b"FLASH_FADE_TICKS" not in script
+    assert b"FLASH_BUILD_UP_SECONDS = (255 / 45) / 60" in script
+    assert b"FLASH_CERTAIN_BLIND_SECONDS = 3" in script
+    assert b"FLASH_PAYLOAD_VERSION = 2" in script
+    assert b"FLASH_FULL_DURATION_TICKS" not in script
     assert b"FLASH_ACTIVE_REFRESH_SECONDS = 0.016" in script
     assert b"FLASH_IDLE_REFRESH_SECONDS = 0.05" in script
     assert b"blind ? FLASH_ACTIVE_REFRESH_SECONDS : FLASH_IDLE_REFRESH_SECONDS" in script
-    assert b"const peak = Math.min(1, span / FLASH_FULL_DURATION_TICKS)" in script
-    assert b"return peak * Math.pow(1 - t, fadePower)" in script
+    assert b"const wasActive = Boolean(state && event.tick < state.endTick)" in script
+    assert b"endTick: event.tick + event.durationTicks" in script
+    assert b"Math.pow(remainingSeconds / FLASH_CERTAIN_BLIND_SECONDS, 2)" in script
+    assert b"const afterimage = strength * (1 - Math.pow(1 - screenshot, 4))" in script
+    assert b"let cover = 1 - (1 - white) * (1 - afterimage)" in script
     assert b"Math.min(1, flashWashOpacity(blind, tick))" in script
     assert b"if (opacity <= 0.01)" not in script
     assert b'findHudTraverse("ChatHistoryText")' in script
-    assert b'"PanoramaGameTimeJumpEvent"' in script
+    assert b'"PanoramaGameTimeJumpEvent"' not in script
     assert b"TRANSIENT_HUD_TICK_JUMP_THRESHOLD = 64" in script
     assert b"TRANSIENT_HUD_RESUME_GRACE_TICKS = 32" in script
     assert b'STOCK_HUD_ALERT_SUPPRESS_CLASS = "CS2InsightPausedSeekSuppress"' in script
     assert b"STOCK_HUD_ALERT_RESUME_GRACE_TICKS = 128" in script
     assert b"STOCK_HUD_ALERT_HIDDEN_STABLE_FRAMES = 10" in script
-    assert b"if (state.bIsPaused || tick <= transientHudSuppressUntilTick)" in script
+    assert b"if (!hud || state.bIsPaused || tick <= transientHudSuppressUntilTick)" in script
     assert b"$.Schedule(0.016, watchDemoTimeJumps)" in script
     assert b"$.Schedule(0, watchDemoTimeJumps)" in script
     assert b'findHudTraverse("AlertText")' in script
     assert b"armStockHudAlertSeekSuppress(state, tick)" in script
     assert b"updateStockHudAlertSeekSuppress(state, tick)" in script
     assert b'GameInterfaceAPI.ConsoleCommand("hud_reloadscheme")' not in script
-    assert (
-        b'"PanoramaGameTimeJumpEvent",\n            scheduleTransientStockHudClear'
-        in script
-    )
-    assert b"CS2InsightPovSoundRing" not in script
-    assert b'FindChildTraverse("RI_PlayerSoundContainer")' not in script
+    assert b"CS2InsightPovSoundRing" in script
+    assert b'FindChildTraverse("RI_PlayerSoundContainer")' in script
+    assert b"radarTrack.nativeSoundComplete" in script
+    assert b"belongsToNativeSoundRoot(pack)" in script
+    assert b"updatePovSoundRings(nativeRadar, tick, povXuid, povSample)" in script
+    assert b"nativeSoundComplete describes the event source, not Panorama playback" in script
+    assert b"setNativeSoundRingsVisible(nativeRadar, false)" in script
+    assert b"setNativeSoundRingsVisible(nativeRadar, true)" not in script
+    assert b"updatePovUnclipFx(nativeRadar, tick, povXuid, povSample, povTeam)" in script
+    assert b"const MAX_POV_SOUND_RINGS = 10" in script
+    assert b"fx.soundRings[soundIndex]" in script
+    assert b"return active.slice(0, MAX_POV_SOUND_RINGS)" in script
+    assert b"Math.abs(candidate.radius - existing.radius)" not in script
+    assert b"function annotateContinuousStepSounds(sounds, tickRate)" in script
+    assert b"rows[index].stepStateEndTick = last.tick + releaseTicks" in script
+    assert b"const activeSteps = {}" in script
+    assert b'? "1"' in script
+    assert b"function assignPovSoundsToSlots(fx, active)" in script
+    assert b"ring._insightSoundKey !== soundKey" in script
+    assert b"panelRadius >= maxClassThreshold" in script
+    assert b"ring.SetParent(anchor)" in script
+    assert b"const POV_RADAR_SCALE = 0.4" in script
+    assert b"return POV_RADAR_SCALE" in script
+    assert b"function radarScaleFromNativeTransform" not in script
+    assert b'GetSettingFloat("cl_radar_scale")' not in script
+    assert b'GameInterfaceAPI.GetSettingFloat("cl_radar_icon_scale_min")' in script
+    assert b"function nativeRadarIconScale(centeredScale)" in script
+    assert b"const panelRadius = Math.floor(" in script
+    assert b"const visualPanelRadius = Number(sound.radius) <= 120" in script
+    assert b"? Math.max(12, panelRadius)" in script
+    assert b"diameter: 2 * Math.max(0, visualPanelRadius) * iconScale" in script
+    assert b'ring.style.border = "1px solid #ffffff40"' in script
+    assert b"2px solid #ffffff80" not in script
+    assert b"hostWidth / RADAR_MAP_SIZE" not in script
+    assert b'fx.rotated.style.transform = "rotateZ("' in script
+    assert b'fx.frustum.style.width = "128px"' in script
+    assert b'fx.anchor.style.position = "50% 50% 0px"' in script
+    assert b'fx.anchor.style.x = "0px"' not in script
+    assert b'fx.anchor.style.y = "0px"' not in script
     assert b'ConsoleCommand("cl_drawhud_force_radar 0")' not in script
     assert b'["SHIFT", 0, 0' in script
     assert b'["SPACE", 82, 112' in script
     assert b'["R", 194, 0' in script
     assert b"onlyWhenActive" in script
+    assert b'findHudTraverse("VisiblePlayerIDs")' in script
+    assert b'GameInterfaceAPI.ConsoleCommand(commands[index])' in script
+    assert b'"cl_drawhud_force_teamid_overhead 1"' in script
+    assert b'"mp_forcecamera 0"' in script
+    assert b'overheadNativeCvarApplyAttempts < 4' in script
+    assert b'FindChildrenWithClassTraverse("playerid")' in script
+    assert b'"#Panorama_HUD_playerid_overhead_money"' in script
+    assert b'"#Panorama_HUD_playerid_overhead_health"' not in script
+    assert b'GameStateAPI.GetPlayerMoney(xuid)' in script
+    assert b'firstChildWithClass(playerPanel, "playerid__name")' in script
+    assert b'playerPanel.BHasClass("playerid--team-ct")' in script
+    assert b'setPlayerOverheadContentVisible(playerPanel, visible)' in script
+    assert b'label.text = text' in script
+    assert b'playerPanel.SetHasClass("money", active)' in script
+    assert b'playerPanel.SetHasClass("normal-health", false)' in script
+    assert b'playerPanel.SetHasClass("low-health", false)' in script
+    assert b'label.style.color = "white"' in script
+    assert b'#b0dc88ff' not in script
+    assert b'setNativePlayerEconomy(' in script
+    assert b'label.style.width = "300px"' not in script
+    assert b"$.Schedule(0, updateOverheadInfoHud)" in script
+    assert b"const encodedRadio = packed[11] || null" in script
+    assert b"function decodeRadioTrack(raw)" in script
+    assert b"function safelyDecodeRadioTrack()" in script
+    assert b"catch (errRadioDecode)" in script
+    assert b"Do not re-sort equal-tick" in script
+    assert b".localeCompare(" not in script
+    assert b"function updateRadioHud()" in script
+    assert b"return povTeam !== 0 && event.team === povTeam" in script
+    assert b'const messages = String(raw[4] || "")' in script
+    assert b'kind === 0 ? "chat" : "server"' in script
+    assert b"function chatEventHtml(event)" in script
+    assert b"function serverEventHtml(event)" in script
+    assert b'|| !event.teamOnly' in script
+    assert b'radioHud.GetParent() === root' in script
+    assert b'hud.style.width = "560px"' in script
+    assert b'hud.style.height = "300px"' in script
+    assert b'hud.style.marginLeft = "0px"' in script
+    assert b"const RADIO_PANEL_Y_OFFSET = 182 + VOICE_NOTICE_ROW_HEIGHT" in script
+    assert b'hud.style.marginBottom = RADIO_PANEL_Y_OFFSET + "px"' in script
+    assert b'radioHud.style.marginBottom = RADIO_PANEL_Y_OFFSET + "px"' in script
+    assert b"activeVoiceNoticeRows" not in script
+    assert b'history.style.height = "100%"' in script
+    assert b'history.style.verticalAlign = "bottom"' in script
+    assert b'rowStack.style.height = "fit-children"' in script
+    assert b'rowStack.style.verticalAlign = "bottom"' in script
+    assert b'rowStack.style.paddingLeft = "8px"' in script
+    assert b'rowStack.style.paddingBottom = "0px"' in script
+    assert b'rowStack.style.flowChildren = "down"' in script
+    assert b"rowIndex < MAX_VISIBLE_RADIO_MESSAGES" in script
+    assert b"row.html = true" in script
+    assert b'row.style.fontFamily = "Stratum2, \'Arial Unicode MS\'"' in script
+    assert b'row.style.fontWeight = "medium"' in script
+    assert b'row.style.textShadow = "0px 0px 1px 1.0 #0000003a"' in script
+    assert b"const RADIO_MESSAGE_SECONDS = 15.5" in script
+    assert b"const RADIO_FADE_IN_END = 0.05" in script
+    assert b"const RADIO_FADE_OUT_START = 0.90" in script
+    assert b"const RADIO_FADE_OUT_END = 0.95" in script
+    assert b"const NATIVE_VOICE_ALERT_PANEL_COUNT = 16" in script
+    assert b'findHudTraverse("AlertPanel" + (index + 1))' in script
+    assert b"function suppressNativeLowerLeft()" in script
+    assert b'panel.style.opacity = "0"' in script
+    assert b"nativeVoiceAlertHost" not in script
+    assert b'nativeChatHistoryText.style.opacity = "0"' in script
+    assert b"nativeChatHistoryText.visible = false" in script
+    assert b"Number(panel.actuallayoutheight)" not in script
+    assert b"function refreshNativeVoiceAlertStates()" not in script
+    assert b"function reserveNativeVoiceAlertLane(nativeStates)" not in script
+    assert b"suppressNativeLowerLeft();" in script
+    assert b"setChronologicalOffset" not in script
+    assert b"state.panel.style" not in script
+    assert b'"translateY(-" + distance + "px)"' not in script
+    assert b"function radioEventOpacity(event, tick)" in script
+    assert b"visible.length ? RADIO_ACTIVE_REFRESH_SECONDS" in script
+    assert b"row.text = event ? lowerLeftEventHtml(event)" in script
+    assert b"String(radioEventOpacity(event, tick))" in script
+    assert b"event.tick + radioLifetimeTicks <= tick" in script
+    assert b"event.tick + cashLifetimeTicks > tick" in script
+    assert b"event.attackerXuid === povXuid" in script
+    assert b"#Player_Cash_Award_Killed_Enemy_Generic" in script
+    assert b"function cashAwardEventHtml(event)" in script
+    assert b'return color ? radioHtmlSpan(color, "\xe2\x97\x8f ") : ""' in script
+    assert b'createClassedPanel("Label", notice, "VoiceMarker", "VoiceText")' in script
+    assert b'marker.text = markerColor ? "\xe2\x97\x8f " : ""' in script
+    assert b'marker.style.color = markerColor || "#ffffff"' in script
+    assert b'label.html = true' not in script
+    assert b'function voiceNoticeHtml(' not in script
+    assert b'return team === 2 ? "#e0b756" : "#ffffff"' in script
+    assert b'return team === 2 ? "#ffdf93" : "#ffffff"' in script
+    assert b'locationLabel.style.color = "#40ff40"' in script
+    assert b'notice.FindChildTraverse("VoiceLocation")' in script
+    assert b'notice.SetHasClass("Hidden", !active);' in script
+    assert b"reward: Math.max(0, parseInt(fields[3], 36) || 0)" in script
+    assert b"if (radioTrack || killFeedbackTrack)" in script
+    assert b'join("<br>")' not in script
+    assert "﹫".encode() in script
+    assert b"Stratum2 Bold" not in script
+    assert b"#SFUI_TitlesTXT_Smoke_in_the_hole" in script
+    assert b"#Cstrike_TitlesTXT_Planting_Bomb" in script
     assert b"765611" not in script
 
 
@@ -369,6 +510,14 @@ def test_radar_track_is_appended_at_payload_index_eight(monkeypatch):
                 return {"tick": [8, 64]}
             if name == "round_end":
                 return {"tick": [24, 80]}
+            if name == "player_sound":
+                return {
+                    "tick": [16, 24],
+                    "user_steamid": [111, 222],
+                    "radius": [1100, 120],
+                    "duration": [0.1, 0.5],
+                    "step": [False, True],
+                }
             return {"tick": []}
 
         @staticmethod
@@ -417,9 +566,530 @@ def test_radar_track_is_appended_at_payload_index_eight(monkeypatch):
     assert stats["radar_players"] == 2
     assert stats["radar_samples"] > 0
     assert stats["radar_map"] == "de_dust2"
+    assert stats["radar_native_sound_complete"] == 1
+    assert radar[5][2] == 1
     xuids = {row[0] for row in radar[3]}
     assert xuids == {"111", "222"}
     assert all(isinstance(row[3], str) and row[3] for row in radar[3])
+
+
+def test_incomplete_native_sound_rows_select_insight_ring_fallback():
+    class _IncompleteSoundParser:
+        @staticmethod
+        def parse_event(name):
+            if name == "player_sound":
+                return {
+                    "tick": [16, 24],
+                    "user_steamid": [111],
+                    "radius": [1100, 120],
+                    "duration": [0.1, 0.5],
+                    "step": [False, True],
+                }
+            if name == "weapon_fire":
+                return {
+                    "tick": [32],
+                    "user_steamid": [111],
+                    "weapon": ["ak47"],
+                    "silenced": [False],
+                }
+            return {"tick": []}
+
+    track = _build_player_sound_track(
+        _IncompleteSoundParser(),
+        {111: (0, 2), 222: (1, 3)},
+    )
+
+    assert track[1]
+    assert track[2] == 0
+
+
+def test_complete_native_sound_track_is_unfiltered_without_missing_actions():
+    class _CompleteSoundParser:
+        @staticmethod
+        def parse_event(name):
+            if name == "player_sound":
+                return {
+                    "tick": [10, 11, 12, 13, 14, 15, 16, 17, 18],
+                    "user_steamid": [111] * 9,
+                    "radius": [98, 594, 597, 600, 800, 1000, 1065, 1070, 1100],
+                    "duration": [0.1] * 9,
+                    "step": [False] * 8 + [True],
+                }
+            return {"tick": []}
+
+    track = _build_player_sound_track(
+        _CompleteSoundParser(),
+        {111: (0, 2)},
+    )
+
+    assert track[2] == 1
+    tokens = track[1].split(",")
+    assert len(tokens) == 9
+    assert [int(token.split(".")[2], 36) for token in tokens] == [
+        98,
+        594,
+        597,
+        600,
+        800,
+        1000,
+        1065,
+        1070,
+        1100,
+    ]
+    assert [int(token.split(".")[3], 36) for token in tokens] == [100] * 9
+    assert [int(token.split(".")[4], 36) for token in tokens] == [0] * 8 + [1]
+
+
+def test_complete_native_sound_track_reconciles_missing_knife_and_jump_layers():
+    class _CompleteButSemanticallyGappedParser:
+        @staticmethod
+        def parse_event(name):
+            if name == "player_sound":
+                # The producer retained a valid table and an independent step
+                # row, but omitted both knife layers and the 98u take-off row.
+                return {
+                    "tick": [30],
+                    "user_steamid": [111],
+                    "radius": [1100],
+                    "duration": [0.5],
+                    "step": [True],
+                }
+            if name == "weapon_fire":
+                return {
+                    "tick": [20, 40],
+                    "user_steamid": [111, 111],
+                    "weapon": ["weapon_knife", "weapon_ak47"],
+                    "silenced": [False, False],
+                }
+            if name == "player_jump":
+                return {"tick": [30], "user_steamid": [111]}
+            return {"tick": []}
+
+    track = _build_player_sound_track(
+        _CompleteButSemanticallyGappedParser(),
+        {111: (0, 2)},
+    )
+
+    tick = 0
+    decoded = []
+    for token in track[1].split(","):
+        fields = token.split(".")
+        tick += int(fields[0], 36)
+        decoded.append((tick, int(fields[2], 36), int(fields[3], 36)))
+
+    assert track[2] == 1
+    assert decoded == [
+        (20, 352, 100),
+        (20, 800, 100),
+        (30, 98, 100),
+        (30, 1100, 500),
+        (40, 1, 100),
+    ]
+
+
+def test_complete_native_sound_track_excludes_local_only_pickup_circle():
+    class _PickupSoundParser:
+        @staticmethod
+        def parse_event(name):
+            if name == "item_pickup":
+                return {
+                    "tick": [20],
+                    "user_steamid": [111],
+                    "item": ["smokegrenade"],
+                    "silent": [False],
+                }
+            if name == "player_sound":
+                return {
+                    "tick": [20, 20, 20, 21],
+                    "user_steamid": [111] * 4,
+                    "radius": [1100, 1100, 800, 1000],
+                    "duration": [0.1, 0.5, 0.1, 0.1],
+                    "step": [False, True, False, False],
+                }
+            return {"tick": []}
+
+    track = _build_player_sound_track(
+        _PickupSoundParser(),
+        {111: (0, 2)},
+    )
+
+    assert track[2] == 1
+    assert [int(token.split(".")[2], 36) for token in track[1].split(",")] == [
+        800,
+        1100,
+        1000,
+    ]
+
+
+def test_stripped_demo_weapon_sound_fallback_excludes_ordinary_utility_pin_pull():
+    assert _weapon_fire_sound_radius("weapon_ak47", False) is None
+    assert _weapon_fire_sound_radius("weapon_awp", False) is None
+    assert _weapon_fire_sound_radius("weapon_m4a1_silencer", True) is None
+    assert _weapon_fire_sound_radius("weapon_molotov", False) == 1100
+    assert _weapon_fire_sound_radius("weapon_incgrenade", False) == 1100
+    assert _weapon_fire_sound_radius("weapon_flashbang", False) is None
+    assert _weapon_fire_sound_radius("weapon_smokegrenade", False) is None
+    assert _weapon_fire_sound_radius("weapon_hegrenade", False) is None
+    assert _weapon_fire_sound_radius("weapon_decoy", False) is None
+    assert _weapon_fire_sound_radius("weapon_knife", False) == 800
+    assert _weapon_fire_sound_radius("weapon_taser", False) is None
+    assert _weapon_fire_sound_radius("weapon_c4", False) is None
+
+
+def test_complete_native_sound_track_reconciles_only_fire_utility_action_layer():
+    class _FireUtilitySoundParser:
+        @staticmethod
+        def parse_event(name):
+            if name == "player_sound":
+                return {
+                    "tick": [30],
+                    "user_steamid": [111],
+                    "radius": [1100],
+                    "duration": [0.5],
+                    "step": [True],
+                }
+            if name == "weapon_fire":
+                return {
+                    "tick": [20, 40, 50, 60],
+                    "user_steamid": [111] * 4,
+                    "weapon": [
+                        "weapon_incgrenade",
+                        "weapon_molotov",
+                        "weapon_flashbang",
+                        "weapon_smokegrenade",
+                    ],
+                    "silenced": [False] * 4,
+                }
+            return {"tick": []}
+
+    track = _build_player_sound_track(
+        _FireUtilitySoundParser(),
+        {111: (0, 2)},
+        # M1 rises at ticks 10/35, before the fire utilities are released at
+        # ticks 20/40. The ordinary utility presses at 45/55 must not add rows.
+        input_tracks=[["111", "a.74,a.0,f.74,5.0,5.74,5.0,5.74,5.0"]],
+    )
+
+    tick = 0
+    decoded = []
+    for token in track[1].split(","):
+        fields = token.split(".")
+        tick += int(fields[0], 36)
+        decoded.append((tick, int(fields[2], 36), int(fields[3], 36)))
+
+    assert track[2] == 1
+    assert decoded == [
+        (10, 1100, 100),
+        (30, 1100, 500),
+        (35, 1100, 100),
+    ]
+
+
+def test_stripped_sound_track_reconstructs_jump_and_reload_from_input_edges():
+    class _ActionSoundParser:
+        @staticmethod
+        def parse_event(name):
+            if name == "weapon_reload":
+                # Same action as the R input edge below: it must not duplicate.
+                return {"tick": [20], "user_steamid": [111]}
+            return {"tick": []}
+
+    track = _build_player_sound_track(
+        _ActionSoundParser(),
+        {111: (0, 2)},
+        input_tracks=[["111", "a.g,1.0,9.3k,1.0"]],
+    )
+
+    tick = 0
+    decoded = []
+    for token in track[1].split(","):
+        fields = token.split(".")
+        tick += int(fields[0], 36)
+        decoded.append(
+            (
+                tick,
+                int(fields[2], 36),
+                int(fields[3], 36),
+                int(fields[4], 36),
+            )
+        )
+
+    assert track[2] == 0
+    assert decoded == [
+        (10, 98, 100, 0),
+        (20, 98, 100, 0),
+    ]
+
+
+def test_stripped_sound_track_uses_sampled_action_fallback_without_input():
+    class _ObservedActionParser:
+        @staticmethod
+        def parse_event(_name):
+            return {"tick": []}
+
+    track = _build_player_sound_track(
+        _ObservedActionParser(),
+        {111: (0, 2)},
+        observed_actions=[("jump", 30, 111), ("reload", 40, 111)],
+    )
+
+    assert [int(token.split(".")[2], 36) for token in track[1].split(",")] == [
+        98,
+        98,
+    ]
+
+
+def test_stripped_sound_track_rebuilds_stock_step_rows_from_player_footstep():
+    class _FootstepParser:
+        @staticmethod
+        def parse_event(name):
+            if name == "player_footstep":
+                return {
+                    "tick": [10, 30, 70],
+                    "user_steamid": [111, 111, 111],
+                }
+            return {"tick": []}
+
+    track = _build_player_sound_track(
+        _FootstepParser(),
+        {111: (0, 2)},
+    )
+
+    tick = 0
+    decoded = []
+    for token in track[1].split(","):
+        fields = token.split(".")
+        tick += int(fields[0], 36)
+        decoded.append(
+            (
+                tick,
+                int(fields[2], 36),
+                int(fields[3], 36),
+                int(fields[4], 36),
+            )
+        )
+
+    assert track[2] == 0
+    assert decoded == [
+        (10, 1100, 500, 1),
+        (30, 1100, 500, 1),
+        (70, 1100, 500, 1),
+    ]
+
+
+def test_complete_native_sound_track_does_not_duplicate_player_footstep_rows():
+    class _NativeAndFootstepParser:
+        @staticmethod
+        def parse_event(name):
+            if name == "player_sound":
+                return {
+                    "tick": [10],
+                    "user_steamid": [111],
+                    "radius": [1100],
+                    "duration": [0.5],
+                    "step": [True],
+                }
+            if name == "player_footstep":
+                return {"tick": [10], "user_steamid": [111]}
+            return {"tick": []}
+
+    track = _build_player_sound_track(
+        _NativeAndFootstepParser(),
+        {111: (0, 2)},
+        observed_actions=[("step", 12, 111)],
+    )
+
+    assert track[2] == 1
+    assert len(track[1].split(",")) == 1
+    fields = track[1].split(".")
+    assert int(fields[2], 36) == 1100
+    assert int(fields[4], 36) == 1
+
+
+def test_gun_fire_fallback_is_combat_border_only_not_a_sound_circle():
+    class _GunFireParser:
+        @staticmethod
+        def parse_event(name):
+            if name == "weapon_fire":
+                return {
+                    "tick": [20],
+                    "user_steamid": [111],
+                    "weapon": ["weapon_ak47"],
+                    "silenced": [False],
+                }
+            return {"tick": []}
+
+    track = _build_player_sound_track(
+        _GunFireParser(),
+        {111: (0, 2)},
+    )
+
+    fields = track[1].split(".")
+    assert int(fields[2], 36) == 1
+    assert int(fields[3], 36) == 100
+    assert int(fields[4], 36) == 4
+
+
+def test_flash_track_falls_back_to_flash_duration_tick_state():
+    class _FlashTickParser(_FakeParser):
+        @staticmethod
+        def parse_header():
+            return {"map_name": "de_dust2", "tick_rate": 64}
+
+        @staticmethod
+        def parse_event(name, **_kwargs):
+            if name == "round_start":
+                return {"tick": [8]}
+            if name == "round_end":
+                return {"tick": [40]}
+            if name == "player_blind":
+                return []
+            return {"tick": []}
+
+        @staticmethod
+        def parse_ticks(fields, ticks=None):
+            if fields == ["last_place_name"]:
+                return _FakeParser.parse_ticks(fields)
+            assert fields == ["steamid", "flash_duration"]
+            out = {"tick": [], "steamid": [], "flash_duration": []}
+            for tick in ticks or []:
+                out["tick"].extend([tick, tick])
+                out["steamid"].extend([111, 222])
+                duration = 0.0 if tick < 12 else (2.0 if tick < 24 else 1.0)
+                out["flash_duration"].extend([duration, 0.0])
+            return out
+
+    voice_payload, _ = build_voice_payload("match.dem", parser_factory=_FlashTickParser)
+    payload, stats = add_flash_blind_track_to_payload(
+        voice_payload,
+        "match.dem",
+        parser_factory=_FlashTickParser,
+    )
+    packed = json.loads(payload)
+
+    assert packed[10] == [
+        ["111"],
+        "8.0.0.1.0,4.3k.0.0.73,c.1s.0.0.73",
+        2,
+        64000,
+    ]
+    assert stats["flash_blind_events"] == 2
+    assert stats["flash_blind_parse_failed"] == 0
+    assert stats["flash_blind_tick_fallback"] == 1
+
+
+def test_flash_track_uses_merged_native_updates_and_clears_on_death():
+    class _NativeFlashParser(_FakeParser):
+        @staticmethod
+        def parse_header():
+            return {"map_name": "de_dust2", "tick_rate": 64}
+
+        @staticmethod
+        def parse_event(name, **_kwargs):
+            if name == "round_start":
+                return {"tick": [0]}
+            if name == "player_death":
+                return {"tick": [250], "user_steamid": [111]}
+            if name == "player_blind":
+                return {
+                    "tick": [100, 190, 270],
+                    "user_steamid": [111, 111, 111],
+                    "blind_duration": [4.5, 4.5, 3.0],
+                }
+            if name == "flashbang_detonate":
+                return {"tick": [100, 190, 270]}
+            return {"tick": []}
+
+        @staticmethod
+        def parse_ticks(fields, ticks=None):
+            if fields == ["last_place_name"]:
+                return _FakeParser.parse_ticks(fields)
+            if fields == ["steamid", "flash_duration", "flash_max_alpha", "is_alive"]:
+                raise RuntimeError("native-only fixture")
+            return _FakeParser.parse_ticks(fields)
+
+    voice_payload, _ = build_voice_payload("match.dem", parser_factory=_NativeFlashParser)
+    payload, stats = add_flash_blind_track_to_payload(
+        voice_payload,
+        "match.dem",
+        parser_factory=_NativeFlashParser,
+    )
+    packed = json.loads(payload)
+
+    assert packed[10] == [
+        ["111"],
+        "0.0.0.1.0,2s.80.0.0.73,2i.80.0.0.73,1o.0.0.1.0",
+        2,
+        64000,
+    ]
+    # The post-death tick-270 blind row is intentionally absent.
+    assert stats["flash_blind_events"] == 2
+    assert stats["flash_blind_tick_fallback"] == 0
+
+
+def test_flash_track_recovers_exact_updates_from_detonation_tick_properties():
+    class _DetonationFlashParser(_FakeParser):
+        @staticmethod
+        def parse_header():
+            return {"map_name": "de_dust2", "tick_rate": 64}
+
+        @staticmethod
+        def parse_event(name, **_kwargs):
+            if name == "round_start":
+                return {"tick": [0]}
+            if name == "round_end":
+                return {"tick": [300]}
+            if name == "player_death":
+                return {"tick": [200], "user_steamid": [111]}
+            if name == "player_blind":
+                return []
+            if name == "flashbang_detonate":
+                return {"tick": [100, 164]}
+            return {"tick": []}
+
+        @staticmethod
+        def parse_ticks(fields, ticks=None):
+            if fields == ["last_place_name"]:
+                return _FakeParser.parse_ticks(fields)
+            assert fields == ["steamid", "flash_duration", "flash_max_alpha", "is_alive"]
+            out = {
+                "tick": [],
+                "steamid": [],
+                "flash_duration": [],
+                "flash_max_alpha": [],
+                "is_alive": [],
+            }
+            for tick in ticks or []:
+                out["tick"].extend([tick, tick])
+                out["steamid"].extend([111, 222])
+                if tick < 100:
+                    duration = 0.0
+                elif tick < 164:
+                    duration = 4.5
+                else:
+                    # A weaker overlap preserves the original tick-388 end.
+                    duration = 3.5
+                out["flash_duration"].extend([duration, 0.0])
+                out["flash_max_alpha"].extend([255, 255])
+                out["is_alive"].extend([tick < 200, True])
+            return out
+
+    voice_payload, _ = build_voice_payload("match.dem", parser_factory=_DetonationFlashParser)
+    payload, stats = add_flash_blind_track_to_payload(
+        voice_payload,
+        "match.dem",
+        parser_factory=_DetonationFlashParser,
+    )
+    packed = json.loads(payload)
+
+    assert packed[10] == [
+        ["111"],
+        "0.0.0.1.0,2s.80.0.0.73,1s.68.0.0.73,10.0.0.1.0",
+        2,
+        64000,
+    ]
+    assert stats["flash_blind_events"] == 2
+    assert stats["flash_blind_tick_fallback"] == 1
 
 
 def test_radar_spotted_side_follows_live_team_and_any_current_pov(monkeypatch):
@@ -542,9 +1212,237 @@ def test_kill_feedback_track_is_appended_at_payload_index_nine():
     track = packed[9]
     assert track[0] == ["111", "222"]
     # suicide at tick 140 is dropped; remaining: 100 HS, 120 body+armor, 160 HS+armor
-    assert track[1] == "2s.0.1,k.1.2,14.0.3"
+    assert track[1] == "2s.0.1.8c,k.1.2.8c,14.0.3.8c"
+    assert track[2] == 64_000
     assert stats["kill_feedback_events"] == 3
     assert stats["kill_feedback_parse_failed"] == 0
+
+
+def test_kill_cash_award_matches_classic_weapon_rewards():
+    assert _kill_cash_award("weapon_ak47") == 300
+    assert _kill_cash_award("awp") == 100
+    assert _kill_cash_award("weapon_mac10") == 600
+    assert _kill_cash_award("xm1014") == 900
+    assert _kill_cash_award("knife_karambit") == 1500
+    assert _kill_cash_award("bayonet") == 1500
+    assert _kill_cash_award("taser") == 0
+
+
+def test_radio_track_prefers_native_throws_and_rebuilds_only_missing_rows():
+    class _RadioParser(_FakeParser):
+        @staticmethod
+        def parse_header():
+            return {"tick_rate": 64}
+
+        @staticmethod
+        def parse_event(name, **_kwargs):
+            if name == "grenade_thrown":
+                return {
+                    "tick": [110, 220],
+                    "user_steamid": [111, 222],
+                    "user_last_place_name": ["TopofMid", "BombsiteB"],
+                    "user_team_num": [2, 3],
+                    "weapon": ["smokegrenade", "flashbang"],
+                }
+            if name == "weapon_fire":
+                return {
+                    "tick": [100, 210, 300, 320],
+                    "user_steamid": [111, 222, 111, 222],
+                    "user_last_place_name": ["TopofMid", "BombsiteB", "Middle", "CTSpawn"],
+                    "user_team_num": [2, 3, 2, 3],
+                    "weapon": [
+                        "weapon_smokegrenade",
+                        "weapon_flashbang",
+                        "weapon_hegrenade",
+                        "weapon_ak47",
+                    ],
+                }
+            if name == "bomb_beginplant":
+                return {
+                    "tick": [350],
+                    "user_steamid": [111],
+                    "user_last_place_name": ["BombsiteA"],
+                    "user_team_num": [2],
+                }
+            if name == "bomb_begindefuse":
+                return {
+                    "tick": [400],
+                    "user_steamid": [222],
+                    "user_last_place_name": ["BombsiteB"],
+                    "user_team_num": [3],
+                }
+            return {"tick": []}
+
+    voice_payload, _ = build_voice_payload("match.dem", parser_factory=_RadioParser)
+    payload, stats = add_radio_track_to_payload(
+        voice_payload,
+        "match.dem",
+        parser_factory=_RadioParser,
+    )
+    packed = json.loads(payload)
+
+    assert len(packed) >= 12
+    assert packed[11] == [
+        ["111", "222"],
+        ["", "TopofMid", "BombsiteB", "Middle", "BombsiteA"],
+        "32.0.0.1.2,32.1.1.2.3,28.0.2.3.2,1e.0.6.4.2,1e.1.7.2.3",
+        [],
+        "",
+        64000,
+        2,
+    ]
+    assert stats == {
+        "radio_events": 5,
+        "radio_native_events": 2,
+        "radio_rebuilt_events": 1,
+        "radio_objective_events": 2,
+        "radio_chat_messages": 0,
+        "radio_server_messages": 0,
+        "radio_parse_failed": 0,
+        "payload_bytes": len(payload),
+    }
+
+
+def test_radio_track_preserves_arrival_order_for_same_tick_rows():
+    class _SameTickRadioParser(_FakeParser):
+        @staticmethod
+        def parse_header():
+            return {"tick_rate": 64}
+
+        @staticmethod
+        def parse_event(name, **_kwargs):
+            if name == "weapon_fire":
+                return {
+                    "tick": [100, 100],
+                    # Deliberately reverse numeric XUID order. Native HudChat
+                    # keeps source arrival order instead of sorting players.
+                    "user_steamid": [222, 111],
+                    "user_last_place_name": ["BombsiteB", "BombsiteA"],
+                    "user_team_num": [3, 2],
+                    "weapon": ["weapon_flashbang", "weapon_hegrenade"],
+                }
+            return {"tick": [], "user_steamid": []}
+
+    voice_payload, _ = build_voice_payload("match.dem", parser_factory=_SameTickRadioParser)
+    payload, _stats = add_radio_track_to_payload(
+        voice_payload,
+        "match.dem",
+        parser_factory=_SameTickRadioParser,
+    )
+
+    radio = json.loads(payload)[11]
+    assert radio[0] == ["222", "111"]
+    assert radio[1] == ["", "BombsiteB", "BombsiteA"]
+    assert radio[2] == "2s.0.1.1.3,0.1.2.2.2"
+
+
+def test_lower_left_feed_unifies_chat_and_server_notices():
+    class _UnifiedFeedParser(_FakeParser):
+        @staticmethod
+        def parse_header():
+            return {"tick_rate": 64}
+
+        @staticmethod
+        def parse_event(name, **_kwargs):
+            if name == "chat_message":
+                return {
+                    "tick": [10],
+                    "chat_message": ["hello"],
+                    "user_steamid": [111],
+                    "user_name": ["one"],
+                    "user_team_num": [2],
+                    "team_only": [False],
+                }
+            if name == "server_message":
+                return {
+                    "tick": [12],
+                    "server_message": ["Console: maintenance soon"],
+                }
+            if name == "player_hurt":
+                return {
+                    "tick": [14],
+                    "attacker_steamid": [111],
+                    "user_steamid": [999],
+                    "attacker_team_num": [2],
+                    "user_team_num": [2],
+                    "attacker_name": ["one"],
+                    "dmg_health": [20],
+                }
+            if name == "player_death":
+                return {
+                    "tick": [16],
+                    "attacker_steamid": [111],
+                    "user_steamid": [999],
+                    "attacker_team_num": [2],
+                    "user_team_num": [2],
+                    "attacker_name": ["one"],
+                }
+            return {"tick": []}
+
+    voice_payload, _ = build_voice_payload("match.dem", parser_factory=_UnifiedFeedParser)
+    payload, stats = add_radio_track_to_payload(
+        voice_payload,
+        "match.dem",
+        parser_factory=_UnifiedFeedParser,
+    )
+
+    feed = json.loads(payload)[11]
+    assert feed == [
+        ["111", "0"],
+        [""],
+        "",
+        [["one", "hello"], ["", "Console: maintenance soon"], ["one", ""]],
+        "a.0.0.2.0.0,2.3.1.0.0.1,2.1.0.2.0.2,2.2.0.2.0.2",
+        64000,
+        2,
+    ]
+    assert stats["radio_chat_messages"] == 1
+    assert stats["radio_server_messages"] == 3
+
+
+def test_radio_track_rebuilds_even_when_demo_contains_native_radio_text(tmp_path: Path):
+    class _RadioTextParser(_FakeParser):
+        @staticmethod
+        def parse_header():
+            return {"tick_rate": 64}
+
+        @staticmethod
+        def parse_event(name, **_kwargs):
+            if name == "weapon_fire":
+                return {
+                    "tick": [100],
+                    "user_steamid": [111],
+                    "user_last_place_name": ["Middle"],
+                    "user_team_num": [2],
+                    "weapon": ["weapon_smokegrenade"],
+                }
+            return {"tick": []}
+
+    voice_payload, _ = build_voice_payload("match.dem", parser_factory=_FakeParser)
+    demo_path = tmp_path / "native-radio.dem"
+    demo_path.write_bytes(
+        b"prefix Game_radio_location middle Game_radio_location suffix"
+    )
+
+    payload, stats = add_radio_track_to_payload(
+        voice_payload,
+        demo_path,
+        parser_factory=_RadioTextParser,
+    )
+
+    radio = json.loads(payload)[11]
+    assert radio[2] == "2s.0.0.1.2"
+    assert radio[6] == 2
+    assert stats == {
+        "radio_events": 1,
+        "radio_native_events": 0,
+        "radio_rebuilt_events": 1,
+        "radio_objective_events": 0,
+        "radio_chat_messages": 0,
+        "radio_server_messages": 0,
+        "radio_parse_failed": 0,
+        "payload_bytes": len(payload),
+    }
 
 
 def test_pov_manager_installs_generated_voice_package(monkeypatch, tmp_path: Path):

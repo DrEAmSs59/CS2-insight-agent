@@ -12,6 +12,7 @@ from __future__ import annotations
 from collections import defaultdict
 from dataclasses import dataclass
 import json
+import math
 from pathlib import Path
 import re
 import struct
@@ -40,11 +41,17 @@ class DemoVoiceHudError(RuntimeError):
 # Payload indices 0-3 are voice/input/roster. 4-7 are reserved for mouse /
 # subtitles / weapon pulses / broadcast (see internal Panorama VPK guide).
 # Index 8 is the custom radar track; index 9 is POV kill/HS feedback audio;
-# index 10 is POV flash-blind intervals (HUD wash + tinnitus cues).
+# index 10 is POV flash-blind intervals (HUD wash + tinnitus cues); index 11
+# is the fully reconstructed lower-left feed (radio, chat, server notices).
 RADAR_PAYLOAD_INDEX = 8
 KILL_FEEDBACK_PAYLOAD_INDEX = 9
 FLASH_BLIND_PAYLOAD_INDEX = 10
+RADIO_PAYLOAD_INDEX = 11
 RADAR_SAMPLE_HZ = 8
+_GROUND_ENTITY_FIELD = "CCSPlayerPawn.m_hGroundEntity"
+_LAST_JUMP_TICK_FIELD = (
+    "CCSPlayerPawn.CCSPlayer_MovementServices.m_nLastJumpTick"
+)
 # Flags for kill-feedback samples: bit0 = headshot, bit1 = armor damage.
 _COLOR_SLOT_NAMES = {
     "blue": 0,
@@ -76,11 +83,20 @@ class DemoVoiceHudBuild:
     radar_planted_bombs: int = 0
     radar_dropped_bombs: int = 0
     radar_player_sounds: int = 0
+    radar_native_sound_complete: int = 0
     radar_occlusion_grid: int = 0
     kill_feedback_events: int = 0
     kill_feedback_parse_failed: int = 0
     flash_blind_events: int = 0
     flash_blind_parse_failed: int = 0
+    flash_blind_tick_fallback: int = 0
+    radio_events: int = 0
+    radio_native_events: int = 0
+    radio_rebuilt_events: int = 0
+    radio_objective_events: int = 0
+    radio_chat_messages: int = 0
+    radio_server_messages: int = 0
+    radio_parse_failed: int = 0
 
 
 def _read_cstring(data: bytes, cursor: int, limit: int) -> tuple[str, int]:
@@ -325,7 +341,7 @@ def _normalize_map_name(raw: Any) -> str:
 
 def _pad_payload_slots(
     packed: list[Any],
-    length: int = FLASH_BLIND_PAYLOAD_INDEX + 1,
+    length: int = RADIO_PAYLOAD_INDEX + 1,
 ) -> list[Any]:
     if not isinstance(packed, list):
         raise DemoVoiceHudError("voice HUD payload has an unsupported shape")
@@ -337,14 +353,19 @@ def _pad_payload_slots(
 
 
 def _encode_kill_feedback_events(
-    events: list[tuple[int, int, int]],
+    events: list[tuple[int, int, int, int]],
 ) -> str:
-    """Delta-encode ``(tick, attacker_xuid_index, flags)`` as base36."""
+    """Delta-encode ``(tick, attacker_xuid_index, flags, cash_award)``."""
     previous_tick = 0
     encoded: list[str] = []
-    for tick, attacker_index, flags in events:
+    for tick, attacker_index, flags, cash_award in events:
         encoded.append(
-            f"{_base36(tick - previous_tick)}.{_base36(attacker_index)}.{_base36(int(flags) & 0xFF)}"
+            ".".join((
+                _base36(tick - previous_tick),
+                _base36(attacker_index),
+                _base36(int(flags) & 0xFF),
+                _base36(max(0, int(cash_award))),
+            ))
         )
         previous_tick = tick
     return ",".join(encoded)
@@ -354,7 +375,7 @@ def _build_kill_feedback_payload(
     parser: Any,
     roster_by_xuid: Mapping[int, tuple[int, int]],
 ) -> tuple[list[Any], dict[str, Any]]:
-    """Compact POV kill/HS feedback events for local Panorama ``play`` cues."""
+    """Compact POV kill/HS cues and lower-left enemy-kill cash awards."""
     try:
         rows = parser.parse_event("player_death")
     except Exception as exc:  # noqa: BLE001 - demoparser failures vary by demo
@@ -367,12 +388,15 @@ def _build_kill_feedback_payload(
     victims = rows.get("user_steamid")
     headshots = rows.get("headshot")
     armor_dmg = rows.get("dmg_armor")
+    weapons = rows.get("weapon")
+    attacker_teams = rows.get("attackerteam")
+    victim_teams = rows.get("userteam") or rows.get("user_team_num")
     if not isinstance(ticks, list) or not isinstance(attackers, list) or not isinstance(victims, list):
         raise DemoVoiceHudError("player_death rows are missing tick/attacker/victim fields")
 
     xuid_table: list[str] = []
     xuid_index: dict[int, int] = {}
-    events: list[tuple[int, int, int]] = []
+    events: list[tuple[int, int, int, int]] = []
     count = min(len(ticks), len(attackers), len(victims))
     for i in range(count):
         tick = _as_int(ticks[i])
@@ -394,28 +418,630 @@ def _build_kill_feedback_payload(
             armor = _as_int(armor_dmg[i])
             if armor is not None and armor > 0:
                 flags |= 0x2
-        events.append((tick, xuid_index[attacker], flags))
+        cash_award = _kill_cash_award(
+            weapons[i] if isinstance(weapons, list) and i < len(weapons) else None
+        )
+        if isinstance(attacker_teams, list) and isinstance(victim_teams, list):
+            attacker_team = _as_int(attacker_teams[i]) if i < len(attacker_teams) else None
+            victim_team = _as_int(victim_teams[i]) if i < len(victim_teams) else None
+            if attacker_team in (2, 3) and attacker_team == victim_team:
+                cash_award = 0
+        events.append((tick, xuid_index[attacker], flags, cash_award))
 
     events.sort(key=lambda item: item[0])
     if not events:
         raise DemoVoiceHudError("demo contains no usable player_death kill feedback events")
 
-    payload = [xuid_table, _encode_kill_feedback_events(events)]
+    payload = [
+        xuid_table,
+        _encode_kill_feedback_events(events),
+        int(round(_infer_demo_tick_rate(parser) * 1000.0)),
+    ]
     return payload, {
         "kill_feedback_events": len(events),
         "kill_feedback_parse_failed": 0,
     }
 
 
-def _encode_flash_blind_events(
-    events: list[tuple[int, int, int]],
+_RADIO_PAYLOAD_VERSION = 2
+_RADIO_NATIVE_MATCH_TOLERANCE_TICKS = 16
+_RADIO_KIND_BY_WEAPON = {
+    "smokegrenade": 0,
+    "flashbang": 1,
+    "hegrenade": 2,
+    "molotov": 3,
+    "incgrenade": 4,
+    "incendiarygrenade": 4,
+    "decoy": 5,
+}
+_RADIO_KIND_PLANTING = 6
+_RADIO_KIND_DEFUSING = 7
+_LOWER_LEFT_CHAT = 0
+_LOWER_LEFT_TEAM_ATTACK = 1
+_LOWER_LEFT_TEAM_KILL = 2
+_LOWER_LEFT_SERVER = 3
+
+
+@dataclass(frozen=True)
+class _RadioEvent:
+    tick: int
+    xuid: int
+    kind: int
+    location: str
+    team: int
+    native: bool = False
+
+
+@dataclass(frozen=True)
+class _LowerLeftMessage:
+    tick: int
+    kind: int
+    xuid: int
+    team: int
+    name: str = ""
+    text: str = ""
+    team_only: bool = False
+
+
+def _radio_weapon_kind(raw_weapon: Any) -> int | None:
+    weapon = str(raw_weapon or "").strip().lower()
+    while weapon.startswith("weapon_"):
+        weapon = weapon[len("weapon_") :]
+    return _RADIO_KIND_BY_WEAPON.get(weapon)
+
+
+def _radio_location(raw_location: Any) -> str:
+    return str(raw_location or "").strip().lstrip("#")
+
+
+def _parse_radio_event_rows(
+    parser: Any,
+    event_name: str,
+    roster_by_xuid: Mapping[int, tuple[int, int]],
+    *,
+    fixed_kind: int | None = None,
+    native: bool = False,
+) -> list[_RadioEvent]:
+    """Return XUID-bound radio rows with event-time location enrichment."""
+    try:
+        rows = parser.parse_event(
+            event_name,
+            player=["last_place_name", "team_num"],
+        )
+    except TypeError:
+        # Older parser shims (and a few tests) do not accept ``player``.
+        rows = parser.parse_event(event_name)
+    if not isinstance(rows, Mapping):
+        return []
+
+    ticks = rows.get("tick")
+    xuids = rows.get("user_steamid")
+    if not isinstance(ticks, list) or not isinstance(xuids, list):
+        return []
+    weapons = rows.get("weapon")
+    locations = rows.get("user_last_place_name")
+    teams = rows.get("user_team_num")
+    count = min(len(ticks), len(xuids))
+    events: list[_RadioEvent] = []
+    seen: set[tuple[int, int, int]] = set()
+    for index in range(count):
+        tick = _as_int(ticks[index])
+        xuid = _as_positive_int(xuids[index])
+        kind = fixed_kind
+        if kind is None:
+            kind = _radio_weapon_kind(
+                weapons[index]
+                if isinstance(weapons, list) and index < len(weapons)
+                else None
+            )
+        if (
+            tick is None
+            or tick < 0
+            or xuid is None
+            or xuid not in roster_by_xuid
+            or kind is None
+        ):
+            continue
+        key = (tick, xuid, kind)
+        if key in seen:
+            continue
+        seen.add(key)
+        location = _radio_location(
+            locations[index]
+            if isinstance(locations, list) and index < len(locations)
+            else ""
+        )
+        team = _as_int(
+            teams[index]
+            if isinstance(teams, list) and index < len(teams)
+            else None
+        )
+        if team not in (2, 3):
+            team = roster_by_xuid[xuid][1]
+        events.append(_RadioEvent(tick, xuid, kind, location, team, native))
+    # Python's sort is stable, preserving the source user-message order for
+    # multiple teammates throwing utility on the same server tick.
+    events.sort(key=lambda event: event.tick)
+    return events
+
+
+def _merge_native_and_rebuilt_radio_events(
+    native_events: list[_RadioEvent],
+    rebuilt_events: list[_RadioEvent],
+) -> tuple[list[_RadioEvent], int]:
+    """Use native ``grenade_thrown`` rows and fill only unmatched fires.
+
+    Current native rows arrive 5-14 ticks after the corresponding
+    ``weapon_fire`` in all scanned Valve/5E/Faceit/PWA/GOTV samples.  A greedy
+    one-to-one match within 16 ticks avoids duplicates while retaining a fire
+    row when a partially stripped native stream missed that throw.
+    """
+    merged = list(native_events)
+    used_native: set[int] = set()
+    rebuilt_count = 0
+    for rebuilt in rebuilt_events:
+        candidates = [
+            (abs(native_event.tick - rebuilt.tick), index)
+            for index, native_event in enumerate(native_events)
+            if index not in used_native
+            and native_event.xuid == rebuilt.xuid
+            and native_event.kind == rebuilt.kind
+            and abs(native_event.tick - rebuilt.tick)
+            <= _RADIO_NATIVE_MATCH_TOLERANCE_TICKS
+        ]
+        if candidates:
+            _distance, native_index = min(candidates)
+            used_native.add(native_index)
+            continue
+        merged.append(rebuilt)
+        rebuilt_count += 1
+    merged.sort(key=lambda event: event.tick)
+    return merged, rebuilt_count
+
+
+def _encode_radio_events(
+    events: list[_RadioEvent],
+    xuid_index: Callable[[int], int],
+    location_index: Callable[[str], int],
 ) -> str:
-    """Delta-encode ``(tick, duration_ticks, victim_xuid_index)`` as base36."""
     previous_tick = 0
     encoded: list[str] = []
-    for tick, duration_ticks, victim_index in events:
+    for event in events:
         encoded.append(
-            f"{_base36(tick - previous_tick)}.{_base36(max(1, int(duration_ticks)))}.{_base36(victim_index)}"
+            f"{_base36(event.tick - previous_tick)}.{_base36(xuid_index(event.xuid))}"
+            f".{_base36(event.kind)}.{_base36(location_index(event.location))}"
+            f".{_base36(event.team)}"
+        )
+        previous_tick = event.tick
+    return ",".join(encoded)
+
+
+def _row_values(rows: Mapping[str, Any], *names: str) -> list[Any]:
+    for name in names:
+        values = rows.get(name)
+        if isinstance(values, list):
+            return values
+    return []
+
+
+def _parse_chat_messages(parser: Any) -> list[_LowerLeftMessage]:
+    """Extract the player chat stream exposed by demoparser's SayText2 event."""
+    try:
+        rows = parser.parse_event(
+            "chat_message",
+            player=["team_num"],
+        )
+    except TypeError:
+        try:
+            rows = parser.parse_event("chat_message")
+        except Exception:  # noqa: BLE001
+            return []
+    except Exception:  # noqa: BLE001 - chat is optional on stripped demos
+        return []
+    if not isinstance(rows, Mapping):
+        return []
+
+    ticks = _row_values(rows, "tick")
+    texts = _row_values(rows, "chat_message", "message", "text")
+    xuids = _row_values(rows, "user_steamid", "steamid")
+    names = _row_values(rows, "user_name", "name")
+    teams = _row_values(rows, "user_team_num", "team_num", "team")
+    team_only_values = _row_values(
+        rows,
+        "team_only",
+        "teamonly",
+        "is_team_chat",
+        "is_team",
+    )
+    events: list[_LowerLeftMessage] = []
+    for index in range(min(len(ticks), len(texts))):
+        tick = _as_int(ticks[index])
+        text = str(texts[index] or "").strip()
+        xuid = _as_positive_int(xuids[index] if index < len(xuids) else None) or 0
+        if tick is None or tick < 0 or not text:
+            continue
+        team = _as_int(teams[index] if index < len(teams) else None) or 0
+        if team not in (2, 3):
+            team = 0
+        events.append(
+            _LowerLeftMessage(
+                tick=tick,
+                kind=_LOWER_LEFT_CHAT,
+                xuid=xuid,
+                team=team,
+                name=str(names[index] or "").strip() if index < len(names) else "",
+                text=text,
+                team_only=bool(
+                    team_only_values[index]
+                    if index < len(team_only_values)
+                    else False
+                ),
+            )
+        )
+    return events
+
+
+def _parse_direct_server_messages(parser: Any) -> list[_LowerLeftMessage]:
+    """Best-effort support for parsers that expose TextMsg as server_message."""
+    try:
+        rows = parser.parse_event("server_message")
+    except Exception:  # noqa: BLE001 - not exposed by current demoparser builds
+        return []
+    if not isinstance(rows, Mapping):
+        return []
+    ticks = _row_values(rows, "tick")
+    texts = _row_values(rows, "server_message", "message", "text")
+    events: list[_LowerLeftMessage] = []
+    for index in range(min(len(ticks), len(texts))):
+        tick = _as_int(ticks[index])
+        text = str(texts[index] or "").strip()
+        if tick is None or tick < 0 or not text:
+            continue
+        events.append(
+            _LowerLeftMessage(
+                tick=tick,
+                kind=_LOWER_LEFT_SERVER,
+                xuid=0,
+                team=0,
+                text=text,
+            )
+        )
+    return events
+
+
+def _parse_team_notice_messages(
+    parser: Any,
+    roster_by_xuid: Mapping[int, tuple[int, int]],
+    *,
+    tick_rate: float,
+) -> list[_LowerLeftMessage]:
+    """Rebuild red teammate-attack/team-kill server notices from game events."""
+    events: list[_LowerLeftMessage] = []
+    try:
+        hurt_rows = parser.parse_event(
+            "player_hurt",
+            player=["team_num"],
+        )
+    except TypeError:
+        try:
+            hurt_rows = parser.parse_event("player_hurt")
+        except Exception:  # noqa: BLE001
+            hurt_rows = None
+    except Exception:  # noqa: BLE001
+        hurt_rows = None
+    if isinstance(hurt_rows, Mapping):
+        ticks = _row_values(hurt_rows, "tick")
+        attackers = _row_values(hurt_rows, "attacker_steamid")
+        victims = _row_values(hurt_rows, "user_steamid")
+        attacker_teams = _row_values(
+            hurt_rows,
+            "attacker_team_num",
+            "attackerteam",
+        )
+        victim_teams = _row_values(hurt_rows, "user_team_num", "userteam")
+        attacker_names = _row_values(hurt_rows, "attacker_name")
+        damage = _row_values(hurt_rows, "dmg_health")
+        last_attack_tick: dict[int, int] = {}
+        cooldown_ticks = max(1, int(round(max(1.0, tick_rate))))
+        count = min(len(ticks), len(attackers), len(victims))
+        for index in range(count):
+            tick = _as_int(ticks[index])
+            attacker = _as_positive_int(attackers[index])
+            victim = _as_positive_int(victims[index])
+            attacker_team = _as_int(
+                attacker_teams[index] if index < len(attacker_teams) else None
+            )
+            victim_team = _as_int(
+                victim_teams[index] if index < len(victim_teams) else None
+            )
+            health_damage = _as_int(damage[index] if index < len(damage) else 1)
+            if (
+                tick is None
+                or attacker is None
+                or victim is None
+                or attacker == victim
+                or attacker not in roster_by_xuid
+                or attacker_team not in (2, 3)
+                or attacker_team != victim_team
+                or health_damage is None
+                or health_damage <= 0
+            ):
+                continue
+            if tick - last_attack_tick.get(attacker, -cooldown_ticks - 1) <= cooldown_ticks:
+                continue
+            last_attack_tick[attacker] = tick
+            events.append(
+                _LowerLeftMessage(
+                    tick=tick,
+                    kind=_LOWER_LEFT_TEAM_ATTACK,
+                    xuid=attacker,
+                    team=attacker_team,
+                    name=(
+                        str(attacker_names[index] or "").strip()
+                        if index < len(attacker_names)
+                        else ""
+                    ),
+                )
+            )
+
+    try:
+        death_rows = parser.parse_event(
+            "player_death",
+            player=["team_num"],
+        )
+    except TypeError:
+        try:
+            death_rows = parser.parse_event("player_death")
+        except Exception:  # noqa: BLE001
+            death_rows = None
+    except Exception:  # noqa: BLE001
+        death_rows = None
+    if isinstance(death_rows, Mapping):
+        ticks = _row_values(death_rows, "tick")
+        attackers = _row_values(death_rows, "attacker_steamid")
+        victims = _row_values(death_rows, "user_steamid")
+        attacker_teams = _row_values(
+            death_rows,
+            "attacker_team_num",
+            "attackerteam",
+        )
+        victim_teams = _row_values(death_rows, "user_team_num", "userteam")
+        attacker_names = _row_values(death_rows, "attacker_name")
+        count = min(len(ticks), len(attackers), len(victims))
+        for index in range(count):
+            tick = _as_int(ticks[index])
+            attacker = _as_positive_int(attackers[index])
+            victim = _as_positive_int(victims[index])
+            attacker_team = _as_int(
+                attacker_teams[index] if index < len(attacker_teams) else None
+            )
+            victim_team = _as_int(
+                victim_teams[index] if index < len(victim_teams) else None
+            )
+            if (
+                tick is None
+                or attacker is None
+                or victim is None
+                or attacker == victim
+                or attacker not in roster_by_xuid
+                or attacker_team not in (2, 3)
+                or attacker_team != victim_team
+            ):
+                continue
+            events.append(
+                _LowerLeftMessage(
+                    tick=tick,
+                    kind=_LOWER_LEFT_TEAM_KILL,
+                    xuid=attacker,
+                    team=attacker_team,
+                    name=(
+                        str(attacker_names[index] or "").strip()
+                        if index < len(attacker_names)
+                        else ""
+                    ),
+                )
+            )
+
+    events.sort(key=lambda event: event.tick)
+    return events
+
+
+def _encode_lower_left_messages(
+    events: list[_LowerLeftMessage],
+    xuid_index: Callable[[int], int],
+    text_index: Callable[[str, str], int],
+) -> str:
+    previous_tick = 0
+    encoded: list[str] = []
+    for event in events:
+        flags = 1 if event.team_only else 0
+        encoded.append(
+            f"{_base36(event.tick - previous_tick)}.{_base36(event.kind)}"
+            f".{_base36(xuid_index(event.xuid))}.{_base36(event.team)}"
+            f".{_base36(flags)}.{_base36(text_index(event.name, event.text))}"
+        )
+        previous_tick = event.tick
+    return ",".join(encoded)
+
+
+_KILL_CASH_AWARD_BY_WEAPON = {
+    # Current classic-mode weapon kill awards. Unlisted weapons use the
+    # server's cash_player_killed_enemy_default ($300).
+    "awp": 100,
+    "cz75a": 100,
+    "knife": 1500,
+    "bayonet": 1500,
+    "nova": 900,
+    "mag7": 900,
+    "sawedoff": 900,
+    "xm1014": 900,
+    "mac10": 600,
+    "mp9": 600,
+    "mp7": 600,
+    "mp5sd": 600,
+    "ump45": 600,
+    "bizon": 600,
+    "taser": 0,
+}
+
+
+def _kill_cash_award(raw_weapon: Any) -> int:
+    weapon = str(raw_weapon or "").strip().lower()
+    if weapon.startswith("weapon_"):
+        weapon = weapon[7:]
+    if weapon.startswith("knife") or "bayonet" in weapon:
+        return 1500
+    return _KILL_CASH_AWARD_BY_WEAPON.get(weapon, 300)
+
+
+def _build_radio_payload(
+    parser: Any,
+    roster_by_xuid: Mapping[int, tuple[int, int]],
+) -> tuple[list[Any], dict[str, Any]]:
+    """Build one deterministic lower-left feed for the POV audience.
+
+    Some newer GOTV demos expose ``grenade_thrown`` while older platform demos
+    retain only ``weapon_fire``.  Both are compacted into one deterministic
+    timeline. Bomb plant/defuse radio, player chat, and teammate attack/kill
+    notices are carried beside it so Panorama never has to interleave an
+    Insight row stack with CS2's independently animated native alert pool.
+    """
+    try:
+        native_events = _parse_radio_event_rows(
+            parser,
+            "grenade_thrown",
+            roster_by_xuid,
+            native=True,
+        )
+    except Exception:  # noqa: BLE001 - event is absent in most demos
+        native_events = []
+    try:
+        rebuilt_events = _parse_radio_event_rows(
+            parser,
+            "weapon_fire",
+            roster_by_xuid,
+        )
+    except Exception:  # noqa: BLE001
+        rebuilt_events = []
+
+    throw_events, rebuilt_count = _merge_native_and_rebuilt_radio_events(
+        native_events,
+        rebuilt_events,
+    )
+    objective_events: list[_RadioEvent] = []
+    for event_name, kind in (
+        ("bomb_beginplant", _RADIO_KIND_PLANTING),
+        ("bomb_begindefuse", _RADIO_KIND_DEFUSING),
+    ):
+        try:
+            objective_events.extend(
+                _parse_radio_event_rows(
+                    parser,
+                    event_name,
+                    roster_by_xuid,
+                    fixed_kind=kind,
+                )
+            )
+        except Exception:  # noqa: BLE001 - objective radio is best effort
+            continue
+    radio_events = sorted(
+        throw_events + objective_events,
+        key=lambda event: event.tick,
+    )
+    tick_rate = _infer_demo_tick_rate(parser)
+    chat_events = _parse_chat_messages(parser)
+    team_notice_events = _parse_team_notice_messages(
+        parser,
+        roster_by_xuid,
+        tick_rate=tick_rate,
+    )
+    direct_server_events = _parse_direct_server_messages(parser)
+    message_events = sorted(
+        chat_events + team_notice_events + direct_server_events,
+        key=lambda event: event.tick,
+    )
+
+    xuid_table: list[str] = []
+    xuid_indexes: dict[int, int] = {}
+
+    def xuid_index(xuid: int) -> int:
+        if xuid not in xuid_indexes:
+            xuid_indexes[xuid] = len(xuid_table)
+            xuid_table.append(str(xuid))
+        return xuid_indexes[xuid]
+
+    locations = [""]
+    location_indexes = {"": 0}
+
+    def location_index(location: str) -> int:
+        if location not in location_indexes:
+            location_indexes[location] = len(locations)
+            locations.append(location)
+        return location_indexes[location]
+
+    encoded_radio = _encode_radio_events(
+        radio_events,
+        xuid_index,
+        location_index,
+    )
+
+    texts: list[list[str]] = []
+    text_indexes: dict[tuple[str, str], int] = {}
+
+    def text_index(name: str, text: str) -> int:
+        key = (name, text)
+        if key not in text_indexes:
+            text_indexes[key] = len(texts)
+            texts.append([name, text])
+        return text_indexes[key]
+
+    encoded_messages = _encode_lower_left_messages(
+        message_events,
+        xuid_index,
+        text_index,
+    )
+    payload = [
+        xuid_table,
+        locations,
+        encoded_radio,
+        texts,
+        encoded_messages,
+        int(round(tick_rate * 1000.0)),
+        _RADIO_PAYLOAD_VERSION,
+    ]
+    return payload, {
+        "radio_events": len(radio_events),
+        "radio_native_events": len(native_events),
+        "radio_rebuilt_events": rebuilt_count,
+        "radio_objective_events": len(objective_events),
+        "radio_chat_messages": len(chat_events),
+        "radio_server_messages": len(team_notice_events) + len(direct_server_events),
+        "radio_parse_failed": 0,
+    }
+
+
+_FLASH_BLIND_PAYLOAD_VERSION = 2
+_FLASH_BLIND_CLEAR = 0x1
+_FLASH_DURATION_EPSILON = 0.0001
+
+
+def _encode_flash_blind_events(
+    events: list[tuple[int, int, int, int, int]],
+) -> str:
+    """Delta-encode v2 flash state updates as base36.
+
+    Tokens are ``dt.duration_ticks.victim_index.flags.max_alpha``.  ``flags``
+    bit0 clears the victim's state (death / round reset).  Keeping clears in the
+    same stream makes backward seeks deterministic without relying on whatever
+    flash state CS2 happened to retain before ``demo_gototick``.
+    """
+    previous_tick = 0
+    encoded: list[str] = []
+    for tick, duration_ticks, victim_index, flags, max_alpha in events:
+        encoded.append(
+            f"{_base36(tick - previous_tick)}.{_base36(max(0, int(duration_ticks)))}"
+            f".{_base36(victim_index)}.{_base36(int(flags) & 0xFF)}"
+            f".{_base36(max(0, min(255, int(max_alpha))))}"
         )
         previous_tick = tick
     return ",".join(encoded)
@@ -513,55 +1139,129 @@ def _build_flash_blind_payload(
     parser: Any,
     roster_by_xuid: Mapping[int, tuple[int, int]],
 ) -> tuple[list[Any], dict[str, Any]]:
-    """Compact ``player_blind`` intervals for POV flash wash + tinnitus cues.
+    """Compact authoritative flash state updates for the POV HUD.
 
-    Demo has no separate tinnitus timeline; CS2 tinnitus tracks flash blindness.
-    ``player_blind.blind_duration`` (seconds) is the authoritative window.
+    ``blind_duration`` / ``flash_duration`` is already the server's merged state
+    after overlapping flashes.  A later positive update therefore replaces the
+    previous end-time; it is not a second independent opacity animation.  Native
+    ``player_blind`` rows are combined with exact property changes sampled only
+    around ``flashbang_detonate`` ticks.  Deaths and round resets are encoded as
+    explicit clears.
     """
-    try:
-        rows = parser.parse_event("player_blind")
-    except Exception as exc:  # noqa: BLE001
-        raise DemoVoiceHudError(f"could not parse player_blind for flash track: {exc}") from exc
-    if not isinstance(rows, Mapping):
-        raise DemoVoiceHudError("demoparser returned unsupported player_blind rows")
-
-    ticks = rows.get("tick")
-    victims = rows.get("user_steamid")
-    durations = rows.get("blind_duration")
-    if not isinstance(ticks, list) or not isinstance(victims, list) or not isinstance(durations, list):
-        raise DemoVoiceHudError("player_blind rows are missing tick/victim/duration fields")
-
     tick_rate = _infer_demo_tick_rate(parser)
+    round_starts, deaths_by_xuid = _flash_lifecycle_events(parser, roster_by_xuid)
+
+    try:
+        rows = parser.parse_event("player_blind", other=["blind_duration"])
+    except Exception:  # noqa: BLE001 - property fallback remains authoritative
+        rows = None
+
+    native_by_key: dict[tuple[int, int], tuple[int, int]] = {}
+    if isinstance(rows, Mapping):
+        ticks = rows.get("tick")
+        victims = rows.get("user_steamid")
+        durations = rows.get("blind_duration")
+        if isinstance(ticks, list) and isinstance(victims, list) and isinstance(durations, list):
+            count = min(len(ticks), len(victims), len(durations))
+            for i in range(count):
+                tick = _as_int(ticks[i])
+                victim = _as_positive_int(victims[i])
+                try:
+                    seconds = float(durations[i])
+                except (TypeError, ValueError, OverflowError):
+                    continue
+                if (
+                    tick is None
+                    or tick < 0
+                    or victim is None
+                    or victim not in roster_by_xuid
+                    or not seconds > 0.01
+                    or not _flash_victim_alive_at(
+                        victim,
+                        tick,
+                        round_starts=round_starts,
+                        deaths_by_xuid=deaths_by_xuid,
+                    )
+                ):
+                    continue
+                key = (tick, victim)
+                duration_ticks = max(1, int(round(seconds * tick_rate)))
+                previous = native_by_key.get(key)
+                if previous is None or duration_ticks > previous[0]:
+                    native_by_key[key] = (duration_ticks, 255)
+
+    property_updates: list[tuple[int, int, int, int, int]] = []
+    try:
+        property_updates = _flash_property_updates_from_detonations(
+            parser,
+            roster_by_xuid,
+            tick_rate=tick_rate,
+            round_starts=round_starts,
+            deaths_by_xuid=deaths_by_xuid,
+        )
+    except DemoVoiceHudError:
+        # Native rows remain usable when a stripped demo lacks tick properties.
+        property_updates = []
+
+    merged: dict[tuple[int, int], tuple[int, int]] = dict(native_by_key)
+    property_fills = 0
+    for update_tick, duration_ticks, victim, max_alpha, detonate_tick in property_updates:
+        native_key = (detonate_tick, victim)
+        if native_key in merged:
+            # The property is the final state after every same-tick blind event.
+            merged[native_key] = (duration_ticks, max_alpha)
+            continue
+        merged[(update_tick, victim)] = (duration_ticks, max_alpha)
+        property_fills += 1
+
+    used_tick_fallback = property_fills > 0
+    if not merged:
+        coarse_events = _flash_blind_events_from_tick_properties(
+            parser,
+            roster_by_xuid,
+            tick_rate=tick_rate,
+        )
+        for tick, duration_ticks, victim in coarse_events:
+            merged[(tick, victim)] = (duration_ticks, 255)
+        used_tick_fallback = True
+
+    flashed_victims = {victim for _tick, victim in merged}
+    raw_updates: list[tuple[int, int, int, int, int]] = [
+        (tick, duration_ticks, victim, 0, max_alpha)
+        for (tick, victim), (duration_ticks, max_alpha) in merged.items()
+    ]
+    for victim in flashed_victims:
+        for round_start_tick in round_starts:
+            raw_updates.append((round_start_tick, 0, victim, _FLASH_BLIND_CLEAR, 0))
+        for death_tick in deaths_by_xuid.get(victim, []):
+            raw_updates.append((death_tick, 0, victim, _FLASH_BLIND_CLEAR, 0))
 
     xuid_table: list[str] = []
     xuid_index: dict[int, int] = {}
-    events: list[tuple[int, int, int]] = []
-    count = min(len(ticks), len(victims), len(durations))
-    for i in range(count):
-        tick = _as_int(ticks[i])
-        victim = _as_positive_int(victims[i])
-        try:
-            seconds = float(durations[i])
-        except (TypeError, ValueError):
-            continue
-        if tick is None or tick < 0 or victim is None or victim not in roster_by_xuid:
-            continue
-        if seconds <= 0.05:
-            continue
-        duration_ticks = max(1, int(round(seconds * tick_rate)))
+    events: list[tuple[int, int, int, int, int]] = []
+    # Positive updates at a tick must run before a same-tick death clear.
+    raw_updates.sort(
+        key=lambda item: (item[0], 1 if (item[3] & _FLASH_BLIND_CLEAR) else 0, item[2])
+    )
+    for tick, duration_ticks, victim, flags, max_alpha in raw_updates:
         if victim not in xuid_index:
             xuid_index[victim] = len(xuid_table)
             xuid_table.append(str(victim))
-        events.append((tick, duration_ticks, xuid_index[victim]))
+        events.append((tick, duration_ticks, xuid_index[victim], flags, max_alpha))
 
-    events.sort(key=lambda item: item[0])
     if not events:
         raise DemoVoiceHudError("demo contains no usable player_blind flash events")
 
-    payload = [xuid_table, _encode_flash_blind_events(events)]
+    payload = [
+        xuid_table,
+        _encode_flash_blind_events(events),
+        _FLASH_BLIND_PAYLOAD_VERSION,
+        int(round(tick_rate * 1000.0)),
+    ]
     return payload, {
-        "flash_blind_events": len(events),
+        "flash_blind_events": len(merged),
         "flash_blind_parse_failed": 0,
+        "flash_blind_tick_fallback": int(used_tick_fallback),
     }
 
 
@@ -586,6 +1286,257 @@ def _demo_tick_bounds(parser: Any) -> tuple[int, int]:
         only = candidates[0]
         return only, only + 64 * 60
     raise DemoVoiceHudError("demo contains no round events for radar tick bounds")
+
+
+def _flash_lifecycle_events(
+    parser: Any,
+    roster_by_xuid: Mapping[int, tuple[int, int]],
+) -> tuple[list[int], dict[int, list[int]]]:
+    """Return round resets and victim death ticks used by the flash state machine."""
+    round_starts: list[int] = []
+    try:
+        rows = parser.parse_event("round_start")
+    except Exception:  # noqa: BLE001 - lifecycle filtering is best effort
+        rows = None
+    ticks = rows.get("tick") if isinstance(rows, Mapping) else None
+    if isinstance(ticks, list):
+        round_starts = sorted({
+            tick
+            for tick in (_as_int(raw_tick) for raw_tick in ticks)
+            if tick is not None and tick >= 0
+        })
+
+    deaths_by_xuid: dict[int, list[int]] = defaultdict(list)
+    try:
+        rows = parser.parse_event("player_death")
+    except Exception:  # noqa: BLE001
+        rows = None
+    ticks = rows.get("tick") if isinstance(rows, Mapping) else None
+    victims = rows.get("user_steamid") if isinstance(rows, Mapping) else None
+    if isinstance(ticks, list) and isinstance(victims, list):
+        for raw_tick, raw_victim in zip(ticks, victims):
+            tick = _as_int(raw_tick)
+            victim = _as_positive_int(raw_victim)
+            if (
+                tick is None
+                or tick < 0
+                or victim is None
+                or victim not in roster_by_xuid
+            ):
+                continue
+            deaths_by_xuid[victim].append(tick)
+    for death_ticks in deaths_by_xuid.values():
+        death_ticks.sort()
+    return round_starts, dict(deaths_by_xuid)
+
+
+def _flash_victim_alive_at(
+    victim: int,
+    tick: int,
+    *,
+    round_starts: list[int],
+    deaths_by_xuid: Mapping[int, list[int]],
+) -> bool:
+    """Infer ordinary competitive respawns and reject blind rows after death."""
+    prior_deaths = [death for death in deaths_by_xuid.get(victim, []) if death < tick]
+    if not prior_deaths:
+        return True
+    last_death = prior_deaths[-1]
+    return any(round_tick > last_death and round_tick <= tick for round_tick in round_starts)
+
+
+def _flash_property_updates_from_detonations(
+    parser: Any,
+    roster_by_xuid: Mapping[int, tuple[int, int]],
+    *,
+    tick_rate: float,
+    round_starts: list[int],
+    deaths_by_xuid: Mapping[int, list[int]],
+) -> list[tuple[int, int, int, int, int]]:
+    """Read final pawn flash states around exact flashbang detonation ticks.
+
+    GOTV demos that omit ``player_blind`` still retain ``m_flFlashDuration``.
+    Sampling ``t-1/t/t+1`` for every detonation finds its network transition
+    without a costly 16 Hz whole-match scan and preserves the authored tick to
+    within one demo tick.  The returned final item is the source detonation tick
+    used to merge a property transition with a native event when both exist.
+    """
+    try:
+        detonations = parser.parse_event("flashbang_detonate")
+    except Exception as exc:  # noqa: BLE001
+        raise DemoVoiceHudError(f"could not parse flashbang_detonate: {exc}") from exc
+    detonation_ticks_raw = detonations.get("tick") if isinstance(detonations, Mapping) else None
+    if not isinstance(detonation_ticks_raw, list):
+        return []
+    detonation_ticks = sorted(
+        {
+            tick
+            for tick in (_as_int(raw_tick) for raw_tick in detonation_ticks_raw)
+            if tick is not None and tick >= 0
+        }
+    )
+    if not detonation_ticks:
+        return []
+
+    sample_ticks = sorted(
+        {
+            candidate
+            for detonation_tick in detonation_ticks
+            for candidate in (detonation_tick - 1, detonation_tick, detonation_tick + 1)
+            if candidate >= 0
+        }
+    )
+    try:
+        rows = parser.parse_ticks(
+            ["steamid", "flash_duration", "flash_max_alpha", "is_alive"],
+            ticks=sample_ticks,
+        )
+    except Exception as exc:  # noqa: BLE001
+        raise DemoVoiceHudError(f"could not parse flash state at detonations: {exc}") from exc
+    if not isinstance(rows, Mapping):
+        raise DemoVoiceHudError("demoparser returned unsupported flash detonation state")
+
+    ticks = rows.get("tick")
+    victims = rows.get("steamid")
+    durations = rows.get("flash_duration")
+    if not isinstance(ticks, list) or not isinstance(victims, list) or not isinstance(durations, list):
+        raise DemoVoiceHudError("flash detonation state is missing tick/steamid/duration")
+    count = min(len(ticks), len(victims), len(durations))
+    alphas = rows.get("flash_max_alpha")
+    alive_values = rows.get("is_alive")
+    snapshots: dict[tuple[int, int], tuple[float, int, bool | None]] = {}
+    for index in range(count):
+        tick = _as_int(ticks[index])
+        victim = _as_positive_int(victims[index])
+        if tick is None or victim is None or victim not in roster_by_xuid:
+            continue
+        try:
+            duration = float(durations[index] or 0.0)
+        except (TypeError, ValueError, OverflowError):
+            duration = 0.0
+        max_alpha = 255
+        if isinstance(alphas, list) and index < len(alphas):
+            try:
+                max_alpha = int(round(float(alphas[index])))
+            except (TypeError, ValueError, OverflowError):
+                max_alpha = 255
+        max_alpha = max(0, min(255, max_alpha))
+        alive: bool | None = None
+        if isinstance(alive_values, list) and index < len(alive_values):
+            alive = bool(alive_values[index])
+        snapshots[(tick, victim)] = (max(0.0, duration), max_alpha, alive)
+
+    updates: list[tuple[int, int, int, int, int]] = []
+    last_snapshot_by_xuid: dict[int, tuple[float, int, bool | None]] = {}
+    for detonation_tick in detonation_ticks:
+        for victim in roster_by_xuid:
+            before = snapshots.get((detonation_tick - 1, victim))
+            if before is None:
+                before = last_snapshot_by_xuid.get(victim)
+            chosen_tick: int | None = None
+            chosen: tuple[float, int, bool | None] | None = None
+            for candidate_tick in (detonation_tick, detonation_tick + 1):
+                candidate = snapshots.get((candidate_tick, victim))
+                if candidate is None:
+                    continue
+                if before is None:
+                    changed = candidate[0] > 0.01
+                else:
+                    changed = (
+                        candidate[0] > 0.01
+                        and (
+                            before[0] <= 0.01
+                            or abs(candidate[0] - before[0]) > _FLASH_DURATION_EPSILON
+                        )
+                    )
+                if changed:
+                    chosen_tick = candidate_tick
+                    chosen = candidate
+                    break
+            latest = snapshots.get((detonation_tick + 1, victim))
+            if latest is None:
+                latest = snapshots.get((detonation_tick, victim))
+            if latest is not None:
+                last_snapshot_by_xuid[victim] = latest
+            if chosen_tick is None or chosen is None:
+                continue
+            duration, max_alpha, alive = chosen
+            if alive is False or not _flash_victim_alive_at(
+                victim,
+                chosen_tick,
+                round_starts=round_starts,
+                deaths_by_xuid=deaths_by_xuid,
+            ):
+                continue
+            updates.append(
+                (
+                    chosen_tick,
+                    max(1, int(round(duration * tick_rate))),
+                    victim,
+                    max_alpha,
+                    detonation_tick,
+                )
+            )
+    return updates
+
+
+def _flash_blind_events_from_tick_properties(
+    parser: Any,
+    roster_by_xuid: Mapping[int, tuple[int, int]],
+    *,
+    tick_rate: float,
+) -> list[tuple[int, int, int]]:
+    """Rebuild flash starts from pawn ``flash_duration`` state transitions."""
+    start_tick, end_tick = _demo_tick_bounds(parser)
+    probe_hz = 16
+    stride = max(1, int(round(max(1.0, tick_rate) / probe_hz)))
+    sample_ticks = list(range(start_tick, end_tick + 1, stride))
+    if not sample_ticks:
+        return []
+    try:
+        rows = parser.parse_ticks(["steamid", "flash_duration"], ticks=sample_ticks)
+    except Exception as exc:  # noqa: BLE001
+        raise DemoVoiceHudError(f"could not parse flash_duration tick state: {exc}") from exc
+    if not isinstance(rows, Mapping):
+        raise DemoVoiceHudError("demoparser returned unsupported flash_duration tick state")
+
+    ticks = rows.get("tick")
+    victims = rows.get("steamid")
+    durations = rows.get("flash_duration")
+    if not isinstance(ticks, list) or not isinstance(victims, list) or not isinstance(durations, list):
+        raise DemoVoiceHudError("flash_duration tick columns are missing")
+    if not ticks or len(ticks) != len(victims) or len(ticks) != len(durations):
+        raise DemoVoiceHudError("flash_duration tick columns are empty or misaligned")
+
+    samples: list[tuple[int, int, float]] = []
+    for raw_tick, raw_victim, raw_duration in zip(ticks, victims, durations):
+        tick = _as_int(raw_tick)
+        victim = _as_positive_int(raw_victim)
+        try:
+            seconds = float(raw_duration or 0)
+        except (TypeError, ValueError, OverflowError):
+            seconds = 0.0
+        if tick is None or victim is None or victim not in roster_by_xuid:
+            continue
+        samples.append((tick, victim, seconds if seconds > 0.01 else 0.0))
+    samples.sort(key=lambda item: (item[0], item[1]))
+
+    previous_by_xuid: dict[int, float] = {}
+    events: list[tuple[int, int, int, int]] = []
+    for tick, victim, seconds in samples:
+        previous = previous_by_xuid.get(victim, 0.0)
+        # flash_duration is stable between flash applications. A transition from
+        # zero or to a materially different positive value represents a new hit,
+        # including a weaker overlapping flash.
+        changed = seconds > 0.01 and (
+            previous <= 0.01 or abs(seconds - previous) > _FLASH_DURATION_EPSILON
+        )
+        if changed:
+            events.append((tick, max(1, int(round(seconds * tick_rate))), victim))
+        previous_by_xuid[victim] = seconds
+    if not events:
+        raise DemoVoiceHudError("demo contains no usable flash_duration tick transitions")
+    return events
 
 
 def _encode_radar_samples(
@@ -617,6 +1568,7 @@ def _build_radar_payload(
     roster_by_xuid: Mapping[int, tuple[int, int]],
     *,
     sample_hz: int = RADAR_SAMPLE_HZ,
+    input_tracks: Any = None,
 ) -> tuple[list[Any], dict[str, Any]]:
     """Extract an 8Hz XUID-bound radar track for Panorama interpolation."""
     try:
@@ -662,6 +1614,15 @@ def _build_radar_payload(
     if not sample_ticks:
         raise DemoVoiceHudError("radar sample tick list is empty")
 
+    action_probe_fields = [
+        "Z",
+        "is_in_reload",
+        "is_walking",
+        "duck_amount",
+        "move_type",
+        _GROUND_ENTITY_FIELD,
+        _LAST_JUMP_TICK_FIELD,
+    ]
     field_sets = [
         [
             "X",
@@ -675,6 +1636,7 @@ def _build_radar_payload(
             "inventory",
             "spotted",
             "approximate_spotted_by",
+            *action_probe_fields,
         ],
         [
             "X",
@@ -687,6 +1649,7 @@ def _build_radar_payload(
             "inventory",
             "spotted",
             "approximate_spotted_by",
+            *action_probe_fields,
         ],
         ["X", "Y", "yaw", "steamid", "team_num", "is_alive", "player_color", "has_c4", "inventory"],
         ["X", "Y", "yaw", "steamid", "team_num", "is_alive", "player_color", "inventory"],
@@ -717,6 +1680,13 @@ def _build_radar_payload(
     inventories = rows.get("inventory", [])
     spotteds = rows.get("spotted", [])
     spotted_by = rows.get("approximate_spotted_by", [])
+    zs = rows.get("Z", [])
+    reloads = rows.get("is_in_reload", [])
+    walkings = rows.get("is_walking", [])
+    duck_amounts = rows.get("duck_amount", [])
+    move_types = rows.get("move_type", [])
+    ground_entities = rows.get(_GROUND_ENTITY_FIELD, [])
+    last_jump_ticks = rows.get(_LAST_JUMP_TICK_FIELD, [])
     column_lengths = [len(col) for col in (ticks, xuids, xs, ys, yaws) if isinstance(col, list)]
     if not column_lengths or len(set(column_lengths)) != 1:
         raise DemoVoiceHudError("radar tick columns are missing or misaligned")
@@ -759,6 +1729,35 @@ def _build_radar_payload(
 
     samples_by_xuid: dict[int, dict[int, tuple[int, int, int, int]]] = defaultdict(dict)
     color_by_xuid: dict[int, int] = {}
+    observed_actions: list[tuple[str, int, int]] = []
+    # ``player_jump`` is absent from common GOTV demos. The exact UserCmd track
+    # below is preferred, while pawn movement fields preserve jumps and running
+    # intervals when that track was stripped as well. ``player_footstep`` rows
+    # are also consumed later as exact anchors; these 8Hz states fill the longer
+    # gaps in producers which retain only a sparse subset of those events.
+    observed_state: dict[
+        int,
+        tuple[
+            int,
+            int,
+            float | None,
+            float,
+            bool,
+            bool,
+            int | None,
+            int | None,
+            int,
+        ],
+    ] = {}
+
+    def _grounded(raw: int | None) -> bool | None:
+        if raw is None:
+            return None
+        # Source 2 serializes an invalid entity handle as 0xFFFFFF (and some
+        # parser builds widen it to 0xFFFFFFFF). Every other retained handle is
+        # a concrete ground entity, including the world handle used on floors.
+        return raw not in (-1, 0xFFFFFF, 0xFFFFFFFF)
+
     for index in range(row_count):
         xuid = _as_positive_int(xuids[index] if index < len(xuids) else None)
         tick = _as_int(ticks[index] if index < len(ticks) else None)
@@ -798,6 +1797,120 @@ def _build_radar_payload(
             | (16 if team == 3 else 0)
         )
         samples_by_xuid[xuid][tick] = (x, y, yaw, flags)
+
+        z: float | None = None
+        if isinstance(zs, list) and index < len(zs):
+            try:
+                z = float(zs[index])
+            except (TypeError, ValueError, OverflowError):
+                z = None
+        reload_active = bool(
+            reloads[index]
+            if isinstance(reloads, list) and index < len(reloads)
+            else False
+        )
+        walking = bool(
+            walkings[index]
+            if isinstance(walkings, list) and index < len(walkings)
+            else False
+        )
+        try:
+            duck_amount = float(
+                duck_amounts[index]
+                if isinstance(duck_amounts, list) and index < len(duck_amounts)
+                else 0.0
+            )
+        except (TypeError, ValueError, OverflowError):
+            duck_amount = 0.0
+        move_type = _as_int(
+            move_types[index]
+            if isinstance(move_types, list) and index < len(move_types)
+            else None
+        )
+        ground_entity = _as_int(
+            ground_entities[index]
+            if isinstance(ground_entities, list) and index < len(ground_entities)
+            else None
+        )
+        last_jump_tick = _as_int(
+            last_jump_ticks[index]
+            if isinstance(last_jump_ticks, list) and index < len(last_jump_ticks)
+            else None
+        )
+        alive = bool(alive_raw)
+        previous = observed_state.get(xuid)
+        vertical_delta = 0.0
+        if previous is not None:
+            (
+                previous_x,
+                previous_y,
+                previous_z,
+                previous_delta,
+                previous_alive,
+                previous_reload,
+                previous_jump_tick,
+                previous_ground_entity,
+                previous_tick,
+            ) = previous
+            if alive and previous_alive:
+                if reload_active and not previous_reload:
+                    observed_actions.append(("reload", tick, xuid))
+                horizontal_delta = math.hypot(x - previous_x, y - previous_y)
+                tick_delta = max(1, tick - previous_tick)
+                horizontal_speed = horizontal_delta * tick_rate / tick_delta
+                if z is not None and previous_z is not None:
+                    vertical_delta = z - previous_z
+                previous_grounded = _grounded(previous_ground_entity)
+                current_grounded = _grounded(ground_entity)
+                jump_marker_changed = (
+                    previous_jump_tick is not None
+                    and last_jump_tick is not None
+                    and last_jump_tick != previous_jump_tick
+                )
+                took_off = previous_grounded is True and current_grounded is False
+                rising_fallback = (
+                    z is not None
+                    and previous_z is not None
+                    and vertical_delta >= 20.0
+                    and previous_delta < 20.0
+                    and horizontal_delta < 64.0
+                )
+                jump_marker_available = (
+                    previous_jump_tick is not None and last_jump_tick is not None
+                )
+                if (jump_marker_changed and took_off) or (
+                    (not jump_marker_available or previous_grounded is None)
+                    and rising_fallback
+                ):
+                    # The state changes inside this 8Hz interval. UserCmd edges
+                    # dedupe this approximation when exact input was retained.
+                    observed_actions.append(("jump", max(0, tick - min(stride, 4)), xuid))
+
+                current_grounded = _grounded(ground_entity)
+                on_foot = move_type in (None, 2)
+                # Running footsteps begin well above silent Shift/crouch speed.
+                # A bounded speed also rejects round-start teleports and POV
+                # correction jumps. Exact player_footstep rows remain anchors
+                # for unusual surfaces and transitions outside this gate.
+                if (
+                    not walking
+                    and duck_amount < 0.5
+                    and on_foot
+                    and current_grounded is not False
+                    and 125.0 <= horizontal_speed <= 340.0
+                ):
+                    observed_actions.append(("step", tick, xuid))
+        observed_state[xuid] = (
+            x,
+            y,
+            z,
+            vertical_delta,
+            alive,
+            reload_active,
+            last_jump_tick,
+            ground_entity,
+            tick,
+        )
         if xuid not in color_by_xuid and isinstance(colors, list) and index < len(colors):
             color_by_xuid[xuid] = _player_color_slot(colors[index])
         elif (
@@ -907,7 +2020,12 @@ def _build_radar_payload(
 
     planted_bombs = _build_planted_bomb_track(parser, roster_by_xuid)
     dropped_bombs = _build_dropped_bomb_track(parser, roster_by_xuid)
-    player_sounds = _build_player_sound_track(parser, roster_by_xuid)
+    player_sounds = _build_player_sound_track(
+        parser,
+        roster_by_xuid,
+        input_tracks=input_tracks,
+        observed_actions=observed_actions,
+    )
     occlusion = _build_radar_occlusion_mask(map_name)
 
     radar = [
@@ -928,6 +2046,9 @@ def _build_radar_payload(
         "radar_map": map_name,
         "radar_planted_bombs": len(planted_bombs),
         "radar_player_sounds": len(player_sounds[1].split(",")) if player_sounds and player_sounds[1] else 0,
+        "radar_native_sound_complete": int(
+            bool(player_sounds and len(player_sounds) >= 3 and player_sounds[2])
+        ),
         "radar_occlusion_grid": int(occlusion[0]) if occlusion else 0,
     }
     return radar, stats
@@ -978,23 +2099,48 @@ def _is_gun_weapon_name(weapon: Any) -> bool:
     return not any(token in text for token in blocked)
 
 
-def _weapon_fire_sound_radius(weapon: Any, silenced: Any) -> int | None:
-    """Stock-ish audible radius for radar rings synthesized from ``weapon_fire``.
+def _is_knife_weapon_name(weapon: Any) -> bool:
+    text = _normalize_weapon_name(weapon)
+    return "knife" in text or "bayonet" in text
 
-    Utility throws also get a thin ring (native bounce mid-radii are filtered from
-    ``player_sound``; synthesize the throw itself from ``weapon_fire``).
+
+def _is_fire_util_weapon_name(weapon: Any) -> bool:
+    text = _normalize_weapon_name(weapon)
+    return "molotov" in text or "incgrenade" in text or "incendiary" in text
+
+
+def _weapon_fire_sound_radius(weapon: Any, silenced: Any) -> int | None:
+    """Return the HUD sound-circle radius attributable to ``weapon_fire``.
+
+    Audio propagation distance is not the CHudRadar circle radius. Retained
+    native demos do not pair ordinary gun ``weapon_fire`` rows with a
+    ``player_sound`` circle, so gun/taser shots only drive the combat border.
+    Knife slash and fire-utility action layers are the two broadcast circles
+    which can be reconstructed from this event stream. Ordinary grenade pin
+    pulls remain local-only.
     """
-    if _is_util_weapon_name(weapon):
-        # Throw pull/release — thinner/shorter than gunfire, not landing-loud.
-        return 700
-    if not _is_gun_weapon_name(weapon):
-        return None
+    del silenced
     text = _normalize_weapon_name(weapon).replace("weapon_", "")
-    if bool(silenced) or "silencer" in text:
+    if _is_knife_weapon_name(text):
         return 800
-    if text in ("awp", "ssg08", "g3sg1", "scar20", "negev", "m249"):
-        return 1400
-    return 1100
+    if _is_fire_util_weapon_name(weapon):
+        return 1100
+    return None
+
+
+def _weapon_fire_sound_specs(weapon: Any, silenced: Any) -> tuple[tuple[int, int], ...]:
+    """Return missing action-layer ``(radius, duration_ms)`` rows.
+
+    Knife swing playback follows the two authored distance-curve layers of
+    ``Weapon_Knife.Slash``: the 352u inner ring and the 800u broadcast radius.
+    Native 1000u Hit/Stab rows, when present, remain separate impact layers.
+    """
+    radius = _weapon_fire_sound_radius(weapon, silenced)
+    if radius is None:
+        return ()
+    if _is_knife_weapon_name(weapon):
+        return ((352, 100), (radius, 100))
+    return ((radius, 100),)
 
 
 def _player_sound_flags(
@@ -1003,71 +2149,62 @@ def _player_sound_flags(
     radius: int,
     kind: str = "auto",
 ) -> int:
-    """bit0 = footstep, bit1 = loud visual (``.player-sound-max`` / thick border).
+    """Return compact radar-event flags.
 
-    Native hudradar.css: default ``.PlayerSound`` is a thin 1px ring; landing uses
-    ``.player-sound-max`` (3px flash). Jump impulses are tiny non-step radii (~98)
-    and stay thin. Gunfire is also a thin ring — only landing-like loud movement
-    (non-step radius >= 1000) gets the thick flash. Mid radii (~500–999) are
-    utility / bounce noise and are filtered out before flags are applied.
+    Bit 0 is the server-provided ``step`` bit. Bit 1 remains reserved for old
+    payloads. Bit 2 marks a gunshot which drives only the live radar combat
+    border; it must never be painted as a centered PlayerSound circle.
     """
-    flags = 1 if is_step else 0
-    if kind == "weapon":
-        return flags
-    if kind == "loud" or (kind == "auto" and (not is_step) and radius >= 1000):
-        flags |= 2
-    return flags
+    del radius
+    return (1 if is_step else 0) | (4 if kind == "combat" else 0)
 
 
 def _build_player_sound_track(
     parser: Any,
     roster_by_xuid: Mapping[int, tuple[int, int]],
+    *,
+    input_tracks: Any = None,
+    observed_actions: Iterable[tuple[str, int, int]] = (),
 ) -> list[Any]:
-    """Compact ``player_sound`` (+ synthesized gunfire) events for radar rings.
+    """Compact and reconcile radar sound-ring sources.
 
-    Returns ``[xuid_table, "dt.xi.radius.durMs.flags,..."]`` where ``xi`` indexes
-    ``xuid_table`` and ``flags`` is ``bit0=step, bit1=loudMax``. Missing demos
-    yield ``[[], ""]``.
+    Returns ``[xuid_table, "dt.xi.radius.durMs.flags,...", native_complete]``
+    where ``xi`` indexes ``xuid_table`` and ``flags`` is ``bit0=step,
+    bit1=legacy loudMax``. ``native_complete`` is true only when the demo has a
+    fully aligned, valid native ``player_sound`` table. This is a structural
+    source-quality flag, not a promise that the producer retained every action
+    which can drive CS2's live sound HUD. Local-only pickup rows are excluded,
+    while missing knife/jump/reload rows are reconciled from their independent
+    action streams and player state.
     """
     events: list[tuple[int, int, int, int, int]] = []
 
-    # Equip/buy/pickup clicks show up as non-step ~1100 ``player_sound`` rows but
-    # are not audible movement/gun cues on the live radar — suppress those.
-    equip_ticks: set[tuple[int, int]] = set()
-    for event_name, silent_key in (
-        ("item_pickup", "silent"),
-        ("item_purchase", None),
-    ):
-        try:
-            rows = parser.parse_event(event_name)
-        except Exception:  # noqa: BLE001
-            continue
-        if not isinstance(rows, Mapping):
-            continue
-        ticks = rows.get("tick", [])
-        xuids = rows.get("user_steamid", rows.get("steamid", []))
-        silent = rows.get(silent_key, []) if silent_key else None
-        if not isinstance(ticks, list):
-            continue
-        for index, raw_tick in enumerate(ticks):
-            tick = _as_int(raw_tick)
-            xuid = None
-            if isinstance(xuids, list) and index < len(xuids):
-                xuid = _as_positive_int(xuids[index])
-            if tick is None or xuid is None or xuid not in roster_by_xuid:
-                continue
-            if isinstance(silent, list) and index < len(silent) and bool(silent[index]):
-                continue
-            for delta in range(-8, 9):
-                equip_ticks.add((tick + delta, xuid))
-
-    def _near_equip_sound(tick: int, xuid: int) -> bool:
-        return (tick, xuid) in equip_ticks
+    # ``player_sound`` is a transport table, not a final HUD decision. CS2's
+    # Player.PickupWeapon event is audible locally but has display_broadcast
+    # disabled. GOTV still commonly records it as a 1000/1100u, 100ms row at
+    # the exact item_pickup tick, so keep the action context needed to reject
+    # that false broadcast circle. The exact-tick match avoids suppressing an
+    # unrelated movement or combat sound merely near a pickup.
+    pickup_ticks: set[tuple[int, int]] = set()
+    try:
+        pickup_rows = parser.parse_event("item_pickup")
+    except Exception:  # noqa: BLE001
+        pickup_rows = None
+    if isinstance(pickup_rows, Mapping):
+        raw_pickup_ticks = pickup_rows.get("tick", [])
+        raw_pickup_xuids = pickup_rows.get("user_steamid", [])
+        if isinstance(raw_pickup_ticks, list) and isinstance(raw_pickup_xuids, list):
+            for raw_tick, raw_xuid in zip(raw_pickup_ticks, raw_pickup_xuids):
+                tick = _as_int(raw_tick)
+                xuid = _as_positive_int(raw_xuid)
+                if tick is not None and tick >= 0 and xuid is not None:
+                    pickup_ticks.add((tick, xuid))
 
     try:
         rows = parser.parse_event("player_sound")
     except Exception:  # noqa: BLE001
         rows = None
+    native_complete = _native_player_sound_rows_complete(rows, roster_by_xuid)
     if isinstance(rows, Mapping):
         ticks = rows.get("tick", [])
         xuids = rows.get("user_steamid", [])
@@ -1093,14 +2230,6 @@ def _build_player_sound_track(
                 if radius <= 0:
                     continue
                 is_step = bool(steps[index]) if isinstance(steps, list) and index < len(steps) else False
-                # Mid non-step (~597) is sniper scope-open on CS2 demos; keep that
-                # band. Other mid radii are util bounce / land-on-you noise.
-                is_scope = (not is_step) and 580 <= radius <= 620
-                if (not is_step) and 200 <= radius < 1000 and not is_scope:
-                    continue
-                # Buy/equip/pickup clicks masquerade as non-step ~1100 sounds.
-                if (not is_step) and radius >= 1000 and _near_equip_sound(tick, xuid):
-                    continue
                 try:
                     duration = (
                         float(durations[index])
@@ -1109,25 +2238,74 @@ def _build_player_sound_track(
                     )
                 except (TypeError, ValueError, OverflowError):
                     duration = 0.1
-                duration_ms = max(50, int(round(duration * 1000)))
-                # Scope click is ~100ms in the demo; stretch so the ring is visible.
-                if is_scope and duration_ms < 280:
-                    duration_ms = 280
+                duration_ms = max(1, int(round(duration * 1000)))
+                if (
+                    not is_step
+                    and (tick, xuid) in pickup_ticks
+                    and radius in (1000, 1100)
+                    and duration_ms <= 160
+                ):
+                    continue
                 flags = _player_sound_flags(is_step=is_step, radius=radius)
-                if (flags & 2) != 0 and duration_ms < 400:
-                    duration_ms = 400
                 events.append((tick, xuid, radius, duration_ms, flags))
 
-    # GOTV ``player_sound`` almost never records gunshots; synthesize from weapon_fire.
-    existing_loud: set[tuple[int, int]] = {
-        (tick, xuid)
-        for tick, xuid, _radius, _dur, flags in events
-        if (flags & 2) != 0
-    }
+    native_events = tuple(events)
+
+    def _has_nearby_native_sound(xuid: int, tick: int, radius: int, window: int) -> bool:
+        return any(
+            event_xuid == xuid
+            and event_radius == radius
+            and not (event_flags & 1)
+            and abs(event_tick - tick) <= window
+            for event_tick, event_xuid, event_radius, _duration, event_flags in native_events
+        )
+
+    # Decode UserCmd rising edges once. For a held grenade, M1 rises when the
+    # player starts the pull/arming animation while ``weapon_fire`` arrives on
+    # release. Matching a later fire-utility event back to that edge preserves
+    # the visible circle's action timing. Jump/reload reuse the same edge pass.
+    input_action_edges: list[tuple[str, int, int]] = []
+    fire_press_ticks_by_xuid: dict[int, list[int]] = defaultdict(list)
+    if isinstance(input_tracks, list):
+        for raw_track in input_tracks:
+            if not isinstance(raw_track, list) or len(raw_track) < 2:
+                continue
+            xuid = _as_positive_int(raw_track[0])
+            encoded = raw_track[1]
+            if (
+                xuid is None
+                or xuid not in roster_by_xuid
+                or not isinstance(encoded, str)
+                or not _ENCODED_INPUT_TRACK.fullmatch(encoded)
+            ):
+                continue
+            previous_tick = 0
+            previous_mask = 0
+            for token in encoded.split(","):
+                fields = token.split(".")
+                try:
+                    tick = previous_tick + int(fields[0], 36)
+                    mask = int(fields[1], 36)
+                except (IndexError, TypeError, ValueError, OverflowError):
+                    break
+                for kind, bit in (("jump", 4), ("reload", 7)):
+                    if (mask & (1 << bit)) and not (previous_mask & (1 << bit)):
+                        input_action_edges.append((kind, tick, xuid))
+                if (mask & (1 << 8)) and not (previous_mask & (1 << 8)):
+                    fire_press_ticks_by_xuid[xuid].append(tick)
+                previous_tick = tick
+                previous_mask = mask
+
+    # ``weapon_fire`` is an independent event stream. Reconcile knife slashes
+    # and the fire-utility ignition/throw layer, while carrying ordinary shots
+    # as combat-border-only markers. Audio propagation range (formerly 9000u)
+    # is never a centered radar-circle radius.
     try:
         fires = parser.parse_event("weapon_fire")
     except Exception:  # noqa: BLE001
         fires = None
+    used_fire_presses: set[tuple[int, int]] = set()
+    fire_press_window = max(1, int(round(_infer_demo_tick_rate(parser) * 8.0)))
     if isinstance(fires, Mapping):
         ticks = fires.get("tick", [])
         xuids = fires.get("user_steamid", [])
@@ -1143,27 +2321,106 @@ def _build_player_sound_track(
                     continue
                 weapon = weapons[index] if isinstance(weapons, list) and index < len(weapons) else ""
                 sil = silenced[index] if isinstance(silenced, list) and index < len(silenced) else False
-                radius = _weapon_fire_sound_radius(weapon, sil)
-                if radius is None:
+                normalized_weapon = _normalize_weapon_name(weapon)
+                if _is_gun_weapon_name(weapon) or "taser" in normalized_weapon:
+                    events.append(
+                        (
+                            tick,
+                            xuid,
+                            1,
+                            100,
+                            _player_sound_flags(
+                                is_step=False,
+                                radius=1,
+                                kind="combat",
+                            ),
+                        )
+                    )
                     continue
-                is_util = _is_util_weapon_name(weapon)
-                # Gunfire dedupes against existing loud cues; util throws are thin
-                # rings and should still show next to footsteps / landings.
-                if (not is_util) and any(
-                    (tick + delta, xuid) in existing_loud for delta in range(-2, 3)
-                ):
+                reconcile_complete = (
+                    _is_knife_weapon_name(weapon)
+                    or _is_fire_util_weapon_name(weapon)
+                )
+                if native_complete and not reconcile_complete:
                     continue
-                flags = _player_sound_flags(is_step=False, radius=radius, kind="weapon")
-                duration_ms = 160 if is_util else 100
-                events.append((tick, xuid, radius, duration_ms, flags))
-                if not is_util:
-                    existing_loud.add((tick, xuid))
+                action_tick = tick
+                if _is_fire_util_weapon_name(weapon):
+                    candidates = [
+                        press_tick
+                        for press_tick in fire_press_ticks_by_xuid.get(xuid, [])
+                        if press_tick <= tick
+                        and tick - press_tick <= fire_press_window
+                        and (xuid, press_tick) not in used_fire_presses
+                    ]
+                    if candidates:
+                        action_tick = max(candidates)
+                        used_fire_presses.add((xuid, action_tick))
+                for radius, duration_ms in _weapon_fire_sound_specs(weapon, sil):
+                    # Match by authored radius as well as owner/tick. A nearby
+                    # impact/mechanism row must not suppress another knife layer.
+                    if _has_nearby_native_sound(xuid, action_tick, radius, 2):
+                        continue
+                    flags = _player_sound_flags(is_step=False, radius=radius, kind="weapon")
+                    events.append((action_tick, xuid, radius, duration_ms, flags))
+
+    # Values measured from retained CS2 ``player_sound`` rows. Jump itself is a
+    # short 98u take-off pulse. Nearby 1100u/step rows belong to the independent
+    # footstep/movement state and must not be synthesized from jump input.
+    action_specs = {
+        "reload": ((98, 100, False),),
+        "jump": ((98, 100, False),),
+        "step": ((1100, 500, True),),
+    }
+    inferred_actions: list[tuple[str, int, int]] = []
+
+    # Server-observable events are exact when present. ``player_jump`` is absent
+    # from some GOTV streams even though sampled pawn state is retained.
+    for event_name, kind in (("weapon_reload", "reload"), ("player_jump", "jump")):
+        for tick, xuid in _event_ticks_and_xuids(parser, event_name):
+            if xuid is not None and xuid in roster_by_xuid:
+                inferred_actions.append((kind, tick, xuid))
+
+    # Several POV/GOTV producers omit the aggregated ``player_sound`` table but
+    # retain standard player_footstep events. They provide exact cadence anchors
+    # but no radius/duration, whose stock step values are consistently 1100u and
+    # 0.5s in complete CS2 recordings.
+    for tick, xuid in _event_ticks_and_xuids(parser, "player_footstep"):
+        if xuid is not None and xuid in roster_by_xuid:
+            inferred_actions.append(("step", tick, xuid))
+
+    # The compact UserCmd mask is W,A,S,D,jump,crouch,walk,reload,fire,scope.
+    # Rising edges make held R/SPACE produce exactly one sound event.
+    inferred_actions.extend(input_action_edges)
+
+    for raw_action in observed_actions:
+        try:
+            kind, raw_tick, raw_xuid = raw_action
+        except (TypeError, ValueError):
+            continue
+        tick = _as_int(raw_tick)
+        xuid = _as_positive_int(raw_xuid)
+        if kind in action_specs and tick is not None and tick >= 0 and xuid in roster_by_xuid:
+            inferred_actions.append((kind, tick, xuid))
+
+    accepted_action_ticks: dict[tuple[str, int], list[int]] = defaultdict(list)
+    for kind, tick, xuid in inferred_actions:
+        if kind == "step" and native_complete:
+            continue
+        dedupe_window = 12 if kind == "reload" else (4 if kind == "step" else 8)
+        key = (kind, xuid)
+        if any(abs(tick - prior) <= dedupe_window for prior in accepted_action_ticks[key]):
+            continue
+        accepted_action_ticks[key].append(tick)
+        for radius, duration_ms, is_step in action_specs[kind]:
+            if _has_nearby_native_sound(xuid, tick, radius, dedupe_window):
+                continue
+            flags = _player_sound_flags(is_step=is_step, radius=radius, kind=kind)
+            events.append((tick, xuid, radius, duration_ms, flags))
 
     if not events:
-        return [[], ""]
+        return [[], "", int(native_complete)]
 
-    # Same-tick: keep loud cues after footsteps so the active ring prefers gun/land.
-    events.sort(key=lambda item: (item[0], item[1], 0 if (item[4] & 2) == 0 else 1))
+    events.sort(key=lambda item: (item[0], item[1], item[2], item[4]))
     xuid_table: list[str] = []
     xuid_index: dict[int, int] = {}
     encoded: list[str] = []
@@ -1180,7 +2437,41 @@ def _build_player_sound_track(
             f"{_base36(dt)}.{_base36(xuid_index[xuid])}.{_base36(radius)}"
             f".{_base36(duration_ms)}.{_base36(int(flags) & 0xFF)}"
         )
-    return [xuid_table, ",".join(encoded)]
+    return [xuid_table, ",".join(encoded), int(native_complete)]
+
+
+def _native_player_sound_rows_complete(
+    rows: Any,
+    roster_by_xuid: Mapping[int, tuple[int, int]],
+) -> bool:
+    """Return whether CS2 can be trusted to render the demo's native rings."""
+    if not isinstance(rows, Mapping):
+        return False
+    columns = [rows.get(key) for key in ("tick", "user_steamid", "radius", "duration", "step")]
+    if not all(isinstance(column, list) for column in columns):
+        return False
+    lengths = [len(column) for column in columns]
+    if not lengths or lengths[0] == 0 or len(set(lengths)) != 1:
+        return False
+    ticks, xuids, radii, durations, _steps = columns
+    for raw_tick, raw_xuid, raw_radius, raw_duration in zip(ticks, xuids, radii, durations):
+        tick = _as_int(raw_tick)
+        xuid = _as_positive_int(raw_xuid)
+        try:
+            radius = float(raw_radius)
+            duration = float(raw_duration)
+        except (TypeError, ValueError, OverflowError):
+            return False
+        if (
+            tick is None
+            or tick < 0
+            or xuid is None
+            or xuid not in roster_by_xuid
+            or not radius > 0
+            or not duration > 0
+        ):
+            return False
+    return True
 
 
 def _event_ticks_and_xuids(parser: Any, event_name: str) -> list[tuple[int, int | None]]:
@@ -1734,6 +3025,7 @@ def add_radar_track_to_payload(
         parser,
         roster_by_xuid,
         sample_hz=sample_hz,
+        input_tracks=packed[2],
     )
     packed[RADAR_PAYLOAD_INDEX] = radar
     payload = json.dumps(packed, ensure_ascii=True, separators=(",", ":")).encode("ascii")
@@ -1826,6 +3118,48 @@ def add_flash_blind_track_to_payload(
     return payload, stats
 
 
+def add_radio_track_to_payload(
+    voice_payload: bytes,
+    demo_path: str | Path,
+    *,
+    parser_factory: Callable[[str], Any] | None = None,
+) -> tuple[bytes, dict[str, Any]]:
+    """Append the reconstructed lower-left feed at payload index 11."""
+    try:
+        packed = json.loads(voice_payload.decode("ascii"))
+    except (UnicodeDecodeError, ValueError, TypeError) as exc:
+        raise DemoVoiceHudError("voice HUD payload is not valid compact JSON") from exc
+    packed = _pad_payload_slots(packed)
+
+    encoded_roster = packed[3]
+    if not isinstance(encoded_roster, list):
+        raise DemoVoiceHudError("voice HUD payload contains no player roster")
+    roster_by_xuid: dict[int, tuple[int, int]] = {}
+    for row in encoded_roster:
+        if not isinstance(row, list) or len(row) != 3:
+            continue
+        xuid = _as_positive_int(row[0])
+        slot = _as_int(row[1])
+        team = _as_int(row[2])
+        if xuid is None or slot is None or team not in (2, 3):
+            continue
+        roster_by_xuid[xuid] = (slot, team)
+    if not roster_by_xuid:
+        raise DemoVoiceHudError("voice HUD payload contains no team-bound Steam IDs")
+
+    if parser_factory is None:
+        from demoparser2 import DemoParser
+
+        parser_factory = DemoParser
+    parser = parser_factory(str(demo_path))
+    radio, stats = _build_radio_payload(parser, roster_by_xuid)
+    packed[RADIO_PAYLOAD_INDEX] = radio
+    payload = json.dumps(packed, ensure_ascii=True, separators=(",", ":")).encode("ascii")
+    stats = dict(stats)
+    stats["payload_bytes"] = len(payload)
+    return payload, stats
+
+
 def inject_voice_payload(template_vpk: bytes, payload: bytes) -> bytes:
     """Fill the bounded data slot and rebuild the VPK with fresh CRCs."""
     entries = read_inline_vpk(template_vpk)
@@ -1900,6 +3234,7 @@ def build_demo_voice_hud_vpk(
             "radar_planted_bombs": 0,
             "radar_dropped_bombs": 0,
             "radar_player_sounds": 0,
+            "radar_native_sound_complete": 0,
             "radar_occlusion_grid": 0,
         }
 
@@ -1923,6 +3258,7 @@ def build_demo_voice_hud_vpk(
     flash_blind_stats: dict[str, Any] = {
         "flash_blind_events": 0,
         "flash_blind_parse_failed": 0,
+        "flash_blind_tick_fallback": 0,
     }
     try:
         payload, flash_blind_stats = add_flash_blind_track_to_payload(
@@ -1935,10 +3271,38 @@ def build_demo_voice_hud_vpk(
         flash_blind_stats = {
             "flash_blind_events": 0,
             "flash_blind_parse_failed": 1,
+            "flash_blind_tick_fallback": 0,
+        }
+
+    radio_stats: dict[str, Any] = {
+        "radio_events": 0,
+        "radio_native_events": 0,
+        "radio_rebuilt_events": 0,
+        "radio_objective_events": 0,
+        "radio_chat_messages": 0,
+        "radio_server_messages": 0,
+        "radio_parse_failed": 0,
+    }
+    try:
+        payload, radio_stats = add_radio_track_to_payload(
+            payload,
+            demo_path,
+            parser_factory=parser_factory,
+        )
+        stats["payload_bytes"] = int(radio_stats.pop("payload_bytes", len(payload)))
+    except DemoVoiceHudError:
+        radio_stats = {
+            "radio_events": 0,
+            "radio_native_events": 0,
+            "radio_rebuilt_events": 0,
+            "radio_objective_events": 0,
+            "radio_chat_messages": 0,
+            "radio_server_messages": 0,
+            "radio_parse_failed": 1,
         }
 
     if not voice_enabled:
-        # Keep roster, input, radar, kill-feedback, and flash tracks intact.
+        # Keep roster, input, radar, kill-feedback, flash, and radio tracks intact.
         # Only remove the precomputed speaking schedule that drives the custom
         # lower-left notice; native voice volume is muted by the warmup policy.
         packed = json.loads(payload.decode("ascii"))
@@ -1967,4 +3331,5 @@ def build_demo_voice_hud_vpk(
         **radar_stats,
         **kill_feedback_stats,
         **flash_blind_stats,
+        **radio_stats,
     )

@@ -100,7 +100,9 @@ def main() -> None:
         raise RuntimeError("could not separate the stock demo controller from its injection")
     stock_source = data_source[:injection_start].rstrip()
 
-    injection = INJECTION.read_bytes()
+    # Keep the compiled Panorama DATA source deterministic on Windows even when
+    # the working tree uses CRLF or a patch leaves mixed line endings.
+    injection = INJECTION.read_bytes().replace(b"\r\n", b"\n")
     begin = injection.find(VOICE_DATA_BEGIN)
     end = injection.find(VOICE_DATA_END, begin + len(VOICE_DATA_BEGIN))
     if begin < 0 or end < 0:

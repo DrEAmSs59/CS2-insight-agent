@@ -1942,9 +1942,14 @@ _POST_SPEC_COMMAND_NAMES: frozenset[str] = frozenset({
     "cl_showloadout",
     "cl_silencer_mode",
     "cl_sniper_auto_rezoom",
+    "cl_teamid_overhead_colors_show",
+    "cl_teamid_overhead_fade_near_crosshair",
     "cl_teamid_overhead_maxdist",
     "cl_teamid_overhead_maxdist_spec",
+    "cl_teamid_overhead_mode",
+    "cl_drawhud_force_teamid_overhead",
     "hud_showtargetid",
+    "mp_forcecamera",
 })
 _VOICE_CVAR_NAMES: frozenset[str] = frozenset({
     "voice_modenable",

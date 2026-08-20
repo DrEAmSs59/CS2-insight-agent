@@ -40,6 +40,20 @@ def test_pov_forces_teammate_hud_color():
     assert "cl_hud_color 12" in POV_CORE_FORCED_COMMANDS
 
 
+def test_pov_forces_native_player_overhead_name_equipment_and_range():
+    expected = {
+        "mp_forcecamera 0",
+        "cl_drawhud_force_teamid_overhead 1",
+        "cl_teamid_overhead_mode 3",
+        "cl_teamid_overhead_colors_show 1",
+        "cl_teamid_overhead_fade_near_crosshair 0",
+        "cl_teamid_overhead_maxdist 9999",
+        "cl_teamid_overhead_maxdist_spec 9999",
+    }
+
+    assert expected.issubset(POV_CORE_FORCED_COMMANDS)
+
+
 def test_semantic_cleanup_removes_only_active_pov_search_path():
     content = (
         "// Game csgo/pov.vpk\n"
