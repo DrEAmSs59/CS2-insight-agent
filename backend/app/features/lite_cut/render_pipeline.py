@@ -1329,6 +1329,7 @@ def compose_lite_cut_montage(
         build_encoder_candidates,
         enumerate_windows_gpus,
         map_nvenc_device_indices,
+        parse_nvenc_driver_warning,
         probe_ffmpeg_encoder,
         run_encoder_attempts,
     )
@@ -1510,11 +1511,20 @@ def compose_lite_cut_montage(
             attempt.stage,
             attempt.detail[-600:],
         )
-        if attempt.status == "export_failed" and progress_callback is not None:
+        warning = parse_nvenc_driver_warning(
+            attempt.candidate.codec,
+            attempt.detail,
+            current_driver_version=getattr(attempt.candidate.adapter, "driver_version", ""),
+        )
+        if (
+            progress_callback is not None
+            and (attempt.status == "export_failed" or warning is not None)
+        ):
             _emit_progress(
                 progress_callback,
                 0.01,
                 f"fallback_{attempt.candidate.codec}",
+                {"encoder_warning": warning} if warning is not None else None,
             )
 
     try:

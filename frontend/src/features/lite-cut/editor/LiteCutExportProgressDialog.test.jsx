@@ -56,4 +56,30 @@ describe("LiteCutExportProgressDialog", () => {
     fireEvent.click(screen.getByRole("button", { name: "取消导出" }));
     expect(onCancel).toHaveBeenCalledTimes(1);
   });
+
+  it.each(["liteCut", "montage"])("shows the dynamic NVIDIA driver warning below cancellation for %s", (variant) => {
+    render(<LiteCutExportProgressDialog
+      variant={variant}
+      phase="running"
+      result={{
+        export_id: 19,
+        stage: "fallback_h264_nvenc",
+        progress: 0.12,
+        encoder_warning: {
+          code: "NVIDIA_DRIVER_TOO_OLD",
+          found_nvenc_api: "13.0",
+          required_nvenc_api: "13.1",
+          minimum_driver_version: "610.00",
+        },
+      }}
+      onCancel={vi.fn()}
+    />);
+
+    const cancelButton = screen.getByRole("button", { name: "取消导出" });
+    const warning = screen.getByRole("status");
+    expect(cancelButton.compareDocumentPosition(warning) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.getByText(/已自动切换至 CPU 编码/)).toBeTruthy();
+    expect(screen.getByText(/当前 NVENC API 13.0，要求 13.1/)).toBeTruthy();
+    expect(screen.getByText(/NVIDIA 驱动升级至 610.00/)).toBeTruthy();
+  });
 });

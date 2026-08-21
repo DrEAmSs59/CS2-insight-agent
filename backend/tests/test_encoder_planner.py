@@ -24,6 +24,7 @@ from app.encoder_planner import (  # noqa: E402
     enumerate_windows_gpus,
     map_nvenc_device_indices,
     make_probe_cache_key,
+    parse_nvenc_driver_warning,
     run_encoder_attempts,
     select_first_usable_encoder,
 )
@@ -477,6 +478,34 @@ def test_probe_exception_does_not_block_x264_fallback() -> None:
     assert plan.selected is not None
     assert plan.selected.codec == "libx264"
     assert plan.attempts[0].result.ok is False
+
+
+def test_nvenc_driver_warning_extracts_dynamic_ffmpeg_requirements() -> None:
+    warning = parse_nvenc_driver_warning(
+        "h264_nvenc",
+        """
+        Driver does not support the required nvenc API version. Required: 13.1 Found: 13.0
+        The minimum required Nvidia driver for nvenc is 610.00 or newer
+        """,
+        current_driver_version="32.0.15.6094",
+    )
+
+    assert warning == {
+        "code": "NVIDIA_DRIVER_TOO_OLD",
+        "codec": "h264_nvenc",
+        "found_nvenc_api": "13.0",
+        "required_nvenc_api": "13.1",
+        "minimum_driver_version": "610.00",
+        "current_driver_version": "32.0.15.6094",
+    }
+
+
+def test_nvenc_driver_warning_ignores_unrelated_encoder_failure() -> None:
+    assert parse_nvenc_driver_warning("h264_nvenc", "No capable devices found") is None
+    assert parse_nvenc_driver_warning(
+        "h264_amf",
+        "Driver does not support the required nvenc API version. Required: 13.1 Found: 13.0",
+    ) is None
 
 
 def test_manual_adapterless_hardware_failure_retries_x264_and_poisons_probe_cache() -> None:

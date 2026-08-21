@@ -33,6 +33,14 @@ def test_background_montage_export_reports_progress_and_completes(monkeypatch, t
     def fake_compose_montage(**kwargs: object) -> None:
         callback = kwargs["progress_callback"]
         callback(0.12, "starting", {"stage_progress": 1.0})
+        callback(0.12, "fallback_h264_nvenc", {
+            "encoder_warning": {
+                "code": "NVIDIA_DRIVER_TOO_OLD",
+                "found_nvenc_api": "13.0",
+                "required_nvenc_api": "13.1",
+                "minimum_driver_version": "610.00",
+            },
+        })
         callback(0.4, "normalizing", {"stage_progress": 0.5})
         callback(0.99, "validating", {"stage_progress": 1.0})
 
@@ -49,6 +57,12 @@ def test_background_montage_export_reports_progress_and_completes(monkeypatch, t
     assert snapshot["stage"] == "done"
     assert snapshot["progress"] == 1.0
     assert snapshot["output_path"] == str(output)
+    assert snapshot["encoder_warning"] == {
+        "code": "NVIDIA_DRIVER_TOO_OLD",
+        "found_nvenc_api": "13.0",
+        "required_nvenc_api": "13.1",
+        "minimum_driver_version": "610.00",
+    }
     assert fake_db.updates[0][1]["status"] == "running"
     assert fake_db.updates[-1][1]["status"] == "done"
 

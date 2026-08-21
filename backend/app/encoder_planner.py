@@ -247,6 +247,49 @@ class EncoderExportAttempt:
     stage: str = ""
 
 
+def parse_nvenc_driver_warning(
+    codec: str,
+    detail: str,
+    *,
+    current_driver_version: str = "",
+) -> dict[str, str] | None:
+    """Return a UI-safe warning when FFmpeg reports an outdated NVIDIA driver."""
+
+    if str(codec or "").strip().casefold() != "h264_nvenc":
+        return None
+    raw_detail = str(detail or "").strip()
+    lowered = raw_detail.casefold()
+    if not raw_detail or not (
+        "required nvenc api version" in lowered
+        or "minimum required nvidia driver" in lowered
+    ):
+        return None
+
+    def _capture(pattern: str) -> str:
+        match = re.search(pattern, raw_detail, flags=re.IGNORECASE)
+        return match.group(1) if match else ""
+
+    warning = {
+        "code": "NVIDIA_DRIVER_TOO_OLD",
+        "codec": "h264_nvenc",
+    }
+    found_api = _capture(r"\bfound\s*:\s*([0-9]+(?:\.[0-9]+)*)")
+    required_api = _capture(r"\brequired\s*:\s*([0-9]+(?:\.[0-9]+)*)")
+    minimum_driver = _capture(
+        r"minimum\s+required\s+nvidia\s+driver(?:\s+for\s+nvenc)?\s+is\s+"
+        r"([0-9]+(?:\.[0-9]+)*)"
+    )
+    if found_api:
+        warning["found_nvenc_api"] = found_api
+    if required_api:
+        warning["required_nvenc_api"] = required_api
+    if minimum_driver:
+        warning["minimum_driver_version"] = minimum_driver
+    if str(current_driver_version or "").strip():
+        warning["current_driver_version"] = str(current_driver_version).strip()
+    return warning
+
+
 @dataclass(frozen=True, slots=True)
 class EncoderRunResult:
     value: object
@@ -1236,6 +1279,7 @@ __all__ = [
     "enumerate_windows_gpus",
     "map_nvenc_device_indices",
     "make_probe_cache_key",
+    "parse_nvenc_driver_warning",
     "plan_auto_encoder",
     "probe_ffmpeg_encoder",
     "run_encoder_attempts",
