@@ -14,7 +14,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional
 
-from .cs2_config_backup import is_cs2_running
+from .cs2_config_backup import (
+    is_cs2_running,
+    restore_user_config_snapshot,
+    snapshot_user_configs,
+    write_persistent_backup_from_snap,
+)
 from .demo_compat_service import ensure_demo_compatible
 from .pov_constants import POV_CORE_FORCED_COMMANDS, pov_tail_commands
 from .pov_hud_manager import PovHudError, PovHudManager, restore_pov_after_cs2_exit
@@ -48,6 +53,7 @@ class DemoPlaybackSession:
     pov_manager: Optional[PovHudManager]
     pov_enabled: bool
     expected_gameinfo_sha256: Optional[str]
+    player_config_snapshot: dict[Path, Optional[bytes]]
     started_at_monotonic: float
 
 
@@ -84,7 +90,13 @@ class DemoPlaybackService:
                 previous_error = str((result.get("restore") or {}).get("error") or "")
                 fresh_restore["error"] = "" if fresh_restore.get("verified") else previous_error
                 result["restore"] = fresh_restore
-                result["state"] = "completed" if fresh_restore.get("verified") else "restore_failed"
+                player_restore = result.get("player_config_restore") or {}
+                player_ok = bool(player_restore.get("verified", True))
+                result["state"] = (
+                    "completed"
+                    if fresh_restore.get("verified") and player_ok
+                    else "restore_failed"
+                )
                 self._set_session_report(str(session_id), state=result["state"], restore=fresh_restore)
             except Exception as exc:  # noqa: BLE001
                 result["state"] = "restore_failed"
@@ -168,6 +180,33 @@ class DemoPlaybackService:
             logger=logger,
         )
 
+    @staticmethod
+    def _start_player_config_protection(cs2_path: str) -> dict[Path, Optional[bytes]]:
+        snapshot = snapshot_user_configs(cs2_path)
+        if snapshot and write_persistent_backup_from_snap(snapshot) is None:
+            raise RuntimeError("Unable to create the player config backup; playback was not started.")
+        return snapshot
+
+    @staticmethod
+    def _restore_player_configs(
+        snapshot: dict[Path, Optional[bytes]],
+    ) -> dict[str, Any]:
+        if not snapshot:
+            return {
+                "ok": True,
+                "verified": True,
+                "checked": 0,
+                "restored": 0,
+                "failed": [],
+                "source": "none",
+                "state": "not_needed",
+            }
+        result = restore_user_config_snapshot(snapshot)
+        return {
+            **result,
+            "state": "restored" if result.get("verified") else "restore_failed",
+        }
+
     def _monitor_session(self, session: DemoPlaybackSession) -> None:
         try:
             try:
@@ -185,6 +224,7 @@ class DemoPlaybackService:
             while is_cs2_running():
                 time.sleep(1.0)
 
+            player_restoration = self._restore_player_configs(session.player_config_snapshot)
             if session.pov_enabled and session.pov_manager is not None:
                 self._set_session_report(session.session_id, state="restoring")
                 restoration = self._restore_pov_after_exit(
@@ -193,11 +233,21 @@ class DemoPlaybackService:
                 )
                 self._set_session_report(
                     session.session_id,
-                    state="completed" if restoration.get("verified") else "restore_failed",
+                    state=(
+                        "completed"
+                        if restoration.get("verified") and player_restoration.get("verified")
+                        else "restore_failed"
+                    ),
                     restore=restoration,
+                    player_config_restore=player_restoration,
                 )
             else:
-                self._set_session_report(session.session_id, state="completed", restore=None)
+                self._set_session_report(
+                    session.session_id,
+                    state="completed" if player_restoration.get("verified") else "restore_failed",
+                    restore=None,
+                    player_config_restore=player_restoration,
+                )
         finally:
             self._cleanup_artifacts(session)
             with self._lock:
@@ -205,7 +255,7 @@ class DemoPlaybackService:
                     self._active = None
                 report = self._session_reports.get(session.session_id)
                 if report and report.get("state") not in {"completed", "restore_failed"}:
-                    report["state"] = "restore_failed" if session.pov_enabled else "completed"
+                    report["state"] = "restore_failed"
                     if session.pov_enabled and not report.get("restore"):
                         report["restore"] = {
                             "verified": False,
@@ -250,6 +300,7 @@ class DemoPlaybackService:
             pov_manager = PovHudManager(config_like)
             pov_install_attempted = False
             expected_gameinfo_sha256: Optional[str] = None
+            player_config_snapshot: dict[Path, Optional[bytes]] = {}
             session: Optional[DemoPlaybackSession] = None
 
             try:
@@ -258,6 +309,11 @@ class DemoPlaybackService:
                     if is_cs2_running():
                         raise DemoPlaybackCs2RunningError("CS2 is already running")
                     pov_manager.restore()
+
+                # POV and even normal playback launch cvars that CS2 can archive.
+                # Protect both local slot files and Steam's remote/cloud copies
+                # before any managed CS2 process is allowed to start.
+                player_config_snapshot = self._start_player_config_protection(cs2_path)
 
                 compat = ensure_demo_compatible(dem_path)
                 shutil.copy2(dem_path, copied_demo)
@@ -334,6 +390,7 @@ class DemoPlaybackService:
                     pov_manager=pov_manager if options.enabled else None,
                     pov_enabled=bool(options.enabled),
                     expected_gameinfo_sha256=expected_gameinfo_sha256,
+                    player_config_snapshot=player_config_snapshot,
                     started_at_monotonic=time.monotonic(),
                 )
                 self._active = session
@@ -342,6 +399,7 @@ class DemoPlaybackService:
                     state="running",
                     pov_hud_enabled=bool(options.enabled),
                     restore=None,
+                    player_config_restore=None,
                 )
                 if options.enabled:
                     self._session_verifiers[session_id] = (pov_manager, expected_gameinfo_sha256)
@@ -368,6 +426,13 @@ class DemoPlaybackService:
                         session.process.wait(timeout=10)
                     except Exception as stop_exc:  # noqa: BLE001
                         logger.error("Could not stop CS2 after playback monitor startup failure: %s", stop_exc)
+                if player_config_snapshot:
+                    player_restoration = self._restore_player_configs(player_config_snapshot)
+                    if not player_restoration.get("verified"):
+                        logger.error(
+                            "Could not restore player configs after playback launch failure: %s",
+                            player_restoration,
+                        )
                 self._best_effort_restore(pov_manager, pov_install_attempted)
                 placeholder = session or DemoPlaybackSession(
                     session_id=session_id,
@@ -377,6 +442,7 @@ class DemoPlaybackService:
                     pov_manager=None,
                     pov_enabled=False,
                     expected_gameinfo_sha256=None,
+                    player_config_snapshot=player_config_snapshot,
                     started_at_monotonic=time.monotonic(),
                 )
                 self._cleanup_artifacts(placeholder)

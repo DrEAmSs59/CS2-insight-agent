@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from app import obs_director
+from app import cs2_config_backup, obs_director
 from app.obs_director import OBSDirector, _empty_voice_ban_payload
 
 
@@ -73,7 +73,7 @@ def test_voice_ban_is_snapshotted_cleared_and_restored(monkeypatch, tmp_path: Pa
         "write_persistent_backup_from_snap",
         lambda snap: captured.update(snap),
     )
-    monkeypatch.setattr(obs_director, "is_restore_required", lambda: False)
+    monkeypatch.setattr(cs2_config_backup, "is_restore_required", lambda: False)
 
     director._snapshot_user_configs()
     director._clear_voice_ban_files()

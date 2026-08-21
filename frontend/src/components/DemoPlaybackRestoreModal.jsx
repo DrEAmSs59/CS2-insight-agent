@@ -30,8 +30,11 @@ export default function DemoPlaybackRestoreModal({
   const t = useT();
   const state = String(status?.state || "running");
   const restore = status?.restore && typeof status.restore === "object" ? status.restore : null;
+  const playerRestore = status?.player_config_restore && typeof status.player_config_restore === "object"
+    ? status.player_config_restore
+    : null;
   const final = state === "completed" || state === "restore_failed";
-  const verified = Boolean(final && restore?.verified);
+  const verified = Boolean(final && restore?.verified && playerRestore?.verified !== false);
   const failed = final && !verified;
   const canClose = final || Boolean(pollError);
   const verificationMode = String(restore?.verification_mode || "").toLowerCase();
@@ -121,6 +124,15 @@ export default function DemoPlaybackRestoreModal({
               failureText={t("playDemo.vpkStillPresent")}
               unknownText={t("playDemo.restoreUnknown")}
             />
+            {playerRestore ? (
+              <FactRow
+                label={t("playDemo.playerConfigLabel")}
+                value={playerRestore.verified}
+                successText={t("playDemo.playerConfigRestored")}
+                failureText={t("playDemo.playerConfigNotRestored")}
+                unknownText={t("playDemo.playerConfigUnknown")}
+              />
+            ) : null}
             {showHashes ? (
               <div className="rounded-lg border border-cs2-border bg-cs2-bg-card px-3 py-2 text-[10px] text-cs2-text-muted">
                 <p className="break-all">{t("playDemo.expectedHash")}: {restore.expected_gameinfo_sha256 || "—"}</p>

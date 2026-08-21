@@ -28,6 +28,7 @@ def test_all_maps_use_default_pov_asset(tmp_path: Path):
 def test_pov_forces_rotating_round_scaled_radar():
     expected = {
         "cl_radar_always_centered 1",
+        "cl_radar_square_always false",
         "cl_radar_square_when_spectating 0",
         "cl_radar_scale 0.4",
         "snd_disable_radar_visualize 0",

@@ -40,6 +40,8 @@ POV_CORE_FORCED_COMMANDS: list[str] = [
     "cl_spec_show_bindings 0",
     "r_spectator_flashbang_opacity 1",
     "cl_radar_always_centered 1",
+    "cl_radar_square_always false",
+    "cl_radar_rotate true",
     "cl_radar_square_when_spectating 0",
     "cl_radar_scale 0.4",
     # Keep CS2's own footstep/sound visualization authoritative. Panorama must

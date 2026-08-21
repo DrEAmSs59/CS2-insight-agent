@@ -62,3 +62,69 @@ def test_restore_keeps_recovery_required_when_post_write_verification_fails(
     assert result["checked"] == 0
     assert result["failed"]
     assert backup.read_recording_state()["status"] == "recording"
+
+
+def test_config_discovery_and_snapshot_include_steam_remote_files(monkeypatch, tmp_path: Path):
+    steam_root = tmp_path / "Steam"
+    cs2 = (
+        steam_root
+        / "steamapps"
+        / "common"
+        / "Counter-Strike Global Offensive"
+        / "game"
+        / "bin"
+        / "win64"
+        / "cs2.exe"
+    )
+    cs2.parent.mkdir(parents=True)
+    cs2.write_bytes(b"exe")
+
+    account = steam_root / "userdata" / "123" / "730"
+    local_cfg = account / "local" / "cfg"
+    remote = account / "remote"
+    local_cfg.mkdir(parents=True)
+    remote.mkdir(parents=True)
+    local_keys = local_cfg / "cs2_user_keys_0_slot0.vcfg"
+    remote_keys = remote / "cs2_user_keys.vcfg"
+    remote_convars = remote / "cs2_user_convars.vcfg"
+    local_keys.write_bytes(b'local: "ALT" "toggleradarscale"')
+    remote_keys.write_bytes(b'remote: "ALT" "toggleradarscale"')
+    remote_convars.write_bytes(b'"cl_hud_color" "8"')
+    monkeypatch.setattr(backup, "_candidate_steam_roots", lambda: [])
+
+    directories = backup.candidate_user_config_dirs(cs2)
+    snapshot = backup.snapshot_user_configs(cs2)
+
+    assert local_cfg in directories
+    assert remote in directories
+    assert snapshot[local_keys] == b'local: "ALT" "toggleradarscale"'
+    assert snapshot[remote_keys] == b'remote: "ALT" "toggleradarscale"'
+    assert snapshot[remote_convars] == b'"cl_hud_color" "8"'
+
+
+def test_memory_snapshot_restores_local_and_remote_player_settings(monkeypatch, tmp_path: Path):
+    local_keys = tmp_path / "local" / "cfg" / "cs2_user_keys_0_slot0.vcfg"
+    remote_keys = tmp_path / "remote" / "cs2_user_keys.vcfg"
+    machine_convars = tmp_path / "local" / "cfg" / "cs2_machine_convars.vcfg"
+    for path in (local_keys, remote_keys, machine_convars):
+        path.parent.mkdir(parents=True, exist_ok=True)
+
+    snapshot = {
+        local_keys: b'"ALT" "toggleradarscale"',
+        remote_keys: b'"ALT" "toggleradarscale"',
+        machine_convars: b'"cl_hud_color" "8"',
+    }
+    local_keys.write_bytes(b"")
+    remote_keys.write_bytes(b"")
+    machine_convars.write_bytes(b'"cl_hud_color" "12"')
+    monkeypatch.setattr(backup, "is_restore_required", lambda: False)
+    monkeypatch.setattr(backup, "is_cs2_running", lambda: False)
+
+    result = backup.restore_user_config_snapshot(snapshot)
+
+    assert result["ok"] is True
+    assert result["verified"] is True
+    assert result["restored"] == 3
+    assert local_keys.read_bytes() == snapshot[local_keys]
+    assert remote_keys.read_bytes() == snapshot[remote_keys]
+    assert machine_convars.read_bytes() == snapshot[machine_convars]
