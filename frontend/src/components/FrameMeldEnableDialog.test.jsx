@@ -10,6 +10,26 @@ const translations = {
   "frameMeld.enableDialog.item2Emphasis": "导出速度会有非常明显的下降。",
   "frameMeld.enableDialog.item7": "建议先用短片段测试效果和预计耗时。",
   "frameMeld.enableDialog.item8": "推荐使用 FrameMeld_ffmpeg V0.1.3 及以上版本的 ffmpeg。",
+  "frameMeld.enableDialog.strategyButton": "补帧策略",
+  "frameMeld.enableDialog.strategyTitle": "补帧策略（Balanced）",
+  "frameMeld.enableDialog.strategyIntro": "最终均通过动态模糊输出 60 FPS。",
+  "frameMeld.enableDialog.strategySourceHeader": "素材帧率",
+  "frameMeld.enableDialog.strategyStandardHeader": "V0.1.1–V0.1.3",
+  "frameMeld.enableDialog.strategyFastHeader": "V0.1.4-fast.2",
+  "frameMeld.enableDialog.strategyStandard60": "300 FPS（×5）",
+  "frameMeld.enableDialog.strategyFast60": "240 FPS（×4）",
+  "frameMeld.enableDialog.strategyStandard90": "360 FPS（×4）",
+  "frameMeld.enableDialog.strategyFast90": "270 FPS（×3）",
+  "frameMeld.enableDialog.strategyStandard120": "360 FPS（×3）",
+  "frameMeld.enableDialog.strategyFast120": "240 FPS（×2）",
+  "frameMeld.enableDialog.strategyStandard144": "360 FPS",
+  "frameMeld.enableDialog.strategyFast144": "288 FPS（×2）",
+  "frameMeld.enableDialog.strategyStandard180": "360 FPS",
+  "frameMeld.enableDialog.strategyFast180": "360 FPS",
+  "frameMeld.enableDialog.strategyStandard240": "480 FPS（×2）",
+  "frameMeld.enableDialog.strategyFast240": "保持原帧率",
+  "frameMeld.enableDialog.strategyFootnote": "低于 56 FPS 时，两版都会按整数倍补帧至至少 200 FPS，其他非常见帧率由 FrameMeld_FFmpeg 自动决定。",
+  "frameMeld.enableDialog.strategyFastNote": "*Fast 版本 FFmpeg 会添加锐化并使用更低倍数的补帧策略以缩短耗时（提速约 25%）。",
   "frameMeld.enableDialog.benchmarkTitle": "*部分显卡性能指标参考：",
   "frameMeld.enableDialog.benchmark5070Ti": "NVIDIA Geforce RTX 5070Ti：1080P分辨率（1920×1080）补帧速率≈10.571帧/秒",
   "frameMeld.enableDialog.cancel": "取消",
@@ -34,6 +54,19 @@ describe("FrameMeldEnableDialog", () => {
     expect(screen.getByText("导出速度会有非常明显的下降。").className).toContain("text-red-400");
     expect(screen.getByText("建议先用短片段测试效果和预计耗时。").closest("li").className).toContain("font-bold");
     expect(screen.getByText("推荐使用 FrameMeld_ffmpeg V0.1.3 及以上版本的 ffmpeg。")).toBeTruthy();
+    expect(screen.queryByText("300 FPS（×5）")).toBeNull();
+    fireEvent.mouseEnter(screen.getByRole("button", { name: "补帧策略" }));
+    expect(screen.getByRole("tooltip")).toBeTruthy();
+    expect(screen.getByText("补帧策略（Balanced）")).toBeTruthy();
+    expect(screen.getByText("V0.1.1–V0.1.3")).toBeTruthy();
+    expect(screen.getByText("V0.1.4-fast.2")).toBeTruthy();
+    expect(screen.getByText("300 FPS（×5）")).toBeTruthy();
+    expect(screen.getByText("240 FPS（×4）")).toBeTruthy();
+    expect(screen.getByText("保持原帧率")).toBeTruthy();
+    expect(screen.getByText("低于 56 FPS 时，两版都会按整数倍补帧至至少 200 FPS，其他非常见帧率由 FrameMeld_FFmpeg 自动决定。")).toBeTruthy();
+    expect(screen.getByText("*Fast 版本 FFmpeg 会添加锐化并使用更低倍数的补帧策略以缩短耗时（提速约 25%）。").className).toContain("font-bold");
+    fireEvent.mouseLeave(screen.getByRole("button", { name: "补帧策略" }));
+    expect(screen.queryByRole("tooltip")).toBeNull();
     expect(screen.getByText("*部分显卡性能指标参考：").className).toContain("text-red-400");
     expect(screen.getByText(/1920×1080/)).toBeTruthy();
   });
