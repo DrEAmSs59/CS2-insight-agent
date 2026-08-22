@@ -15,6 +15,8 @@ if str(_BACKEND_ROOT) not in sys.path:
 
 from app.framemeld import (
     FRAMEMELD_DELIVERY_FPS,
+    FRAMEMELD_FINAL_SHARPEN_AMOUNT,
+    FRAMEMELD_FINAL_SHARPEN_FEATURE,
     FRAMEMELD_STATUS_PREFIX,
     FrameMeldCapability,
     build_framemeld_command,
@@ -189,8 +191,27 @@ class TestFrameMeld(unittest.TestCase):
             "--deduplicate-method",
         ):
             self.assertNotIn(forbidden, command)
+        self.assertNotIn("--final-sharpen", command)
         self.assertEqual(command[command.index("-c:a") + 1], "copy")
         self.assertIn("--host-managed-encoder-fallback", command)
+
+    def test_command_enables_tested_final_sharpen_when_supported(self):
+        command = build_framemeld_command(
+            ffmpeg_bin=Path("ffmpeg.exe"),
+            source_path=Path("input.mp4"),
+            output_path=Path("output.mp4"),
+            video_encode_args=["-c:v", "libx264", "-crf", "18"],
+            capability=FrameMeldCapability(
+                route="-framemeld",
+                api_version=1,
+                features=frozenset({FRAMEMELD_FINAL_SHARPEN_FEATURE}),
+            ),
+        )
+
+        self.assertEqual(
+            command[command.index("--final-sharpen") + 1],
+            f"{FRAMEMELD_FINAL_SHARPEN_AMOUNT:g}",
+        )
 
     def test_command_preserves_nvenc_device_binding_and_quality(self):
         from app.framemeld import FrameMeldCapability

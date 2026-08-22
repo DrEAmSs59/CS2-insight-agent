@@ -36,6 +36,8 @@ FRAMEMELD_STATUS_PROTOCOL = "org.framemeld.status"
 FRAMEMELD_DEVICE_INVENTORY_FEATURE = "device-inventory-json-v1"
 FRAMEMELD_RIFE_GPU_SELECTION_FEATURE = "rife-gpu-selection-v1"
 FRAMEMELD_RIFE_BINDING_FEATURE = "rife-binding-json-v1"
+FRAMEMELD_FINAL_SHARPEN_FEATURE = "final-luma-sharpen-v1"
+FRAMEMELD_FINAL_SHARPEN_AMOUNT = 0.15
 FRAMEMELD_DEVICE_PROTOCOL = "org.framemeld.devices"
 # FrameMeld is a frame-processing workload regardless of which encoder writes
 # the final stream.  Keep one policy so a healthy long render is not treated
@@ -788,11 +790,18 @@ def build_framemeld_command(
         "balanced",
         "--blur-output-fps",
         str(FRAMEMELD_DELIVERY_FPS),
+    ]
+    # Fast runtimes expose final sharpening as a host-controlled opt-in. Keep
+    # the argument capability-gated so older FrameMeld versions continue to
+    # receive only CLI options they understand.
+    if FRAMEMELD_FINAL_SHARPEN_FEATURE in resolved_capability.features:
+        command.extend(["--final-sharpen", f"{FRAMEMELD_FINAL_SHARPEN_AMOUNT:g}"])
+    command.extend([
         "-c:v",
         codec,
         "-cq",
         quality,
-    ]
+    ])
     if "host-managed-encoder-fallback" in resolved_capability.features:
         command.append("--host-managed-encoder-fallback")
     # Keep the public CLI contract unchanged for older runtimes. Unified host
