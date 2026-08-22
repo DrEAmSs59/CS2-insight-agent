@@ -50,6 +50,7 @@ export default {
   "nav.guide": "Getting Started",
   "nav.demoLibrary": "Demo Library",
   "nav.analysis": "Analysis",
+  "nav.cosmeticsWorkshop": "Cosmetics Workshop",
   "nav.recordQueue": "Record Queue",
   "nav.montage": "Montage Studio",
   "nav.sectionTools": "Tools",

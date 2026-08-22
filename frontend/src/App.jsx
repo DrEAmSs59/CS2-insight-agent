@@ -44,6 +44,7 @@ const PlayerGameConfigPage = lazy(() => import("./pages/PlayerGameConfigPage"));
 const MatchHistoryPage = lazy(() => import("./pages/MatchHistoryPage"));
 const ObsAiTuningPreviewPage = lazy(() => import("./pages/ObsAiTuningPreviewPage"));
 const ObsAiEntryPreviewPage = lazy(() => import("./pages/ObsAiEntryPreviewPage"));
+const CosmeticsWorkshopPage = lazy(() => import("./features/cosmetics-workshop/CosmeticsWorkshopPage"));
 
 const DEFAULT_CS2_EXTRA_LAUNCH_ARGS = "-fullscreen";
 
@@ -1405,6 +1406,7 @@ export default function App() {
   const isStandalonePreview = [
     "/obs-ai-preview",
     "/obs-ai-entry-preview",
+    "/cosmetics-workshop",
   ].includes(location.pathname);
 
   return (
@@ -1464,6 +1466,7 @@ export default function App() {
                 <Route path="/" element={<GuidePage />} />
                 <Route path="/library" element={<DemoLibraryPage />} />
                 <Route path="/analysis" element={<DemoAnalysisPage />} />
+                <Route path="/cosmetics-workshop" element={<CosmeticsWorkshopPage />} />
                 <Route path="/demo-analysis-preview" element={<Navigate to="/analysis" replace />} />
                 <Route path="/queue" element={<RecordingQueuePage />} />
                 <Route path="/montage" element={<MontageWorkbenchPage />} />
