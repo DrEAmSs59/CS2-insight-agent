@@ -103,11 +103,15 @@
 - 录制成功的片段自动入库；拖拽排序、配 BGM / 转场主题，导出 MP4；可按高光 / 下饭 / 合集 / 时间线等筛选，并编排片头片尾。
 - **玩家信息卡** — 导出时可开启左下角名牌：每段画面开头短暂显示该片段对应玩家昵称、高光/下饭/合集类型、回合与情景标签（如多杀、颗秒等）；可为时间线里出现的每位玩家单独上传头像，不上传则显示昵称首字。
 - 适合「录完 → 排序 → 一键出片」的轻量合辑流程。
-- **使用前需配置 FFmpeg**：前往 [FFmpeg 官网](https://ffmpeg.org/download.html) 或 [gyan.dev](https://www.gyan.dev/ffmpeg/builds/) 下载 Windows 构建包，解压后在程序设置页面的「FFmpeg 路径」中填入 `ffmpeg.exe` 的完整路径。导出时会优先使用显卡硬件编码（NVENC / QSV / AMF），没有则使用软件编码。合辑工作台与 LiteCut 均依赖此配置。
+
+- **FFmpeg 导出配置** — 合辑工作台和 LiteCut 导出都要用到 `ffmpeg.exe`，建议选择下面任意一种：
+  - **推荐：[FrameMeld](https://github.com/LiTA8341/FrameMeld) 提供的 FFmpeg** — 到 [Releases](https://github.com/LiTA8341/FrameMeld/releases) 下载最新版本，解压后使用其中的 `ffmpeg.exe`。除了普通导出，还支持补帧、去重和动态模糊。
+  - **普通导出：[FFmpeg 9.0 full build](https://www.gyan.dev/ffmpeg/builds/#release-builds)** — 不需要帧混合时可以选这个。下载时认准 **full** 完整版，不要使用 essentials 或其他精简版。
+  - **配置方法** — 在程序设置页面的「FFmpeg 路径」中选择解压出来的 `ffmpeg.exe`。导出时会优先使用显卡硬件编码（NVENC / QSV / AMF），不可用时自动改用软件编码。
 
 ### LiteCut（多轨精剪）
 
-内置轻量非编：在 Insight 录制成片之上做多轨精剪，也可导入本地素材（需先配置 FFmpeg，见上）。
+内置轻量非编：在 Insight 录制成片之上做多轨精剪，也可导入本地素材（需先完成上方推荐的 FFmpeg 配置）。
 
 - **工程管理** — 新建 / 打开 / 复制工程，自定义画布尺寸与帧率；支持模板创建、工程 JSON 导入导出、崩溃恢复。
 - **素材池** — 直接使用 **Insight 录制** 片段（按高光 / 下饭 / 合集 / 时间线等筛选），或拖入本地视频、音频、图片、字体；支持预览代理、素材重定位与麦克风配音。

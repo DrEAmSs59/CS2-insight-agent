@@ -103,11 +103,15 @@ A unified match-analysis workspace: loading a demo auto-parses all players; swit
 - Successfully recorded clips land in the library; drag-and-drop reorder, add BGM/transition themes, export MP4; filter by highlight/fail/compilation/timeline, with intro/outro arrangement.
 - **Player Info Card** — Optional bottom-left nameplate at each clip start: nickname, clip type, round and scenario tags (e.g. multi-kill, one-tap); upload avatars per player, or fall back to the nickname initial.
 - Best for a lightweight “record → reorder → export” montage flow.
-- **FFmpeg Required**: Download a Windows build from [FFmpeg Official](https://ffmpeg.org/download.html) or [gyan.dev](https://www.gyan.dev/ffmpeg/builds/), then set the full path to `ffmpeg.exe` in Settings. Export prefers GPU encoders (NVENC/QSV/AMF) and falls back to software encoding. Both the Compilation Workbench and LiteCut depend on this setup.
+
+- **FFmpeg export setup** — The Compilation Workbench and LiteCut both use `ffmpeg.exe` for exporting. Choose either option below:
+  - **Recommended: FFmpeg from [FrameMeld](https://github.com/LiTA8341/FrameMeld)** — Download the latest release from [Releases](https://github.com/LiTA8341/FrameMeld/releases), extract it, and use the included `ffmpeg.exe`. It supports regular exports as well as frame interpolation, duplicate-frame repair, and motion blur.
+  - **Regular exports: [FFmpeg 9.0 full build](https://www.gyan.dev/ffmpeg/builds/#release-builds)** — Use this if you do not need FrameMeld processing. Choose the **full** build, not an essentials or stripped-down build.
+  - **Setup** — In Settings, select the extracted `ffmpeg.exe` as the FFmpeg path. Exports prefer GPU encoding (NVENC/QSV/AMF) and automatically fall back to software encoding when unavailable.
 
 ### LiteCut (Multi-track Editor)
 
-Built-in lightweight NLE for multi-track finishing on top of Insight recordings, or with local media (requires FFmpeg as above).
+Built-in lightweight NLE for multi-track finishing on top of Insight recordings, or with local media (requires one of the recommended FFmpeg setups above).
 
 - **Project Management** — Create / open / duplicate projects with custom canvas size and frame rate; templates, portable project JSON import/export, and crash recovery.
 - **Media Bin** — Use **Insight recordings** (filter by highlight/fail/compilation/timeline) or drop in local video, audio, images, and fonts; preview proxies, asset relinking, and mic voiceover.
