@@ -18,6 +18,7 @@ import {
 } from "./utils/freezeToDeathRoundFilter";
 import { progressToastShowsBusy } from "./utils/progressToast";
 import { playerIdentityKey } from "./utils/playerIdentity.js";
+import { normalizeRecordingSkyboxId } from "./utils/recordingSkybox.js";
 import { useDemoAnalysisWorkflows } from "./features/demo-analysis/useDemoAnalysisWorkflows";
 import { useDemoLibraryController } from "./features/demo-library/useDemoLibraryController";
 import { useClipQueueActions } from "./features/recording-queue/useClipQueueActions";
@@ -137,6 +138,7 @@ export default function App() {
   const [montageDrawerOpen, setMontageDrawerOpen] = useState(false);
   const [commonParamsOpen, setCommonParamsOpen] = useState(false);
   const [experimentalPovEnabled, setExperimentalPovEnabled] = useState(false);
+  const [recordingSkybox, setRecordingSkybox] = useState("default");
   const [obsTransitionEnabled, setObsTransitionEnabled] = useState(false);
   const [obsTransitionName, setObsTransitionName] = useState("Fade");
   const [obsTransitionDurationMs, setObsTransitionDurationMs] = useState(100);
@@ -491,6 +493,9 @@ export default function App() {
     if (data.experimental && typeof data.experimental.pov_enabled === "boolean") {
       setExperimentalPovEnabled(data.experimental.pov_enabled);
     }
+    if (typeof data.recording_skybox === "string") {
+      setRecordingSkybox(normalizeRecordingSkyboxId(data.recording_skybox));
+    }
     const savedPacing =
       data.recording_global_pacing &&
       typeof data.recording_global_pacing === "object" &&
@@ -599,6 +604,7 @@ export default function App() {
       kb_overlay_position: ["bottom_center", "minimap_below", "weapon_right"].includes(payload?.kb_overlay_position) ? payload.kb_overlay_position : "bottom_center",
       kill_fx_enabled: !!payload?.kill_fx_enabled,
       kill_fx_tick_offset: Number.isInteger(payload?.kill_fx_tick_offset) ? payload.kill_fx_tick_offset : 6,
+      recording_skybox: normalizeRecordingSkyboxId(payload?.recording_skybox),
       experimental: { pov_enabled: !!payload?.experimental_pov_enabled },
     };
     try {
@@ -1288,6 +1294,7 @@ export default function App() {
     cs2ExtraLaunchArgs,
     recordInjectConsoleLines,
     experimentalPovEnabled,
+    recordingSkybox,
     hasDemos,
     parsing,
     handleUpload,
@@ -1529,6 +1536,7 @@ export default function App() {
           onConfirm={handleWarmupConfirm}
           defaultOverrides={savedRecordWarmupDefaults ?? undefined}
           experimentalPovEnabled={experimentalPovEnabled}
+          recordingSkybox={recordingSkybox}
           cs2ExtraLaunchArgs={cs2ExtraLaunchArgs}
           recordInjectConsoleLines={recordInjectConsoleLines}
           initObsTransEnabled={obsTransitionEnabled}

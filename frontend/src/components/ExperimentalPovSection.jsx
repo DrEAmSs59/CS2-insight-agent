@@ -1,6 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
 import API from "../api/api";
 import { useT } from "../i18n/useT.js";
+import {
+  normalizeRecordingSkyboxId,
+  RECORDING_SKYBOX_OPTIONS,
+} from "../utils/recordingSkybox.js";
 
 /**
  * 实验性 POV：与常用参数 / 录制前观战弹窗共用；勾选写入 experimental.pov_enabled。
@@ -17,7 +21,10 @@ export default function ExperimentalPovSection({
   onPovTeamcounterNumericChange,
   povVoiceDisabled = false,
   onPovVoiceDisabledChange,
+  recordingSkybox = "default",
+  onRecordingSkyboxChange,
   omitEyebrow = false,
+  omitDisclaimer = false,
   className,
 }) {
   const t = useT();
@@ -59,15 +66,17 @@ export default function ExperimentalPovSection({
       ? "pov.restoreCorrupted"
       : "pov.restoreManaged";
 
-  const rootClass =
-    className ??
-    "rounded-lg border border-amber-500/25 bg-cs2-amber-surface p-4";
+  const rootClass = className ?? "space-y-3";
 
   return (
-    <section className={rootClass}>
+    <div className={rootClass}>
       {!omitEyebrow ? (
-        <p className="mb-2 text-[10px] font-bold uppercase tracking-wider text-cs2-amber-on-surface">{t("pov.eyebrowLabel")}</p>
+        <p className="text-[10px] font-bold uppercase tracking-wider text-cs2-amber-on-surface">{t("pov.eyebrowLabel")}</p>
       ) : null}
+      <section
+        className="rounded-lg border border-amber-500/25 bg-cs2-amber-surface p-3"
+        data-testid="experimental-pov-card"
+      >
       <label className="flex cursor-pointer items-start gap-2 rounded-lg border border-cs2-border bg-cs2-bg-card px-3 py-2">
         <input
           type="checkbox"
@@ -140,9 +149,14 @@ export default function ExperimentalPovSection({
         </div>
       ) : null}
 
-      <div className="mt-2 rounded border border-cs2-border bg-cs2-bg-card px-2.5 py-2 text-[11px] leading-relaxed text-cs2-text-muted">
-        {t("pov.disclaimer")}
-      </div>
+      {!omitDisclaimer ? (
+        <div
+          className="mt-2 rounded border border-cs2-border bg-cs2-bg-card px-2.5 py-2 text-[11px] leading-relaxed text-cs2-text-muted"
+          data-testid="experimental-pov-disclaimer"
+        >
+          {t("pov.disclaimer")}
+        </div>
+      ) : null}
 
       {povStatusError && !povStatusLoading ? (
         <div className="mt-3 rounded border border-amber-500/35 bg-cs2-amber-surface px-2.5 py-2 text-[11px] text-cs2-amber-on-surface">
@@ -220,6 +234,42 @@ export default function ExperimentalPovSection({
           {t(povRestoreResult.messageKey)}
         </div>
       ) : null}
-    </section>
+      </section>
+
+      {onRecordingSkyboxChange ? (
+        <section
+          className="rounded-lg border border-cs2-border bg-cs2-bg-card p-3"
+          data-testid="experimental-skybox-card"
+        >
+          <label className="block text-[11px] text-cs2-text-secondary">
+            <span className="block font-semibold text-cs2-text-primary">
+              {t("record.skyboxTitle")}
+            </span>
+            <span className="mt-1 block text-[10px] leading-relaxed text-cs2-text-muted">
+              {t("record.skyboxSubtitle")}
+            </span>
+            <select
+              aria-label={t("record.skyboxSelectLabel")}
+              value={normalizeRecordingSkyboxId(recordingSkybox)}
+              disabled={checkboxDisabled}
+              onChange={(event) => onRecordingSkyboxChange(event.target.value)}
+              className="mt-2 w-full rounded border border-cs2-border bg-cs2-bg-input px-2 py-1.5 text-xs text-cs2-text-primary outline-none focus:border-cs2-accent/50 disabled:opacity-40"
+            >
+              {RECORDING_SKYBOX_OPTIONS.map(({ value, labelKey }) => (
+                <option key={value} value={value}>{t(labelKey)}</option>
+              ))}
+            </select>
+          </label>
+          <p className="mt-2 text-[10px] leading-relaxed text-cs2-text-muted">
+            {t("record.skyboxSupportedMaps")}
+          </p>
+          {normalizeRecordingSkyboxId(recordingSkybox) !== "default" ? (
+            <p className="mt-2 text-[10px] leading-relaxed text-cs2-amber-on-surface">
+              {t("record.skyboxOutcome")}
+            </p>
+          ) : null}
+        </section>
+      ) : null}
+    </div>
   );
 }

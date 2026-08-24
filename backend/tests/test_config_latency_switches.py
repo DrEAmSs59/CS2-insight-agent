@@ -8,6 +8,9 @@ import asyncio
 import sys
 from pathlib import Path
 
+import pytest
+from fastapi import HTTPException
+
 _BACKEND_ROOT = Path(__file__).resolve().parents[1]
 if str(_BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(_BACKEND_ROOT))
@@ -78,3 +81,24 @@ def test_switches_are_exposed_via_get_config(monkeypatch):
 
     assert data["obs"]["browser_begin_frame_scheduling"] is True
     assert data["latency_calibration_enabled"] is True
+
+
+def test_recording_skybox_is_independent_and_defaults_to_original():
+    cfg = AppConfig(obs=OBSConfig())
+
+    assert cfg.recording_skybox == "default"
+    assert cfg.experimental.pov_enabled is False
+
+
+def test_recording_skybox_survives_the_round_trip(monkeypatch):
+    payload = config_api.ConfigPayload(recording_skybox="xuejing")
+
+    assert _round_trip(monkeypatch, payload).recording_skybox == "xuejing"
+
+
+def test_unknown_recording_skybox_is_rejected(monkeypatch):
+    payload = config_api.ConfigPayload(recording_skybox="unknown")
+
+    with pytest.raises(HTTPException) as exc_info:
+        _round_trip(monkeypatch, payload)
+    assert exc_info.value.status_code == 422

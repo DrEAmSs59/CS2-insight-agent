@@ -7,6 +7,22 @@ the backend instead starts from `pov_voice_template.vpk`, extracts
 bounded data slot in the bundled Panorama demo-controller script. The package
 is rebuilt with fresh VPK entry CRCs before CS2 starts.
 
+## Recording skybox layer
+
+`skybox_assets.vpk` is an independent asset carrier for `cartoon3`, `xuejing`,
+and `yinhezhanjian`. The recording preset presents `recording_skybox` alongside
+POV HUD in the experimental-features group while keeping the two selections
+independent. Before each demo starts, the backend composes one of two runtime
+packages:
+
+- ordinary recording: selected material/texture plus the current map aliases,
+  with no Panorama entries;
+- POV recording: the same sky layer merged into the demo-specific POV VPK.
+
+The supported maps are Dust II, Inferno, Mirage, Nuke, Overpass, Anubis,
+Cache, and Ancient. `default` installs no recording VPK in ordinary mode and
+adds no sky aliases in POV mode, preserving the map's original sky.
+
 The same dynamic package also embeds an 8Hz XUID-bound radar track (payload
 index 8). At runtime Panorama hides the stock team-colored radar, draws the
 stock map backdrop, and interpolates teammate markers at frame rate with real

@@ -1,3 +1,5 @@
+import { normalizeRecordingSkyboxId } from "./recordingSkybox.js";
+
 function gcdInt(a, b) {
   let x = Math.abs(a);
   let y = Math.abs(b);
@@ -208,6 +210,7 @@ export function splitRecordWarmupConfirmPayload(payload) {
     session_cs2_extra_launch_args,
     session_record_inject_console_lines,
     experimental_pov_enabled,
+    recording_skybox,
     obs_transition_enabled,
     obs_transition_name,
     obs_transition_duration_ms,
@@ -230,6 +233,7 @@ export function splitRecordWarmupConfirmPayload(payload) {
           ? session_record_inject_console_lines
           : undefined,
       experimental_pov_enabled: !!experimental_pov_enabled,
+      recording_skybox: normalizeRecordingSkyboxId(recording_skybox),
       obs_transition_enabled,
       obs_transition_name,
       obs_transition_duration_ms,

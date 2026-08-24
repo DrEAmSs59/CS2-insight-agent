@@ -413,6 +413,8 @@ class AppConfig(BaseModel):
     recording_global_pacing: dict[str, Any] = Field(default_factory=dict)
     # 录制前观战选项默认值（与前端 RecordWarmupModal DEFAULT_OPTIONS 对齐的扁平对象）
     default_record_warmup: dict[str, Any] = Field(default_factory=dict)
+    # 实验性录制天空盒预设；与 POV HUD 并列展示，但两者可独立启用。
+    recording_skybox: str = "default"
     # 录制启动 cs2.exe 时附加的命令行参数（shlex 分词后追加在内置参数与 +exec 之前）
     cs2_extra_launch_args: str = _DEFAULT_CS2_EXTRA_LAUNCH_ARGS
     # False 表示仍沿用程序默认启动项；True 表示用户已手动编辑过该字段，

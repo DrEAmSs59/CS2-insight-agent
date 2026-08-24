@@ -54,6 +54,44 @@ describe("ExperimentalPovSection POV recovery", () => {
     expect(onVoiceChange).toHaveBeenCalledWith(true);
   });
 
+  it("renders the skybox as a separate card beside the POV feature", () => {
+    API.get.mockReturnValue(new Promise(() => {}));
+    const onSkyboxChange = vi.fn();
+    render(
+      <ExperimentalPovSection
+        visible
+        experimentalPovEnabled={false}
+        onExperimentalPovChange={() => {}}
+        recordingSkybox="xuejing"
+        onRecordingSkyboxChange={onSkyboxChange}
+      />,
+    );
+
+    const selector = screen.getByRole("combobox", { name: "录制天空盒" });
+    const povCard = screen.getByTestId("experimental-pov-card");
+    const skyboxCard = screen.getByTestId("experimental-skybox-card");
+    expect(selector.value).toBe("xuejing");
+    expect(povCard.contains(selector)).toBe(false);
+    expect(skyboxCard.contains(selector)).toBe(true);
+    expect(skyboxCard.parentElement).toBe(povCard.parentElement);
+    fireEvent.change(selector, { target: { value: "yinhezhanjian" } });
+    expect(onSkyboxChange).toHaveBeenCalledWith("yinhezhanjian");
+  });
+
+  it("can omit the POV disclaimer in the recording dialog", () => {
+    API.get.mockReturnValue(new Promise(() => {}));
+    render(
+      <ExperimentalPovSection
+        visible
+        experimentalPovEnabled={false}
+        onExperimentalPovChange={() => {}}
+        omitDisclaimer
+      />,
+    );
+
+    expect(screen.queryByTestId("experimental-pov-disclaimer")).toBeNull();
+  });
+
   it("explains orphaned residue and reports semantic cleanup", async () => {
     API.get.mockResolvedValue({
       data: {

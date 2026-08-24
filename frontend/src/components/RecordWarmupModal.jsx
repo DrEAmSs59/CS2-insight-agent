@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { X } from "lucide-react";
 import {
   aspectExportHint,
@@ -9,9 +9,10 @@ import {
   validateWarmupResolution,
 } from "../utils/warmupDefaults";
 import ExperimentalPovSection from "./ExperimentalPovSection";
-import Cs2LaunchConsoleFields, { countInjectConsoleLines } from "./Cs2LaunchConsoleFields";
+import Cs2LaunchConsoleFields from "./Cs2LaunchConsoleFields";
 import { POV_CONFLICT_HUD, RecordingHudCard } from "./RecordingHudCard";
 import { useT } from "../i18n/useT.js";
+import { normalizeRecordingSkyboxId } from "../utils/recordingSkybox.js";
 
 /** 拼装随观战选项变化的 cvar（顺序与后端一致）；固定 cvar 见 record_inject_console_lines 配置 */
 export function buildWarmupConsoleCommands(o) {
@@ -147,6 +148,7 @@ export default function RecordWarmupModal({
   onConfirm,
   defaultOverrides,
   experimentalPovEnabled = false,
+  recordingSkybox = "default",
   cs2ExtraLaunchArgs = "",
   recordInjectConsoleLines = "",
   initObsTransEnabled = false,
@@ -170,6 +172,7 @@ export default function RecordWarmupModal({
   const [killFxEnabled, setKillFxEnabled] = useState(false);
   const [killFxTickOffset, setKillFxTickOffset] = useState(6);
   const [sessionPovEnabled, setSessionPovEnabled] = useState(false);
+  const [sessionSkybox, setSessionSkybox] = useState("default");
   const [sessionCs2ExtraLaunchArgs, setSessionCs2ExtraLaunchArgs] = useState("");
   const [sessionRecordInjectConsoleLines, setSessionRecordInjectConsoleLines] = useState("");
 
@@ -203,6 +206,7 @@ export default function RecordWarmupModal({
     setKillFxEnabled(!!initKillFxEnabled);
     setKillFxTickOffset(Number(initKillFxTickOffset) || 0);
     setSessionPovEnabled(!!experimentalPovEnabled);
+    setSessionSkybox(normalizeRecordingSkyboxId(recordingSkybox));
     setSessionCs2ExtraLaunchArgs(cs2ExtraLaunchArgs);
     setSessionRecordInjectConsoleLines(recordInjectConsoleLines);
   }, [
@@ -212,6 +216,7 @@ export default function RecordWarmupModal({
     initObsTransName,
     initObsTransDurationMs,
     experimentalPovEnabled,
+    recordingSkybox,
     initKbOverlayEnabled,
     initKbOverlayTickOffset,
     initKbOverlayPosition,
@@ -229,20 +234,6 @@ export default function RecordWarmupModal({
     }, 400);
     return () => clearTimeout(timer);
   }, [open, opts.aspect_ratio, opts.resolution_width, opts.resolution_height, t]);
-
-  const injectExtraCount = useMemo(
-    () => countInjectConsoleLines(sessionRecordInjectConsoleLines),
-    [sessionRecordInjectConsoleLines],
-  );
-
-  const baseWarmupCmdCount = useMemo(
-    () =>
-      buildWarmupConsoleCommands({
-        ...opts,
-        spec_show_xray: !!opts.spec_show_xray,
-      }).length,
-    [opts],
-  );
 
   const set = useCallback((patch) => {
     setOpts((prev) => ({ ...prev, ...patch }));
@@ -301,6 +292,7 @@ export default function RecordWarmupModal({
         kill_fx_enabled: killFxEnabled,
         kill_fx_tick_offset: Number(killFxTickOffset) || 0,
         experimental_pov_enabled: sessionPovEnabled,
+        recording_skybox: normalizeRecordingSkyboxId(sessionSkybox),
         session_cs2_extra_launch_args: sessionCs2ExtraLaunchArgs,
         session_record_inject_console_lines: sessionRecordInjectConsoleLines,
       });
@@ -353,8 +345,7 @@ export default function RecordWarmupModal({
           {t("record.warmupTitle")}
         </h2>
         <p className="mb-5 text-xs leading-relaxed text-cs2-text-muted">
-          <strong className="text-cs2-text-secondary">{t("record.warmupIntro")}</strong>
-          <span className="mt-1 block text-cs2-text-muted">
+          <span className="block text-cs2-text-muted">
             {t("record.warmupIntroPersistNote")}
           </span>
         </p>
@@ -714,6 +705,9 @@ export default function RecordWarmupModal({
             onPovTeamcounterNumericChange={(v) => set({ pov_teamcounter_numeric: v })}
             povVoiceDisabled={opts.pov_voice_disabled}
             onPovVoiceDisabledChange={(v) => set({ pov_voice_disabled: v })}
+            recordingSkybox={sessionSkybox}
+            onRecordingSkyboxChange={setSessionSkybox}
+            omitDisclaimer
           />
 
           <section aria-labelledby="sec-audio">
@@ -830,19 +824,13 @@ export default function RecordWarmupModal({
               onCs2ExtraLaunchArgsChange={setSessionCs2ExtraLaunchArgs}
               recordInjectConsoleLines={sessionRecordInjectConsoleLines}
               onRecordInjectConsoleLinesChange={setSessionRecordInjectConsoleLines}
+              omitConsoleHint
             />
           </section>
 
           </div>
         </div>
 
-          <p className="mt-4 font-mono text-[11px] leading-relaxed text-cs2-text-muted">
-            {t("record.warmupWarmupCount", {
-              base: baseWarmupCmdCount,
-              extra: injectExtraCount,
-              total: baseWarmupCmdCount + injectExtraCount,
-            })}
-          </p>
         </div>
 
         <div className="flex shrink-0 flex-col gap-2 border-t border-cs2-border bg-cs2-bg-input/60 px-6 py-4 sm:flex-row sm:items-center sm:justify-end">

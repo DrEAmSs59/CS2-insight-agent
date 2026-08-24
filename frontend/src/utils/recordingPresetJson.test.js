@@ -16,6 +16,7 @@ const preset = {
   kill_fx_enabled: true,
   kill_fx_tick_offset: 6,
   experimental_pov_enabled: false,
+  recording_skybox: "xuejing",
 };
 
 describe("recording preset share JSON", () => {
@@ -48,5 +49,16 @@ describe("recording preset share JSON", () => {
     const { kill_fx_tick_offset: _removed, ...legacyPreset } = preset;
     const file = { ...buildRecordingPresetFile(legacyPreset), version: 1 };
     expect(parseRecordingPresetFile(file, RECORD_WARMUP_DEFAULT_OPTIONS).kill_fx_tick_offset).toBe(6);
+  });
+
+  test("defaults legacy presets to the original map sky", () => {
+    const { recording_skybox: _removed, ...legacyPreset } = preset;
+    const file = { ...buildRecordingPresetFile(legacyPreset), version: 2 };
+    expect(parseRecordingPresetFile(file, RECORD_WARMUP_DEFAULT_OPTIONS).recording_skybox).toBe("default");
+  });
+
+  test("rejects an unknown skybox", () => {
+    const file = buildRecordingPresetFile({ ...preset, recording_skybox: "other" });
+    expect(() => parseRecordingPresetFile(file, RECORD_WARMUP_DEFAULT_OPTIONS)).toThrow();
   });
 });

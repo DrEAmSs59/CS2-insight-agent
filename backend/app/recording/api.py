@@ -27,6 +27,7 @@ from ..demo_compat_service import ensure_demo_compatible
 from ..demo_paths import resolve_working_demo_path
 from ..databases import demo_db
 from ..runtime_session import runtime_session_dependency
+from ..skybox_vpk import DEFAULT_SKYBOX_ID, SkyboxVpkError, normalize_skybox_id
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/recording", tags=["recording"])
@@ -570,6 +571,7 @@ class QueueRecordingRequest(BaseModel):
     warmup: Optional[dict] = None
     obs: Optional[dict] = None
     pov_hud: Optional[dict] = None  # {enabled, radar_mode, teamcounter_numeric, voice_disabled}
+    skybox: Optional[dict] = None  # {id: default|cartoon3|xuejing|yinhezhanjian}
     # 仅本次录制队列生效，不写入 cs2-insight.config.json
     cs2_extra_launch_args: Optional[str] = None
     record_inject_console_lines: Optional[str] = None
@@ -788,6 +790,25 @@ async def execute_recording_queue(
             warmup_extras.pov_teamcounter_numeric,
             warmup_extras.pov_voice_disabled,
         )
+
+    saved_skybox_id = getattr(cfg, "recording_skybox", DEFAULT_SKYBOX_ID)
+    raw_skybox_id = (
+        req.skybox.get("id", saved_skybox_id)
+        if isinstance(req.skybox, dict)
+        else saved_skybox_id
+    )
+    try:
+        recording_skybox_id = normalize_skybox_id(raw_skybox_id)
+    except SkyboxVpkError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    if recording_skybox_id != DEFAULT_SKYBOX_ID:
+        if warmup_extras is None:
+            warmup_extras = RecordingWarmupExtras()
+        warmup_extras = dataclasses.replace(
+            warmup_extras,
+            skybox_id=recording_skybox_id,
+        )
+        logger.info("[RecordingV3] skybox enabled: %s", recording_skybox_id)
 
     global _queue_abort_event
     if _queue_abort_event is not None:

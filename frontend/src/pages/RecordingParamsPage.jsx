@@ -14,6 +14,7 @@ export default function RecordingParamsPage({ embedded = false, onRegisterSave, 
       savedWarmupDefaults={s.savedRecordWarmupDefaults}
       onSaveAllCommonParams={s.saveAllCommonParams}
       experimentalPovEnabled={s.experimentalPovEnabled}
+      recordingSkybox={s.recordingSkybox}
       cs2ExtraLaunchArgs={s.cs2ExtraLaunchArgs}
       recordInjectConsoleLines={s.recordInjectConsoleLines}
       obsTransitionEnabled={s.obsTransitionEnabled}

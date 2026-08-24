@@ -178,6 +178,7 @@ export function useRecordingSessionController({
         obs: obsConfig,
         cs2_extra_launch_args: session.cs2_extra_launch_args,
         record_inject_console_lines: session.record_inject_console_lines,
+        skybox: { id: session.recording_skybox },
         ...(povHud ? { pov_hud: povHud } : {}),
       };
       if (!recordingAbortRequestedRef.current) {

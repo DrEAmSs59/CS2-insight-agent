@@ -1493,7 +1493,7 @@ export default function SettingsPage() {
         activeTab === "video" && aiObsRecommendationEnabled
           ? "w-full"
           : activeTab === "recording"
-            ? "mx-auto w-full max-w-4xl"
+            ? "w-full"
             : "mx-auto w-full max-w-[54rem]"
       }`}
     >

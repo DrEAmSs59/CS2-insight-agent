@@ -1828,6 +1828,9 @@ class RecordingWarmupExtras:
     pov_voice_disabled: bool = False
     # RecordingV3 queue: enable POV HUD lifecycle (install vpk + patch gameinfo.gi)
     pov_hud_enabled: bool = False
+    # Independent recording preset. Non-default values install a sky-only VPK
+    # in ordinary mode, or merge the same layer into the POV package.
+    skybox_id: str = "default"
 
 
 # CS2 视频设置「宽高比」下拉与 setting.aspectratiomode 枚举（社区常用映射）。
@@ -3558,6 +3561,7 @@ class OBSDirector:
             restore_pov_after_cs2_exit,
         )
         from .pov_constants import POV_CORE_FORCED_COMMANDS, pov_tail_commands
+        from .skybox_vpk import DEFAULT_SKYBOX_ID, normalize_skybox_id
 
         logger.info("[RecordingV3] execute_plan_queue: %d requests", len(requests))
 
@@ -3580,6 +3584,11 @@ class OBSDirector:
 
         pov_mgr_v3: "Optional[PovHudManager]" = None
         pov_on_v3 = bool(warmup and getattr(warmup, "pov_hud_enabled", False))
+        skybox_id_v3 = normalize_skybox_id(
+            getattr(warmup, "skybox_id", DEFAULT_SKYBOX_ID) if warmup else DEFAULT_SKYBOX_ID
+        )
+        skybox_on_v3 = skybox_id_v3 != DEFAULT_SKYBOX_ID
+        recording_vpk_on_v3 = pov_on_v3 or skybox_on_v3
         pov_install_attempted = False
         pov_expected_gameinfo_sha256: Optional[str] = None
         pov_restoration: Optional[dict[str, Any]] = None
@@ -3742,15 +3751,18 @@ class OBSDirector:
             # Do not continue into POV installation or launch CS2 after that.
             self._check_abort()
 
-            # ── POV HUD manager (the VPK is generated per demo below) ─────────
-            if pov_on_v3:
+            # ── Recording VPK manager (normal sky-only or POV + sky) ─────────
+            if recording_vpk_on_v3:
                 try:
                     from .env_utils import load_config as _load_cfg
                     _app_cfg = _load_cfg()
                     pov_mgr_v3 = PovHudManager(_app_cfg)
                 except PovHudError as _pov_e:
+                    if skybox_on_v3:
+                        raise
                     logger.error("[RecordingV3][POV] setup failed: %s; continuing without POV HUD", _pov_e)
                     pov_on_v3 = False
+                    recording_vpk_on_v3 = False
 
             for job_idx, (demo_key, demo_requests) in enumerate(demo_groups.items()):
                 demo_abs = demo_abs_map[demo_key]
@@ -3760,14 +3772,44 @@ class OBSDirector:
 
                 # The speaking schedule is demo-specific. CS2 is stopped between
                 # groups, so restore/reinstall the package with this demo's data.
-                if pov_on_v3 and pov_mgr_v3 is not None:
+                if recording_vpk_on_v3 and pov_mgr_v3 is not None:
                     try:
-                        logger.info("[RecordingV3][POV] build and install voice HUD for %s", demo_name)
+                        demo_map_name = str(
+                            getattr(demo_requests[0].demo, "map_name", "") or ""
+                        ).strip()
+                        logger.info(
+                            "[RecordingV3][VPK] build and install package for %s "
+                            "(pov=%s skybox=%s map=%s)",
+                            demo_name,
+                            pov_on_v3,
+                            skybox_id_v3,
+                            demo_map_name,
+                        )
                         pov_install_attempted = True
-                        if bool(getattr(warmup, "pov_voice_disabled", False)):
-                            pov_mgr_v3.install(demo_path=demo_abs, voice_enabled=False)
+                        if pov_on_v3 and bool(getattr(warmup, "pov_voice_disabled", False)):
+                            if skybox_on_v3:
+                                pov_mgr_v3.install(
+                                    map_name=demo_map_name,
+                                    demo_path=demo_abs,
+                                    voice_enabled=False,
+                                    skybox_id=skybox_id_v3,
+                                )
+                            else:
+                                pov_mgr_v3.install(demo_path=demo_abs, voice_enabled=False)
+                        elif pov_on_v3:
+                            if skybox_on_v3:
+                                pov_mgr_v3.install(
+                                    map_name=demo_map_name,
+                                    demo_path=demo_abs,
+                                    skybox_id=skybox_id_v3,
+                                )
+                            else:
+                                pov_mgr_v3.install(demo_path=demo_abs)
                         else:
-                            pov_mgr_v3.install(demo_path=demo_abs)
+                            pov_mgr_v3.install(
+                                map_name=demo_map_name,
+                                skybox_id=skybox_id_v3,
+                            )
                         installed_status = pov_mgr_v3.status()
                         pov_expected_gameinfo_sha256 = str(
                             installed_status.get("original_gameinfo_sha256") or ""
@@ -3776,8 +3818,15 @@ class OBSDirector:
                             raise PovHudError(
                                 "POV HUD install manifest does not contain the original gameinfo.gi hash."
                             )
-                        self._pov_enabled = True
+                        self._pov_enabled = pov_on_v3
                     except PovHudError as _pov_e:
+                        if skybox_on_v3:
+                            logger.error(
+                                "[RecordingV3][SKYBOX] install failed for %s: %s",
+                                demo_name,
+                                _pov_e,
+                            )
+                            raise
                         logger.error(
                             "[RecordingV3][POV] install failed for %s: %s; "
                             "continuing without POV HUD",
@@ -4047,6 +4096,7 @@ class OBSDirector:
                         "error": result.error,
                         "warnings": result.warnings,
                         "pov_hud_enabled": pov_on_v3,
+                        "recording_skybox": skybox_id_v3,
                         "recording_perspective": (
                             "pov_hud" if pov_on_v3
                             else "player_follow" if (dto.target_player and dto.target_player.name)
@@ -4215,6 +4265,16 @@ class OBSDirector:
                 "pov_restore_verified": pov_restore_checked if pov_on_v3 else True,
                 "pov_restored": pov_restore_ok if pov_on_v3 else True,
             }
+            if skybox_on_v3:
+                recovery.update(
+                    {
+                        "recording_skybox_id": skybox_id_v3,
+                        "recording_skybox_enabled": True,
+                        "recording_vpk_enabled": True,
+                        "recording_vpk_restore_verified": pov_restore_checked,
+                        "recording_vpk_restored": pov_restore_ok,
+                    }
+                )
             if pov_on_v3:
                 recovery["pov_restore_state"] = (
                     "restored"

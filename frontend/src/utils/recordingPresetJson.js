@@ -1,5 +1,7 @@
+import { isRecordingSkyboxId } from "./recordingSkybox.js";
+
 export const RECORDING_PRESET_FORMAT = "cs2-insight-recording-preset";
-export const RECORDING_PRESET_VERSION = 2;
+export const RECORDING_PRESET_VERSION = 3;
 export const RECORDING_PRESET_MAX_BYTES = 256 * 1024;
 
 const isObject = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
@@ -93,7 +95,7 @@ export function buildRecordingPresetFile(preset, exportedAt = new Date().toISOSt
 export function parseRecordingPresetFile(value, warmupDefaults) {
   if (!isObject(value)) invalid("root", "type");
   if (value.format !== RECORDING_PRESET_FORMAT) invalid("format", "format");
-  if (value.version !== 1 && value.version !== RECORDING_PRESET_VERSION) invalid("version", "version");
+  if (![1, 2, RECORDING_PRESET_VERSION].includes(value.version)) invalid("version", "version");
   if (!isObject(value.preset)) invalid("preset", "type");
 
   const p = value.preset;
@@ -121,9 +123,15 @@ export function parseRecordingPresetFile(value, warmupDefaults) {
       ? kbOverlayTickOffset + storedKillFxOffset
       : (Object.hasOwn(p, "kill_fx_tick_offset") ? storedKillFxOffset : 6),
     experimental_pov_enabled: requireBoolean(p.experimental_pov_enabled, "experimental_pov_enabled"),
+    recording_skybox: Object.hasOwn(p, "recording_skybox")
+      ? requireString(p.recording_skybox, "recording_skybox", 32)
+      : "default",
   };
   if (!["bottom_center", "minimap_below", "weapon_right"].includes(result.kb_overlay_position)) {
     invalid("kb_overlay_position", "range");
+  }
+  if (!isRecordingSkyboxId(result.recording_skybox)) {
+    invalid("recording_skybox", "range");
   }
   return result;
 }
