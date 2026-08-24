@@ -10,9 +10,9 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Iterable, Optional
 
-from .env_utils import get_data_dir
+from .env_utils import _candidate_steam_roots, get_data_dir
 from .win_cs2_console import find_cs2_hwnd
 
 logger = logging.getLogger(__name__)
@@ -23,6 +23,29 @@ MANIFEST_FILENAME = "manifest.json"
 README_FILENAME = "恢复说明.txt"
 RECORDING_STATE_VERSION = 1
 MANIFEST_VERSION = 4
+
+# CS2 writes archived cvars and binds to both the current ``local/cfg`` files
+# and Steam's legacy/cloud-facing ``remote`` files.  Both copies must be
+# restored; otherwise Steam Cloud can copy a polluted remote file back over a
+# successfully restored local snapshot on the next launch.
+USER_CONFIG_FILENAMES: tuple[str, ...] = (
+    "config.cfg",
+    "cs2_user.cfg",
+    "cs2_machine_convars.vcfg",
+    "video.txt",
+    "cs2_video.txt",
+    "user_convars_0_slot0.vcfg",
+    "cs2_user_convars_0_slot0.vcfg",
+    "cs2_user_keys.vcfg",
+    "cs2_user_convars.vcfg",
+    "localconfig.vdf",
+)
+USER_CONFIG_GLOB_PATTERNS: tuple[str, ...] = (
+    "user_convars_0_slot*.vcfg",
+    "cs2_user_convars_0_slot*.vcfg",
+    "cs2_user_keys*.vcfg",
+    "*.vcfg_lastclouded",
+)
 
 RECOVERY_README_TEXT = """这是 CS2 Insight Agent 在录制前自动保存的玩家原始配置。
 
@@ -191,6 +214,117 @@ def is_cs2_running() -> bool:
         return False
 
 
+def candidate_user_config_dirs(cs2_path: str | Path) -> list[Path]:
+    """Return every CS2 config directory that can persist binds or cvars."""
+    dirs: list[Path] = []
+    seen: set[str] = set()
+
+    def add(directory: Path) -> None:
+        if not directory.is_dir():
+            return
+        try:
+            key = str(directory.resolve()).casefold()
+        except OSError:
+            key = str(directory).casefold()
+        if key in seen:
+            return
+        seen.add(key)
+        dirs.append(directory)
+
+    try:
+        cs2 = Path(cs2_path)
+    except (TypeError, ValueError):
+        return dirs
+
+    # game/bin/win64/cs2.exe -> game/csgo/cfg
+    try:
+        add(cs2.parents[2] / "csgo" / "cfg")
+    except IndexError:
+        pass
+    # Compatibility with installations that expose a cfg directory one level
+    # above game/. This was part of the original recording-only discovery.
+    try:
+        add(cs2.parents[3] / "csgo" / "cfg")
+    except IndexError:
+        pass
+
+    steam_roots: list[Path] = []
+    try:
+        steam_roots.append(cs2.parents[6])
+    except IndexError:
+        pass
+    steam_roots.extend(_candidate_steam_roots())
+
+    steam_seen: set[str] = set()
+    for steam_root in steam_roots:
+        try:
+            root_key = str(steam_root.resolve()).casefold()
+        except OSError:
+            root_key = str(steam_root).casefold()
+        if root_key in steam_seen:
+            continue
+        steam_seen.add(root_key)
+        userdata = steam_root / "userdata"
+        if not userdata.is_dir():
+            continue
+        try:
+            accounts = list(userdata.iterdir())
+        except OSError as exc:
+            logger.warning("iter userdata failed: %s", exc)
+            continue
+        for account in accounts:
+            add(account / "730" / "local" / "cfg")
+            add(account / "730" / "remote")
+            add(account / "config")
+    return dirs
+
+
+def snapshot_user_configs(
+    cs2_path: str | Path,
+    *,
+    config_dirs: Optional[Iterable[Path]] = None,
+    extra_paths: Iterable[Path] = (),
+) -> dict[Path, Optional[bytes]]:
+    """Take a byte-for-byte snapshot of all player config persistence paths."""
+    snap: dict[Path, Optional[bytes]] = {}
+
+    def add_path(path: Path, *, record_missing: bool) -> None:
+        if path in snap:
+            return
+        try:
+            if path.is_file():
+                snap[path] = path.read_bytes()
+            elif record_missing:
+                snap[path] = None
+        except OSError as exc:
+            logger.warning("Snapshot user config %s failed: %s", path, exc)
+
+    dirs = (
+        [Path(directory) for directory in config_dirs]
+        if config_dirs is not None
+        else candidate_user_config_dirs(cs2_path)
+    )
+    for directory in dirs:
+        for name in USER_CONFIG_FILENAMES:
+            add_path(directory / name, record_missing=True)
+        for pattern in USER_CONFIG_GLOB_PATTERNS:
+            try:
+                for path in directory.glob(pattern):
+                    add_path(path, record_missing=False)
+            except OSError as exc:
+                logger.warning("Snapshot user config glob %s failed: %s", directory / pattern, exc)
+    for path in extra_paths:
+        add_path(Path(path), record_missing=False)
+
+    if snap:
+        logger.info(
+            "Snapshotted %d user config file(s) before launch (dirs=%s)",
+            len([value for value in snap.values() if value is not None]),
+            [str(directory) for directory in dirs],
+        )
+    return snap
+
+
 def _atomic_write_bytes(target: Path, data: bytes) -> None:
     target.parent.mkdir(parents=True, exist_ok=True)
     tmp = target.with_suffix(target.suffix + ".cs2insight.tmp")
@@ -352,6 +486,109 @@ def restore_latest_user_config_backup(*, skip_cs2_running_check: bool = False) -
         "restored": restored,
         "failed": [],
         "source": "manifest",
+    }
+
+
+def restore_user_config_snapshot(
+    snap: dict[Path, Optional[bytes]],
+    *,
+    skip_cs2_running_check: bool = False,
+) -> dict[str, Any]:
+    """Restore a session snapshot, preferring its crash-safe disk manifest."""
+    if not skip_cs2_running_check and is_cs2_running():
+        return {
+            "ok": False,
+            "verified": False,
+            "checked": 0,
+            "code": "CS2_RUNNING",
+            "restored": 0,
+            "failed": [],
+            "source": "none",
+        }
+
+    if is_restore_required():
+        try:
+            result = restore_latest_user_config_backup(skip_cs2_running_check=True)
+            if result.get("ok"):
+                return {**result, "source": "manifest"}
+            logger.warning("Manifest restore failed post-exit: %s", result)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Manifest restore raised: %s", exc)
+
+    if not snap:
+        return {
+            "ok": True,
+            "verified": False,
+            "checked": 0,
+            "restored": 0,
+            "failed": [],
+            "source": "none",
+        }
+
+    restored = 0
+    failed: list[dict[str, str]] = []
+    for path, original in snap.items():
+        try:
+            current_exists = path.is_file()
+            if original is None:
+                if current_exists:
+                    path.unlink()
+                    logger.info("Removed CS2-created user config: %s", path)
+                    restored += 1
+                continue
+            current = path.read_bytes() if current_exists else None
+            if current != original:
+                _atomic_write_bytes(path, original)
+                logger.info("Restored user config: %s (modified during managed CS2 session)", path)
+                restored += 1
+        except OSError as exc:
+            logger.warning("Restore user config %s failed: %s", path, exc)
+            failed.append({"original": str(path), "error": str(exc)})
+
+    checked = 0
+    failed_paths = {item.get("original") for item in failed}
+    for path, original in snap.items():
+        if str(path) in failed_paths:
+            continue
+        try:
+            if original is None:
+                if path.exists():
+                    failed.append({
+                        "original": str(path),
+                        "error": "file that did not originally exist is still present",
+                    })
+                    continue
+            elif not path.is_file() or path.read_bytes() != original:
+                failed.append({
+                    "original": str(path),
+                    "error": "restored content does not match the in-memory snapshot",
+                })
+                continue
+            checked += 1
+        except OSError as exc:
+            failed.append({
+                "original": str(path),
+                "error": f"post-restore verification failed: {exc}",
+            })
+
+    if not failed and is_restore_required():
+        try:
+            write_recording_state("recorded")
+        except OSError as exc:
+            failed.append({
+                "original": str(get_recording_state_path()),
+                "error": f"could not finalize recovery state: {exc}",
+            })
+
+    if restored:
+        logger.info("Restored %d user config file(s) post-exit (memory snapshot)", restored)
+    return {
+        "ok": not failed,
+        "verified": not failed and checked == len(snap),
+        "checked": checked,
+        "restored": restored,
+        "failed": failed,
+        "source": "memory",
     }
 
 

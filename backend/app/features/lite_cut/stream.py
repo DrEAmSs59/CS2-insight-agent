@@ -42,6 +42,5 @@ async def stream_file_with_range(file_path: Path, request) -> FileResponse:
     return FileResponse(
         path=str(file_path),
         media_type=media_type,
-        filename=file_path.name,
         headers={"Accept-Ranges": "bytes"},
     )

@@ -11,6 +11,7 @@ import montage from "./locales/en/montage.js";
 import liteCut from "./locales/en/liteCut.js";
 import match from "./locales/en/match.js";
 import app from "./locales/en/app.js";
+import cosmeticsWorkshop from "./locales/en/cosmeticsWorkshop.js";
 
 export default mergeCatalogs("en", {
   common,
@@ -25,4 +26,5 @@ export default mergeCatalogs("en", {
   liteCut,
   match,
   app,
+  cosmeticsWorkshop,
 });

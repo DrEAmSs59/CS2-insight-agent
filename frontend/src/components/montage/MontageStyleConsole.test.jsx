@@ -1,5 +1,5 @@
 /** @vitest-environment jsdom */
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import { MontageStyleConsole } from "./MontageStyleConsole.jsx";
@@ -121,5 +121,37 @@ describe("MontageStyleConsole export layout", () => {
     expect(frameMeldButton.disabled).toBe(true);
     expect(frameMeldButton.getAttribute("aria-pressed")).toBe("false");
     expect(screen.getByText("montage.consoleFrameMeldBlockedMixedFps")).toBeTruthy();
+  });
+
+  it("enables FrameMeld only after the shared confirmation delay", () => {
+    vi.useFakeTimers();
+    try {
+      const props = renderConsole({
+        clips: [{ id: 1, fps: 120 }],
+        framemeldRuntimeAvailable: true,
+      });
+
+      fireEvent.click(screen.getByRole("button", { name: "montage.consoleFrameMeldTitle" }));
+      expect(screen.getByRole("dialog")).toBeTruthy();
+      expect(props.onFrameMeldEnabledChange).not.toHaveBeenCalled();
+
+      act(() => vi.advanceTimersByTime(3000));
+      fireEvent.click(screen.getByRole("button", { name: "frameMeld.enableDialog.confirm" }));
+      expect(props.onFrameMeldEnabledChange).toHaveBeenCalledWith(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("turns off an active FrameMeld option without opening the warning", () => {
+    const props = renderConsole({
+      clips: [{ id: 1, fps: 120 }],
+      framemeldEnabled: true,
+      framemeldRuntimeAvailable: true,
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "montage.consoleFrameMeldTitle" }));
+    expect(props.onFrameMeldEnabledChange).toHaveBeenCalledWith(false);
+    expect(screen.queryByRole("dialog")).toBeNull();
   });
 });

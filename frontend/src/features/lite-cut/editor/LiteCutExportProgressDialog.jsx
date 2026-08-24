@@ -1,6 +1,7 @@
-import { CheckCircle2, Copy, FolderOpen, Loader2, X } from "lucide-react";
+import { CheckCircle2, Copy, FolderOpen, Loader2, TriangleAlert, X } from "lucide-react";
 import { liteCutClient } from "../api/liteCutClient.js";
 import { desktopBridge } from "../../../desktop/desktopBridge.js";
+import { writeLiteCutClipboardText } from "./liteCutClipboard.js";
 
 function basenameFromPath(path) {
   const normalized = String(path || "").replace(/\\/g, "/");
@@ -63,6 +64,15 @@ export default function LiteCutExportProgressDialog({
   const totalFrames = Number(result?.total_frames);
   const hasFrameProgress = Number.isFinite(processedFrames) && Number.isFinite(totalFrames) && totalFrames > 0;
   const montage = variant === "montage";
+  const encoderWarning = result?.encoder_warning?.code === "NVIDIA_DRIVER_TOO_OLD"
+    ? result.encoder_warning
+    : null;
+  const nvencApiDetail = encoderWarning?.found_nvenc_api && encoderWarning?.required_nvenc_api
+    ? `当前 NVENC API ${encoderWarning.found_nvenc_api}，要求 ${encoderWarning.required_nvenc_api}。`
+    : "";
+  const minimumDriverDetail = encoderWarning?.minimum_driver_version
+    ? `建议 NVIDIA 驱动升级至 ${encoderWarning.minimum_driver_version} 或更高版本。`
+    : "";
   const runningTitle = montage ? "正在导出合辑…" : "正在导出成片…";
   const runningSubtitle = montage ? "FFmpeg 真实合成 · 请保持程序运行" : "FFmpeg 真实合成 · 预览不参与导出";
   const dialogSubtitle = !running && montage ? "合辑已保存到指定目录" : runningSubtitle;
@@ -71,11 +81,7 @@ export default function LiteCutExportProgressDialog({
 
   const copyPath = async () => {
     if (!outputPath) return;
-    try {
-      await navigator.clipboard.writeText(outputPath);
-    } catch {
-      // Clipboard access may be unavailable outside the desktop shell.
-    }
+    await writeLiteCutClipboardText(outputPath);
   };
 
   const revealOutput = async () => {
@@ -113,6 +119,17 @@ export default function LiteCutExportProgressDialog({
             <p className="font-mono text-[11px] text-cs2-text-muted">请稍候，导出正在后台执行…</p>
           )}
           {onCancel ? <button type="button" onClick={onCancel} className="w-full rounded-lg border border-cs2-border py-2 text-xs font-semibold text-cs2-text-secondary hover:border-rose-400/60 hover:text-rose-300">取消导出</button> : null}
+          {encoderWarning ? (
+            <div className="flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2.5 text-amber-200" role="status">
+              <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0" />
+              <div className="min-w-0 text-[11px] leading-relaxed">
+                <p className="font-semibold">检测到 NVIDIA 驱动版本过低，已自动切换至 CPU 编码。导出速度会明显变慢，建议更新驱动后重试。</p>
+                {nvencApiDetail || minimumDriverDetail ? (
+                  <p className="mt-1 text-amber-200/80">{nvencApiDetail}{nvencApiDetail && minimumDriverDetail ? " " : ""}{minimumDriverDetail}</p>
+                ) : null}
+              </div>
+            </div>
+          ) : null}
         </div> : null}
 
         {phase === "done" ? <div className="mt-5 space-y-4">

@@ -21,7 +21,7 @@ export function usePreviewFrameClock({
   previewClipId,
   reversePlayback,
   safePlaybackRate,
-  setHeldSwitchFrame,
+  onFramePresented,
   streamUrl,
   handoffToleranceSec,
   underlayVideoRefs,
@@ -129,7 +129,7 @@ export function usePreviewFrameClock({
       releasePromotedUnderlay();
       if (presentedStreamRef.current !== mediaIdentity) {
         presentedStreamRef.current = mediaIdentity;
-        setHeldSwitchFrame(null);
+        onFramePresented?.();
       }
       if (now - lastGlobalClockAtRef.current >= 45) {
         lastGlobalClockAtRef.current = now;
@@ -160,7 +160,7 @@ export function usePreviewFrameClock({
       if (videoFrameId != null && typeof element.cancelVideoFrameCallback === "function") element.cancelVideoFrameCallback(videoFrameId);
       if (animationFrameId != null) window.cancelAnimationFrame(animationFrameId);
     };
-  }, [freezePlayback, handoffToleranceSec, hasStream, isPlaying, mediaIdentity, preventBackwardHandoff, previewClipId, promotedPlaybackTime, releasePromotedUnderlay, reversePlayback, setHeldSwitchFrame, sourceOffset, streamUrl, videoRef]);
+  }, [freezePlayback, handoffToleranceSec, hasStream, isPlaying, mediaIdentity, onFramePresented, preventBackwardHandoff, previewClipId, promotedPlaybackTime, releasePromotedUnderlay, reversePlayback, sourceOffset, streamUrl, videoRef]);
 
   return {
     previewClock,

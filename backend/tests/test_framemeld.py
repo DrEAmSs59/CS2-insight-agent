@@ -15,6 +15,8 @@ if str(_BACKEND_ROOT) not in sys.path:
 
 from app.framemeld import (
     FRAMEMELD_DELIVERY_FPS,
+    FRAMEMELD_FINAL_SHARPEN_AMOUNT,
+    FRAMEMELD_FINAL_SHARPEN_FEATURE,
     FRAMEMELD_STATUS_PREFIX,
     FrameMeldCapability,
     build_framemeld_command,
@@ -189,8 +191,27 @@ class TestFrameMeld(unittest.TestCase):
             "--deduplicate-method",
         ):
             self.assertNotIn(forbidden, command)
+        self.assertNotIn("--final-sharpen", command)
         self.assertEqual(command[command.index("-c:a") + 1], "copy")
         self.assertIn("--host-managed-encoder-fallback", command)
+
+    def test_command_enables_tested_final_sharpen_when_supported(self):
+        command = build_framemeld_command(
+            ffmpeg_bin=Path("ffmpeg.exe"),
+            source_path=Path("input.mp4"),
+            output_path=Path("output.mp4"),
+            video_encode_args=["-c:v", "libx264", "-crf", "18"],
+            capability=FrameMeldCapability(
+                route="-framemeld",
+                api_version=1,
+                features=frozenset({FRAMEMELD_FINAL_SHARPEN_FEATURE}),
+            ),
+        )
+
+        self.assertEqual(
+            command[command.index("--final-sharpen") + 1],
+            f"{FRAMEMELD_FINAL_SHARPEN_AMOUNT:g}",
+        )
 
     def test_command_preserves_nvenc_device_binding_and_quality(self):
         from app.framemeld import FrameMeldCapability
@@ -400,7 +421,7 @@ class TestFrameMeld(unittest.TestCase):
         self.assertEqual(policy.branch, "intel_qsv")
         self.assertEqual(policy.encoder, "h264_qsv")
 
-    def test_precise_policy_requires_status_flag_and_supported_backend(self):
+    def test_execution_policy_requires_framemeld_route(self):
         self.assertIsNone(
             framemeld_execution_policy(["ffmpeg.exe", "-c:v", "h264_qsv", "output.mp4"])
         )
@@ -415,6 +436,30 @@ class TestFrameMeld(unittest.TestCase):
                 ]
             )
         )
+
+    def test_execution_policy_covers_hardware_and_software_encoders(self):
+        expected = {
+            "h264_amf": "amd_amf",
+            "h264_qsv": "intel_qsv",
+            "h264_nvenc": "nvidia_nvenc",
+            "libx264": "software_x264",
+        }
+        for encoder, branch in expected.items():
+            with self.subTest(encoder=encoder):
+                policy = framemeld_execution_policy(
+                    ["ffmpeg.exe", "-framemeld", "-c:v", encoder, "output.mp4"]
+                )
+                self.assertIsNotNone(policy)
+                self.assertEqual(policy.branch, branch)
+                self.assertEqual(policy.encoder, encoder)
+                self.assertEqual(policy.hard_timeout_seconds, 12 * 60 * 60)
+                self.assertEqual(policy.stall_timeout_seconds, 15 * 60)
+
+        legacy_policy = framemeld_execution_policy(
+            ["ffmpeg.exe", "-blur", "-c:v", "libx264", "output.mp4"]
+        )
+        self.assertIsNotNone(legacy_policy)
+        self.assertEqual(legacy_policy.branch, "software_x264")
 
     def test_structured_failure_parser_returns_domain_and_devices(self):
         payload = {

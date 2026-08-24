@@ -447,13 +447,22 @@ class PovHudManager:
                 )
                 logger.info(
                     "Built demo voice HUD: packets=%d speakers=%d intervals=%d "
-                    "locations=%d input_tracks=%d input_changes=%d payload=%d bytes",
+                    "locations=%d input_tracks=%d input_changes=%d radio=%d "
+                    "chat=%d server=%d native_radio=%d rebuilt_radio=%d radar_sounds=%d "
+                    "native_sound_table=%d payload=%d bytes",
                     voice_build.voice_packets,
                     voice_build.speakers,
                     voice_build.intervals,
                     voice_build.location_changes,
                     voice_build.input_tracks,
                     voice_build.input_changes,
+                    voice_build.radio_events,
+                    voice_build.radio_chat_messages,
+                    voice_build.radio_server_messages,
+                    voice_build.radio_native_events,
+                    voice_build.radio_rebuilt_events,
+                    voice_build.radar_player_sounds,
+                    voice_build.radar_native_sound_complete,
                     voice_build.payload_bytes,
                 )
             except (DemoVoiceHudError, OSError) as exc:
@@ -520,8 +529,19 @@ class PovHudManager:
                     "radar_map": voice_build.radar_map,
                     "radar_planted_bombs": voice_build.radar_planted_bombs,
                     "radar_player_sounds": voice_build.radar_player_sounds,
+                    "radar_native_sound_complete": bool(voice_build.radar_native_sound_complete),
                     "kill_feedback_events": voice_build.kill_feedback_events,
                     "kill_feedback_parse_failed": bool(voice_build.kill_feedback_parse_failed),
+                    "flash_blind_events": voice_build.flash_blind_events,
+                    "flash_blind_parse_failed": bool(voice_build.flash_blind_parse_failed),
+                    "flash_blind_tick_fallback": bool(voice_build.flash_blind_tick_fallback),
+                    "radio_events": voice_build.radio_events,
+                    "radio_native_events": voice_build.radio_native_events,
+                    "radio_rebuilt_events": voice_build.radio_rebuilt_events,
+                    "radio_objective_events": voice_build.radio_objective_events,
+                    "radio_chat_messages": voice_build.radio_chat_messages,
+                    "radio_server_messages": voice_build.radio_server_messages,
+                    "radio_parse_failed": bool(voice_build.radio_parse_failed),
                 }
                 if voice_build is not None
                 else None

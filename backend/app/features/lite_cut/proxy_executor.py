@@ -49,12 +49,7 @@ def preview_segment_start(index: int) -> float:
     return max(0, int(index)) * SEGMENT_PREVIEW_STEP_SEC
 
 
-def preview_segment_cache_directory(
-    row: dict[str, Any],
-    project_directory: Path,
-    *,
-    max_edge: int,
-) -> Path:
+def preview_asset_cache_directory(row: dict[str, Any], project_directory: Path) -> Path:
     from .assets import lite_cut_assets_dir
 
     root = lite_cut_assets_dir().resolve()
@@ -62,9 +57,22 @@ def preview_segment_cache_directory(
     project_root.relative_to(root)
     fingerprint = re.sub(r"[^a-zA-Z0-9_-]+", "", str(row.get("fingerprint") or "source"))[:20] or "source"
     asset_id = max(0, int(row.get("id") or 0))
+    return project_root / ".preview" / f"asset-{asset_id}-{fingerprint}"
+
+
+def audio_preview_cache_path(row: dict[str, Any], project_directory: Path) -> Path:
+    return preview_asset_cache_directory(row, project_directory) / "preview-audio-v1.m4a"
+
+
+def preview_segment_cache_directory(
+    row: dict[str, Any],
+    project_directory: Path,
+    *,
+    max_edge: int,
+) -> Path:
     edge = max(360, min(2160, int(max_edge or 720)))
     schema = SEGMENT_PREVIEW_ALPHA_SCHEMA if bool(row.get("has_alpha")) else SEGMENT_PREVIEW_SCHEMA
-    return project_root / ".preview" / f"asset-{asset_id}-{fingerprint}" / f"{schema}-{edge}p"
+    return preview_asset_cache_directory(row, project_directory) / f"{schema}-{edge}p"
 
 
 def preview_segment_path(cache_directory: Path, index: int) -> Path:
@@ -224,6 +232,11 @@ def _classify_preview_cache_files(
         _segment_cache_key(row, max_edge=max_edge): int(row.get("id") or 0)
         for row in required_rows
     }
+    valid_audio_asset_directories = {
+        _segment_cache_key(row, max_edge=max_edge)[0]: int(row.get("id") or 0)
+        for row in asset_rows
+        if str(row.get("kind") or "").lower() in {"video", "webm"}
+    }
     valid_files: list[Path] = []
     orphan_files: list[Path] = []
     ready_assets: set[int] = set()
@@ -242,6 +255,15 @@ def _classify_preview_cache_files(
         try:
             preview_index = relative_parts.index(".preview")
         except ValueError:
+            continue
+        asset_directory = relative_parts[preview_index + 1] if len(relative_parts) > preview_index + 1 else ""
+        if candidate.name == "preview-audio-v1.m4a":
+            asset_id = valid_audio_asset_directories.get(asset_directory)
+            if asset_id is not None:
+                valid_files.append(candidate)
+                ready_assets.add(asset_id)
+            else:
+                orphan_files.append(candidate)
             continue
         if len(relative_parts) < preview_index + 4:
             continue

@@ -4,7 +4,8 @@
 // between the two marker comments before installing the package. The payload
 // contains [location tokens, voice speakers, exact svc_UserCmd input tracks,
 // SteamID/slot/team roster, reserved slots, radar track at index 8,
-// kill/HS attacker-feedback cues at index 9, flash-blind intervals at index 10].
+// kill/HS attacker-feedback cues at index 9, flash-blind intervals at index 10,
+    // reconstructed team radio at index 11].
 ;(function CS2InsightDemoVoiceHud() {
     "use strict";
 
@@ -16,11 +17,19 @@
     const encodedRadar = packed[8] || null;
     const encodedKillFeedback = packed[9] || null;
     const encodedFlashBlind = packed[10] || null;
+    const encodedRadio = packed[11] || null;
     const PLAYER_COLOR_HEX = ["#88CEF5", "#009E80", "#F1E441", "#E6802A", "#BD2C96"];
     const RADAR_MAP_SIZE = 1024;
+    const POV_RADAR_SCALE = 0.4;
+    // CHudRadar keeps ten player-sound slots (indices 0..9).
+    const MAX_POV_SOUND_RINGS = 10;
     const KILL_FEEDBACK_CATCHUP_TICKS = 128;
     const MAX_VISIBLE_VOICE_NOTICES = 3;
     const VOICE_NOTICE_ROW_HEIGHT = 22;
+    // Native VoicePanel starts at y=182 and each voice row is 22px tall. Keep
+    // the reconstructed message stack permanently one row above that baseline;
+    // speaker activity must never move this message lane.
+    const RADIO_PANEL_Y_OFFSET = 182 + VOICE_NOTICE_ROW_HEIGHT;
     // Half-angle for "in POV view" checks (dropped C4 for CT, etc.).
     // Keep near the stock radar FOV cone (~80° total) so wall-blocked pings
     // outside the visible cone are not treated as "in view".
@@ -39,11 +48,13 @@
     const FLASH_TINNITUS_SHORT = "Flashbang.Ring.Short";
     const FLASH_TINNITUS_MEDIUM = "Flashbang.Ring.Medium";
     const FLASH_TINNITUS_LONG = "Flashbang.Ring.Long";
-    // A full-face player_blind lasts about 4.5s at the usual 64 tick rate.
-    // Scale weaker hits continuously toward that reference and decay over the
-    // event's complete authored duration; a hard strength threshold creates a
-    // very visible duration jump between otherwise similar flashes.
-    const FLASH_FULL_DURATION_TICKS = 288;
+    // CS flash client state: ~94 ms build-up, then a full-white / squared fade
+    // based on the *remaining* time and a three-second certainty threshold.
+    // The demo duration is already the server-merged overlap state.
+    const FLASH_BUILD_UP_SECONDS = (255 / 45) / 60;
+    const FLASH_CERTAIN_BLIND_SECONDS = 3;
+    const FLASH_PAYLOAD_VERSION = 2;
+    const FLASH_STATE_CLEAR = 1;
     // Rendering cadence only: flash timing and strength remain demo-tick based.
     // Raise active washes to ~60Hz so opacity changes do not arrive in 20Hz steps.
     const FLASH_ACTIVE_REFRESH_SECONDS = 0.016;
@@ -51,8 +62,8 @@
     // Normal playback advances only a few ticks per 20Hz sample. A larger jump
     // means demo_gototick moved to a new highlight segment.
     const TRANSIENT_HUD_TICK_JUMP_THRESHOLD = 64;
-    // Keep clearing chat briefly after the pre-record pause is released. CS2
-    // can publish one final cached chat update on the first resumed frames.
+    // Keep transient Insight overlays hidden briefly after the pre-record pause
+    // is released while CS2 completes its deferred HUD rebuild.
     const TRANSIENT_HUD_RESUME_GRACE_TICKS = 32;
     // A paused demo_gototick does not reliably emit PanoramaGameTimeJumpEvent.
     // Recording then runs spec_player shortly after demo_resume, which can
@@ -62,6 +73,21 @@
     const STOCK_HUD_ALERT_SUPPRESS_CLASS = "CS2InsightPausedSeekSuppress";
     const STOCK_HUD_ALERT_RESUME_GRACE_TICKS = 128;
     const STOCK_HUD_ALERT_HIDDEN_STABLE_FRAMES = 10;
+    const RADIO_PAYLOAD_VERSION = 2;
+    // Current CS2 hudvoicestatus.vcss: AlertNoticeLifetime is 15.5s. The
+    // ShowAndHide animation fades over 0-5%, holds through 90%, then fades to
+    // zero at 95% before the notice panel is reclaimed at 100%.
+    const RADIO_MESSAGE_SECONDS = 15.5;
+    const RADIO_FADE_IN_END = 0.05;
+    const RADIO_FADE_OUT_START = 0.90;
+    const RADIO_FADE_OUT_END = 0.95;
+    const RADIO_ACTIVE_REFRESH_SECONDS = 0.016;
+    const RADIO_IDLE_REFRESH_SECONDS = 0.05;
+    // CCSGO_HudVoiceStatus constructs AlertPanel1..16 for chat, radio, and
+    // server notices. POV mode replaces that entire lower-left message stream;
+    // only those stock rows are hidden (voice speaker notices remain native).
+    const NATIVE_VOICE_ALERT_PANEL_COUNT = 16;
+    const MAX_VISIBLE_RADIO_MESSAGES = 10;
     const roster = encodedRoster.map(function (encoded) {
         return {
             xuid: String(encoded[0]),
@@ -114,6 +140,61 @@
 
     function zigzagDecode(value) {
         return (value & 1) ? (-(value >> 1) - 1) : (value >> 1);
+    }
+
+    function annotateContinuousStepSounds(sounds, tickRate) {
+        // Stock player_sound footsteps are discrete 0.5s events, but the step
+        // flag makes their radar presentation a continuous state. Merge events
+        // whose authored lifetimes touch. Repeated rows extend one steady ring;
+        // when the cadence ends the ring ends on that final state tick, without
+        // retaining the authored audio lifetime as a visual release tail.
+        const grouped = {};
+        sounds.forEach(function (sound) {
+            if (!sound.step) {
+                return;
+            }
+            const key = String(sound.xuid) + ":" + String(sound.radius);
+            if (!grouped[key]) {
+                grouped[key] = [];
+            }
+            grouped[key].push(sound);
+        });
+        const cadenceFloorTicks = Math.max(1, Math.round(tickRate * 0.125));
+        const releaseTicks = 0;
+        Object.keys(grouped).forEach(function (key) {
+            const rows = grouped[key];
+            let chainStart = 0;
+            while (chainStart < rows.length) {
+                let chainEnd = chainStart;
+                let hasFootstepCadence = false;
+                while (chainEnd + 1 < rows.length) {
+                    const current = rows[chainEnd];
+                    const next = rows[chainEnd + 1];
+                    const durationTicks = Math.max(
+                        1,
+                        Math.round((current.durationMs / 1000) * tickRate),
+                    );
+                    const gap = next.tick - current.tick;
+                    if (gap > durationTicks) {
+                        break;
+                    }
+                    if (gap >= cadenceFloorTicks) {
+                        hasFootstepCadence = true;
+                    }
+                    chainEnd += 1;
+                }
+                if (hasFootstepCadence) {
+                    const first = rows[chainStart];
+                    const last = rows[chainEnd];
+                    const stateId = ["step", key, first.tick].join(":");
+                    for (let index = chainStart; index <= chainEnd; index += 1) {
+                        rows[index].stepStateId = stateId;
+                        rows[index].stepStateEndTick = last.tick + releaseTicks;
+                    }
+                }
+                chainStart = chainEnd + 1;
+            }
+        });
     }
 
     function decodeRadarTrack(raw) {
@@ -184,22 +265,26 @@
         });
         const soundRaw = raw[5] || [[], ""];
         const soundXuids = (soundRaw[0] || []).map(function (xuid) { return String(xuid || ""); });
+        const nativeSoundComplete = Number(soundRaw[2] || 0) === 1;
         let soundTick = 0;
-        const sounds = String(soundRaw[1] || "").split(",").filter(Boolean).map(function (token) {
+        const sounds = String(soundRaw[1] || "").split(",").filter(Boolean).map(function (token, soundIndex) {
             const fields = token.split(".");
             soundTick += parseInt(fields[0], 36) || 0;
             const flags = parseInt(fields[4], 36) || 0;
             return {
+                id: "sound-" + soundIndex,
                 tick: soundTick,
                 xuid: soundXuids[parseInt(fields[1], 36) || 0] || "",
                 radius: parseInt(fields[2], 36) || 0,
                 durationMs: parseInt(fields[3], 36) || 100,
                 step: (flags & 1) !== 0,
                 loud: (flags & 2) !== 0,
+                combatOnly: (flags & 4) !== 0,
             };
         }).filter(function (sound) {
             return sound.xuid && sound.radius > 0;
         });
+        annotateContinuousStepSounds(sounds, Math.max(1, stride * 8));
         const droppedRaw = raw[6] || [];
         const droppedBombs = (droppedRaw || []).map(function (row) {
             return {
@@ -231,6 +316,7 @@
             players: players,
             plantedBombs: plantedBombs,
             sounds: sounds,
+            nativeSoundComplete: nativeSoundComplete,
             droppedBombs: droppedBombs,
             occlusion: occlusion,
         };
@@ -243,6 +329,7 @@
             return null;
         }
         const xuids = (raw[0] || []).map(function (xuid) { return String(xuid || ""); });
+        const tickRate = Math.max(1, Number(raw[2] || 64000) / 1000);
         let previousTick = 0;
         const events = String(raw[1] || "").split(",").filter(Boolean).map(function (token) {
             const fields = token.split(".");
@@ -253,37 +340,129 @@
                 attackerXuid: xuids[parseInt(fields[1], 36) || 0] || "",
                 headshot: (flags & 1) !== 0,
                 armor: (flags & 2) !== 0,
+                reward: Math.max(0, parseInt(fields[3], 36) || 0),
+                type: "cash",
+                tickRate: tickRate,
             };
         }).filter(function (event) {
             return event.attackerXuid && event.tick >= 0;
         });
-        return events.length ? events : null;
+        return events.length ? { events: events, tickRate: tickRate } : null;
     }
 
-    const killFeedbackEvents = decodeKillFeedbackTrack(encodedKillFeedback);
+    const killFeedbackTrack = decodeKillFeedbackTrack(encodedKillFeedback);
+    const killFeedbackEvents = killFeedbackTrack ? killFeedbackTrack.events : null;
 
     function decodeFlashBlindTrack(raw) {
         if (!raw || !raw.length || raw.length < 2) {
             return null;
         }
         const xuids = (raw[0] || []).map(function (xuid) { return String(xuid || ""); });
+        const version = Number(raw[2] || 1);
+        const tickRate = Math.max(1, Number(raw[3] || 64000) / 1000);
         let previousTick = 0;
         const events = String(raw[1] || "").split(",").filter(Boolean).map(function (token) {
             const fields = token.split(".");
             previousTick += parseInt(fields[0], 36) || 0;
             const durationTicks = parseInt(fields[1], 36) || 0;
+            const flags = version >= FLASH_PAYLOAD_VERSION
+                ? (parseInt(fields[3], 36) || 0)
+                : 0;
+            const maxAlpha = version >= FLASH_PAYLOAD_VERSION
+                ? Math.max(0, Math.min(255, parseInt(fields[4], 36) || 0))
+                : 255;
             return {
                 tick: previousTick,
-                endTick: previousTick + Math.max(1, durationTicks),
+                durationTicks: Math.max(0, durationTicks),
                 xuid: xuids[parseInt(fields[2], 36) || 0] || "",
+                clear: (flags & FLASH_STATE_CLEAR) !== 0,
+                maxAlpha: maxAlpha,
             };
         }).filter(function (event) {
-            return event.xuid && event.tick >= 0 && event.endTick > event.tick;
+            return event.xuid
+                && event.tick >= 0
+                && (event.clear || event.durationTicks > 0);
         });
-        return events.length ? events : null;
+        return events.length ? {
+            events: events,
+            tickRate: tickRate,
+            version: version,
+        } : null;
     }
 
-    const flashBlindEvents = decodeFlashBlindTrack(encodedFlashBlind);
+    const flashBlindTrack = decodeFlashBlindTrack(encodedFlashBlind);
+    const flashBlindEvents = flashBlindTrack ? flashBlindTrack.events : null;
+
+    function decodeRadioTrack(raw) {
+        if (!raw || raw.length < 7 || Number(raw[6] || 0) < RADIO_PAYLOAD_VERSION) {
+            return null;
+        }
+        const xuids = (raw[0] || []).map(function (xuid) { return String(xuid || ""); });
+        const locations = (raw[1] || []).map(function (token) { return String(token || ""); });
+        const texts = (raw[3] || []).map(function (row) {
+            return {
+                name: row && row.length ? String(row[0] || "") : "",
+                text: row && row.length > 1 ? String(row[1] || "") : "",
+            };
+        });
+        const tickRate = Math.max(1, Number(raw[5] || 64000) / 1000);
+        let previousRadioTick = 0;
+        const events = String(raw[2] || "").split(",").filter(Boolean).map(function (token) {
+            const fields = token.split(".");
+            previousRadioTick += parseInt(fields[0], 36) || 0;
+            return {
+                tick: previousRadioTick,
+                xuid: xuids[parseInt(fields[1], 36) || 0] || "",
+                kind: parseInt(fields[2], 36) || 0,
+                location: locations[parseInt(fields[3], 36) || 0] || "",
+                team: parseInt(fields[4], 36) || 0,
+                type: "radio",
+                tickRate: tickRate,
+            };
+        }).filter(function (event) {
+            return event.xuid && event.tick >= 0 && event.team >= 2 && event.team <= 3;
+        });
+        let previousMessageTick = 0;
+        const messages = String(raw[4] || "").split(",").filter(Boolean).map(function (token) {
+            const fields = token.split(".");
+            previousMessageTick += parseInt(fields[0], 36) || 0;
+            const kind = parseInt(fields[1], 36) || 0;
+            const text = texts[parseInt(fields[5], 36) || 0] || { name: "", text: "" };
+            return {
+                tick: previousMessageTick,
+                messageKind: kind,
+                xuid: xuids[parseInt(fields[2], 36) || 0] || "",
+                team: parseInt(fields[3], 36) || 0,
+                teamOnly: Boolean((parseInt(fields[4], 36) || 0) & 1),
+                name: text.name,
+                message: text.text,
+                type: kind === 0 ? "chat" : "server",
+                tickRate: tickRate,
+            };
+        }).filter(function (event) {
+            return event.tick >= 0 && (event.type === "server" || event.message);
+        });
+        // The packed stream is already tick-ordered. Do not re-sort equal-tick
+        // rows by XUID: CS2 displays radio messages in arrival order, including
+        // two teammates throwing utility during the same server tick.
+        return events.length || messages.length ? {
+            events: events,
+            messages: messages,
+            tickRate: tickRate,
+            version: Number(raw[6] || 0),
+        } : null;
+    }
+
+    // Radio is an optional enhancement. A malformed platform event payload or
+    // an older Panorama runtime must never abort this shared controller before
+    // the established POV radar/input/flash schedules are registered.
+    const radioTrack = (function safelyDecodeRadioTrack() {
+        try {
+            return decodeRadioTrack(encodedRadio);
+        } catch (errRadioDecode) {
+            return null;
+        }
+    })();
     let unmuteAttempts = 0;
     let audiencePovXuid = "";
     let audienceMaskSignature = "";
@@ -304,11 +483,19 @@
     let killFeedbackCheatsReady = false;
     let transientHudLastTick = -1;
     let transientHudSuppressUntilTick = -1;
-    let stockHudChatHistoryText = null;
     let stockHudAlertPanel = null;
     let stockHudAlertSeekSuppressActive = false;
     let stockHudAlertResumeTick = -1;
     let stockHudAlertHiddenStableFrames = 0;
+    let radioHud = null;
+    let overheadNativeCvarApplyAttempts = 0;
+    let overheadNativeCvarRetryFrames = 0;
+    let radioHistoryPanel = null;
+    let radioHistoryRows = [];
+    let nativeVoiceAlertPanels = [];
+    let nativeChatHistoryText = null;
+    let radioLastTick = -1;
+    let radioEpochTick = -1;
     // Stock-ish radar intel timings (no public convar; matched to live feel).
     const RADAR_DEATH_ICON_SECONDS = 2.0;
     const RADAR_LAST_KNOWN_SECONDS = 1.5;
@@ -676,30 +863,6 @@
         return null;
     }
 
-    function clearStockHudChat() {
-        // HudChat owns this rich-text label. Clearing it preserves the stock
-        // panel and lets messages produced in the new segment appear normally.
-        let chatHistoryText = stockHudChatHistoryText;
-        if (!chatHistoryText || !chatHistoryText.IsValid()) {
-            chatHistoryText = findHudTraverse("ChatHistoryText");
-            stockHudChatHistoryText = chatHistoryText;
-        }
-        if (!chatHistoryText || !chatHistoryText.IsValid()) {
-            return;
-        }
-        try {
-            chatHistoryText.text = "";
-        } catch (errText) {}
-    }
-
-    function scheduleTransientStockHudClear() {
-        // Panorama can apply old chat state just after the time-jump event, so
-        // clear once immediately and twice after its deferred UI work.
-        clearStockHudChat();
-        $.Schedule(0.05, clearStockHudChat);
-        $.Schedule(0.20, clearStockHudChat);
-    }
-
     function currentStockHudAlertPanel() {
         const alertText = findHudTraverse("AlertText");
         const resolved = alertText && alertText.IsValid() && alertText.GetParent
@@ -777,27 +940,31 @@
                 && (tick + 2 < transientHudLastTick
                     || tick - transientHudLastTick > TRANSIENT_HUD_TICK_JUMP_THRESHOLD);
             if (jumped) {
+                // A full demo seek can replay the recorded mp_forcecamera=1
+                // NetSetConVar. Re-arm the native TeamID override afterwards.
+                overheadNativeCvarApplyAttempts = 0;
+                overheadNativeCvarRetryFrames = 0;
+                if (radioTrack) {
+                    radioEpochTick = tick;
+                }
                 transientHudSuppressUntilTick = Math.max(
                     transientHudSuppressUntilTick,
                     tick + TRANSIENT_HUD_RESUME_GRACE_TICKS,
                 );
                 armStockHudAlertSeekSuppress(state, tick);
-                scheduleTransientStockHudClear();
             }
 
             // The executor deliberately pauses at the exact segment start before
-            // StartRecord/ResumeRecord. Keep clearing for the whole paused state,
-            // because demo pre-roll can recreate old chat content long after
-            // demo_gototick's initial event. The short tick grace covers CS2's
-            // deferred update on the first resumed frames.
+            // StartRecord/ResumeRecord. Reset reconstructed radio while paused;
+            // the short tick grace covers CS2's deferred first resumed frames.
             if (state.bIsPaused) {
+                if (radioTrack) {
+                    radioEpochTick = tick;
+                }
                 transientHudSuppressUntilTick = Math.max(
                     transientHudSuppressUntilTick,
                     tick + TRANSIENT_HUD_RESUME_GRACE_TICKS,
                 );
-            }
-            if (state.bIsPaused || tick <= transientHudSuppressUntilTick) {
-                clearStockHudChat();
             }
             updateStockHudAlertSeekSuppress(state, tick);
             transientHudLastTick = tick;
@@ -1329,6 +1496,219 @@
         $.Schedule(0.1, tickTeamCounterHud);
     }
 
+    function firstChildWithClass(panel, className) {
+        if (!panel || !panel.IsValid() || !panel.FindChildrenWithClassTraverse) {
+            return null;
+        }
+        const children = panel.FindChildrenWithClassTraverse(className) || [];
+        for (let index = 0; index < children.length; index += 1) {
+            if (children[index] && children[index].IsValid()) {
+                return children[index];
+            }
+        }
+        return null;
+    }
+
+    function forceNativePlayerOverheadCvars() {
+        // Keep this inside the injected Panorama script as well as the backend
+        // cfg. A long-running backend may still have the old Python constants,
+        // and cl_drawhud_force_teamid_overhead=1 is the native bypass for
+        // cl_draw_only_deathnotices in CCSGO_HudReticle.
+        const commands = [
+            "cl_draw_only_deathnotices false",
+            "mp_forcecamera 0",
+            "cl_drawhud_force_teamid_overhead 1",
+            "cl_teamid_overhead_mode 3",
+            "cl_teamid_overhead_colors_show 1",
+            "cl_teamid_overhead_fade_near_crosshair 0",
+            "cl_teamid_overhead_maxdist 9999",
+            "cl_teamid_overhead_maxdist_spec 9999",
+        ];
+        for (let index = 0; index < commands.length; index += 1) {
+            try {
+                GameInterfaceAPI.ConsoleCommand(commands[index]);
+            } catch (err) {}
+        }
+        overheadNativeCvarApplyAttempts += 1;
+        overheadNativeCvarRetryFrames = 10;
+    }
+
+    function localizedPlayerOverheadValue(playerPanel, token) {
+        try {
+            const localized = String($.Localize(token, playerPanel) || "").trim();
+            if (!localized
+                || localized === token
+                || localized.indexOf("{s:") >= 0
+                || localized.indexOf("{d:") >= 0
+                || localized.indexOf("%s") >= 0) {
+                return "";
+            }
+            return localized;
+        } catch (err) {
+            return "";
+        }
+    }
+
+    function normalizedOverheadName(value) {
+        return String(value || "").replace(/\s+/g, " ").trim().toLowerCase();
+    }
+
+    function buildOverheadXuidByName() {
+        const lookup = {};
+        for (let slot = 0; slot < 64; slot += 1) {
+            let xuid = "";
+            let name = "";
+            try {
+                xuid = normalizeXuid(GameStateAPI.GetPlayerXuidStringFromPlayerSlot(slot) || "");
+                name = xuid ? normalizedOverheadName(GameStateAPI.GetPlayerName(xuid)) : "";
+            } catch (err) {}
+            if (xuid && name && lookup[name] === undefined) {
+                lookup[name] = xuid;
+            }
+        }
+        return lookup;
+    }
+
+    function overheadPanelXuid(playerPanel, xuidByName) {
+        const nameLabel = firstChildWithClass(playerPanel, "playerid__name");
+        if (!nameLabel || !nameLabel.IsValid()) {
+            return "";
+        }
+        const name = normalizedOverheadName(nameLabel.text);
+        return name ? (xuidByName[name] || "") : "";
+    }
+
+    function playerMoneyOverheadValue(playerPanel, xuidByName) {
+        const xuid = overheadPanelXuid(playerPanel, xuidByName);
+        if (xuid) {
+            try {
+                const value = Number(GameStateAPI.GetPlayerMoney(xuid));
+                if (isFinite(value) && value >= 0) {
+                    return Math.floor(value);
+                }
+            } catch (err) {}
+        }
+        const localized = localizedPlayerOverheadValue(
+            playerPanel,
+            "#Panorama_HUD_playerid_overhead_money",
+        );
+        const digits = String(localized).replace(/[^0-9]/g, "");
+        const parsed = Number(digits);
+        // An unset player_money variable localizes to a bare "$". Never
+        // mistake that empty value for a real zero-dollar balance.
+        return digits && isFinite(parsed) ? parsed : null;
+    }
+
+    function playerOverheadTeam(playerPanel) {
+        try {
+            if (playerPanel.BHasClass("playerid--team-t")) {
+                return 2;
+            }
+            if (playerPanel.BHasClass("playerid--team-ct")) {
+                return 3;
+            }
+        } catch (err) {}
+        return 0;
+    }
+
+    function setPlayerOverheadContentVisible(playerPanel, visible) {
+        const content = firstChildWithClass(playerPanel, "playerid__content_parent")
+            || firstChildWithClass(playerPanel, "playerid__content");
+        if (!content || !content.IsValid()) {
+            return;
+        }
+        content.visible = visible;
+        try {
+            content.style.visibility = visible ? "visible" : "collapse";
+        } catch (err) {}
+    }
+
+    function setNativePlayerEconomy(playerPanel, money) {
+        if (!playerPanel || !playerPanel.FindChildrenWithClassTraverse) {
+            return;
+        }
+        const active = money !== null;
+        const text = active ? ("$" + money) : "";
+        try {
+            // Stock hudreticle.vcss does not color money through Label.color.
+            // Native CCSGO_HudReticle puts `money` on the pooled player panel,
+            // which selects rgb(177, 224, 136) through wash-color. The health
+            // state classes have team-colored selectors with higher specificity,
+            // so clear them while this label is being used for economy only.
+            playerPanel.SetHasClass("money", active);
+            if (active) {
+                playerPanel.SetHasClass("normal-health", false);
+                playerPanel.SetHasClass("low-health", false);
+            }
+        } catch (err) {}
+        if (active && playerPanel.SetDialogVariableInt) {
+            try {
+                playerPanel.SetDialogVariableInt("player_money", money);
+            } catch (err) {}
+        }
+        const labels = playerPanel.FindChildrenWithClassTraverse("playerid__extrainfo") || [];
+        for (let index = 0; index < labels.length; index += 1) {
+            const label = labels[index];
+            if (!label || !label.IsValid()) {
+                continue;
+            }
+            // Reuse the native extra-info label instead of creating a wide
+            // custom panel. Its engine-owned layout stays centered on the
+            // player's world-to-screen anchor at every distance.
+            label.text = text;
+            label.visible = active;
+            try {
+                label.style.visibility = active ? "visible" : "collapse";
+                // Keep the label's source color neutral so the stock `.money`
+                // wash-color is the sole tint, exactly as in the live HUD.
+                label.style.color = "white";
+            } catch (err) {}
+        }
+    }
+
+    function updatePlayerOverheadInfo(playerPanel, xuidByName) {
+        setNativePlayerEconomy(
+            playerPanel,
+            playerMoneyOverheadValue(playerPanel, xuidByName),
+        );
+    }
+
+    function updateOverheadInfoHud() {
+        const state = controller.GetDemoControllerState();
+        // Reapply a few times after the demo state becomes live. This covers
+        // launch cfg/user-config ordering without spamming the console forever.
+        if (state && overheadNativeCvarApplyAttempts < 4) {
+            if (overheadNativeCvarRetryFrames <= 0) {
+                forceNativePlayerOverheadCvars();
+            } else {
+                overheadNativeCvarRetryFrames -= 1;
+            }
+        }
+        const visiblePlayerIds = findHudTraverse("VisiblePlayerIDs");
+        if (visiblePlayerIds
+            && visiblePlayerIds.IsValid()
+            && visiblePlayerIds.FindChildrenWithClassTraverse) {
+            const playerPanels = visiblePlayerIds.FindChildrenWithClassTraverse("playerid") || [];
+            const povTeam = state
+                ? resolvePovTeam(currentPovXuid(state), state.nTick)
+                : 0;
+            const xuidByName = buildOverheadXuidByName();
+            for (let index = 0; index < playerPanels.length; index += 1) {
+                const playerPanel = playerPanels[index];
+                if (playerPanel && playerPanel.IsValid()) {
+                    const panelTeam = playerOverheadTeam(playerPanel);
+                    const visible = povTeam === 0 || panelTeam === 0 || panelTeam === povTeam;
+                    setPlayerOverheadContentVisible(playerPanel, visible);
+                    if (visible) {
+                        updatePlayerOverheadInfo(playerPanel, xuidByName);
+                    }
+                }
+            }
+        }
+        // Match the native player-ID update cadence without creating a frame loop.
+        $.Schedule(0.1, updateOverheadInfoHud);
+    }
+
     function ensureDemoVoicesUnmuted() {
         const state = controller.GetDemoControllerState();
         if (!state) {
@@ -1377,43 +1757,80 @@
         if (!want) {
             return null;
         }
-        let best = null;
+        let state = null;
         for (let i = 0; i < flashBlindEvents.length; i += 1) {
             const event = flashBlindEvents[i];
             if (tick < event.tick) {
                 break;
             }
-            if (tick < event.endTick && sameXuid(event.xuid, want)) {
-                if (!best || event.endTick > best.endTick) {
-                    best = event;
-                }
+            if (!sameXuid(event.xuid, want)) {
+                continue;
             }
+            if (event.clear) {
+                state = null;
+                continue;
+            }
+            const wasActive = Boolean(state && event.tick < state.endTick);
+            state = {
+                // Latest update tick drives one tinnitus cue per actual hit.
+                tick: event.tick,
+                startTick: wasActive ? state.startTick : event.tick,
+                endTick: event.tick + event.durationTicks,
+                durationTicks: event.durationTicks,
+                maxAlpha: wasActive
+                    ? Math.max(state.maxAlpha, event.maxAlpha)
+                    : event.maxAlpha,
+                // RecvProxy_FlashTime only starts build-up from an inactive state.
+                // Any overlapping update ends an in-progress build-up immediately.
+                buildUp: !wasActive,
+            };
         }
-        return best;
+        if (!state || tick >= state.endTick) {
+            return null;
+        }
+        return state;
     }
 
     function flashWashOpacity(blind, tick) {
         if (!blind) {
             return 0;
         }
-        const start = blind.tick | 0;
-        const end = blind.endTick | 0;
-        const span = Math.max(1, end - start);
-        const elapsed = Math.max(0, Number(tick) - start);
-        let t = elapsed / span;
-        if (t < 0) {
-            t = 0;
+        const tickRate = flashBlindTrack ? flashBlindTrack.tickRate : 64;
+        const alpha = Math.max(0, Math.min(1, Number(blind.maxAlpha) / 255));
+        const durationSeconds = Math.max(1 / tickRate, blind.durationTicks / tickRate);
+        const strength = alpha * Math.min(
+            1,
+            Math.pow(durationSeconds / FLASH_CERTAIN_BLIND_SECONDS, 2),
+        );
+        const elapsedSeconds = Math.max(0, (Number(tick) - blind.startTick) / tickRate);
+
+        let white;
+        let screenshot;
+        if (blind.buildUp && elapsedSeconds < FLASH_BUILD_UP_SECONDS) {
+            const phase = Math.max(0, Math.min(1, elapsedSeconds / FLASH_BUILD_UP_SECONDS));
+            white = alpha * phase;
+            screenshot = phase;
+        } else {
+            const remainingSeconds = Math.max(0, (blind.endTick - Number(tick)) / tickRate);
+            white = alpha * Math.min(
+                1,
+                Math.pow(remainingSeconds / FLASH_CERTAIN_BLIND_SECONDS, 2),
+            );
+            screenshot = Math.max(0, Math.min(1, remainingSeconds / durationSeconds));
         }
-        if (t > 1) {
-            t = 1;
+
+        // CS draws the captured flash frame four times. The demo does not retain
+        // that client-only texture, so convert its linear alpha into an equivalent
+        // HUD occlusion, scaled by the authored flash strength. Native world flash
+        // remains below this topmost Panorama compensation layer.
+        const afterimage = strength * (1 - Math.pow(1 - screenshot, 4));
+        let cover = 1 - (1 - white) * (1 - afterimage);
+        if (cover >= 0.995) {
+            cover = 1;
+        } else if (cover <= 0.002) {
+            cover = 0;
         }
-        // Peak strength comes from the authoritative player_blind duration.
-        // Every strength uses the complete event span, avoiding the old 3s
-        // branch whose fixed two-second tail made nearby durations look unlike.
-        const peak = Math.min(1, span / FLASH_FULL_DURATION_TICKS);
-        // Stronger flash lingers nearer white (lower power); weak fades quicker.
-        const fadePower = 2.4 - 1.2 * peak;
-        return peak * Math.pow(1 - t, fadePower);
+        return Math.max(0, Math.min(1, cover));
     }
 
     function ensureFlashWash(root) {
@@ -1950,7 +2367,25 @@
     function hideNativeRadarPlayerIcons(nativeRadar) {
         // Only hide stock player icon packages. Never touch DirectionArrow (rim
         // facing pointer), native RI_PlayerSoundContainer, map transforms, bomb
-        // zones, or the place-name label. Sound visualization belongs to CS2.
+        // zones, or the place-name label. Sound visibility is selected explicitly
+        // in updatePovSoundRings instead of being an accidental PlayerIcons side effect.
+        const nativeSoundRoot = nativeRadar.FindChildTraverse("RI_PlayerSoundContainer");
+
+        function belongsToNativeSoundRoot(panel) {
+            if (!radarTrack.nativeSoundComplete || !nativeSoundRoot || !nativeSoundRoot.IsValid()) {
+                return false;
+            }
+            let current = panel;
+            let guard = 0;
+            while (current && current.IsValid() && guard < 16) {
+                if (current === nativeSoundRoot) {
+                    return true;
+                }
+                current = current.GetParent ? current.GetParent() : null;
+                guard += 1;
+            }
+            return false;
+        }
 
         function hideIfNativePlayerIcon(child) {
             if (!child || !child.IsValid()) {
@@ -1962,6 +2397,7 @@
                 id === "CS2InsightRadarUnclip" ||
                 id.indexOf("CS2Insight") === 0 ||
                 id === "DirectionArrow" ||
+                id === "RI_PlayerSoundContainer" ||
                 id === "Radar__Round" ||
                 id === "Radar__Square" ||
                 id.indexOf("BombZone") === 0 ||
@@ -2017,7 +2453,7 @@
             for (let i = 0; i < packs.length; i += 1) {
                 const pack = packs[i];
                 const id = String(pack.id || "");
-                if (id.indexOf("CS2Insight") === 0) {
+                if (id.indexOf("CS2Insight") === 0 || belongsToNativeSoundRoot(pack)) {
                     continue;
                 }
                 pack.visible = false;
@@ -2129,92 +2565,8 @@
     }
 
     function ensureRadarUnclipHud(nativeRadar) {
-        // Same parent as stock RI_PlayerSoundContainer: #Radar (outside Inner
-        // border-radius). Position rings/frustum from the POV marker's laid-out
-        // pixel offset so always_centered stays correct without copying C++ transforms.
-        const radar = nativeRadar.FindChildTraverse("Radar") || nativeRadar;
-        if (!radar || !radar.IsValid()) {
-            return null;
-        }
-        if (radarUnclipHud && radarUnclipHud.IsValid() && radarUnclipHud.GetParent() === radar) {
-            radarUnclipHud.style.overflow = "noclip";
-            return radarUnclipHud;
-        }
-        let existing = radar.FindChildTraverse("CS2InsightRadarUnclip");
-        if (existing && existing.IsValid()) {
-            if (existing.GetParent() !== radar) {
-                try { existing.SetParent(radar); } catch (err) {}
-            }
-            radarUnclipHud = existing;
-        } else {
-            radarUnclipHud = $.CreatePanel("Panel", radar, "CS2InsightRadarUnclip");
-        }
-        radarUnclipHud.hittest = false;
-        radarUnclipHud.style.width = "100%";
-        radarUnclipHud.style.height = "100%";
-        radarUnclipHud.style.horizontalAlign = "left";
-        radarUnclipHud.style.verticalAlign = "top";
-        radarUnclipHud.style.overflow = "noclip";
-        radarUnclipHud.style.flowChildren = "none";
-        radarUnclipHud.style.zIndex = "80";
-        return radarUnclipHud;
-    }
-
-    function markerCenterInRadarPx(marker, radar, percent) {
-        if (!marker || !marker.IsValid() || !radar || !radar.IsValid()) {
-            return null;
-        }
-        // Prefer window-space delta (includes C++ radar transforms).
-        try {
-            if (typeof marker.GetPositionWithinWindow === "function"
-                && typeof radar.GetPositionWithinWindow === "function") {
-                const m = marker.GetPositionWithinWindow();
-                const r = radar.GetPositionWithinWindow();
-                if (m && r && isFinite(m.x) && isFinite(m.y) && isFinite(r.x) && isFinite(r.y)) {
-                    return { x: m.x - r.x, y: m.y - r.y };
-                }
-            }
-        } catch (err) {}
-        const offset = panelOffsetInAncestor(marker, radar);
-        if (offset && (offset.ok || offset.x !== 0 || offset.y !== 0)) {
-            return { x: offset.x, y: offset.y };
-        }
-        // UV percent → Radar px via InnerTransform's laid-out box.
-        if (!percent) {
-            return null;
-        }
-        const native = findNativeRadar();
-        const host = native ? resolveMapTransformHost(native) : null;
-        if (!host || !host.IsValid()) {
-            return null;
-        }
-        const w = host.actuallayoutwidth || 0;
-        const h = host.actuallayoutheight || 0;
-        if (w <= 1 || h <= 1) {
-            return null;
-        }
-        const hostOff = panelOffsetInAncestor(host, radar);
-        return {
-            x: hostOff.x + (percent.x / 100) * w,
-            y: hostOff.y + (percent.y / 100) * h,
-        };
-    }
-
-    function panelOffsetInAncestor(panel, ancestor) {
-        let x = 0;
-        let y = 0;
-        let current = panel;
-        let guard = 0;
-        while (current && current.IsValid() && current !== ancestor && guard < 24) {
-            x += typeof current.actualx === "number" ? current.actualx : 0;
-            y += typeof current.actualy === "number" ? current.actualy : 0;
-            current = current.GetParent ? current.GetParent() : null;
-            guard += 1;
-        }
-        return { x: x, y: y, ok: current === ancestor };
-    }
-
-    function ensureRadarUnclipHud(nativeRadar) {
+        // Mirror stock RI_PlayerSoundContainer: a full #Radar-sized sibling of
+        // Round--Inner, so POV effects are bounded only by #Radar's outer clip.
         const radar = nativeRadar.FindChildTraverse("Radar") || nativeRadar;
         if (!radar || !radar.IsValid()) {
             return null;
@@ -2248,10 +2600,21 @@
         if (!unclip) {
             return null;
         }
+        const currentSoundRingsValid = povRadarFx
+            && Array.isArray(povRadarFx.soundRings)
+            && povRadarFx.soundRings.length === MAX_POV_SOUND_RINGS
+            && povRadarFx.soundRings.every(function (ring) {
+                return ring && ring.IsValid();
+            });
         if (povRadarFx
             && povRadarFx.anchor && povRadarFx.anchor.IsValid()
             && povRadarFx.anchor.GetParent() === unclip
-            && povRadarFx.frustum && povRadarFx.frustum.IsValid()) {
+            && povRadarFx.frustum && povRadarFx.frustum.IsValid()
+            && currentSoundRingsValid) {
+            if (!Array.isArray(povRadarFx.soundSlotKeys)
+                || povRadarFx.soundSlotKeys.length !== MAX_POV_SOUND_RINGS) {
+                povRadarFx.soundSlotKeys = povRadarFx.soundRings.map(function () { return ""; });
+            }
             return povRadarFx;
         }
 
@@ -2286,32 +2649,35 @@
         frustum.style.washColor = "#ffffffff";
         frustum.visible = false;
 
+        function makeSoundRing(id) {
+            const ring = $.CreatePanel("Panel", anchor, id);
+            ring.hittest = false;
+            ring.AddClass("PlayerSound");
+            ring.AddClass("hud-colorize-wash");
+            ring.style.borderRadius = "50% / 50%";
+            ring.style.horizontalAlign = "left";
+            ring.style.verticalAlign = "top";
+            ring.style.overflow = "noclip";
+            ring.style.zIndex = "81";
+            ring.visible = false;
+            return ring;
+        }
+
+        const soundRings = [];
+        for (let soundIndex = 0; soundIndex < MAX_POV_SOUND_RINGS; soundIndex += 1) {
+            soundRings.push(makeSoundRing("CS2InsightPovSoundRing" + (soundIndex || "")));
+        }
         povRadarFx = {
             anchor: anchor,
             rotated: rotated,
             frustum: frustum,
+            soundRings: soundRings,
+            soundSlotKeys: soundRings.map(function () { return ""; }),
+            // Retain aliases used by older injected-template diagnostics.
+            soundRing: soundRings[0],
+            soundRing2: soundRings[1],
         };
         return povRadarFx;
-    }
-
-    function mapPercentToRadarPx(percent, nativeRadar) {
-        const host = resolveMapTransformHost(nativeRadar);
-        const radar = nativeRadar.FindChildTraverse("Radar") || nativeRadar;
-        if (!host || !host.IsValid() || !radar || !radar.IsValid()) {
-            return null;
-        }
-        const w = host.actuallayoutwidth || 0;
-        const h = host.actuallayoutheight || 0;
-        if (w <= 1 || h <= 1) {
-            return null;
-        }
-        const offset = panelOffsetInAncestor(host, radar);
-        return {
-            x: offset.x + (percent.x / 100) * w,
-            y: offset.y + (percent.y / 100) * h,
-            pxPerMap: w / RADAR_MAP_SIZE,
-            ok: offset.ok,
-        };
     }
 
     function prepareNativeRadarHost() {
@@ -2652,11 +3018,8 @@
             }
             const carrying = sameTeam && sample.alive && sample.hasC4 && !showDeath;
             if (player.frustum && player.frustum.IsValid()) {
-                player.frustum.visible = sameTeam && sample.alive && isPov && !showDeath;
-                if (isPov) {
-                    player.frustum.style.washColor = "#ffffffff";
-                    player.frustum.style.opacity = "0.08";
-                }
+                // Draw the POV cone in #Radar's unclipped sibling layer below.
+                player.frustum.visible = false;
             }
             if (player.pip && player.pip.IsValid()) {
                 // Stock: CreateBombPack replaces the colored pip while carrying;
@@ -2723,6 +3086,8 @@
             const nativeRadar = findNativeRadar();
             if (nativeRadar) {
                 hideNativeRadarPlayerIcons(nativeRadar);
+                updatePovUnclipFx(nativeRadar, tick, povXuid, povSample, povTeam);
+                updatePovSoundRings(nativeRadar, tick, povXuid, povSample);
                 updateRadarCombatBorder(nativeRadar, tick, povXuid);
             }
         } catch (radarErr) {
@@ -2743,9 +3108,16 @@
             firing = Boolean(inputMaskAt(changes, tick) & (1 << 8));
         }
         if (!firing) {
-            const sounds = findActivePovSounds(tick, povXuid);
+            const sounds = findActivePovSounds(tick, povXuid, true);
             for (let i = 0; i < sounds.length; i += 1) {
-                if (!sounds[i].step && sounds[i].radius >= 800) {
+                if (sounds[i].combatOnly) {
+                    firing = true;
+                    break;
+                }
+                // Backward compatibility for payloads built before the
+                // combatOnly flag: their synthetic gun rows started at 1400u.
+                // Knife Slash/Hit layers are 800/1000u and stay excluded.
+                if (!sounds[i].step && sounds[i].radius >= 1400) {
                     firing = true;
                     break;
                 }
@@ -2762,9 +3134,10 @@
         }
     }
 
-    function findActivePovSounds(tick, povXuid) {
-        // Live HUD can stack two radii (e.g. footstep + gun). Prefer distinct
-        // radii: one loud/land, one thinner step/weapon when both overlap.
+    function findActivePovSounds(tick, povXuid, includeCombatOnly) {
+        // Native CHudRadar owns ten event slots. Radius is geometry, not event
+        // identity for transient sounds. Repeated step events are one continuous
+        // state and must reuse one ring instead of stacking additive pulses.
         const sounds = (radarTrack && radarTrack.sounds) || [];
         if (!povXuid || !sounds.length) {
             return [];
@@ -2782,6 +3155,7 @@
             }
         }
         const active = [];
+        const activeSteps = {};
         for (let index = lo; index < sounds.length; index += 1) {
             const sound = sounds[index];
             if (sound.tick > tick) {
@@ -2790,12 +3164,30 @@
             if (String(sound.xuid) !== String(povXuid)) {
                 continue;
             }
-            const endTick = sound.tick + Math.max(1, Math.round((sound.durationMs / 1000) * tickRate));
+            if (sound.combatOnly && !includeCombatOnly) {
+                continue;
+            }
+            const endTick = sound.stepStateEndTick !== undefined
+                ? Number(sound.stepStateEndTick)
+                : sound.tick + Math.max(1, Math.round((sound.durationMs / 1000) * tickRate));
             if (tick > endTick) {
                 continue;
             }
-            active.push(sound);
+            if (sound.step) {
+                const stepKey = String(sound.stepStateId || (
+                    "step:" + String(sound.xuid) + ":" + String(sound.radius)
+                ));
+                const previous = activeSteps[stepKey];
+                if (!previous || sound.tick > previous.tick) {
+                    activeSteps[stepKey] = sound;
+                }
+            } else {
+                active.push(sound);
+            }
         }
+        Object.keys(activeSteps).forEach(function (key) {
+            active.push(activeSteps[key]);
+        });
         if (!active.length) {
             return [];
         }
@@ -2808,16 +3200,233 @@
             }
             return b.radius - a.radius;
         });
-        const picked = [active[0]];
-        for (let i = 1; i < active.length; i += 1) {
-            const candidate = active[i];
-            if (Math.abs(candidate.radius - picked[0].radius) < 150) {
+        return active.slice(0, MAX_POV_SOUND_RINGS);
+    }
+
+    function setNativeSoundRingsVisible(nativeRadar, visible) {
+        if (!nativeRadar || !nativeRadar.IsValid()) {
+            return;
+        }
+        const soundRoot = nativeRadar.FindChildTraverse("RI_PlayerSoundContainer");
+        if (soundRoot && soundRoot.IsValid()) {
+            soundRoot.visible = Boolean(visible);
+        }
+    }
+
+    function hideInsightSoundRings() {
+        if (!povRadarFx || !Array.isArray(povRadarFx.soundRings)) {
+            return;
+        }
+        povRadarFx.soundRings.forEach(function (ring) {
+            if (ring && ring.IsValid()) {
+                ring.visible = false;
+                ring._insightSoundKey = "";
+                ring.RemoveClass("player-sound-max");
+            }
+        });
+        povRadarFx.soundSlotKeys = povRadarFx.soundRings.map(function () { return ""; });
+    }
+
+    function povSoundKey(sound) {
+        if (!sound) {
+            return "";
+        }
+        if (sound.step) {
+            return String(sound.stepStateId || [
+                "step",
+                sound.xuid,
+                sound.radius,
+            ].join(":"));
+        }
+        return String(sound.id || [
+            sound.tick,
+            sound.xuid,
+            sound.radius,
+            sound.durationMs,
+        ].join(":"));
+    }
+
+    function assignPovSoundsToSlots(fx, active) {
+        const assignments = new Array(fx.soundRings.length);
+        const used = new Array(active.length);
+        const previousKeys = Array.isArray(fx.soundSlotKeys) ? fx.soundSlotKeys : [];
+
+        // Keep every still-active event on its prior panel so a newly arriving
+        // event can retrigger even when it has exactly the same radius.
+        for (let slot = 0; slot < assignments.length; slot += 1) {
+            const previousKey = String(previousKeys[slot] || "");
+            if (!previousKey) {
                 continue;
             }
-            picked.push(candidate);
-            break;
+            for (let soundIndex = 0; soundIndex < active.length; soundIndex += 1) {
+                if (!used[soundIndex] && povSoundKey(active[soundIndex]) === previousKey) {
+                    assignments[slot] = active[soundIndex];
+                    used[soundIndex] = true;
+                    break;
+                }
+            }
         }
-        return picked;
+        for (let soundIndex = 0; soundIndex < active.length; soundIndex += 1) {
+            if (used[soundIndex]) {
+                continue;
+            }
+            for (let slot = 0; slot < assignments.length; slot += 1) {
+                if (!assignments[slot]) {
+                    assignments[slot] = active[soundIndex];
+                    used[soundIndex] = true;
+                    break;
+                }
+            }
+        }
+        fx.soundSlotKeys = assignments.map(povSoundKey);
+        return assignments;
+    }
+
+    function nativeRadarCenteredScale() {
+        // Insight starts POV playback with cl_radar_scale 0.4. Keep custom
+        // geometry on that same invariant instead of following later console/UI
+        // changes that only mutate the stock map transform.
+        return POV_RADAR_SCALE;
+    }
+
+    function nativeRadarIconScale(centeredScale) {
+        // CHudRadar applies this scale to the complete PlayerIcons package after
+        // sizing PlayerSound/ViewFrustrum. This is the exact client expression:
+        // min + clamp(radarScale, 0, 1) * (1.25 - min).
+        let minimum = 0.6;
+        try {
+            if (GameInterfaceAPI.GetSettingFloat) {
+                const configured = Number(GameInterfaceAPI.GetSettingFloat("cl_radar_icon_scale_min"));
+                if (isFinite(configured) && configured >= 0) {
+                    minimum = configured;
+                }
+            } else if (GameInterfaceAPI.GetSettingString) {
+                const configuredString = Number(GameInterfaceAPI.GetSettingString("cl_radar_icon_scale_min"));
+                if (isFinite(configuredString) && configuredString >= 0) {
+                    minimum = configuredString;
+                }
+            }
+        } catch (errSetting) {}
+        const radarScale = Math.max(0, Math.min(1, Number(centeredScale) || 0));
+        return minimum + radarScale * (1.25 - minimum);
+    }
+
+    function paintPovSoundRingOnAnchor(ring, anchor, diamPx, sound, maxed, tick, tickRate) {
+        if (!ring || !ring.IsValid()) {
+            return;
+        }
+        if (!anchor || !anchor.IsValid() || !sound || !(diamPx > 0)) {
+            ring.visible = false;
+            ring._insightSoundKey = "";
+            return;
+        }
+        try {
+            if (ring.GetParent() !== anchor) {
+                ring.SetParent(anchor);
+            }
+        } catch (err) {
+            ring.visible = false;
+            return;
+        }
+        const half = diamPx / 2;
+        const soundKey = povSoundKey(sound);
+        const retriggered = ring._insightSoundKey !== soundKey;
+        ring._insightSoundKey = soundKey;
+        ring.visible = true;
+        ring.style.width = diamPx + "px";
+        ring.style.height = diamPx + "px";
+        // The anchor is the shared center of #Radar and the forced
+        // cl_radar_always_centered POV marker, outside Round--Inner's clip.
+        ring.style.position = "0px 0px 0px";
+        ring.style.marginLeft = (-half) + "px";
+        ring.style.marginTop = (-half) + "px";
+        const durationTicks = Math.max(1, Math.round((sound.durationMs / 1000) * tickRate));
+        const progress = Math.max(0, Math.min(1, (tick - sound.tick) / durationTicks));
+        // Stock .PlayerSound has no opacity animation. The step flag denotes a
+        // steady state; only transient knife/reload/jump pulses use our fade.
+        ring.style.opacity = sound.step
+            ? "1"
+            : String(Math.max(0.45, 1 - progress * 0.55));
+        // Keep the stock thin stroke for every radius. Compact 98u pulses gain
+        // visibility from the layout minimum, not from a heavier/brighter rim.
+        ring.style.border = "1px solid #ffffff40";
+        ring.style.brightness = retriggered ? "1.2" : "1";
+        let hasMaxClass = false;
+        try {
+            hasMaxClass = Boolean(ring.BHasClass && ring.BHasClass("player-sound-max"));
+        } catch (errClass) {}
+        if (maxed && !hasMaxClass) {
+            ring.AddClass("player-sound-max");
+        } else if (!maxed && hasMaxClass) {
+            ring.RemoveClass("player-sound-max");
+        }
+    }
+
+    function updatePovSoundRings(nativeRadar, tick, povXuid, povSample) {
+        // nativeSoundComplete describes the event source, not Panorama playback.
+        // Some GOTV demos retain a perfect player_sound table but CS2 does not
+        // instantiate visible RI_PlayerSoundContainer children while spectating the
+        // recording. Replay the exact native radius/duration rows through panels
+        // carrying CS2's PlayerSound classes; stripped demos use synthesized rows.
+        // Suppress the stock root to avoid doubled rings on builds that do replay it.
+        setNativeSoundRingsVisible(nativeRadar, false);
+        unclipRadarForSoundRings(nativeRadar);
+        const fx = ensurePovRadarFx(nativeRadar);
+        if (!fx || !povSample || !povSample.alive || !povXuid) {
+            hideInsightSoundRings();
+            return;
+        }
+        fx.anchor.visible = true;
+        fx.anchor.style.position = "50% 50% 0px";
+        const active = findActivePovSounds(tick, povXuid, false);
+        const assigned = assignPovSoundsToSlots(fx, active);
+        const radarFrame = nativeRadar.FindChildTraverse("Radar") || nativeRadar;
+        const frameWidth = radarFrame && radarFrame.IsValid()
+            ? (radarFrame.actuallayoutwidth || 0)
+            : 0;
+        const frameHeight = radarFrame && radarFrame.IsValid()
+            ? (radarFrame.actuallayoutheight || frameWidth)
+            : frameWidth;
+        const maxClassThreshold = Math.max(0, Math.min(frameWidth, frameHeight) * 0.5 * 0.98);
+        const centeredScale = nativeRadarCenteredScale();
+        const iconScale = nativeRadarIconScale(centeredScale);
+        function ringLayout(sound) {
+            if (!sound) {
+                return { diameter: 0, maxed: false };
+            }
+            // Native first rounds the unscaled PlayerSound panel radius to an
+            // integer, then scales the whole PlayerIcons package.
+            const panelRadius = Math.floor(
+                (Math.max(0, Number(sound.radius) || 0) / radarTrack.transform.scale)
+                    * centeredScale,
+            );
+            // The authored 98u jump/reload pulse is smaller than the POV icon
+            // on high-scale overviews (about 7px rendered radius on dust2).
+            // Preserve its small-circle identity, but expose enough rim beyond
+            // the 11px marker for the event to remain visible.
+            const visualPanelRadius = Number(sound.radius) <= 120
+                ? Math.max(12, panelRadius)
+                : panelRadius;
+            return {
+                diameter: 2 * Math.max(0, visualPanelRadius) * iconScale,
+                // Native CHudRadar sets player-sound-max when the ring radius
+                // reaches the current radar boundary (98% tolerance).
+                maxed: maxClassThreshold > 0 && panelRadius >= maxClassThreshold,
+            };
+        }
+        for (let soundIndex = 0; soundIndex < fx.soundRings.length; soundIndex += 1) {
+            const sound = assigned[soundIndex] || null;
+            const layout = ringLayout(sound);
+            paintPovSoundRingOnAnchor(
+                fx.soundRings[soundIndex],
+                fx.anchor,
+                layout.diameter,
+                sound,
+                layout.maxed,
+                tick,
+                Math.max(1, Number(radarTrack.stride) * 8),
+            );
+        }
     }
 
     function hidePovRadarFx() {
@@ -2830,11 +3439,12 @@
         if (povRadarFx.frustum && povRadarFx.frustum.IsValid()) {
             povRadarFx.frustum.visible = false;
         }
+        hideInsightSoundRings();
     }
 
     function updatePovUnclipFx(nativeRadar, tick, povXuid, povSample, povTeam) {
-        // This helper owns only the custom POV viewing frustum. Sound circles are
-        // rendered exclusively by CS2's native RI_PlayerSoundContainer.
+        // This helper owns the custom POV viewing frustum. It shares the
+        // unclipped #Radar-center anchor with sound circles.
         radarTrack.players.forEach(function (player) {
             if (player.frustum && player.frustum.IsValid()) {
                 player.frustum.visible = false;
@@ -2851,24 +3461,31 @@
             return;
         }
 
-        const percent = worldToRadarPercent(povSample.x, povSample.y, radarTrack.transform);
-        const pos = mapPercentToRadarPx(percent, nativeRadar);
-        if (!pos) {
-            hidePovRadarFx();
-            return;
-        }
-
         const cssYaw = yawToCssRotation(povSample.yaw);
         fx.anchor.visible = true;
-        fx.anchor.style.x = pos.x + "px";
-        fx.anchor.style.y = pos.y + "px";
-        fx.anchor.style.position = "0px 0px 0px";
+        fx.anchor.style.position = "50% 50% 0px";
         if (fx.rotated && fx.rotated.IsValid()) {
-            fx.rotated.style.transform = "rotateZ(" + cssYaw + "deg)";
+            // With a rotating, always-centered radar the POV always points up.
+            // If the user disabled radar rotation, retain the world-yaw cone.
+            let radarRotates = true;
+            try {
+                if (GameInterfaceAPI.GetSettingString) {
+                    const setting = String(GameInterfaceAPI.GetSettingString("cl_radar_rotate") || "1").toLowerCase();
+                    radarRotates = setting !== "0" && setting !== "false";
+                }
+            } catch (errSetting) {}
+            const iconScale = nativeRadarIconScale(nativeRadarCenteredScale());
+            // Native scales the complete PlayerIcons package around the player
+            // origin. Resizing ViewFrustrum itself moves the SVG tip off-center.
+            fx.rotated.style.transform = "rotateZ(" + (radarRotates ? 0 : cssYaw)
+                + "deg) scale3d(" + iconScale + ", " + iconScale + ", 1)";
             fx.rotated.visible = true;
         }
         if (fx.frustum && fx.frustum.IsValid()) {
             fx.frustum.visible = true;
+            fx.frustum.style.width = "128px";
+            fx.frustum.style.height = "64px";
+            fx.frustum.style.y = "-12px";
             fx.frustum.style.washColor = "#ffffffff";
             fx.frustum.style.opacity = "0.08";
         }
@@ -3070,6 +3687,479 @@
         }
     }
 
+    function radioTeamColor(team) {
+        // client.dll ChatColor(3): team-colored names in chat/radio notices.
+        if (team === 3) {
+            return "#a2c6ff";
+        }
+        return team === 2 ? "#ffdf93" : "#ffffff";
+    }
+
+    function voiceTeamColor(team) {
+        // CCSGO_HudVoiceStatus uses a slightly stronger team color whenever a
+        // competitive teammate marker is available.
+        if (team === 3) {
+            return "#729bdd";
+        }
+        return team === 2 ? "#e0b756" : "#ffffff";
+    }
+
+    function radioPlayerColor(xuid) {
+        const slot = povColorSlot(xuid);
+        if (slot >= 0 && slot < PLAYER_COLOR_HEX.length) {
+            return PLAYER_COLOR_HEX[slot];
+        }
+        return "";
+    }
+
+    function localizedRadioMessage(kind) {
+        const tokens = [
+            "#SFUI_TitlesTXT_Smoke_in_the_hole",
+            "#SFUI_TitlesTXT_Flashbang_in_the_hole",
+            "#SFUI_TitlesTXT_Fire_in_the_hole",
+            "#SFUI_TitlesTXT_Molotov_in_the_hole",
+            "#SFUI_TitlesTXT_Incendiary_in_the_hole",
+            "#SFUI_TitlesTXT_Decoy_in_the_hole",
+            "#Cstrike_TitlesTXT_Planting_Bomb",
+            "#Cstrike_TitlesTXT_Defusing_Bomb",
+        ];
+        const fallback = [
+            "Smoke!",
+            "Flashbang!",
+            "HE Grenade!",
+            "Molotov!",
+            "Incendiary!",
+            "Decoy!",
+            "Planting!",
+            "Defusing!",
+        ];
+        const index = Math.max(0, Math.min(tokens.length - 1, Number(kind) || 0));
+        let message = "";
+        try { message = String($.Localize(tokens[index]) || ""); } catch (errLocalize) {}
+        // Stock radio strings carry one leading legacy control-color byte. The
+        // custom HTML Label applies the same palette through font spans.
+        message = message.replace(/[\x00-\x1f]/g, "").trim();
+        if (!message || message === tokens[index]) {
+            message = fallback[index];
+        }
+        return message;
+    }
+
+    function radioMessageColor(kind) {
+        // csgo_english.txt prefixes the corresponding tokens with Source chat
+        // colors: 05 olive, 0B blue, 0F light-red, 10 gold, and 08 grey.
+        const colors = [
+            "#9abf45",
+            "#5fa8e6",
+            "#ef6a6a",
+            "#efae42",
+            "#efae42",
+            "#b9c0c5",
+            "#efae42",
+            "#efae42",
+        ];
+        const index = Math.max(0, Math.min(colors.length - 1, Number(kind) || 0));
+        return colors[index];
+    }
+
+    function escapeRadioHtml(value) {
+        return String(value || "")
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(/\"/g, "&quot;")
+            .replace(/'/g, "&#39;");
+    }
+
+    function radioHtmlSpan(color, value) {
+        return "<font color='" + color + "'>" + escapeRadioHtml(value) + "</font>";
+    }
+
+    function teammateMarkerHtml(xuid) {
+        const color = radioPlayerColor(xuid);
+        // client.dll localizes #CSGO_Competitive_Dot to U+25CF. U+2022 is a
+        // materially smaller Stratum glyph and caused the Insight mismatch.
+        return color ? radioHtmlSpan(color, "● ") : "";
+    }
+
+    function lowerLeftPlayerName(event) {
+        let name = "";
+        if (event && event.xuid) {
+            try { name = String(GameStateAPI.GetPlayerName(event.xuid) || ""); } catch (errName) {}
+        }
+        return name || String(event && event.name || "") || "Player";
+    }
+
+    function radioEventHtml(event) {
+        const team = event.team;
+        const name = lowerLeftPlayerName(event);
+
+        let location = "";
+        if (event.location) {
+            try { location = String($.Localize("#" + event.location) || ""); } catch (errLoc) {}
+            if (!location || location === "#" + event.location) {
+                location = event.location;
+            }
+        }
+
+        // Mirrors current Game_radio_location:
+        // " %s4\x03%s1\x04﹫%s2\x01: %s3". Keep the compact native ﹫ glyph
+        // and one HTML Label line so font metrics do not drift between segments.
+        let line = " ";
+        line += radioHtmlSpan(radioTeamColor(team), team === 3 ? "[CT] " : "[T] ");
+        line += teammateMarkerHtml(event.xuid);
+        line += radioHtmlSpan(radioTeamColor(team), name);
+        if (location) {
+            line += radioHtmlSpan("#40ff40", "﹫" + location);
+        }
+        line += radioHtmlSpan("#edf3f6", ": ");
+        line += radioHtmlSpan(radioMessageColor(event.kind), localizedRadioMessage(event.kind));
+        return line;
+    }
+
+    function chatEventHtml(event) {
+        const team = Number(event.team) || 0;
+        const prefix = event.teamOnly
+            ? (team === 3 ? "[CT] " : "[T] ")
+            : "[ALL] ";
+        let line = radioHtmlSpan("#edf3f6", prefix);
+        line += teammateMarkerHtml(event.xuid);
+        line += radioHtmlSpan(radioTeamColor(team), lowerLeftPlayerName(event));
+        line += radioHtmlSpan("#edf3f6", " : " + String(event.message || ""));
+        return line;
+    }
+
+    function teammateNoticeText(event) {
+        const name = lowerLeftPlayerName(event);
+        let language = "";
+        try { language = String($.Language() || "").toLowerCase(); } catch (errLanguage) {}
+        const chinese = language.indexOf("schinese") >= 0
+            || language.indexOf("tchinese") >= 0
+            || language.indexOf("chinese") >= 0;
+        if (Number(event.messageKind) === 1) {
+            return chinese ? name + " 攻击了一名队友" : name + " attacked a teammate";
+        }
+        if (Number(event.messageKind) === 2) {
+            return chinese ? name + " 击杀了一名队友" : name + " killed a teammate";
+        }
+        const message = String(event.message || "");
+        if (message.charAt(0) === "#") {
+            try {
+                const localized = String($.Localize(message) || "");
+                if (localized && localized !== message) {
+                    return localized;
+                }
+            } catch (errLocalize) {}
+        }
+        return message;
+    }
+
+    function serverEventHtml(event) {
+        return radioHtmlSpan("#ef5252", teammateNoticeText(event));
+    }
+
+    function cashAwardEventHtml(event) {
+        let message = "";
+        const token = "#Player_Cash_Award_Killed_Enemy_Generic";
+        try { message = String($.Localize(token) || ""); } catch (errLocalize) {}
+        if (!message || message === token) {
+            message = " Award for neutralizing an enemy: \x06+$%s1\x01";
+        }
+        message = message.replace(/%s1/g, String(Math.max(0, Number(event.reward) || 0)));
+
+        let color = "#edf3f6";
+        let segment = "";
+        const spans = [];
+        function flushSegment() {
+            if (segment) {
+                spans.push(radioHtmlSpan(color, segment));
+                segment = "";
+            }
+        }
+        for (let index = 0; index < message.length; index += 1) {
+            const code = message.charCodeAt(index);
+            if (code > 0 && code < 0x20) {
+                flushSegment();
+                color = code === 0x06 ? "#8df05d" : "#edf3f6";
+            } else {
+                segment += message.charAt(index);
+            }
+        }
+        flushSegment();
+        return spans.join("");
+    }
+
+    function lowerLeftEventHtml(event) {
+        if (!event) {
+            return "";
+        }
+        if (event.type === "cash") {
+            return cashAwardEventHtml(event);
+        }
+        if (event.type === "chat") {
+            return chatEventHtml(event);
+        }
+        if (event.type === "server") {
+            return serverEventHtml(event);
+        }
+        return radioEventHtml(event);
+    }
+
+    function nativeVoiceAlertPanel(index) {
+        const cached = nativeVoiceAlertPanels[index] || null;
+        if (cached && cached.IsValid()) {
+            return cached;
+        }
+        const resolved = findHudTraverse("AlertPanel" + (index + 1));
+        nativeVoiceAlertPanels[index] = resolved && resolved.IsValid()
+            ? resolved
+            : null;
+        return nativeVoiceAlertPanels[index];
+    }
+
+    function suppressNativeLowerLeft() {
+        for (let index = 0; index < NATIVE_VOICE_ALERT_PANEL_COUNT; index += 1) {
+            const panel = nativeVoiceAlertPanel(index);
+            if (!panel || !panel.IsValid()) {
+                continue;
+            }
+            // Do not change stock animation classes or layout. Opacity is
+            // reapplied because the engine recycles this fixed panel pool.
+            panel.style.opacity = "0";
+            panel.hittest = false;
+        }
+        if (!nativeChatHistoryText || !nativeChatHistoryText.IsValid()) {
+            nativeChatHistoryText = findHudTraverse("ChatHistoryText");
+        }
+        if (nativeChatHistoryText && nativeChatHistoryText.IsValid()) {
+            nativeChatHistoryText.style.opacity = "0";
+            nativeChatHistoryText.hittest = false;
+            nativeChatHistoryText.visible = false;
+        }
+        $.Schedule(RADIO_IDLE_REFRESH_SECONDS, suppressNativeLowerLeft);
+    }
+
+    function ensureRadioHud() {
+        const root = hudRootPanel();
+        if (!root) {
+            return null;
+        }
+        // ChatHistory's ancestors collapse whenever the engine has no live
+        // message, so the reconstructed radio needs an independent host. Match
+        // current HudVoiceStatus's 560px alert slot. This independent host is
+        // already inside the HUD safe-zone transform, so only AlertText's 8px
+        // left padding is needed; reapplying ChatContainer/ChatFG left insets
+        // produced the visibly shifted ~50px Insight baseline. It does not,
+        // however, inherit HudVoiceStatus's vertical layout origin, so use the
+        // fixed stock message lane rather than reacting to active voice rows.
+        if (radioHud && radioHud.IsValid() && radioHud.GetParent() === root) {
+            radioHud.style.marginBottom = RADIO_PANEL_Y_OFFSET + "px";
+            return radioHud;
+        }
+        if (radioHud && radioHud.IsValid()) {
+            try { radioHud.DeleteAsync(0.0); } catch (errDelete) {}
+        }
+        const hud = $.CreatePanel("Panel", root, "CS2InsightRadioHud");
+        hud.hittest = false;
+        hud.style.width = "560px";
+        hud.style.height = "300px";
+        hud.style.horizontalAlign = "left";
+        hud.style.verticalAlign = "bottom";
+        hud.style.marginLeft = "0px";
+        hud.style.marginBottom = RADIO_PANEL_Y_OFFSET + "px";
+        hud.style.zIndex = "25000";
+        hud.style.overflow = "noclip";
+
+        const history = $.CreatePanel("Panel", hud, "CS2InsightRadioHistoryText");
+        history.hittest = false;
+        history.style.width = "100%";
+        // Stock #ChatHistoryText fills the 327px history slot but vertically
+        // aligns its contents to the bottom. Keep a full-height anchor, then
+        // bottom-align a fit-children row stack inside it. Flowing rows directly
+        // in this full-height panel starts them at the top and is visibly too
+        // high at 16:9.
+        history.style.height = "100%";
+        history.style.verticalAlign = "bottom";
+        history.style.overflow = "noclip";
+
+        const rowStack = $.CreatePanel("Panel", history, "CS2InsightRadioRows");
+        rowStack.hittest = false;
+        rowStack.style.width = "100%";
+        rowStack.style.height = "fit-children";
+        rowStack.style.verticalAlign = "bottom";
+        rowStack.style.paddingLeft = "8px";
+        rowStack.style.paddingRight = "0px";
+        rowStack.style.paddingTop = "0px";
+        rowStack.style.paddingBottom = "0px";
+        rowStack.style.flowChildren = "down";
+        rowStack.style.overflow = "noclip";
+
+        radioHistoryRows = [];
+        for (let rowIndex = 0; rowIndex < MAX_VISIBLE_RADIO_MESSAGES; rowIndex += 1) {
+            const row = $.CreatePanel(
+                "Label",
+                rowStack,
+                "CS2InsightRadioHistoryRow" + rowIndex,
+            );
+            row.hittest = false;
+            row.html = true;
+            row.style.width = "100%";
+            row.style.height = "fit-children";
+            row.style.fontFamily = "Stratum2, 'Arial Unicode MS'";
+            row.style.fontSize = "18px";
+            row.style.fontWeight = "medium";
+            row.style.letterSpacing = "0px";
+            row.style.textShadow = "0px 0px 1px 1.0 #0000003a";
+            row.style.whiteSpace = "nowrap";
+            row.style.overflow = "noclip";
+            row.style.opacity = "0";
+            row.style.transitionProperty = "transform";
+            row.style.transitionDuration = "0.1s";
+            row.style.transitionTimingFunction = "linear";
+            row.visible = false;
+            radioHistoryRows.push(row);
+        }
+        radioHistoryPanel = rowStack;
+        radioHud = hud;
+        return hud;
+    }
+
+    function hideRadioHud() {
+        radioHistoryRows.forEach(function (row) {
+            if (row && row.IsValid()) {
+                row.text = "";
+                row.style.opacity = "0";
+                row.style.transform = "none";
+                row.visible = false;
+            }
+        });
+        if (radioHud && radioHud.IsValid()) {
+            radioHud.visible = false;
+        }
+    }
+
+    function radioEventOpacity(event, tick) {
+        const lifetimeTicks = Math.max(
+            1,
+            RADIO_MESSAGE_SECONDS * Math.max(1, Number(event.tickRate) || 64),
+        );
+        const progress = Math.max(
+            0,
+            Math.min(1, (tick - event.tick) / lifetimeTicks),
+        );
+        if (progress < RADIO_FADE_IN_END) {
+            return progress / RADIO_FADE_IN_END;
+        }
+        if (progress < RADIO_FADE_OUT_START) {
+            return 1;
+        }
+        if (progress < RADIO_FADE_OUT_END) {
+            return 1 - (
+                (progress - RADIO_FADE_OUT_START)
+                / (RADIO_FADE_OUT_END - RADIO_FADE_OUT_START)
+            );
+        }
+        return 0;
+    }
+
+    function paintRadioHistory(events, tick) {
+        if (!radioHistoryPanel || !radioHistoryPanel.IsValid()) {
+            return;
+        }
+        for (let rowIndex = 0; rowIndex < radioHistoryRows.length; rowIndex += 1) {
+            const row = radioHistoryRows[rowIndex];
+            if (!row || !row.IsValid()) {
+                continue;
+            }
+            const event = events[rowIndex] || null;
+            row.text = event ? lowerLeftEventHtml(event) : "";
+            row.style.opacity = event
+                ? String(radioEventOpacity(event, tick))
+                : "0";
+            row.visible = Boolean(event);
+        }
+    }
+
+    function updateRadioHud() {
+        if (!radioTrack && !killFeedbackTrack) {
+            return;
+        }
+        const state = controller.GetDemoControllerState();
+        if (!state || !isFinite(Number(state.nTick))) {
+            hideRadioHud();
+            $.Schedule(RADIO_IDLE_REFRESH_SECONDS, updateRadioHud);
+            return;
+        }
+        const tick = Number(state.nTick);
+        const jumped = radioLastTick >= 0
+            && (tick + 2 < radioLastTick
+                || tick - radioLastTick > TRANSIENT_HUD_TICK_JUMP_THRESHOLD);
+        if (radioEpochTick < 0) {
+            radioEpochTick = 0;
+        }
+        if (jumped || state.bIsPaused) {
+            radioEpochTick = tick;
+        }
+        radioLastTick = tick;
+
+        const hud = ensureRadioHud();
+        if (!hud || state.bIsPaused || tick <= transientHudSuppressUntilTick) {
+            hideRadioHud();
+            $.Schedule(RADIO_IDLE_REFRESH_SECONDS, updateRadioHud);
+            return;
+        }
+        const povXuid = currentPovXuid(state);
+        let visible = [];
+        if (radioTrack) {
+            const povTeam = resolvePovTeam(povXuid, tick);
+            const radioLifetimeTicks = Math.max(
+                1,
+                Math.round(RADIO_MESSAGE_SECONDS * radioTrack.tickRate),
+            );
+            visible = visible.concat(radioTrack.events.filter(function (event) {
+                if (event.tick < radioEpochTick
+                        || event.tick > tick
+                        || event.tick + radioLifetimeTicks <= tick) {
+                    return false;
+                }
+                return povTeam !== 0 && event.team === povTeam;
+            }));
+            visible = visible.concat(radioTrack.messages.filter(function (event) {
+                if (event.tick < radioEpochTick
+                        || event.tick > tick
+                        || event.tick + radioLifetimeTicks <= tick) {
+                    return false;
+                }
+                return event.type !== "chat"
+                    || !event.teamOnly
+                    || (povTeam !== 0 && event.team === povTeam);
+            }));
+        }
+        if (killFeedbackTrack && povXuid) {
+            const cashLifetimeTicks = Math.max(
+                1,
+                Math.round(RADIO_MESSAGE_SECONDS * killFeedbackTrack.tickRate),
+            );
+            visible = visible.concat(killFeedbackEvents.filter(function (event) {
+                return event.reward > 0
+                    && event.attackerXuid === povXuid
+                    && event.tick >= radioEpochTick
+                    && event.tick <= tick
+                    && event.tick + cashLifetimeTicks > tick;
+            }));
+        }
+        // Stable sort retains demo arrival order for events sharing one tick.
+        visible.sort(function (left, right) { return left.tick - right.tick; });
+        visible = visible.slice(-MAX_VISIBLE_RADIO_MESSAGES);
+
+        hud.visible = Boolean(visible.length);
+        paintRadioHistory(visible, tick);
+        $.Schedule(
+            visible.length ? RADIO_ACTIVE_REFRESH_SECONDS : RADIO_IDLE_REFRESH_SECONDS,
+            updateRadioHud,
+        );
+    }
+
     function ensureNotice(speaker, index, voicePanel) {
         if (speaker.panel && speaker.panel.IsValid() && speaker.panel.GetParent() === voicePanel) {
             return speaker.panel;
@@ -3100,19 +4190,20 @@
             "SteamAvatar",
         );
         createClassedPanel("Panel", avatarPanel, "", "Skull");
+        const marker = createClassedPanel("Label", notice, "VoiceMarker", "VoiceText");
+        marker.style.width = "fit-children";
+        marker.style.marginLeft = "4px";
         const label = createClassedPanel("Label", notice, "VoiceText", "VoiceText");
         label.style.width = "fit-children";
+        label.style.marginLeft = "0px";
         const locationLabel = createClassedPanel("Label", notice, "VoiceLocation", "VoiceText");
         locationLabel.style.width = "fit-children";
-        locationLabel.style.color = "#a7d44cff";
+        locationLabel.style.marginLeft = "0px";
+        locationLabel.style.color = "#40ff40";
 
         const xuid = speaker.xuid || GameStateAPI.GetPlayerXuidStringFromPlayerSlot(speaker.slot);
         if (xuid) {
             avatar.PopulateFromSteamID(xuid);
-            const color = GameStateAPI.GetPlayerColor(xuid);
-            if (color) {
-                label.style.color = color;
-            }
         } else {
             avatar.PopulateFromPlayerSlot(speaker.slot);
         }
@@ -3246,7 +4337,6 @@
                 activeRowCount += 1;
             }
         });
-
         speakers.forEach(function (speaker, index) {
             const row = activeRows[index];
             const active = row !== undefined;
@@ -3254,18 +4344,30 @@
                 return;
             }
             const notice = ensureNotice(speaker, index, voicePanel);
+            // Reveal the structural voice notice before painting its labels so
+            // the speaker icon/avatar cannot disappear while the row still
+            // reserves space above reconstructed messages.
+            notice.SetHasClass("Hidden", !active);
             if (active) {
                 pinVoiceNotices(voicePanel, activeRowCount, notice, row);
                 const xuid = speaker.xuid || GameStateAPI.GetPlayerXuidStringFromPlayerSlot(speaker.slot);
                 const name = xuid ? GameStateAPI.GetPlayerName(xuid) : "";
-                notice.FindChildTraverse("VoiceText").text = name || ("Player " + (speaker.slot + 1));
                 const locationToken = locationAt(speaker.locations, state.nTick);
                 const localizedLocation = locationToken ? $.Localize("#" + locationToken) : "";
-                notice.FindChildTraverse("VoiceLocation").text = localizedLocation
-                    ? "@ " + localizedLocation
-                    : "";
+                const speakerTeam = resolvePovTeam(speaker.xuid, state.nTick)
+                    || (speakerPlayer ? speakerPlayer.team : 0);
+                const markerColor = radioPlayerColor(xuid);
+                const marker = notice.FindChildTraverse("VoiceMarker");
+                const voiceText = notice.FindChildTraverse("VoiceText");
+                const voiceLocation = notice.FindChildTraverse("VoiceLocation");
+                marker.text = markerColor ? "● " : "";
+                marker.style.color = markerColor || "#ffffff";
+                voiceText.text = name || ("Player " + (speaker.slot + 1));
+                voiceText.style.color = markerColor
+                    ? voiceTeamColor(speakerTeam)
+                    : radioTeamColor(speakerTeam);
+                voiceLocation.text = localizedLocation ? " @ " + localizedLocation : "";
             }
-            notice.SetHasClass("Hidden", !active);
         });
         $.Schedule(0.05, update);
     }
@@ -3274,18 +4376,17 @@
     $.Schedule(0, update);
     $.Schedule(0, updateInputHud);
     $.Schedule(0, tickTeamCounterHud);
+    $.Schedule(0, updateOverheadInfoHud);
     $.Schedule(0, tickFlashBlindHud);
-    try {
-        $.RegisterForUnhandledEvent(
-            "PanoramaGameTimeJumpEvent",
-            scheduleTransientStockHudClear,
-        );
-    } catch (errTimeJumpEvent) {}
     $.Schedule(0, watchDemoTimeJumps);
+    suppressNativeLowerLeft();
     if (radarTrack) {
         $.Schedule(0, updateRadarHud);
     }
     if (killFeedbackEvents) {
         $.Schedule(0, updateKillFeedback);
+    }
+    if (radioTrack || killFeedbackTrack) {
+        $.Schedule(0, updateRadioHud);
     }
 })();

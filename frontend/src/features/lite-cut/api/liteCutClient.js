@@ -1,14 +1,15 @@
 import API, {
   API_BASE_URL,
+  getLiteCutAssetAudioPreviewUrl,
   getLiteCutAssetStreamUrl,
   getRecordedClipStreamUrl,
 } from "../../../api/api.js";
 
 const responseData = (response) => response?.data;
 const idPart = (value) => encodeURIComponent(String(value));
-const resolveLiteCutApiUrl = (value) => {
+export const resolveLiteCutApiUrl = (value, baseUrl = API_BASE_URL) => {
   const path = String(value || "");
-  return API_BASE_URL && path.startsWith("/") ? `${API_BASE_URL}${path}` : path;
+  return baseUrl && path.startsWith("/") ? `${baseUrl}${path}` : path;
 };
 
 /**
@@ -108,7 +109,12 @@ export function createLiteCutClient(transport = API) {
       transport.post(`/lite-cut/projects/${idPart(projectId)}/snapshots/${idPart(snapshotId)}/restore`).then(responseData),
 
     exportProjectFile: (projectId, destination = "") =>
-      transport.post(`/lite-cut/projects/${idPart(projectId)}/project-file/export`, { destination }).then(responseData),
+      transport.post(`/lite-cut/projects/${idPart(projectId)}/project-file/export`, { destination })
+        .then(responseData)
+        .then((data) => ({
+          ...data,
+          download_url: data?.download_url ? resolveLiteCutApiUrl(data.download_url) : null,
+        })),
     importProjectFile: (file) => {
       const form = new FormData();
       form.append("file", file);
@@ -128,4 +134,4 @@ export function createLiteCutClient(transport = API) {
 }
 
 export const liteCutClient = createLiteCutClient();
-export { getLiteCutAssetStreamUrl, getRecordedClipStreamUrl };
+export { getLiteCutAssetAudioPreviewUrl, getLiteCutAssetStreamUrl, getRecordedClipStreamUrl };

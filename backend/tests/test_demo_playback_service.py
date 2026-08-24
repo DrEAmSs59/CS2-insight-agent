@@ -92,6 +92,7 @@ def _playback_fakes(monkeypatch):
             report=SimpleNamespace(outcome="clean", removed_messages=0),
         ),
     )
+    monkeypatch.setattr(playback, "snapshot_user_configs", lambda _cs2_path: {})
     monkeypatch.setattr(playback.threading, "Thread", _DeferredThread)
 
 
@@ -187,6 +188,106 @@ def test_pov_playback_installs_cfg_and_restores_after_exit(monkeypatch, tmp_path
     rechecked = service.session_status(result["session_id"])
     assert rechecked["state"] == "restore_failed"
     assert rechecked["restore"]["verified"] is False
+
+
+def test_pov_playback_snapshots_and_restores_player_configs(monkeypatch, tmp_path: Path):
+    cfg, demo, _game_root = _paths(tmp_path)
+    process = _FakeProcess()
+    original_snapshot = {tmp_path / "cs2_machine_convars.vcfg": b'"cl_hud_color" "8"'}
+    calls = []
+
+    monkeypatch.setattr(playback, "snapshot_user_configs", lambda _cs2_path: original_snapshot)
+    monkeypatch.setattr(
+        playback,
+        "write_persistent_backup_from_snap",
+        lambda snapshot: calls.append(("backup", snapshot)) or (tmp_path / "backup"),
+    )
+    monkeypatch.setattr(
+        playback,
+        "restore_user_config_snapshot",
+        lambda snapshot: calls.append(("restore", snapshot)) or {
+            "ok": True,
+            "verified": True,
+            "checked": 1,
+            "restored": 1,
+            "failed": [],
+            "source": "manifest",
+        },
+    )
+    monkeypatch.setattr(playback.subprocess, "Popen", lambda *_args, **_kwargs: process)
+
+    service = playback.DemoPlaybackService()
+    result = service.launch(demo, cfg, playback.DemoPlaybackPovOptions(enabled=True))
+    session = service._active
+    assert session is not None
+    session.started_at_monotonic = time.monotonic() - 4
+    service._monitor_session(session)
+
+    assert calls == [
+        ("backup", original_snapshot),
+        ("restore", original_snapshot),
+    ]
+    status = service.session_status(result["session_id"])
+    assert status["state"] == "completed"
+    assert status["player_config_restore"]["verified"] is True
+    assert status["player_config_restore"]["state"] == "restored"
+
+
+def test_pov_launch_failure_restores_player_configs(monkeypatch, tmp_path: Path):
+    cfg, demo, _game_root = _paths(tmp_path)
+    original_snapshot = {tmp_path / "cs2_user_keys.vcfg": b'"ALT" "toggleradarscale"'}
+    restored = []
+
+    monkeypatch.setattr(playback, "snapshot_user_configs", lambda _cs2_path: original_snapshot)
+    monkeypatch.setattr(
+        playback,
+        "write_persistent_backup_from_snap",
+        lambda _snapshot: tmp_path / "backup",
+    )
+    monkeypatch.setattr(
+        playback,
+        "restore_user_config_snapshot",
+        lambda snapshot: restored.append(snapshot) or {
+            "ok": True,
+            "verified": True,
+            "checked": 1,
+            "restored": 0,
+            "failed": [],
+            "source": "manifest",
+        },
+    )
+    monkeypatch.setattr(
+        playback.subprocess,
+        "Popen",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError("launch failed")),
+    )
+
+    with pytest.raises(OSError, match="launch failed"):
+        playback.DemoPlaybackService().launch(
+            demo,
+            cfg,
+            playback.DemoPlaybackPovOptions(enabled=True),
+        )
+
+    assert restored == [original_snapshot]
+
+
+def test_playback_is_blocked_when_player_config_backup_cannot_be_created(
+    monkeypatch,
+    tmp_path: Path,
+):
+    cfg, demo, _game_root = _paths(tmp_path)
+    snapshot = {tmp_path / "cs2_machine_convars.vcfg": b'"cl_hud_color" "8"'}
+    monkeypatch.setattr(playback, "snapshot_user_configs", lambda _cs2_path: snapshot)
+    monkeypatch.setattr(playback, "write_persistent_backup_from_snap", lambda _snapshot: None)
+    monkeypatch.setattr(playback.subprocess, "Popen", pytest.fail)
+
+    with pytest.raises(RuntimeError, match="player config backup"):
+        playback.DemoPlaybackService().launch(
+            demo,
+            cfg,
+            playback.DemoPlaybackPovOptions(enabled=True),
+        )
 
 
 def test_pov_launch_failure_rolls_back_files(monkeypatch, tmp_path: Path):

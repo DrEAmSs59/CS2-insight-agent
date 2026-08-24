@@ -258,8 +258,15 @@ async def _run_montage_export_job(job: MontageExportJob, prepared: dict[str, Any
         else:
             job.progress = max(job.progress, next_progress)
         job.stage = next_stage
-        if isinstance(detail, dict) and detail.get("stage_progress") is not None:
-            job.stage_progress = max(0.0, min(1.0, float(detail["stage_progress"])))
+        if isinstance(detail, dict):
+            raw_encoder_warning = detail.get("encoder_warning")
+            if (
+                isinstance(raw_encoder_warning, dict)
+                and raw_encoder_warning.get("code") == "NVIDIA_DRIVER_TOO_OLD"
+            ):
+                job.encoder_warning = dict(raw_encoder_warning)
+            if detail.get("stage_progress") is not None:
+                job.stage_progress = max(0.0, min(1.0, float(detail["stage_progress"])))
 
     try:
         await asyncio.to_thread(

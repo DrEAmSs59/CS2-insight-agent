@@ -18,6 +18,7 @@ import { MontagePlayerAssetsPanel } from "./MontagePlayerAssetsPanel";
 import { useT } from "../../i18n/useT.js";
 import { humanizeMontageError } from "../../utils/formatMontageApiError.js";
 import { summarizeFrameMeldSources } from "../../utils/framemeld.js";
+import FrameMeldEnableDialog from "../FrameMeldEnableDialog.jsx";
 
 function pathBasename(path) {
   const s = String(path || "").trim();
@@ -238,6 +239,19 @@ export function MontageStyleConsole({
   const optionalActiveCount = optionalItems.filter((item) => item.active).length;
 
   const [activeTab, setActiveTab] = useState("media");
+  const [frameMeldConfirmationOpen, setFrameMeldConfirmationOpen] = useState(false);
+  const toggleFrameMeld = () => {
+    if (!framemeldAvailable) return;
+    if (framemeldActive) {
+      onFrameMeldEnabledChange?.(false);
+      return;
+    }
+    setFrameMeldConfirmationOpen(true);
+  };
+  const confirmFrameMeld = () => {
+    setFrameMeldConfirmationOpen(false);
+    if (framemeldAvailable) onFrameMeldEnabledChange?.(true);
+  };
   const tabItems = [
     { id: "media", label: t("montage.consoleTabMedia") },
     { id: "players", label: t("montage.consoleTabPlayers") },
@@ -579,7 +593,7 @@ export function MontageStyleConsole({
                   aria-pressed={framemeldActive}
                   aria-label={t("montage.consoleFrameMeldTitle")}
                   disabled={!framemeldAvailable}
-                  onClick={() => onFrameMeldEnabledChange?.(!framemeldActive)}
+                  onClick={toggleFrameMeld}
                   className={`mt-0.5 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cs2-accent/60 active:scale-95 disabled:cursor-not-allowed disabled:opacity-40 ${
                     framemeldActive
                       ? "border-cs2-accent bg-cs2-accent text-white shadow-sm"
@@ -671,6 +685,11 @@ export function MontageStyleConsole({
           </div>
         )}
       </div>
+      <FrameMeldEnableDialog
+        open={frameMeldConfirmationOpen}
+        onCancel={() => setFrameMeldConfirmationOpen(false)}
+        onConfirm={confirmFrameMeld}
+      />
     </aside>
   );
 }

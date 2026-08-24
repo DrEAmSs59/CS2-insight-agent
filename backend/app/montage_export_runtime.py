@@ -21,6 +21,7 @@ class MontageExportJob:
     started_at_monotonic: float = field(default_factory=time.monotonic)
     stage_started_at_monotonic: float = field(default_factory=time.monotonic)
     stage_progress: float | None = None
+    encoder_warning: dict[str, Any] | None = None
     task: asyncio.Task | None = None
     cancel_event: threading.Event = field(default_factory=threading.Event)
 
@@ -46,5 +47,6 @@ def montage_export_job_snapshot(job: MontageExportJob) -> dict[str, Any]:
         "output_path": job.output_path,
         "error": job.error,
         "elapsed_seconds": elapsed_seconds,
+        "encoder_warning": dict(job.encoder_warning) if job.encoder_warning else None,
         "estimated_remaining_seconds": estimated_remaining_seconds,
     }

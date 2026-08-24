@@ -28,6 +28,7 @@ def test_all_maps_use_default_pov_asset(tmp_path: Path):
 def test_pov_forces_rotating_round_scaled_radar():
     expected = {
         "cl_radar_always_centered 1",
+        "cl_radar_square_always false",
         "cl_radar_square_when_spectating 0",
         "cl_radar_scale 0.4",
         "snd_disable_radar_visualize 0",
@@ -38,6 +39,20 @@ def test_pov_forces_rotating_round_scaled_radar():
 
 def test_pov_forces_teammate_hud_color():
     assert "cl_hud_color 12" in POV_CORE_FORCED_COMMANDS
+
+
+def test_pov_forces_native_player_overhead_name_equipment_and_range():
+    expected = {
+        "mp_forcecamera 0",
+        "cl_drawhud_force_teamid_overhead 1",
+        "cl_teamid_overhead_mode 3",
+        "cl_teamid_overhead_colors_show 1",
+        "cl_teamid_overhead_fade_near_crosshair 0",
+        "cl_teamid_overhead_maxdist 9999",
+        "cl_teamid_overhead_maxdist_spec 9999",
+    }
+
+    assert expected.issubset(POV_CORE_FORCED_COMMANDS)
 
 
 def test_semantic_cleanup_removes_only_active_pov_search_path():

@@ -11,6 +11,7 @@ import SponsorModal from "../components/SponsorModal";
 import ObsAiSettingsPanel from "../components/ObsAiSettingsPanel";
 import ObsHostField from "../components/settings/ObsHostField.jsx";
 import { formatFileSize } from "../utils/demoLibraryDisplay.js";
+import { formatObsEncoderLabel, obsEncoderIsConfigured, obsEncoderIsHardware } from "../utils/obsEncoderDisplay.js";
 import {
   FieldRow,
   NumberInput,
@@ -184,6 +185,7 @@ export default function SettingsPage() {
   const [statusRefreshing, setStatusRefreshing] = useState(false);
   const [calibrating, setCalibrating] = useState(false);
   const [calibrateResult, setCalibrateResult] = useState(null);
+  const [restartAlertDismissed, setRestartAlertDismissed] = useState(false);
 
   // Sponsor Modal
   const [showSponsorModal, setShowSponsorModal] = useState(false);
@@ -529,6 +531,7 @@ export default function SettingsPage() {
   const handleConfigCheck = useCallback(async () => {
     setChecking(true);
     setCheckResult(null);
+    setRestartAlertDismissed(false);
     try {
       const obs = config.obs ?? {};
       const { data } = await API.post("/obs/config-check", {
@@ -551,6 +554,7 @@ export default function SettingsPage() {
   const handleCalibrate = useCallback(async () => {
     setCalibrating(true);
     setCalibrateResult(null);
+    setRestartAlertDismissed(false);
     try {
       // Save first so the backend config has the latest OBS connection params
       await handleSave();
@@ -571,6 +575,14 @@ export default function SettingsPage() {
 
   const obsStatusRows = useCallback((s) => {
     if (!s?.obs_connected) return [];
+    const currentEncoderLabel = formatObsEncoderLabel(s.recording?.encoder, t("obscfg.encoderUnknown"));
+    const recommendedEncoder = s.recording?.recommended_encoder;
+    const recommendedEncoderLabel = String(recommendedEncoder?.label || "").trim();
+    const simpleHardwareCandidate = s.recording?.stream_encoder;
+    const shouldRecommendHardware = obsEncoderIsConfigured(s.recording?.encoder)
+      && !obsEncoderIsHardware(s.recording?.encoder)
+      && !!recommendedEncoderLabel;
+    const canApplyHardwareRecommendation = obsEncoderIsHardware(simpleHardwareCandidate);
     return [
       {
         label: t("obscfg.rowCanvas"),
@@ -605,6 +617,21 @@ export default function SettingsPage() {
         skip: !s.scene?.capture_source_exists,
       },
       {
+        label: t("obscfg.rowOutputMode"),
+        value: s.recording?.output_mode === "Advanced" ? t("obscfg.outputModeAdvanced") : t("obscfg.outputModeSimple"),
+        ok: s.recording?.output_mode === "Simple",
+        issue: t("obscfg.outputModeIssue"),
+      },
+      {
+        label: t("obscfg.rowEncoder"),
+        value: currentEncoderLabel,
+        ok: obsEncoderIsConfigured(s.recording?.encoder) && !shouldRecommendHardware,
+        issue: shouldRecommendHardware
+          ? t("obscfg.encoderRecommendationIssue", { current: currentEncoderLabel, recommended: recommendedEncoderLabel })
+          : t("obscfg.encoderIssue"),
+        advisoryOnly: shouldRecommendHardware && !canApplyHardwareRecommendation,
+      },
+      {
         label: t("obscfg.rowFormat"),
         value: (s.recording?.format === "hybrid_mp4" ? t("obscfg.formatHybridMp4") : s.recording?.format === "fragmented_mp4" ? t("obscfg.formatFragMp4") : s.recording?.format ?? t("obscfg.formatUnknown")),
         ok: s.recording?.format === "hybrid_mp4",
@@ -612,9 +639,10 @@ export default function SettingsPage() {
       },
       {
         label: t("obscfg.rowQuality"),
-        value: s.recording?.rec_quality === "Stream" ? t("obscfg.qualityStream") : s.recording?.rec_quality === "Small" ? t("obscfg.qualitySmall") : s.recording?.rec_quality === "HQ" ? t("obscfg.qualityHq") : s.recording?.rec_quality === "Lossless" ? t("obscfg.qualityLossless") : s.recording?.rec_quality ?? t("obscfg.qualityUnknown"),
-        ok: s.recording?.rec_quality !== "Stream" && !!s.recording?.rec_quality,
+        value: s.recording?.output_mode === "Advanced" ? t("obscfg.qualityManagedByEncoder") : s.recording?.rec_quality === "Stream" ? t("obscfg.qualityStream") : s.recording?.rec_quality === "Small" ? t("obscfg.qualitySmall") : s.recording?.rec_quality === "HQ" ? t("obscfg.qualityHq") : s.recording?.rec_quality === "Lossless" ? t("obscfg.qualityLossless") : s.recording?.rec_quality ?? t("obscfg.qualityUnknown"),
+        ok: s.recording?.output_mode === "Advanced" || (s.recording?.rec_quality !== "Stream" && !!s.recording?.rec_quality),
         issue: t("obscfg.qualityIssue"),
+        skip: s.recording?.output_mode === "Advanced",
       },
       {
         label: t("obscfg.rowOutputDir"),
@@ -1318,7 +1346,7 @@ export default function SettingsPage() {
 
                 {(() => {
                   const rows = obsStatusRows(status);
-                  const hasIssues = rows.some(r => !r.skip && !r.infoOnly && !r.ok);
+                  const hasIssues = rows.some(r => !r.skip && !r.infoOnly && !r.advisoryOnly && !r.ok);
                   return (
                     <button
                       type="button"
@@ -1346,18 +1374,6 @@ export default function SettingsPage() {
                         <CheckCircle2 className="mt-0.5 h-3 w-3 shrink-0" />{msg}
                       </div>
                     ))}
-                  </div>
-                )}
-                {calibrateResult?.restart_obs_required && (
-                  <div className="mt-2 flex items-start gap-1.5 rounded-lg border border-amber-400/30 bg-amber-400/5 px-2.5 py-2 text-[11px] text-amber-400">
-                    <RotateCcw className="mt-0.5 h-3 w-3 shrink-0" />
-                    <span>{t("obscfg.restartRequired")}</span>
-                  </div>
-                )}
-                {checkResult?.restart_obs_required && (
-                  <div className="mt-2 flex items-start gap-1.5 rounded-lg border border-amber-400/30 bg-amber-400/5 px-2.5 py-2 text-[11px] text-amber-400">
-                    <RotateCcw className="mt-0.5 h-3 w-3 shrink-0" />
-                    <span>{t("obscfg.restartRequired")}</span>
                   </div>
                 )}
               </SectionCard>
@@ -1514,6 +1530,52 @@ export default function SettingsPage() {
           </div>
         </div>
       }
+      {!restartAlertDismissed && (calibrateResult?.restart_obs_required || checkResult?.restart_obs_required) && (
+        <div
+          role="alert"
+          aria-live="assertive"
+          data-testid="obs-restart-required-alert"
+          className="fixed right-5 top-14 z-[100] w-[34rem] max-w-[calc(100vw-2.5rem)] overflow-hidden rounded-xl border-2 border-amber-400 bg-[#2b1d0d] shadow-[0_20px_70px_rgba(0,0,0,0.7),0_0_36px_rgba(251,191,36,0.38)]"
+        >
+          <div className="flex items-start gap-3 border-b border-amber-300/30 bg-gradient-to-r from-amber-500/25 via-amber-400/10 to-orange-500/20 px-4 py-3.5">
+            <div className="flex h-10 w-10 shrink-0 animate-pulse items-center justify-center rounded-full bg-amber-300 text-zinc-950 shadow-[0_0_22px_rgba(252,211,77,0.65)]">
+              <AlertTriangle className="h-5 w-5" strokeWidth={2.8} />
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="rounded bg-amber-300 px-1.5 py-0.5 text-[9px] font-black tracking-wider text-zinc-950">
+                  {t("obscfg.restartRequiredBadge")}
+                </span>
+                <h4 className="text-[15px] font-black text-amber-100">
+                  {t("obscfg.restartRequiredTitle")}
+                </h4>
+              </div>
+              <p className="mt-1 text-[11px] leading-relaxed text-amber-100/85">
+                {t("obscfg.restartRequired")}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setRestartAlertDismissed(true)}
+              aria-label={t("common.close")}
+              title={t("common.close")}
+              className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-amber-200/25 text-amber-100/75 transition-colors hover:border-amber-200/50 hover:bg-amber-100/10 hover:text-amber-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-300"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+          <div className="bg-black/15 px-4 py-3">
+            <div className="flex items-center gap-2 rounded-lg border border-amber-300/25 bg-black/25 px-3 py-2 text-[11px] font-bold text-amber-100">
+              <RotateCcw className="h-4 w-4 shrink-0 text-amber-300" />
+              <span>{t("obscfg.restartRequiredSteps")}</span>
+            </div>
+            <div className="mt-2 flex items-start gap-2 rounded-lg border border-red-400/45 bg-red-500/20 px-3 py-2 text-[11px] font-bold text-red-100">
+              <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0" />
+              <span>{t("obscfg.restartRequiredDanger")}</span>
+            </div>
+          </div>
+        </div>
+      )}
       {/* Sponsor Modal */}
       {showSponsorModal && <SponsorModal onClose={() => setShowSponsorModal(false)} />}
     </div>

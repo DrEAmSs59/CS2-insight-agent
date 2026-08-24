@@ -24,7 +24,9 @@ import { useT } from "../../../i18n/useT.js";
 import { messageFromApiCode } from "../../../utils/apiErrorMessages.js";
 import { liteCutClient } from "../api/liteCutClient.js";
 import { desktopBridge } from "../../../desktop/desktopBridge.js";
+import { writeLiteCutClipboardText } from "./liteCutClipboard.js";
 import { summarizeFrameMeldSources } from "../../../utils/framemeld.js";
+import FrameMeldEnableDialog from "../../../components/FrameMeldEnableDialog.jsx";
 import {
   LITE_CUT_CANVAS_FIT_VALUES,
   LITE_CUT_OUTPUT_DEFAULTS,
@@ -1329,6 +1331,7 @@ export function ExportPane({
   const canExport = clipCount > 0 && (outputDir.trim() || outputDirHint) && filename.trim() && rangeValid;
   const [encoderDetecting, setEncoderDetecting] = useState(false);
   const [encoderDetection, setEncoderDetection] = useState(null);
+  const [frameMeldConfirmationOpen, setFrameMeldConfirmationOpen] = useState(false);
   const commitSize = (patch) => onOutputSettingsChange?.(patch);
   const setPresetSize = (w, h) => commitSize({ width: w, height: h });
   const framemeldSourceSummary = summarizeFrameMeldSources(framemeldSourceItems);
@@ -1347,7 +1350,15 @@ export function ExportPane({
   };
   const toggleFrameMeld = () => {
     if (!framemeldAvailable) return;
-    commitSize({ framemeld_enabled: !framemeldActive });
+    if (framemeldActive) {
+      commitSize({ framemeld_enabled: false });
+      return;
+    }
+    setFrameMeldConfirmationOpen(true);
+  };
+  const confirmFrameMeld = () => {
+    setFrameMeldConfirmationOpen(false);
+    if (framemeldAvailable) commitSize({ framemeld_enabled: true });
   };
   const maxRangeEnd = Math.max(TIMELINE_DURATION.uiMin, Math.min(TIMELINE_TIME.max, Number(timelineTotalSec) || TIMELINE_DURATION.uiMin));
   const clampRangeStart = (value) => Math.max(TIMELINE_TIME.min, Math.min(maxRangeEnd - TIMELINE_DURATION.uiMin, Number(value) || TIMELINE_TIME.default));
@@ -1384,11 +1395,7 @@ export function ExportPane({
   };
   const copyExportPath = async (path) => {
     if (!path) return;
-    try {
-      await navigator.clipboard.writeText(path);
-    } catch {
-      // ignore clipboard failures in the desktop shell.
-    }
+    await writeLiteCutClipboardText(path);
   };
   const revealExportPath = async (path) => {
     if (!path) return;
@@ -1740,6 +1747,11 @@ export function ExportPane({
           </p>
         )}
       </PaneSection>
+      <FrameMeldEnableDialog
+        open={frameMeldConfirmationOpen}
+        onCancel={() => setFrameMeldConfirmationOpen(false)}
+        onConfirm={confirmFrameMeld}
+      />
     </div>
   );
 }

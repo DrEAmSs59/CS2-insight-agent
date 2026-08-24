@@ -36,18 +36,19 @@ from .demo_parser import (
     spec_player_extra_offset_for_gsi_failure,
 )
 from .cs2_config_backup import (
+    USER_CONFIG_FILENAMES,
+    USER_CONFIG_GLOB_PATTERNS,
     _atomic_write_bytes,
+    candidate_user_config_dirs,
     is_cs2_running,
-    is_restore_required,
-    restore_latest_user_config_backup,
-    write_recording_state,
+    restore_user_config_snapshot,
+    snapshot_user_configs,
     write_persistent_backup_from_snap,
 )
 from .env_utils import (
     OBSConfig,
     SpecPlayerVerifyConfig,
     _candidate_steam_roots,
-    _steam_install_from_registry as _get_steam_install_root,
 )
 from .gsi_ready import (
     cleanup_stale_gsi_configs,
@@ -1942,9 +1943,14 @@ _POST_SPEC_COMMAND_NAMES: frozenset[str] = frozenset({
     "cl_showloadout",
     "cl_silencer_mode",
     "cl_sniper_auto_rezoom",
+    "cl_teamid_overhead_colors_show",
+    "cl_teamid_overhead_fade_near_crosshair",
     "cl_teamid_overhead_maxdist",
     "cl_teamid_overhead_maxdist_spec",
+    "cl_teamid_overhead_mode",
+    "cl_drawhud_force_teamid_overhead",
     "hud_showtargetid",
+    "mp_forcecamera",
 })
 _VOICE_CVAR_NAMES: frozenset[str] = frozenset({
     "voice_modenable",
@@ -2962,128 +2968,25 @@ class OBSDirector:
     # viewmodel_fov 是 54/60/68，都不会被我们覆盖。
 
     # CS2 仅对以下文件写入 archive cvar（命名在不同版本可能微调，用 glob 兜底）。
-    _USER_CONFIG_FILENAMES: tuple[str, ...] = (
-        "config.cfg",
-        "cs2_user.cfg",
-        "cs2_machine_convars.vcfg",
-        "video.txt",
-        "cs2_video.txt",
-        "user_convars_0_slot0.vcfg",
-        "cs2_user_convars_0_slot0.vcfg",
-        # -worldwide 会把区域选择偏好写入此文件；录制后需还原，否则玩家自己
-        # 通过 Steam 启动时永远不再弹选服窗口。
-        "localconfig.vdf",
-    )
-    _USER_CONFIG_GLOB_PATTERNS: tuple[str, ...] = (
-        "user_convars_0_slot*.vcfg",
-        "cs2_user_convars_0_slot*.vcfg",
-        "cs2_user_keys*.vcfg",
-        "*.vcfg_lastclouded",
-    )
+    _USER_CONFIG_FILENAMES = USER_CONFIG_FILENAMES
+    _USER_CONFIG_GLOB_PATTERNS = USER_CONFIG_GLOB_PATTERNS
 
     def _candidate_user_config_dirs(self) -> list[Path]:
-        """返回所有可能存放用户 CS2 配置的目录。
-
-        1) ``<cs2 安装根>/game/csgo/cfg``：老版本的 ``config.cfg``。
-        2) ``<Steam root>/userdata/<id>/730/local/cfg``：CS2 现行的 archive cvar /
-           video 设置主目录，每个 Steam 账号一份（多账号登陆时全部备份）。
-        """
-        dirs: list[Path] = []
-        try:
-            cs2 = Path(self.cs2_path)
-        except Exception:
-            return dirs
-        # game/bin/win64/cs2.exe → parents[3] = game 根；game/csgo/cfg
-        try:
-            game_cfg = cs2.parents[2] / "csgo" / "cfg"
-            if game_cfg.is_dir():
-                dirs.append(game_cfg)
-        except IndexError:
-            pass
-        try:
-            install_cfg = cs2.parents[3] / "csgo" / "cfg"
-            if install_cfg.is_dir() and install_cfg not in dirs:
-                dirs.append(install_cfg)
-        except IndexError:
-            pass
-        # game/bin/win64/cs2.exe → parents[6] = Steam 根（仅在默认库时正确）
-        # 额外通过注册表获取真正的 Steam 安装目录，覆盖 CS2 装在副库盘的情况。
-        steam_root_candidates: list[Path] = []
-        try:
-            steam_root_candidates.append(cs2.parents[6])
-        except IndexError:
-            pass
-        reg_root = _get_steam_install_root()
-        if reg_root is not None and reg_root not in steam_root_candidates:
-            steam_root_candidates.append(reg_root)
-        seen_userdata: set[str] = set()
-        for steam_root in steam_root_candidates:
-            userdata = steam_root / "userdata"
-            try:
-                ud_str = str(userdata.resolve())
-            except OSError:
-                ud_str = str(userdata)
-            if ud_str in seen_userdata:
-                continue
-            seen_userdata.add(ud_str)
-            if userdata.is_dir():
-                try:
-                    for uid in userdata.iterdir():
-                        candidate = uid / "730" / "local" / "cfg"
-                        if candidate.is_dir() and candidate not in dirs:
-                            dirs.append(candidate)
-                        # localconfig.vdf 在 <steamid>/config/，-worldwide 会写入此处
-                        cfg_dir = uid / "config"
-                        if cfg_dir.is_dir() and cfg_dir not in dirs:
-                            dirs.append(cfg_dir)
-                except OSError as e:
-                    logger.warning("iter userdata failed: %s", e)
-        return dirs
+        """返回本机所有 CS2 本地、Steam Cloud 和兼容配置目录。"""
+        return candidate_user_config_dirs(self.cs2_path)
 
     def _snapshot_user_configs(self) -> None:
         """对用户 CS2 配置文件做字节级快照，存到 ``self._user_config_snapshot``。
         启动 CS2 之前调用；跳过我们自己写的 ``_insight_<uuid>.cfg``。"""
-        snap: dict[Path, Optional[bytes]] = {}
         self._player_config_snapshot_attempted = True
         self._last_player_config_restore_result = None
-
-        def add_path(p: Path, record_missing: bool) -> None:
-            if p in snap:
-                return
-            try:
-                if p.is_file():
-                    snap[p] = p.read_bytes()
-                elif record_missing:
-                    snap[p] = None
-            except OSError as e:
-                logger.warning("Snapshot user config %s failed: %s", p, e)
-        for d in self._candidate_user_config_dirs():
-            for name in self._USER_CONFIG_FILENAMES:
-                p = d / name
-                try:
-                    if p.is_file():
-                        snap[p] = p.read_bytes()
-                    else:
-                        # 记录"文件原本不存在"的状态，用于 restore 时删掉
-                        # CS2 新建的污染文件。
-                        snap[p] = None
-                except OSError as e:
-                    logger.warning("Snapshot user config %s failed: %s", p, e)
-            for pattern in self._USER_CONFIG_GLOB_PATTERNS:
-                try:
-                    for p in d.glob(pattern):
-                        add_path(p, record_missing=False)
-                except OSError as e:
-                    logger.warning("Snapshot user config glob %s failed: %s", d / pattern, e)
-        for p in self._voice_ban_paths():
-            add_path(p, record_missing=False)
+        snap = snapshot_user_configs(
+            self.cs2_path,
+            config_dirs=self._candidate_user_config_dirs(),
+            extra_paths=self._voice_ban_paths(),
+        )
         self._user_config_snapshot = snap
         if snap:
-            logger.info(
-                "Snapshotted %d user config file(s) before launch (dirs=%s)",
-                len([v for v in snap.values() if v is not None]),
-                [str(d) for d in self._candidate_user_config_dirs()],
-            )
             # 同步把磁盘上的玩家配置原样拷到 ``<repo>/data/.cs2_config_backup/``，每次录制
             # 启动会清空目录再重写，项目里只保留"最近一次录制前"的玩家原始 cfg。
             # 玩家事后可以在该目录翻出 config.cfg / video.txt 自行覆盖回去。
@@ -3095,95 +2998,12 @@ class OBSDirector:
     def _restore_user_configs(self) -> dict[str, Any]:
         """强杀 CS2 后：若 ``recording_state`` 为 ``recording`` 则按 manifest 原子恢复；
         否则回退为内存快照对比（例如持久化备份未写入 state 的边缘情况）。"""
-        snap = self._user_config_snapshot
-        if is_restore_required():
-            try:
-                res = restore_latest_user_config_backup(skip_cs2_running_check=True)
-                if res.get("ok"):
-                    self._user_config_snapshot = {}
-                    return {**res, "source": "manifest"}
-                logger.warning("Manifest restore failed post-kill: %s", res)
-            except Exception as e:  # noqa: BLE001
-                logger.warning("Manifest restore raised: %s", e)
-        if not snap:
-            self._user_config_snapshot = {}
-            return {
-                "ok": True,
-                "verified": False,
-                "checked": 0,
-                "restored": 0,
-                "failed": [],
-                "source": "none",
-            }
-        restored = 0
-        failed: list[dict[str, str]] = []
-        for p, original in snap.items():
-            try:
-                current_exists = p.is_file()
-                if original is None:
-                    if current_exists:
-                        try:
-                            p.unlink()
-                            logger.info("Removed CS2-created user config: %s", p)
-                            restored += 1
-                        except OSError as e:
-                            logger.warning("Remove user config %s failed: %s", p, e)
-                            failed.append({"original": str(p), "error": str(e)})
-                    continue
-                current = p.read_bytes() if current_exists else None
-                if current != original:
-                    p.write_bytes(original)
-                    logger.info("Restored user config: %s (modified during recording)", p)
-                    restored += 1
-            except OSError as e:
-                logger.warning("Restore user config %s failed: %s", p, e)
-                failed.append({"original": str(p), "error": str(e)})
-        checked = 0
-        failed_paths = {item.get("original") for item in failed}
-        for p, original in snap.items():
-            if str(p) in failed_paths:
-                continue
-            try:
-                if original is None:
-                    if p.exists():
-                        failed.append({
-                            "original": str(p),
-                            "error": "file that did not originally exist is still present",
-                        })
-                        continue
-                elif not p.is_file() or p.read_bytes() != original:
-                    failed.append({
-                        "original": str(p),
-                        "error": "restored content does not match the in-memory snapshot",
-                    })
-                    continue
-                checked += 1
-            except OSError as e:
-                failed.append({
-                    "original": str(p),
-                    "error": f"post-restore verification failed: {e}",
-                })
-
-        if not failed and is_restore_required():
-            try:
-                write_recording_state("recorded")
-            except OSError as e:
-                failed.append({
-                    "original": "",
-                    "error": f"could not finalize recovery state: {e}",
-                })
-
-        if restored:
-            logger.info("Restored %d user config file(s) post-kill (memory snapshot)", restored)
+        result = restore_user_config_snapshot(
+            self._user_config_snapshot,
+            skip_cs2_running_check=True,
+        )
         self._user_config_snapshot = {}
-        return {
-            "ok": not failed,
-            "verified": not failed and checked == len(snap),
-            "checked": checked,
-            "restored": restored,
-            "failed": failed,
-            "source": "memory",
-        }
+        return result
 
     def _player_config_recovery_payload(self) -> dict[str, Any]:
         reports = list(self._player_config_restore_results)

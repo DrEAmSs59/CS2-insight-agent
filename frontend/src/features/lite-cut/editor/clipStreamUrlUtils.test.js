@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { liteCutClipStreamUrl } from "./clipStreamUrlUtils.js";
+import { liteCutAudioPreviewUrl, liteCutClipStreamUrl } from "./clipStreamUrlUtils.js";
 
 describe("liteCutClipStreamUrl", () => {
   it("cache-busts timeline media with the persisted source version", () => {
@@ -26,5 +26,22 @@ describe("liteCutClipStreamUrl", () => {
 
   it("keeps recorded clip streams unchanged", () => {
     expect(liteCutClipStreamUrl({ source_type: "recorded_clip", source_id: 6 })).toBe("/api/recorded-clips/6/stream");
+  });
+
+  it("routes video-derived A-track clips through the full audio proxy", () => {
+    const item = {
+      clip: {
+        source_type: "file",
+        meta: { asset_id: 10, source_clip_id: "video-1", preview_proxy_version: "source-abc" },
+      },
+    };
+    expect(liteCutAudioPreviewUrl(item, new Set(["video-1"])))
+      .toBe("/api/lite-cut/assets/10/preview/audio?v=source-abc");
+  });
+
+  it("keeps independent audio assets on their direct stream", () => {
+    const item = { clip: { source_type: "file", meta: { asset_id: 11 } } };
+    expect(liteCutAudioPreviewUrl(item, new Set(["video-1"])))
+      .toBe("/api/lite-cut/assets/11/stream");
   });
 });

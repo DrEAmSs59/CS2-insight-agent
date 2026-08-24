@@ -213,6 +213,14 @@ app.add_middleware(
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=[
+        "Accept-Ranges",
+        "Content-Length",
+        "Content-Range",
+        "Content-Type",
+        "ETag",
+        "Last-Modified",
+    ],
 )
 
 

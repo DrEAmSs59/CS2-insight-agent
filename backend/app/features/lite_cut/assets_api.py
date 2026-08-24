@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field
 from ...api_errors import error_detail
 from .asset_executor import (
     attach_video_facts as _attach_video_fps,
+    build_asset_audio_preview,
     build_asset_waveform,
     linked_asset_identity_matches,
     probe_asset_metadata,
@@ -434,6 +435,28 @@ async def stream_lite_cut_asset(asset_id: int, request: Request):
         path,
         request,
     )
+
+
+@router.get("/assets/{asset_id}/preview/audio")
+async def stream_lite_cut_audio_preview(asset_id: int, request: Request):
+    from .assets import asset_source_status
+    from .stream import stream_file_with_range
+
+    row = await service_call(_services().assets.get(int(asset_id)))
+    if str(row.get("kind") or "").lower() not in {"video", "webm"}:
+        raise HTTPException(400, "only video assets support full audio preview")
+    source_status = asset_source_status(row)
+    if source_status == "missing":
+        raise HTTPException(404, "素材原文件不存在，请重新链接")
+    if source_status == "changed":
+        raise HTTPException(409, "素材原文件已发生变化，请重新链接")
+    row = await _ensure_asset_preview_metadata(row)
+    segment_directory, _max_edge = await _segment_preview_context(row)
+    output = segment_directory.parent / "preview-audio-v1.m4a"
+    preview = await build_asset_audio_preview(row, output_path=output)
+    if preview is None or not preview.is_file():
+        raise HTTPException(422, "素材没有可用于预览的音轨")
+    return await stream_file_with_range(preview, request)
 
 
 async def _segment_preview_context(row: dict[str, Any]):

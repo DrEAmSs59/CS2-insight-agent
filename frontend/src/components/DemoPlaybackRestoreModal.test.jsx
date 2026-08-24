@@ -81,10 +81,38 @@ describe("DemoPlaybackRestoreModal", () => {
       />,
     );
 
-    expect(screen.getByText("POV 文件未能确认恢复")).toBeTruthy();
+    expect(screen.getByText("POV 文件或玩家设置未能确认恢复")).toBeTruthy();
     expect(screen.getByText(/POV 加载项仍然存在/)).toBeTruthy();
     expect(screen.getByText(/文件仍然存在/)).toBeTruthy();
     expect(screen.getByText("hash mismatch")).toBeTruthy();
     expect(screen.queryByText("POV 文件已确认恢复")).toBeNull();
+  });
+
+  it("does not claim success when player settings restoration failed", () => {
+    render(
+      <DemoPlaybackRestoreModal
+        open
+        status={{
+          state: "restore_failed",
+          restore: {
+            verified: true,
+            gameinfo_restored: true,
+            pov_vpk_removed: true,
+            verification_mode: "strict",
+            byte_verified: true,
+          },
+          player_config_restore: {
+            verified: false,
+            state: "restore_failed",
+          },
+        }}
+        onClose={() => {}}
+        onRetry={() => {}}
+      />,
+    );
+
+    expect(screen.getByText("POV 文件或玩家设置未能确认恢复")).toBeTruthy();
+    expect(screen.getByText("配置恢复失败，请使用“一键恢复玩家配置”。")).toBeTruthy();
+    expect(screen.queryByText("POV 文件已按备份完整恢复")).toBeNull();
   });
 });

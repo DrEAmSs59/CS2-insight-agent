@@ -107,6 +107,12 @@ async def _run_lite_cut_export_job_in_session(job: LiteCutExportJob, prepared: d
             job.progress = max(job.progress, next_progress)
         job.stage = next_stage
         if isinstance(detail, dict):
+            raw_encoder_warning = detail.get("encoder_warning")
+            if (
+                isinstance(raw_encoder_warning, dict)
+                and raw_encoder_warning.get("code") == "NVIDIA_DRIVER_TOO_OLD"
+            ):
+                job.encoder_warning = dict(raw_encoder_warning)
             raw_stage_progress = detail.get("stage_progress")
             if raw_stage_progress is not None:
                 job.stage_progress = max(0.0, min(1.0, float(raw_stage_progress)))

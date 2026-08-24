@@ -58,6 +58,9 @@ debug_demoparser.py
 debug_demo_max_tick.py
 debug_demoparser2.py
 debug_parse_demo.py
+# Local reverse-engineering probe; the tracked copy is hidden locally with
+# skip-worktree so workstation-only NetSetConVar diagnostics are not committed.
+tools/demo-cosmetic-rewriter/src/bin/demo-netmessage-audit.rs
 .cursor/
 .claude/
 # Root scripts/ is for ad-hoc local scripts; tracked exceptions below.

@@ -35,6 +35,7 @@ class LiteCutExportJob:
     stage_progress: float | None = None
     processed_frames: int | None = None
     total_frames: int | None = None
+    encoder_warning: dict[str, Any] | None = None
     cancel_event: threading.Event = field(default_factory=threading.Event)
     task: asyncio.Task | None = None
 
@@ -180,6 +181,7 @@ def export_job_snapshot(job: LiteCutExportJob) -> dict[str, Any]:
         "stage_progress": job.stage_progress,
         "processed_frames": job.processed_frames,
         "total_frames": job.total_frames,
+        "encoder_warning": dict(job.encoder_warning) if job.encoder_warning else None,
         "estimated_remaining_seconds": estimated_remaining_seconds,
     }
 
