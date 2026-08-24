@@ -149,6 +149,8 @@ class DemoPlaybackService:
     def _write_pov_cfg(cfg_path: Path, demo_stem: str, options: DemoPlaybackPovOptions) -> None:
         commands = [
             "con_enable 1",
+            "sv_cheats 1",
+            "demoui false",
             *POV_CORE_FORCED_COMMANDS,
             *pov_tail_commands(
                 teamcounter_numeric=bool(options.teamcounter_numeric),
@@ -337,7 +339,10 @@ class DemoPlaybackService:
 
                 if options.enabled:
                     pov_install_attempted = True
-                    pov_manager.install(demo_path=dem_path)
+                    pov_manager.install(
+                        demo_path=dem_path,
+                        advanced_playback_enabled=True,
+                    )
                     installed_status = pov_manager.status()
                     expected_gameinfo_sha256 = str(
                         installed_status.get("original_gameinfo_sha256") or ""

@@ -421,6 +421,7 @@ class PovHudManager:
         demo_path: Optional[str | Path] = None,
         input_track_report: Optional[Mapping[str, Any]] = None,
         voice_enabled: bool = True,
+        advanced_playback_enabled: bool = False,
     ) -> Optional[DemoVoiceHudBuild]:
         if sys.platform != "win32":
             raise PovHudError("POV HUD 仅支持 Windows。")
@@ -444,6 +445,7 @@ class PovHudManager:
                     voice_template,
                     input_track_report=input_track_report,
                     voice_enabled=voice_enabled,
+                    advanced_playback_enabled=advanced_playback_enabled,
                 )
                 logger.info(
                     "Built demo voice HUD: packets=%d speakers=%d intervals=%d "
@@ -466,6 +468,8 @@ class PovHudManager:
                     voice_build.payload_bytes,
                 )
             except (DemoVoiceHudError, OSError) as exc:
+                if advanced_playback_enabled:
+                    raise PovHudError(f"高级播放菜单数据生成失败：{exc}") from exc
                 logger.warning(
                     "Could not build demo-specific voice HUD; using the static POV package: %s",
                     exc,
@@ -542,6 +546,12 @@ class PovHudManager:
                     "radio_chat_messages": voice_build.radio_chat_messages,
                     "radio_server_messages": voice_build.radio_server_messages,
                     "radio_parse_failed": bool(voice_build.radio_parse_failed),
+                    "advanced_playback_enabled": bool(voice_build.advanced_playback_enabled),
+                    "advanced_playback_players": voice_build.advanced_playback_players,
+                    "advanced_playback_events": voice_build.advanced_playback_events,
+                    "advanced_playback_rounds": voice_build.advanced_playback_rounds,
+                    "advanced_playback_total_tick": voice_build.advanced_playback_total_tick,
+                    "advanced_playback_parse_failed": bool(voice_build.advanced_playback_parse_failed),
                 }
                 if voice_build is not None
                 else None

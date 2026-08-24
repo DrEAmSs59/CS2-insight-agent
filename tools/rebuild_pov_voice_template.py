@@ -25,6 +25,12 @@ HUD_ALERTS_RESOURCES = {
     "panorama/scripts/hud/hudalerts_insight.vjs_c": ROOT / "pov" / "hudalerts_insight.vjs_c",
     "panorama/styles/hud/hudalerts_insight.vcss_c": ROOT / "pov" / "hudalerts_insight.vcss_c",
 }
+ADVANCED_HOT_SWITCH_STYLE_PATHS = {
+    "panorama/styles/hud/hudhealthammocenter.vcss_c",
+    "panorama/styles/hud/hudradar.vcss_c",
+    "panorama/styles/hud/hudteamcounter-equipmentinfo.vcss_c",
+    "panorama/styles/hud/hudteamcounter.vcss_c",
+}
 PAYLOAD_CAPACITY = 8_000_000
 
 
@@ -121,6 +127,12 @@ def main() -> None:
     )
     combined_source = stock_source + b"\n" + injection
     entries[VOICE_SCRIPT_PATH] = replace_data_block(compiled, combined_source)
+    # Advanced playback must switch back to the native DEMO HUD without a CS2
+    # restart. These four POV-only compiled styles cannot be unloaded at
+    # runtime, so keep them exclusively in pov_default.vpk (recording) and let
+    # the generated advanced package use CS2's stock styles plus JS/cvars.
+    for resource_path in ADVANCED_HOT_SWITCH_STYLE_PATHS:
+        entries.pop(resource_path, None)
     entries.pop(STOCK_HUD_ALERTS_STYLE_PATH, None)
     for resource_path, source_path in HUD_ALERTS_RESOURCES.items():
         entries[resource_path] = source_path.read_bytes()
@@ -134,6 +146,7 @@ def main() -> None:
     print(f"template={TEMPLATE}")
     print(f"static_package={STATIC_PACKAGE}")
     print("hudalerts_resources=" + ",".join(HUD_ALERTS_RESOURCES))
+    print("advanced_removed_styles=" + ",".join(sorted(ADVANCED_HOT_SWITCH_STYLE_PATHS)))
     print(f"payload_capacity={PAYLOAD_CAPACITY}")
     print(f"panorama_source_bytes={len(combined_source)}")
     print(f"vpk_bytes={TEMPLATE.stat().st_size}")

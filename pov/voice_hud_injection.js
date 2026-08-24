@@ -5,7 +5,7 @@
 // contains [location tokens, voice speakers, exact svc_UserCmd input tracks,
 // SteamID/slot/team roster, reserved slots, radar track at index 8,
 // kill/HS attacker-feedback cues at index 9, flash-blind intervals at index 10,
-    // reconstructed team radio at index 11].
+// reconstructed team radio at index 11, advanced-playback menu data at index 12].
 ;(function CS2InsightDemoVoiceHud() {
     "use strict";
 
@@ -18,6 +18,7 @@
     const encodedKillFeedback = packed[9] || null;
     const encodedFlashBlind = packed[10] || null;
     const encodedRadio = packed[11] || null;
+    const encodedAdvancedPlayback = packed[12] || null;
     const PLAYER_COLOR_HEX = ["#88CEF5", "#009E80", "#F1E441", "#E6802A", "#BD2C96"];
     const RADAR_MAP_SIZE = 1024;
     const POV_RADAR_SCALE = 0.4;
@@ -463,6 +464,104 @@
             return null;
         }
     })();
+
+    function decodeAdvancedPlayback(raw) {
+        if (!raw || !Array.isArray(raw) || Number(raw[0] || 0) !== 1) {
+            return null;
+        }
+        const tickRate = Math.max(1, Number(raw[1] || 64000) / 1000);
+        const encodedPlayers = Array.isArray(raw[2]) ? raw[2] : [];
+        const details = Array.isArray(raw[3]) ? raw[3] : [""];
+        const players = encodedPlayers.map(function (row, index) {
+            return {
+                xuid: normalizeXuid(row && row[0]),
+                name: String(row && row[1] || ""),
+                team: Number(row && row[2] || 0),
+                parserSlot: Number(row && row[3] || index),
+                index: index,
+            };
+        }).filter(function (player) {
+            return player.xuid && (player.team === 2 || player.team === 3);
+        });
+        if (!players.length) {
+            return null;
+        }
+        const byXuid = {};
+        const eventsByXuid = {};
+        let maximumEventTick = 0;
+        players.forEach(function (player) {
+            byXuid[player.xuid] = player;
+            eventsByXuid[player.xuid] = [];
+        });
+        let previousTick = 0;
+        String(raw[4] || "").split(",").filter(Boolean).forEach(function (token) {
+            const fields = token.split(".");
+            if (fields.length < 6) {
+                return;
+            }
+            previousTick += parseInt(fields[0], 36) || 0;
+            maximumEventTick = Math.max(maximumEventTick, previousTick);
+            const type = parseInt(fields[1], 36) || 0;
+            const actorIndex = (parseInt(fields[2], 36) || 0) - 1;
+            const targetIndex = (parseInt(fields[3], 36) || 0) - 1;
+            const detail = String(details[parseInt(fields[4], 36) || 0] || "");
+            const flags = parseInt(fields[5], 36) || 0;
+            const actor = actorIndex >= 0 ? players[actorIndex] : null;
+            const target = targetIndex >= 0 ? players[targetIndex] : null;
+            if (type === 0) {
+                if (actor && eventsByXuid[actor.xuid]) {
+                    eventsByXuid[actor.xuid].push({
+                        tick: previousTick,
+                        type: "kill",
+                        detail: detail,
+                        peerXuid: target ? target.xuid : "",
+                        flags: flags,
+                    });
+                }
+                if (target && eventsByXuid[target.xuid]) {
+                    eventsByXuid[target.xuid].push({
+                        tick: previousTick,
+                        type: "death",
+                        detail: detail,
+                        peerXuid: actor ? actor.xuid : "",
+                        flags: flags,
+                    });
+                }
+            } else if (type === 1 && actor && eventsByXuid[actor.xuid]) {
+                eventsByXuid[actor.xuid].push({
+                    tick: previousTick,
+                    type: "utility",
+                    detail: detail,
+                    peerXuid: "",
+                    flags: flags,
+                });
+            }
+        });
+        const rounds = (Array.isArray(raw[6]) ? raw[6] : []).map(function (row, index) {
+            const number = Math.max(1, Number(row && row[0] || (index + 1)));
+            const start = Math.max(0, Number(row && row[1] || 0));
+            const end = Math.max(start, Number(row && row[2] || start));
+            return { number: number, start: start, end: end };
+        }).filter(function (round) {
+            return isFinite(round.number) && isFinite(round.start) && isFinite(round.end);
+        });
+        return {
+            tickRate: tickRate,
+            totalTick: Math.max(1, Number(raw[5] || 0), maximumEventTick),
+            players: players,
+            byXuid: byXuid,
+            eventsByXuid: eventsByXuid,
+            rounds: rounds,
+        };
+    }
+
+    const advancedPlayback = (function safelyDecodeAdvancedPlayback() {
+        try {
+            return decodeAdvancedPlayback(encodedAdvancedPlayback);
+        } catch (errAdvancedDecode) {
+            return null;
+        }
+    })();
     let unmuteAttempts = 0;
     let audiencePovXuid = "";
     let audienceMaskSignature = "";
@@ -496,6 +595,60 @@
     let nativeChatHistoryText = null;
     let radioLastTick = -1;
     let radioEpochTick = -1;
+    let advancedMenu = null;
+    let advancedEdgeTrigger = null;
+    let advancedMenuVisible = false;
+    let advancedMenuHoverGeneration = 0;
+    let advancedSelectedXuid = "";
+    let advancedEventFilter = "all";
+    let advancedEventPage = 0;
+    let advancedViewMode = 5;
+    let advancedPovVisualsEnabled = true;
+    let advancedSpecOperation = null;
+    let advancedMenuTickLabel = null;
+    let advancedPlayerListPanel = null;
+    let advancedEventListPanel = null;
+    let advancedEventPagerLabel = null;
+    let advancedProgressFill = null;
+    let advancedProgressTrack = null;
+    let advancedProgressSlider = null;
+    let advancedProgressLabel = null;
+    let advancedTickInput = null;
+    let advancedPlayPauseButton = null;
+    let advancedRoundLabel = null;
+    let advancedRoundInput = null;
+    let advancedPinButton = null;
+    let advancedNumericPad = null;
+    let advancedNumericEntry = null;
+    let advancedNumericSubmit = null;
+    let advancedMenuPinned = true;
+    let advancedNativeMessagesRestored = false;
+    let advancedNativeRadarRestored = false;
+    let advancedNativeOverheadRestored = false;
+    let advancedMenuDragging = false;
+    let advancedMenuDragStartCursor = null;
+    let advancedMenuDragStartPosition = null;
+    let advancedMenuDragGhost = null;
+    let advancedRoundIntervals = advancedPlayback && advancedPlayback.rounds
+        ? advancedPlayback.rounds.slice()
+        : [];
+    let advancedNativeDemoUiCommandAttempts = 0;
+    const advancedProfileButtons = {};
+    const advancedVoiceButtons = {};
+    const advancedFilterButtons = {};
+    const advancedOptionButtons = {};
+    const advancedOptionLabels = {};
+    let advancedVoicePolicy = "team";
+    let advancedPlayerTeamSignature = "";
+    const advancedCustomVoiceXuids = {};
+    const advancedRestrictedTeamCounterPanels = [];
+    const advancedModifiedTeamSides = [];
+    const advancedModifiedHealthPanels = [];
+    const advancedQuickOptions = {
+        xray: false,
+        radar: true,
+        overhead: true,
+    };
     // Stock-ish radar intel timings (no public convar; matched to live feel).
     const RADAR_DEATH_ICON_SECONDS = 2.0;
     const RADAR_LAST_KNOWN_SECONDS = 1.5;
@@ -655,6 +808,40 @@
         }
     }
 
+    function advancedPovVisualsActive() {
+        return !advancedPlayback || advancedPovVisualsEnabled;
+    }
+
+    function runtimeSlotForXuid(xuid) {
+        const wanted = normalizeXuid(xuid);
+        if (!wanted) {
+            return -1;
+        }
+        for (let slot = 0; slot < 64; slot += 1) {
+            let slotXuid = "";
+            try {
+                slotXuid = normalizeXuid(GameStateAPI.GetPlayerXuidStringFromPlayerSlot(slot) || "");
+            } catch (errSlot) {}
+            if (sameXuid(slotXuid, wanted)) {
+                return slot;
+            }
+        }
+        return -1;
+    }
+
+    function advancedVoiceAllows(xuid, povTeam, tick) {
+        if (!advancedPlayback || advancedVoicePolicy === "team") {
+            return povTeam !== 0 && resolvePovTeam(xuid, tick) === povTeam;
+        }
+        if (advancedVoicePolicy === "all") {
+            return true;
+        }
+        if (advancedVoicePolicy === "mute") {
+            return false;
+        }
+        return Boolean(advancedCustomVoiceXuids[normalizeXuid(xuid)]);
+    }
+
     function updateVoiceAudience(state) {
         const povXuid = currentPovXuid(state);
         const tick = state && typeof state.nTick === "number" ? state.nTick : 0;
@@ -667,7 +854,7 @@
 
         let low = 0;
         let high = 0;
-        if (povTeam === 2 || povTeam === 3) {
+        if ((povTeam === 2 || povTeam === 3) || (advancedPlayback && advancedVoicePolicy !== "team")) {
             const swapped = rosterTeamSwappedAt(tick);
             // Resolve runtime slots from XUIDs; map roster team through half-swap once.
             for (let slot = 0; slot < 64; slot += 1) {
@@ -682,7 +869,10 @@
                 if (swapped) {
                     slotTeam = slotTeam === 2 ? 3 : 2;
                 }
-                if (slotTeam !== povTeam) {
+                const allowed = advancedPlayback
+                    ? advancedVoiceAllows(slotXuid, povTeam, tick)
+                    : slotTeam === povTeam;
+                if (!allowed) {
                     continue;
                 }
                 if (slot < 32) {
@@ -695,7 +885,8 @@
 
         low |= 0;
         high |= 0;
-        const signature = low + ":" + high;
+        const signature = (advancedPlayback ? advancedVoicePolicy : "team")
+            + ":" + low + ":" + high;
         if (targetChanged || signature !== audienceMaskSignature) {
             applyVoiceAudienceMask(low, high);
             audienceMaskSignature = signature;
@@ -780,6 +971,9 @@
         }
         // Never zero width/height — Panorama often cannot restore "" and bars stay gone.
         if (restricted) {
+            if (advancedPlayback && advancedRestrictedTeamCounterPanels.indexOf(panel) < 0) {
+                advancedRestrictedTeamCounterPanels.push(panel);
+            }
             if (teamCounterPanelIsRestricted(panel)) {
                 return;
             }
@@ -815,6 +1009,27 @@
         if (panel.RemoveClass) {
             panel.RemoveClass("Invisible");
         }
+    }
+
+    function restoreAdvancedTeamCounterPanels() {
+        for (let index = advancedRestrictedTeamCounterPanels.length - 1; index >= 0; index -= 1) {
+            const panel = advancedRestrictedTeamCounterPanels[index];
+            if (panel && panel.IsValid()) {
+                setTeamCounterPanelRestricted(panel, false);
+            }
+        }
+        advancedRestrictedTeamCounterPanels.length = 0;
+        for (let sideIndex = advancedModifiedTeamSides.length - 1; sideIndex >= 0; sideIndex -= 1) {
+            const side = advancedModifiedTeamSides[sideIndex];
+            if (!side || !side.IsValid()) {
+                continue;
+            }
+            try {
+                side.RemoveClass("CS2InsightPovEnemy");
+                side.RemoveClass("CS2InsightPovAlly");
+            } catch (errClass) {}
+        }
+        advancedModifiedTeamSides.length = 0;
     }
 
     function teamLargeSideOf(panel) {
@@ -1015,6 +1230,9 @@
         }
         // Class toggle drives CSS; only traverse a few known classes (no full tree walk).
         if (side.AddClass && side.RemoveClass) {
+            if (advancedPlayback && advancedModifiedTeamSides.indexOf(side) < 0) {
+                advancedModifiedTeamSides.push(side);
+            }
             if (hideDetails) {
                 side.AddClass("CS2InsightPovEnemy");
                 side.RemoveClass("CS2InsightPovAlly");
@@ -1307,6 +1525,9 @@
         if (!panel || !panel.IsValid() || !color) {
             return;
         }
+        if (advancedPlayback && advancedModifiedHealthPanels.indexOf(panel) < 0) {
+            advancedModifiedHealthPanels.push(panel);
+        }
         const fill = color.length === 7 ? (color + "ff") : color;
         try {
             panel.style.washColor = "#ffffffff";
@@ -1488,10 +1709,19 @@
             $.Schedule(0.1, tickTeamCounterHud);
             return;
         }
-        const povXuid = currentPovXuid(state);
         const povTeam = updateVoiceAudience(state);
+        if (!advancedPovVisualsActive()) {
+            restoreAdvancedTeamCounterPanels();
+            restoreAdvancedHealthPanels();
+            $.Schedule(0.1, tickTeamCounterHud);
+            return;
+        }
+        const povXuid = currentPovXuid(state);
         updateTeamCounterForPov(povTeam, povXuid, state.nTick);
-        fixPovHealthHudColor(povXuid, state);
+        // Leave the native health fill untouched in both recording POV and
+        // Advanced playback. Runtime wash/background writes override CS2's
+        // damage, low-health, and post-plant states and can preserve a color
+        // inherited from a VPK class after switching HUD profiles.
         // 10Hz is enough for top-bar HP; Schedule(0) was locking the client ~5 FPS.
         $.Schedule(0.1, tickTeamCounterHud);
     }
@@ -1627,6 +1857,13 @@
         if (!playerPanel || !playerPanel.FindChildrenWithClassTraverse) {
             return;
         }
+        if (playerPanel._insightOriginalMoneyClass === undefined) {
+            try {
+                playerPanel._insightOriginalMoneyClass = playerPanel.HasClass("money");
+                playerPanel._insightOriginalNormalHealthClass = playerPanel.HasClass("normal-health");
+                playerPanel._insightOriginalLowHealthClass = playerPanel.HasClass("low-health");
+            } catch (errOriginalClasses) {}
+        }
         const active = money !== null;
         const text = active ? ("$" + money) : "";
         try {
@@ -1652,6 +1889,14 @@
             if (!label || !label.IsValid()) {
                 continue;
             }
+            if (label._insightOriginalOverheadText === undefined) {
+                label._insightOriginalOverheadText = String(label.text || "");
+                label._insightOriginalOverheadVisible = Boolean(label.visible);
+                try {
+                    label._insightOriginalOverheadVisibility = label.style.visibility;
+                    label._insightOriginalOverheadColor = label.style.color;
+                } catch (errOriginalStyle) {}
+            }
             // Reuse the native extra-info label instead of creating a wide
             // custom panel. Its engine-owned layout stays centered on the
             // player's world-to-screen anchor at every distance.
@@ -1673,8 +1918,89 @@
         );
     }
 
+    function restoreNativePlayerEconomy(playerPanel) {
+        if (!playerPanel || !playerPanel.IsValid()) {
+            return;
+        }
+        try {
+            playerPanel.SetHasClass("money", Boolean(playerPanel._insightOriginalMoneyClass));
+            if (playerPanel._insightOriginalNormalHealthClass !== undefined) {
+                playerPanel.SetHasClass(
+                    "normal-health",
+                    Boolean(playerPanel._insightOriginalNormalHealthClass),
+                );
+            }
+            if (playerPanel._insightOriginalLowHealthClass !== undefined) {
+                playerPanel.SetHasClass(
+                    "low-health",
+                    Boolean(playerPanel._insightOriginalLowHealthClass),
+                );
+            }
+        } catch (errClass) {}
+        if (!playerPanel.FindChildrenWithClassTraverse) {
+            return;
+        }
+        const labels = playerPanel.FindChildrenWithClassTraverse("playerid__extrainfo") || [];
+        for (let index = 0; index < labels.length; index += 1) {
+            const label = labels[index];
+            if (!label || !label.IsValid()) {
+                continue;
+            }
+            if (label._insightOriginalOverheadText !== undefined) {
+                label.text = label._insightOriginalOverheadText;
+            }
+            if (label._insightOriginalOverheadVisible !== undefined) {
+                label.visible = Boolean(label._insightOriginalOverheadVisible);
+            }
+            try {
+                label.style.visibility = label._insightOriginalOverheadVisibility || null;
+                label.style.color = label._insightOriginalOverheadColor || null;
+            } catch (errStyle) {}
+        }
+    }
+
     function updateOverheadInfoHud() {
         const state = controller.GetDemoControllerState();
+        if (!advancedPovVisualsActive()) {
+            const nativeIds = findHudTraverse("VisiblePlayerIDs");
+            if (nativeIds && nativeIds.IsValid() && nativeIds.FindChildrenWithClassTraverse) {
+                const nativePanels = nativeIds.FindChildrenWithClassTraverse("playerid") || [];
+                nativePanels.forEach(function (panel) {
+                    if (panel && panel.IsValid()) {
+                        if (!advancedNativeOverheadRestored) {
+                            // Clear Insight's POV-only money label once, then
+                            // return the panel to CS2. Re-clearing this label at
+                            // 10 Hz prevented native DEMO HUD details from being
+                            // populated and left only the player name visible.
+                            restoreNativePlayerEconomy(panel);
+                            setPlayerOverheadContentVisible(panel, true);
+                        }
+                        if (!advancedQuickOptions.overhead) {
+                            setPlayerOverheadContentVisible(panel, false);
+                        }
+                    }
+                });
+                if (advancedQuickOptions.overhead) {
+                    advancedNativeOverheadRestored = true;
+                }
+            }
+            $.Schedule(0.1, updateOverheadInfoHud);
+            return;
+        }
+        advancedNativeOverheadRestored = false;
+        if (advancedPlayback && !advancedQuickOptions.overhead) {
+            const nativeIds = findHudTraverse("VisiblePlayerIDs");
+            if (nativeIds && nativeIds.IsValid() && nativeIds.FindChildrenWithClassTraverse) {
+                const nativePanels = nativeIds.FindChildrenWithClassTraverse("playerid") || [];
+                nativePanels.forEach(function (panel) {
+                    if (panel && panel.IsValid()) {
+                        setPlayerOverheadContentVisible(panel, false);
+                    }
+                });
+            }
+            $.Schedule(0.1, updateOverheadInfoHud);
+            return;
+        }
         // Reapply a few times after the demo state becomes live. This covers
         // launch cfg/user-config ordering without spamming the console forever.
         if (state && overheadNativeCvarApplyAttempts < 4) {
@@ -1949,6 +2275,12 @@
 
     function tickFlashBlindHud() {
         const state = controller.GetDemoControllerState();
+        if (!advancedPovVisualsActive()) {
+            updateFlashWash(null, state && isFinite(Number(state.nTick)) ? Number(state.nTick) : 0);
+            flashTinnitusArmedTick = -1;
+            $.Schedule(FLASH_IDLE_REFRESH_SECONDS, tickFlashBlindHud);
+            return;
+        }
         if (!state) {
             $.Schedule(0.1, tickFlashBlindHud);
             return;
@@ -2193,6 +2525,13 @@
 
     function updateInputHud() {
         const state = controller.GetDemoControllerState();
+        if (!advancedPovVisualsActive()) {
+            if (inputHud && inputHud.IsValid()) {
+                inputHud.visible = false;
+            }
+            $.Schedule(0.1, updateInputHud);
+            return;
+        }
         if (!state) {
             if (inputHud && inputHud.IsValid()) {
                 inputHud.visible = false;
@@ -2365,6 +2704,7 @@
     }
 
     function hideNativeRadarPlayerIcons(nativeRadar) {
+        advancedNativeRadarRestored = false;
         // Only hide stock player icon packages. Never touch DirectionArrow (rim
         // facing pointer), native RI_PlayerSoundContainer, map transforms, bomb
         // zones, or the place-name label. Sound visibility is selected explicitly
@@ -2883,8 +3223,87 @@
         return radarHud;
     }
 
+    function restoreNativeRadarForAdvancedSpectator() {
+        if (advancedNativeRadarRestored) {
+            return;
+        }
+        const nativeRadar = findNativeRadar();
+        if (!nativeRadar || !nativeRadar.IsValid()) {
+            return;
+        }
+        if (nativeRadar.FindChildrenWithClassTraverse) {
+            const packs = nativeRadar.FindChildrenWithClassTraverse("PlayerIcons") || [];
+            packs.forEach(function (panel) {
+                if (panel && panel.IsValid() && String(panel.id || "").indexOf("CS2Insight") !== 0) {
+                    panel.visible = true;
+                }
+            });
+        }
+        ["RI_BombDefuserPackage", "RI_DefuserPackage"].forEach(function (id) {
+            const panel = nativeRadar.FindChildTraverse(id);
+            if (panel && panel.IsValid()) {
+                // Restore the stock package host. Its individual children are
+                // stateful and must not all be forced visible together.
+                panel.visible = true;
+                try {
+                    panel.style.opacity = null;
+                    panel.style.visibility = null;
+                } catch (errStyle) {}
+            }
+        });
+        [
+            "DroppedBomb",
+            "DefuserIconDropped",
+            "DefuserIconPackage",
+            "CreateBombPack",
+        ].forEach(function (id) {
+            const panel = nativeRadar.FindChildTraverse(id);
+            if (panel && panel.IsValid()) {
+                // POV mode collapsed these children. Clear those inline styles,
+                // keep the first restored frame hidden, and let CHudRadar show
+                // only the child matching the current bomb/defuser state. This
+                // prevents the giant blue defuser glyph seen after hot-switch.
+                panel.visible = false;
+                try {
+                    panel.style.opacity = null;
+                    panel.style.visibility = null;
+                } catch (errStyle) {}
+            }
+        });
+        setNativeSoundRingsVisible(nativeRadar, true);
+        advancedNativeRadarRestored = true;
+    }
+
     function updateRadarHud() {
         if (!radarTrack) {
+            return;
+        }
+        const spectatorAllPlayers = Boolean(
+            advancedPlayback && !advancedPovVisualsEnabled,
+        );
+        if (advancedPlayback && !advancedQuickOptions.radar) {
+            if (radarHud && radarHud.IsValid()) {
+                radarHud.visible = false;
+            }
+            if (radarUnclipHud && radarUnclipHud.IsValid()) {
+                radarUnclipHud.visible = false;
+            }
+            restoreNativeRadarForAdvancedSpectator();
+            $.Schedule(0.1, updateRadarHud);
+            return;
+        }
+        if (spectatorAllPlayers) {
+            // DEMO HUD must use CS2's own spectator radar: it already supplies
+            // CT/T colors and the native 1-5 numbers when the demo profile
+            // applies the square, non-rotating observer radar convars.
+            if (radarHud && radarHud.IsValid()) {
+                radarHud.visible = false;
+            }
+            if (radarUnclipHud && radarUnclipHud.IsValid()) {
+                radarUnclipHud.visible = false;
+            }
+            restoreNativeRadarForAdvancedSpectator();
+            $.Schedule(0.1, updateRadarHud);
             return;
         }
         const state = controller.GetDemoControllerState();
@@ -2905,6 +3324,9 @@
         const povTeam = resolvePovTeam(povXuid, state.nTick);
         const tick = state.nTick;
         hud.visible = true;
+        if (radarUnclipHud && radarUnclipHud.IsValid()) {
+            radarUnclipHud.visible = true;
+        }
 
         let povSample = null;
         radarTrack.players.forEach(function (player) {
@@ -3918,6 +4340,32 @@
     }
 
     function suppressNativeLowerLeft() {
+        if (!advancedPovVisualsActive()) {
+            // Undo Insight's inline overrides once, then leave the native
+            // alert/chat panels entirely to CS2. Reapplying opacity/visible on
+            // every refresh kept expired Console lines alive indefinitely.
+            if (!advancedNativeMessagesRestored) {
+                for (let restoreIndex = 0; restoreIndex < NATIVE_VOICE_ALERT_PANEL_COUNT; restoreIndex += 1) {
+                    const restorePanel = nativeVoiceAlertPanel(restoreIndex);
+                    if (restorePanel && restorePanel.IsValid()) {
+                        try { restorePanel.style.opacity = null; } catch (errRestoreOpacity) {}
+                        try { restorePanel.style.visibility = null; } catch (errRestoreVisibility) {}
+                    }
+                }
+                if (!nativeChatHistoryText || !nativeChatHistoryText.IsValid()) {
+                    nativeChatHistoryText = findHudTraverse("ChatHistoryText");
+                }
+                if (nativeChatHistoryText && nativeChatHistoryText.IsValid()) {
+                    try { nativeChatHistoryText.style.opacity = null; } catch (errChatOpacity) {}
+                    try { nativeChatHistoryText.style.visibility = null; } catch (errChatVisibility) {}
+                    nativeChatHistoryText.visible = true;
+                }
+                advancedNativeMessagesRestored = true;
+            }
+            $.Schedule(RADIO_IDLE_REFRESH_SECONDS, suppressNativeLowerLeft);
+            return;
+        }
+        advancedNativeMessagesRestored = false;
         for (let index = 0; index < NATIVE_VOICE_ALERT_PANEL_COUNT; index += 1) {
             const panel = nativeVoiceAlertPanel(index);
             if (!panel || !panel.IsValid()) {
@@ -4082,6 +4530,11 @@
 
     function updateRadioHud() {
         if (!radioTrack && !killFeedbackTrack) {
+            return;
+        }
+        if (!advancedPovVisualsActive()) {
+            hideRadioHud();
+            $.Schedule(RADIO_IDLE_REFRESH_SECONDS, updateRadioHud);
             return;
         }
         const state = controller.GetDemoControllerState();
@@ -4277,6 +4730,11 @@
             $.Schedule(0.1, updateKillFeedback);
             return;
         }
+        if (!advancedPovVisualsActive()) {
+            killFeedbackLastTick = Number(state.nTick || 0);
+            $.Schedule(0.1, updateKillFeedback);
+            return;
+        }
         const tick = state.nTick;
         const prev = killFeedbackLastTick;
         if (prev >= 0 && tick > prev && (tick - prev) <= KILL_FEEDBACK_CATCHUP_TICKS) {
@@ -4313,6 +4771,16 @@
         }
 
         const povTeam = updateVoiceAudience(state);
+        if (!advancedPovVisualsActive()) {
+            speakers.forEach(function (speaker) {
+                if (speaker.panel && speaker.panel.IsValid()) {
+                    speaker.panel.AddClass("Hidden");
+                }
+            });
+            $.Schedule(0.1, update);
+            return;
+        }
+
         const voicePanel = findVoicePanel();
         if (!voicePanel || !voicePanel.IsValid()) {
             speakers.forEach(function (speaker) {
@@ -4328,9 +4796,9 @@
         let activeRowCount = 0;
         speakers.forEach(function (speaker, index) {
             const speakerPlayer = rosterByXuid[speaker.xuid];
-            const sameTeam = povTeam !== 0 && speakerPlayer
-                && resolvePovTeam(speaker.xuid, state.nTick) === povTeam;
-            if (sameTeam
+            const audible = Boolean(speakerPlayer)
+                && advancedVoiceAllows(speaker.xuid, povTeam, state.nTick);
+            if (audible
                 && isSpeaking(speaker.intervals, state.nTick)
                 && activeRowCount < MAX_VISIBLE_VOICE_NOTICES) {
                 activeRows[index] = activeRowCount;
@@ -4372,6 +4840,1733 @@
         $.Schedule(0.05, update);
     }
 
+    function advancedChinese() {
+        let language = "";
+        try { language = String($.Language() || "").toLowerCase(); } catch (errLanguage) {}
+        return language.indexOf("schinese") >= 0
+            || language.indexOf("tchinese") >= 0
+            || language.indexOf("chinese") >= 0;
+    }
+
+    function advancedCopy(zh, en) {
+        return advancedChinese() ? zh : en;
+    }
+
+    function advancedCreatePanel(type, parent, id) {
+        const panel = $.CreatePanel(type, parent, id || "");
+        panel.hittest = true;
+        panel.hittestchildren = true;
+        if (type === "Panel") {
+            // Empty Panorama panels otherwise let MOUSE1 reach CS2's spectator
+            // binding (next player). Every structural region consumes clicks.
+            try { panel.SetPanelEvent("onactivate", function () { return true; }); } catch (errActivate) {}
+            try { panel.SetPanelEvent("oncontextmenu", function () { return true; }); } catch (errContext) {}
+        }
+        return panel;
+    }
+
+    function advancedCreateLabel(parent, text, size, color) {
+        const label = advancedCreatePanel("Label", parent, "");
+        label.text = String(text || "");
+        label.style.fontFamily = "Stratum2, 'Arial Unicode MS'";
+        label.style.fontSize = String(size || 16) + "px";
+        label.style.color = color || "#eeeeec";
+        label.style.verticalAlign = "center";
+        label.style.textOverflow = "ellipsis";
+        label.hittest = false;
+        label.hittestchildren = false;
+        return label;
+    }
+
+    function advancedCreateButton(parent, text, onActivate, width) {
+        const button = advancedCreatePanel("Button", parent, "");
+        button.style.height = "30px";
+        button.style.width = width || "fit-children";
+        button.style.paddingLeft = "10px";
+        button.style.paddingRight = "10px";
+        button.style.marginRight = "5px";
+        button.style.backgroundColor = "#222221f2";
+        button.style.border = "1px solid #494844";
+        button.style.borderRadius = "6px";
+        const label = advancedCreateLabel(button, text, 12, "#eeeeec");
+        label.hittest = false;
+        label.style.horizontalAlign = "center";
+        if (onActivate) {
+            button.SetPanelEvent("onactivate", onActivate);
+        }
+        return button;
+    }
+
+    function advancedStyleButton(button, active, accent) {
+        if (!button || !button.IsValid()) {
+            return;
+        }
+        button.style.backgroundColor = active ? (accent || "#e07f0a") : "#222221f2";
+        button.style.border = active ? "1px solid #f2a54a" : "1px solid #494844";
+        button.style.brightness = active ? "1.08" : "1";
+    }
+
+    function advancedRefreshQuickOptionButtons() {
+        Object.keys(advancedOptionButtons).forEach(function (key) {
+            const enabled = Boolean(advancedQuickOptions[key]);
+            advancedSetButtonText(
+                advancedOptionButtons[key],
+                advancedOptionLabels[key]
+                    + advancedCopy(enabled ? "开" : "关", enabled ? " ON" : " OFF"),
+            );
+            advancedStyleButton(advancedOptionButtons[key], enabled);
+        });
+    }
+
+    function advancedApplyQuickOptions() {
+        const overheadMode = advancedQuickOptions.overhead
+            ? 1
+            : -1;
+        const commands = [
+            "spec_show_xray " + (advancedQuickOptions.xray ? 1 : 0),
+            "cl_drawhud_force_radar " + (advancedQuickOptions.radar ? 0 : -1),
+            "cl_drawhud_force_teamid_overhead " + overheadMode,
+            // Messages are profile-owned: reconstructed in POV HUD, native in
+            // DEMO HUD. Always leave CS2 chat enabled so the DEMO profile can
+            // resume its own lifetime/animation without another user switch.
+            "tv_nochat 0",
+        ];
+        for (let index = 0; index < commands.length; index += 1) {
+            try { GameInterfaceAPI.ConsoleCommand(commands[index]); } catch (errCommand) {}
+        }
+        advancedRefreshQuickOptionButtons();
+    }
+
+    function advancedToggleQuickOption(key) {
+        if (!Object.prototype.hasOwnProperty.call(advancedQuickOptions, key)) {
+            return;
+        }
+        advancedQuickOptions[key] = !advancedQuickOptions[key];
+        if (key === "overhead") {
+            advancedNativeOverheadRestored = false;
+        }
+        advancedApplyQuickOptions();
+    }
+
+    function advancedClearPanel(panel) {
+        if (!panel || !panel.IsValid()) {
+            return;
+        }
+        try {
+            panel.RemoveAndDeleteChildren();
+        } catch (errRemove) {
+            const count = panel.GetChildCount ? panel.GetChildCount() : 0;
+            for (let index = count - 1; index >= 0; index -= 1) {
+                try { panel.GetChild(index).DeleteAsync(0); } catch (errDelete) {}
+            }
+        }
+    }
+
+    function restoreAdvancedHealthPanels() {
+        for (let index = advancedModifiedHealthPanels.length - 1; index >= 0; index -= 1) {
+            const panel = advancedModifiedHealthPanels[index];
+            if (!panel || !panel.IsValid()) {
+                continue;
+            }
+            applyHaSlotClass(panel, -1);
+            try { panel.style.backgroundColor = null; } catch (errBackground) {
+                try { panel.style.backgroundColor = "#ffffffff"; } catch (errWhite) {}
+            }
+            try { panel.style.washColor = null; } catch (errWash) {
+                try { panel.style.washColor = "none"; } catch (errNone) {}
+            }
+        }
+        advancedModifiedHealthPanels.length = 0;
+    }
+
+    function advancedPlayerName(xuid) {
+        const normalized = normalizeXuid(xuid);
+        const packedPlayer = advancedPlayback && advancedPlayback.byXuid[normalized];
+        let liveName = "";
+        try { liveName = String(GameStateAPI.GetPlayerName(normalized) || "").trim(); } catch (errName) {}
+        return liveName || (packedPlayer ? packedPlayer.name : "") || "Player";
+    }
+
+    function advancedFormatTick(tick) {
+        const seconds = Math.max(0, Number(tick) || 0) / Math.max(1, advancedPlayback.tickRate);
+        const minutes = Math.floor(seconds / 60);
+        const remain = Math.floor(seconds % 60);
+        return minutes + ":" + (remain < 10 ? "0" : "") + remain;
+    }
+
+    function advancedRefreshRoundIntervals(state) {
+        if (advancedPlayback && advancedPlayback.rounds && advancedPlayback.rounds.length) {
+            advancedRoundIntervals = advancedPlayback.rounds;
+        }
+        return advancedRoundIntervals;
+    }
+
+    function advancedRoundNumberAtTick(tick) {
+        const value = Math.max(0, Number(tick) || 0);
+        const rounds = advancedRoundIntervals;
+        if (!rounds.length || value < rounds[0].start) {
+            return 0;
+        }
+        for (let index = 1; index < rounds.length; index += 1) {
+            if (value < rounds[index].start) {
+                return index;
+            }
+        }
+        return rounds.length;
+    }
+
+    function advancedUpdateRoundLabel(state) {
+        const rounds = advancedRefreshRoundIntervals(state);
+        const current = state ? advancedRoundNumberAtTick(state.nTick) : 0;
+        if (advancedRoundLabel && advancedRoundLabel.IsValid()) {
+            advancedRoundLabel.text = advancedChinese()
+                ? ("第" + current + "/" + rounds.length + "回合")
+                : ("R " + current + "/" + rounds.length);
+        }
+    }
+
+    function advancedNumericEntryText(entry) {
+        if (!entry || !entry.IsValid()) {
+            return "";
+        }
+        if (entry._insightNumericButton) {
+            return String(entry._insightNumericValue || "");
+        }
+        return String(entry.text || "");
+    }
+
+    function advancedSetNumericEntryText(entry, value) {
+        if (!entry || !entry.IsValid()) {
+            return;
+        }
+        const text = String(value || "").replace(/[^0-9]/g, "");
+        if (entry._insightNumericButton) {
+            entry._insightNumericValue = text;
+            advancedSetButtonText(entry, text || entry._insightPlaceholder || "");
+            return;
+        }
+        entry.text = text;
+    }
+
+    function advancedSubmitRound() {
+        if (!advancedRoundInput || !advancedRoundInput.IsValid()) {
+            return;
+        }
+        const raw = advancedNumericEntryText(advancedRoundInput).replace(/[^0-9]/g, "");
+        const wanted = Number(raw);
+        const rounds = advancedRefreshRoundIntervals(null);
+        if (!raw || !isFinite(wanted) || wanted < 1 || wanted > rounds.length) {
+            advancedOpenNumericPad(
+                advancedRoundInput,
+                advancedSubmitRound,
+                advancedCopy("输入回合", "Enter round"),
+            );
+            return;
+        }
+        const target = rounds[wanted - 1];
+        advancedSetNumericEntryText(advancedRoundInput, "");
+        advancedCloseNumericPad();
+        advancedEventPage = 0;
+        advancedSeekToTick(target.start);
+    }
+
+    function advancedStepRound(delta) {
+        const state = controller.GetDemoControllerState();
+        const rounds = advancedRefreshRoundIntervals(null);
+        if (!rounds.length) {
+            return;
+        }
+        const currentNumber = state ? advancedRoundNumberAtTick(state.nTick) : 0;
+        const currentIndex = currentNumber > 0
+            ? currentNumber - 1
+            : (Number(delta || 0) > 0 ? -1 : 0);
+        const targetIndex = Math.max(
+            0,
+            Math.min(rounds.length - 1, currentIndex + Number(delta || 0)),
+        );
+        advancedEventPage = 0;
+        advancedSeekToTick(rounds[targetIndex].start);
+    }
+
+    function advancedClampTick(tick) {
+        return Math.max(0, Math.min(advancedPlayback.totalTick, Math.round(Number(tick) || 0)));
+    }
+
+    function advancedSetButtonText(button, value) {
+        if (!button || !button.IsValid() || !button.GetChildCount || button.GetChildCount() < 1) {
+            return;
+        }
+        const label = button.GetChild(0);
+        if (label && label.IsValid()) {
+            label.text = String(value || "");
+        }
+    }
+
+    function advancedSeekToTick(tick) {
+        const targetTick = advancedClampTick(tick);
+        if (advancedSelectedXuid && advancedPlayback.byXuid[advancedSelectedXuid]) {
+            advancedSelectPlayer(advancedSelectedXuid, { tick: targetTick });
+            return;
+        }
+        const state = controller.GetDemoControllerState();
+        const resumeAfterSeek = Boolean(state && !state.bIsPaused);
+        try {
+            if (controller.SetPaused) {
+                controller.SetPaused(true);
+            } else {
+                GameInterfaceAPI.ConsoleCommand("demo_pause");
+            }
+            if (controller.GotoTick) {
+                controller.GotoTick(targetTick);
+            } else {
+                GameInterfaceAPI.ConsoleCommand("demo_gototick " + targetTick);
+            }
+        } catch (errSeekTick) {}
+        if (resumeAfterSeek) {
+            $.Schedule(0.05, function () {
+                try {
+                    if (controller.SetPaused) {
+                        controller.SetPaused(false);
+                    } else {
+                        GameInterfaceAPI.ConsoleCommand("demo_resume");
+                    }
+                } catch (errResumeSeek) {}
+            });
+        }
+    }
+
+    function advancedStepSeconds(seconds) {
+        const state = controller.GetDemoControllerState();
+        const current = state ? Number(state.nTick || 0) : 0;
+        advancedSeekToTick(current + Number(seconds || 0) * advancedPlayback.tickRate);
+    }
+
+    function advancedTogglePlayback() {
+        const state = controller.GetDemoControllerState();
+        try {
+            if (controller.SetPaused) {
+                controller.SetPaused(!(state && state.bIsPaused));
+            } else {
+                GameInterfaceAPI.ConsoleCommand(state && state.bIsPaused ? "demo_resume" : "demo_pause");
+            }
+        } catch (errTogglePlayback) {}
+    }
+
+    function advancedSubmitTick() {
+        if (!advancedTickInput || !advancedTickInput.IsValid()) {
+            return;
+        }
+        const raw = advancedNumericEntryText(advancedTickInput).replace(/[^0-9]/g, "");
+        if (!raw) {
+            advancedOpenNumericPad(
+                advancedTickInput,
+                advancedSubmitTick,
+                advancedCopy("输入 tick", "Enter tick"),
+            );
+            return;
+        }
+        const value = Number(raw);
+        if (!isFinite(value)) {
+            return;
+        }
+        advancedSetNumericEntryText(advancedTickInput, "");
+        advancedCloseNumericPad();
+        advancedSeekToTick(value);
+    }
+
+    function advancedFocusTextEntry(entry) {
+        if (!entry || !entry.IsValid()) {
+            return;
+        }
+        try { entry.SetFocus(); } catch (errFocus) {}
+        try { $.DispatchEvent("SetInputFocus", entry); } catch (errDispatchFocus) {}
+    }
+
+    function advancedCloseNumericPad() {
+        advancedNumericEntry = null;
+        advancedNumericSubmit = null;
+        if (advancedNumericPad && advancedNumericPad.IsValid()) {
+            try { advancedNumericPad.DeleteAsync(0); } catch (errDeletePad) {}
+        }
+        advancedNumericPad = null;
+    }
+
+    function advancedNumericPadAppend(value) {
+        if (!advancedNumericEntry || !advancedNumericEntry.IsValid()) {
+            advancedCloseNumericPad();
+            return;
+        }
+        const current = advancedNumericEntryText(advancedNumericEntry).replace(/[^0-9]/g, "");
+        const limit = Math.max(1, Number(advancedNumericEntry.maxchars || 10));
+        advancedSetNumericEntryText(
+            advancedNumericEntry,
+            (current + String(value || "")).slice(0, limit),
+        );
+    }
+
+    function advancedOpenNumericPad(entry, submit, title) {
+        if (!advancedMenu || !advancedMenu.IsValid() || !entry || !entry.IsValid()) {
+            return;
+        }
+        advancedCloseNumericPad();
+        advancedNumericEntry = entry;
+        advancedNumericSubmit = submit;
+        advancedNumericPad = advancedCreatePanel("Panel", advancedMenu, "CS2InsightAdvancedNumericPad");
+        advancedNumericPad.style.width = "230px";
+        advancedNumericPad.style.height = "244px";
+        advancedNumericPad.style.horizontalAlign = "center";
+        advancedNumericPad.style.verticalAlign = "center";
+        advancedNumericPad.style.ignoreParentFlow = "true";
+        advancedNumericPad.style.flowChildren = "down";
+        advancedNumericPad.style.padding = "10px";
+        advancedNumericPad.style.backgroundColor = "#191918fe";
+        advancedNumericPad.style.border = "1px solid #e07f0a";
+        advancedNumericPad.style.borderRadius = "8px";
+        advancedNumericPad.style.boxShadow = "0px 4px 18px 3.0 #000000dd";
+        advancedNumericPad.style.zIndex = "32100";
+
+        const heading = advancedCreateLabel(advancedNumericPad, title, 13, "#e07f0a");
+        heading.style.width = "100%";
+        heading.style.height = "24px";
+        heading.style.textAlign = "center";
+
+        [["1", "2", "3"], ["4", "5", "6"], ["7", "8", "9"]].forEach(function (digits) {
+            const row = advancedCreatePanel("Panel", advancedNumericPad, "");
+            row.style.width = "100%";
+            row.style.height = "36px";
+            row.style.flowChildren = "right";
+            digits.forEach(function (digit, digitIndex) {
+                const button = advancedCreateButton(row, digit, function () {
+                    advancedNumericPadAppend(digit);
+                    return true;
+                }, "64px");
+                button.style.height = "31px";
+                button.style.marginRight = digitIndex === 2 ? "0px" : "5px";
+            });
+        });
+
+        const editRow = advancedCreatePanel("Panel", advancedNumericPad, "");
+        editRow.style.width = "100%";
+        editRow.style.height = "36px";
+        editRow.style.flowChildren = "right";
+        const clear = advancedCreateButton(editRow, advancedCopy("清空", "Clear"), function () {
+            if (advancedNumericEntry && advancedNumericEntry.IsValid()) {
+                advancedSetNumericEntryText(advancedNumericEntry, "");
+            }
+            return true;
+        }, "64px");
+        const zero = advancedCreateButton(editRow, "0", function () {
+            advancedNumericPadAppend("0");
+            return true;
+        }, "64px");
+        const erase = advancedCreateButton(editRow, "⌫", function () {
+            if (advancedNumericEntry && advancedNumericEntry.IsValid()) {
+                const current = advancedNumericEntryText(advancedNumericEntry).replace(/[^0-9]/g, "");
+                advancedSetNumericEntryText(advancedNumericEntry, current.slice(0, -1));
+            }
+            return true;
+        }, "64px");
+        [clear, zero, erase].forEach(function (button, index) {
+            button.style.height = "31px";
+            button.style.marginRight = index === 2 ? "0px" : "5px";
+        });
+
+        const actionRow = advancedCreatePanel("Panel", advancedNumericPad, "");
+        actionRow.style.width = "100%";
+        actionRow.style.height = "37px";
+        actionRow.style.marginTop = "3px";
+        actionRow.style.flowChildren = "right";
+        const cancel = advancedCreateButton(actionRow, advancedCopy("取消", "Cancel"), advancedCloseNumericPad, "98px");
+        const confirm = advancedCreateButton(actionRow, advancedCopy("确定", "OK"), function () {
+            const callback = advancedNumericSubmit;
+            if (callback) {
+                callback();
+            }
+            return true;
+        }, "98px");
+        cancel.style.height = "31px";
+        confirm.style.height = "31px";
+        confirm.style.marginRight = "0px";
+        advancedStyleButton(confirm, true);
+    }
+
+    function advancedCursorPosition() {
+        let raw = null;
+        try {
+            if (typeof GameUI !== "undefined" && GameUI.GetCursorPosition) {
+                raw = GameUI.GetCursorPosition();
+            }
+        } catch (errGameUiCursor) {}
+        if (!raw) {
+            try {
+                if ($.GetCursorPosition) {
+                    raw = $.GetCursorPosition();
+                }
+            } catch (errPanoramaCursor) {}
+        }
+        if (!raw) {
+            try {
+                if (GameInterfaceAPI.GetCursorPosition) {
+                    raw = GameInterfaceAPI.GetCursorPosition();
+                }
+            } catch (errInterfaceCursor) {}
+        }
+        if (!raw) {
+            return null;
+        }
+        const x = Number(raw.x !== undefined ? raw.x : raw[0]);
+        const y = Number(raw.y !== undefined ? raw.y : raw[1]);
+        return isFinite(x) && isFinite(y) ? { x: x, y: y } : null;
+    }
+
+    function advancedPanelWindowPosition(panel) {
+        if (!panel || !panel.IsValid()) {
+            return null;
+        }
+        try {
+            if (panel.GetPositionWithinWindow) {
+                const raw = panel.GetPositionWithinWindow();
+                const x = Number(raw.x !== undefined ? raw.x : raw[0]);
+                const y = Number(raw.y !== undefined ? raw.y : raw[1]);
+                if (isFinite(x) && isFinite(y)) {
+                    return { x: x, y: y };
+                }
+            }
+        } catch (errWindowPosition) {}
+        let x = 0;
+        let y = 0;
+        let current = panel;
+        let guard = 0;
+        while (current && current.IsValid() && guard < 32) {
+            x += Number(current.actualxoffset || 0);
+            y += Number(current.actualyoffset || 0);
+            current = current.GetParent ? current.GetParent() : null;
+            guard += 1;
+        }
+        return { x: x, y: y };
+    }
+
+    function advancedPreviewProgressTick(value) {
+        const target = advancedClampTick(value);
+        if (advancedProgressFill && advancedProgressFill.IsValid()) {
+            advancedProgressFill.style.width = (
+                100 * target / Math.max(1, advancedPlayback.totalTick)
+            ).toFixed(2) + "%";
+        }
+        if (advancedProgressLabel && advancedProgressLabel.IsValid()) {
+            advancedProgressLabel.text = advancedFormatTick(target) + " / "
+                + advancedFormatTick(advancedPlayback.totalTick) + "  ·  tick " + target;
+        }
+        return true;
+    }
+
+    function advancedSeekFromProgressSlider(panel, value) {
+        const target = advancedClampTick(value);
+        advancedPreviewProgressTick(target);
+        advancedSeekToTick(target);
+        return true;
+    }
+
+    function advancedUpdateProgress(state) {
+        if (!state) {
+            return;
+        }
+        advancedPlayback.totalTick = Math.max(
+            1,
+            advancedPlayback.totalTick,
+            Number(state.nTotalTicks || 0),
+        );
+        const current = advancedClampTick(state.nTick);
+        if (advancedProgressFill && advancedProgressFill.IsValid()) {
+            advancedProgressFill.style.width = (100 * current / Math.max(1, advancedPlayback.totalTick)).toFixed(2) + "%";
+        }
+        if (advancedProgressSlider && advancedProgressSlider.IsValid()) {
+            // Match CS2's stock HudDemoController exactly: Slider values are
+            // absolute ticks. A normalized 0..1 Slider is integer-quantized by
+            // Panorama and therefore returned 0 for almost every click.
+            advancedProgressSlider.min = 0;
+            advancedProgressSlider.max = advancedPlayback.totalTick;
+            if (!advancedProgressSlider.mousedown) {
+                advancedProgressSlider.value = current;
+            }
+        }
+        if (advancedProgressLabel && advancedProgressLabel.IsValid()) {
+            advancedProgressLabel.text = advancedFormatTick(current) + " / "
+                + advancedFormatTick(advancedPlayback.totalTick) + "  ·  tick " + current;
+        }
+        advancedSetButtonText(
+            advancedPlayPauseButton,
+            state.bIsPaused ? advancedCopy("播放", "Play") : advancedCopy("暂停", "Pause"),
+        );
+    }
+
+    function advancedHideNativeDemoUi() {
+        // The injected script runs on the stock huddemocontroller context panel.
+        // Hide that panel only; its parent owns the rest of the game HUD.
+        try {
+            controller.visible = false;
+            controller.hittest = false;
+            controller.hittestchildren = false;
+            controller.style.opacity = "0";
+        } catch (errNativeController) {}
+        if (advancedNativeDemoUiCommandAttempts >= 12) {
+            return;
+        }
+        let state = null;
+        try { state = controller.GetDemoControllerState(); } catch (errState) {}
+        if (!state || Number(state.nTotalTicks || 0) <= 0) {
+            return;
+        }
+        if (advancedNativeDemoUiCommandAttempts === 0) {
+            try { GameInterfaceAPI.ConsoleCommand("sv_cheats 1"); } catch (errCheats) {}
+        }
+        advancedNativeDemoUiCommandAttempts += 1;
+        try { GameInterfaceAPI.ConsoleCommand("demoui false"); } catch (errDemoUi) {}
+    }
+
+    function advancedGuardNativeDemoUi() {
+        if (!advancedPlayback) {
+            return;
+        }
+        advancedHideNativeDemoUi();
+        $.Schedule(1, advancedGuardNativeDemoUi);
+    }
+
+    function advancedLocalizedUtilityName(raw) {
+        const text = String(raw || "").trim();
+        let key = text.toLowerCase();
+        if (key.indexOf("weapon_") === 0) {
+            key = key.slice(7);
+        }
+        key = key.replace(/[_\- ]/g, "");
+        const names = {
+            smoke: ["烟雾弹", "Smoke"],
+            smokegrenade: ["烟雾弹", "Smoke"],
+            flash: ["闪光弹", "Flashbang"],
+            flashbang: ["闪光弹", "Flashbang"],
+            he: ["高爆手雷", "HE grenade"],
+            hegrenade: ["高爆手雷", "HE grenade"],
+            molotov: ["燃烧瓶", "Molotov"],
+            incendiary: ["燃烧弹", "Incendiary"],
+            incgrenade: ["燃烧弹", "Incendiary"],
+            decoy: ["诱饵弹", "Decoy"],
+            utility: ["道具", "Utility"],
+        };
+        return names[key] ? advancedCopy(names[key][0], names[key][1]) : text;
+    }
+
+    function advancedEventTitle(event) {
+        const peer = event.peerXuid ? advancedPlayerName(event.peerXuid) : "";
+        const roundNumber = advancedRoundNumberAtTick(event.tick);
+        const roundText = roundNumber > 0
+            ? advancedCopy("第" + roundNumber + "回合 · ", "R" + roundNumber + " · ")
+            : "";
+        const eventDetail = event.type === "utility"
+            ? advancedLocalizedUtilityName(event.detail)
+            : event.detail;
+        const detail = eventDetail ? " · " + eventDetail : "";
+        const headshot = (event.flags & 1) && event.type !== "utility"
+            ? advancedCopy(" · 爆头", " · Headshot")
+            : "";
+        if (event.type === "kill") {
+            return advancedCopy("[击杀] ", "[Kill] ") + roundText + advancedFormatTick(event.tick)
+                + "  " + peer + detail + headshot;
+        }
+        if (event.type === "death") {
+            return advancedCopy("[死亡] ", "[Death] ") + roundText + advancedFormatTick(event.tick)
+                + "  " + (peer || advancedCopy("世界", "World")) + detail + headshot;
+        }
+        return advancedCopy("[道具] ", "[Utility] ") + roundText + advancedFormatTick(event.tick)
+            + "  " + (eventDetail || advancedCopy("道具", "Utility"));
+    }
+
+    function advancedSpecCandidates(xuid) {
+        const values = [];
+        function add(value) {
+            const number = Number(value);
+            if (!isFinite(number) || number < 0 || number > 64 || values.indexOf(number) >= 0) {
+                return;
+            }
+            values.push(number);
+        }
+        const runtimeSlot = runtimeSlotForXuid(xuid);
+        const player = advancedPlayback.byXuid[normalizeXuid(xuid)];
+        if (runtimeSlot >= 0) {
+            add(runtimeSlot);
+            add(runtimeSlot + 1);
+        }
+        if (player) {
+            add(player.parserSlot);
+            add(player.parserSlot + 1);
+        }
+        return values;
+    }
+
+    function advancedFinishSpecOperation(success) {
+        const operation = advancedSpecOperation;
+        if (!operation) {
+            return;
+        }
+        advancedSpecOperation = null;
+        if (operation.seekTick >= 0) {
+            if (operation.playAfter) {
+                try {
+                    if (controller.SetPaused) {
+                        controller.SetPaused(false);
+                    } else {
+                        GameInterfaceAPI.ConsoleCommand("demo_resume");
+                    }
+                } catch (errResume) {}
+            } else {
+                try {
+                    if (controller.SetPaused) {
+                        controller.SetPaused(true);
+                    } else {
+                        GameInterfaceAPI.ConsoleCommand("demo_pause");
+                    }
+                    if (controller.GotoTick) {
+                        controller.GotoTick(Math.max(0, operation.seekTick | 0));
+                    } else {
+                        GameInterfaceAPI.ConsoleCommand("demo_gototick " + Math.max(0, operation.seekTick | 0));
+                    }
+                } catch (errExactSeek) {}
+                if (operation.resumeAfterSeek) {
+                    $.Schedule(0.05, function () {
+                        try {
+                            if (controller.SetPaused) {
+                                controller.SetPaused(false);
+                            } else {
+                                GameInterfaceAPI.ConsoleCommand("demo_resume");
+                            }
+                        } catch (errResumeExactSeek) {}
+                    });
+                }
+            }
+        } else if (operation.restorePause) {
+            try {
+                if (controller.SetPaused) {
+                    controller.SetPaused(true);
+                } else {
+                    GameInterfaceAPI.ConsoleCommand("demo_pause");
+                }
+            } catch (errPause) {}
+        }
+        if (!success) {
+            $.Msg("[CS2 Insight] advanced playback could not verify POV XUID " + operation.xuid);
+        }
+    }
+
+    function advancedAdvanceSpecOperation() {
+        const operation = advancedSpecOperation;
+        if (!operation) {
+            return;
+        }
+        const state = controller.GetDemoControllerState();
+        if (!state) {
+            $.Schedule(0.1, advancedAdvanceSpecOperation);
+            return;
+        }
+        if (operation.seekTick >= 0
+                && Math.abs(Number(state.nTick || 0) - operation.initialSeekTick) > 16
+                && operation.seekWaits < 40) {
+            operation.seekWaits += 1;
+            $.Schedule(0.05, advancedAdvanceSpecOperation);
+            return;
+        }
+        if (sameXuid(currentPovXuid(state), operation.xuid)) {
+            advancedFinishSpecOperation(true);
+            return;
+        }
+        if (operation.candidates.length === 0) {
+            advancedFinishSpecOperation(false);
+            return;
+        }
+        if (operation.index >= operation.candidates.length) {
+            operation.index = 0;
+            operation.cycles += 1;
+            if (!operation.resumedForSpec && state.bIsPaused) {
+                operation.resumedForSpec = true;
+                try { GameInterfaceAPI.ConsoleCommand("demo_resume"); } catch (errResume) {}
+                $.Schedule(0.12, advancedAdvanceSpecOperation);
+                return;
+            }
+            if (operation.cycles >= 3) {
+                advancedFinishSpecOperation(false);
+                return;
+            }
+        }
+        const candidate = operation.candidates[operation.index];
+        operation.index += 1;
+        try {
+            GameInterfaceAPI.ConsoleCommand("spec_mode " + operation.mode);
+            GameInterfaceAPI.ConsoleCommand("spec_player " + candidate);
+        } catch (errSpec) {}
+        $.Schedule(0.16, advancedAdvanceSpecOperation);
+    }
+
+    function advancedSelectPlayer(xuid, options) {
+        const normalized = normalizeXuid(xuid);
+        if (!advancedPlayback.byXuid[normalized]) {
+            return;
+        }
+        const state = controller.GetDemoControllerState();
+        const opts = options || {};
+        const exactTick = isFinite(Number(opts.tick)) ? Math.max(0, Number(opts.tick) | 0) : -1;
+        const playAfter = Boolean(opts.playAfter);
+        const resumeAfterSeek = playAfter || Boolean(state && !state.bIsPaused);
+        const initialSeekTick = exactTick >= 0
+            ? Math.max(0, exactTick - (playAfter ? Math.round(advancedPlayback.tickRate * 3) : 0))
+            : -1;
+        advancedSelectedXuid = normalized;
+        advancedEventPage = 0;
+        if (initialSeekTick >= 0) {
+            try {
+                if (controller.SetPaused) {
+                    controller.SetPaused(true);
+                } else {
+                    GameInterfaceAPI.ConsoleCommand("demo_pause");
+                }
+                if (controller.GotoTick) {
+                    controller.GotoTick(initialSeekTick);
+                } else {
+                    GameInterfaceAPI.ConsoleCommand("demo_gototick " + initialSeekTick);
+                }
+            } catch (errSeek) {}
+        }
+        advancedSpecOperation = {
+            xuid: normalized,
+            mode: advancedViewMode === 1 ? 5 : advancedViewMode,
+            candidates: advancedSpecCandidates(normalized),
+            index: 0,
+            cycles: 0,
+            seekWaits: 0,
+            seekTick: exactTick,
+            initialSeekTick: initialSeekTick,
+            playAfter: playAfter,
+            resumeAfterSeek: resumeAfterSeek,
+            restorePause: Boolean(state && state.bIsPaused),
+            resumedForSpec: false,
+        };
+        try { GameInterfaceAPI.ConsoleCommand("spec_mode " + advancedSpecOperation.mode); } catch (errMode) {}
+        $.Schedule(initialSeekTick >= 0 ? 0.12 : 0, advancedAdvanceSpecOperation);
+        advancedRenderMenu();
+    }
+
+    function advancedSetPanelRuntimeVisible(panel, visible) {
+        if (!panel || !panel.IsValid()) {
+            return;
+        }
+        panel.visible = visible;
+        try {
+            panel.style.opacity = visible ? "1" : "0";
+            panel.style.visibility = visible ? "visible" : "collapse";
+        } catch (errStyle) {}
+    }
+
+    function advancedSpectatorInfoPanels() {
+        const root = hudRootPanel();
+        const panels = [];
+        function add(panel) {
+            if (panel && panel.IsValid() && panels.indexOf(panel) < 0) {
+                panels.push(panel);
+            }
+        }
+        [
+            "HudSpecplayer",
+            "HudSpecplayerRoot",
+            "HudSpecplayerParentContainer",
+            "HudSpecPlayer",
+        ].forEach(function (id) {
+            try { add(root.FindChildTraverse(id)); } catch (errId) {}
+        });
+        if (root.FindChildrenWithClassTraverse) {
+            [
+                "HudSpecplayerParentContainer",
+                "HudSpecplayerRoot--visible",
+                "HudSpecplayer__Bg",
+            ].forEach(function (className) {
+                const matches = root.FindChildrenWithClassTraverse(className) || [];
+                matches.forEach(function (panel) {
+                    add(panel);
+                    let parent = panel.GetParent ? panel.GetParent() : null;
+                    for (let depth = 0; parent && parent.IsValid() && depth < 2; depth += 1) {
+                        let belongsToSpecPlayer = String(parent.id || "")
+                            .toLowerCase().indexOf("specplayer") >= 0;
+                        try {
+                            belongsToSpecPlayer = belongsToSpecPlayer
+                                || parent.BHasClass("HudSpecplayerParentContainer")
+                                || parent.BHasClass("HudSpecplayerRoot--visible");
+                        } catch (errClass) {}
+                        if (!belongsToSpecPlayer) {
+                            break;
+                        }
+                        add(parent);
+                        parent = parent.GetParent ? parent.GetParent() : null;
+                    }
+                });
+            });
+        }
+        return panels;
+    }
+
+    function advancedApplyNativeSpectatorHud(enabled) {
+        const healthAmmo = findHudTraverse("HudHealthAmmoCenter")
+            || findHudTraverse("CSGOHudHealthAmmoCenter");
+        advancedSetPanelRuntimeVisible(healthAmmo, !enabled);
+
+        advancedSpectatorInfoPanels().forEach(function (panel) {
+            advancedSetPanelRuntimeVisible(panel, enabled);
+            try { panel.SetHasClass("HudSpecplayerRoot--visible", enabled); } catch (errClass) {}
+        });
+
+        if (enabled) {
+            restoreAdvancedTeamCounterPanels();
+            const teamCounter = findTeamCounterRoot();
+            if (teamCounter && teamCounter.IsValid() && teamCounter.FindChildrenWithClassTraverse) {
+                const equipment = teamCounter.FindChildrenWithClassTraverse("hudteamcounter-equipmentinfo") || [];
+                equipment.forEach(function (panel) {
+                    advancedSetPanelRuntimeVisible(panel, true);
+                    try { panel.RemoveClass("Invisible"); } catch (errInvisible) {}
+                });
+            }
+        }
+    }
+
+    function advancedGuardSpectatorHud() {
+        if (!advancedPlayback) {
+            return;
+        }
+        advancedApplyNativeSpectatorHud(!advancedPovVisualsEnabled);
+        $.Schedule(0.25, advancedGuardSpectatorHud);
+    }
+
+    function advancedApplyPlaybackProfile(profile) {
+        if (profile !== "pov" && profile !== "demo") {
+            return;
+        }
+        advancedPovVisualsEnabled = profile === "pov";
+        const commands = advancedPovVisualsEnabled ? [
+            "cl_draw_only_deathnotices false",
+            "mp_forcecamera 0",
+            "cl_trueview_show_status 0",
+            "cl_spec_show_bindings 0",
+            "cl_spec_stats 0",
+            "r_spectator_flashbang_opacity 1",
+            "cl_radar_always_centered 1",
+            "cl_radar_square_always false",
+            "cl_radar_rotate true",
+            "cl_radar_square_when_spectating 0",
+            "cl_radar_scale 0.4",
+            "snd_disable_radar_visualize 0",
+            "cl_hud_color 12",
+            "cl_drawhud_force_teamid_overhead 1",
+            "cl_teamid_overhead_mode 3",
+            "cl_teamid_overhead_colors_show 1",
+            "cl_teamid_overhead_fade_near_crosshair 0",
+            "cl_teamid_overhead_maxdist 9999",
+            "cl_teamid_overhead_maxdist_spec 9999",
+        ] : [
+            "cl_draw_only_deathnotices false",
+            "mp_forcecamera 0",
+            "cl_trueview_show_status 1",
+            "cl_spec_show_bindings 1",
+            "cl_spec_stats 1",
+            "r_spectator_flashbang_opacity 1",
+            "cl_radar_always_centered 0",
+            "cl_radar_square_always true",
+            "cl_radar_rotate false",
+            "cl_radar_square_when_spectating 1",
+            "cl_radar_scale 0.7",
+            "snd_disable_radar_visualize 0",
+            "cl_hud_color 0",
+            "cl_drawhud_force_teamid_overhead 1",
+            "cl_teamid_overhead_mode 3",
+            "cl_teamid_overhead_colors_show 0",
+            "cl_teamid_overhead_fade_near_crosshair 0",
+            "cl_teamid_overhead_maxdist 9999",
+            "cl_teamid_overhead_maxdist_spec 9999",
+            "cl_teamcounter_playercount_instead_of_avatars false",
+            "cl_drawhud_force_radar 0",
+        ];
+        for (let index = 0; index < commands.length; index += 1) {
+            try { GameInterfaceAPI.ConsoleCommand(commands[index]); } catch (errCommand) {}
+        }
+        advancedApplyQuickOptions();
+        advancedNativeOverheadRestored = false;
+        advancedApplyNativeSpectatorHud(!advancedPovVisualsEnabled);
+        if (!advancedPovVisualsEnabled) {
+            restoreAdvancedTeamCounterPanels();
+            restoreAdvancedHealthPanels();
+            if (inputHud && inputHud.IsValid()) {
+                inputHud.visible = false;
+            }
+            if (radarHud && radarHud.IsValid()) {
+                radarHud.visible = false;
+            }
+            if (radarUnclipHud && radarUnclipHud.IsValid()) {
+                radarUnclipHud.visible = false;
+            }
+            restoreNativeRadarForAdvancedSpectator();
+            hideRadioHud();
+            speakers.forEach(function (speaker) {
+                if (speaker.panel && speaker.panel.IsValid()) {
+                    speaker.panel.AddClass("Hidden");
+                }
+            });
+            $.Schedule(0.05, function () {
+                advancedApplyNativeSpectatorHud(true);
+            });
+        }
+        audienceRefreshFrames = 0;
+        advancedRenderMenu();
+    }
+
+    function advancedSetVoicePolicy(policy) {
+        if (["team", "all", "mute", "custom"].indexOf(policy) < 0) {
+            return;
+        }
+        advancedVoicePolicy = policy;
+        audienceRefreshFrames = 0;
+        advancedRenderMenu();
+    }
+
+    function advancedTogglePlayerVoice(xuid) {
+        const normalized = normalizeXuid(xuid);
+        if (advancedVoicePolicy !== "custom") {
+            Object.keys(advancedCustomVoiceXuids).forEach(function (key) {
+                delete advancedCustomVoiceXuids[key];
+            });
+            advancedVoicePolicy = "custom";
+        }
+        advancedCustomVoiceXuids[normalized] = !advancedCustomVoiceXuids[normalized];
+        audienceRefreshFrames = 0;
+        advancedRenderMenu();
+    }
+
+    function advancedPlayerVoiceEnabled(xuid) {
+        const state = controller.GetDemoControllerState();
+        const tick = state ? Number(state.nTick || 0) : 0;
+        const povTeam = state ? resolvePovTeam(currentPovXuid(state), tick) : 0;
+        return advancedVoiceAllows(xuid, povTeam, tick);
+    }
+
+    function advancedRenderPlayers() {
+        if (!advancedPlayerListPanel || !advancedPlayerListPanel.IsValid()) {
+            return;
+        }
+        advancedClearPanel(advancedPlayerListPanel);
+        const state = controller.GetDemoControllerState();
+        const tick = state ? Number(state.nTick || 0) : 0;
+        const grouped = { 2: [], 3: [] };
+        const teamSignature = [];
+        advancedPlayback.players.forEach(function (player) {
+            const liveTeam = resolvePovTeam(player.xuid, tick) || player.team;
+            grouped[liveTeam === 3 ? 3 : 2].push(player);
+            teamSignature.push(player.xuid + ":" + liveTeam);
+        });
+        advancedPlayerTeamSignature = teamSignature.join("|");
+
+        function renderTeam(team, title, color) {
+            const column = advancedCreatePanel("Panel", advancedPlayerListPanel, "");
+            column.style.width = "fill-parent-flow(1.0)";
+            column.style.height = "100%";
+            column.style.flowChildren = "down";
+            if (team === 3) {
+                column.style.marginRight = "6px";
+            } else {
+                column.style.marginLeft = "6px";
+            }
+            const header = advancedCreateLabel(column, title, 12, color);
+            header.style.width = "100%";
+            header.style.height = "20px";
+            header.style.textAlign = "center";
+            grouped[team].forEach(function (player) {
+                const row = advancedCreatePanel("Panel", column, "");
+                row.style.width = "100%";
+                row.style.height = "25px";
+                row.style.flowChildren = "right";
+                row.style.marginBottom = "1px";
+                const button = advancedCreateButton(
+                    row,
+                    advancedPlayerName(player.xuid),
+                    function () { advancedSelectPlayer(player.xuid, {}); },
+                    "fill-parent-flow(1.0)",
+                );
+                button.style.height = "23px";
+                button.style.marginRight = "3px";
+                advancedStyleButton(button, sameXuid(player.xuid, advancedSelectedXuid));
+                const voiceEnabled = advancedPlayerVoiceEnabled(player.xuid);
+                const voiceText = voiceEnabled
+                    ? advancedCopy("语音开", "ON")
+                    : advancedCopy("语音关", "OFF");
+                const voice = advancedCreateButton(
+                    row,
+                    voiceText,
+                    function () { advancedTogglePlayerVoice(player.xuid); },
+                    "54px",
+                );
+                voice.style.height = "23px";
+                voice.style.marginRight = "0px";
+                voice.style.paddingLeft = "2px";
+                voice.style.paddingRight = "2px";
+                advancedStyleButton(voice, voiceEnabled);
+            });
+        }
+
+        renderTeam(3, "CT", "#5ebaf0");
+        renderTeam(2, "T", "#e7bd53");
+    }
+
+    function advancedFilteredEvents() {
+        const events = advancedPlayback.eventsByXuid[advancedSelectedXuid] || [];
+        if (advancedEventFilter === "all") {
+            return events;
+        }
+        return events.filter(function (event) { return event.type === advancedEventFilter; });
+    }
+
+    function advancedRenderEvents() {
+        if (!advancedEventListPanel || !advancedEventListPanel.IsValid()) {
+            return;
+        }
+        advancedClearPanel(advancedEventListPanel);
+        const events = advancedFilteredEvents();
+        const pageSize = 5;
+        const pageCount = Math.max(1, Math.ceil(events.length / pageSize));
+        advancedEventPage = Math.max(0, Math.min(advancedEventPage, pageCount - 1));
+        const visible = events.slice(advancedEventPage * pageSize, (advancedEventPage + 1) * pageSize);
+        if (!visible.length) {
+            const empty = advancedCreateLabel(
+                advancedEventListPanel,
+                advancedCopy("当前筛选没有事件", "No events for this filter"),
+                14,
+                "#8ea1aa",
+            );
+            empty.style.height = "32px";
+        }
+        visible.forEach(function (event) {
+            const row = advancedCreatePanel("Panel", advancedEventListPanel, "");
+            row.style.width = "100%";
+            row.style.height = "26px";
+            row.style.flowChildren = "right";
+            row.style.marginBottom = "1px";
+            const locate = advancedCreateButton(
+                row,
+                advancedEventTitle(event),
+                function () { advancedSelectPlayer(advancedSelectedXuid, { tick: event.tick }); },
+                "fill-parent-flow(1.0)",
+            );
+            locate.style.height = "24px";
+            locate.style.marginRight = "6px";
+            if (locate.GetChildCount && locate.GetChildCount() > 0) {
+                locate.GetChild(0).style.textOverflow = "shrink";
+            }
+            const preroll = advancedCreateButton(
+                row,
+                "▶ -3s",
+                function () {
+                    advancedSelectPlayer(advancedSelectedXuid, { tick: event.tick, playAfter: true });
+                },
+                "58px",
+            );
+            preroll.style.height = "24px";
+            preroll.style.marginRight = "0px";
+        });
+        if (advancedEventPagerLabel && advancedEventPagerLabel.IsValid()) {
+            advancedEventPagerLabel.text = (advancedEventPage + 1) + " / " + pageCount
+                + "  ·  " + events.length;
+        }
+    }
+
+    function advancedRenderMenu() {
+        if (!advancedPlayback || !advancedMenu || !advancedMenu.IsValid()) {
+            return;
+        }
+        const state = controller.GetDemoControllerState();
+        advancedRefreshRoundIntervals(state);
+        if (!advancedSelectedXuid) {
+            advancedSelectedXuid = state ? currentPovXuid(state) : "";
+        }
+        if (!advancedPlayback.byXuid[advancedSelectedXuid]) {
+            advancedSelectedXuid = advancedPlayback.players[0].xuid;
+        }
+        advancedStyleButton(advancedProfileButtons.pov, advancedPovVisualsEnabled);
+        advancedStyleButton(advancedProfileButtons.demo, !advancedPovVisualsEnabled);
+        Object.keys(advancedVoiceButtons).forEach(function (key) {
+            advancedStyleButton(advancedVoiceButtons[key], key === advancedVoicePolicy);
+        });
+        Object.keys(advancedFilterButtons).forEach(function (key) {
+            advancedStyleButton(advancedFilterButtons[key], key === advancedEventFilter);
+        });
+        if (advancedPinButton && advancedPinButton.IsValid()) {
+            advancedSetButtonText(
+                advancedPinButton,
+                advancedCopy(advancedMenuPinned ? "常显开" : "常显关", advancedMenuPinned ? "PIN ON" : "PIN OFF"),
+            );
+            advancedStyleButton(advancedPinButton, advancedMenuPinned);
+        }
+        advancedRefreshQuickOptionButtons();
+        advancedRenderPlayers();
+        advancedRenderEvents();
+    }
+
+    function advancedStopMenuDrag() {
+        advancedMenuDragging = false;
+        advancedMenuDragStartCursor = null;
+        advancedMenuDragStartPosition = null;
+        if (advancedMenuDragGhost && advancedMenuDragGhost.IsValid()) {
+            try { advancedMenuDragGhost.DeleteAsync(0); } catch (errDeleteGhost) {}
+        }
+        advancedMenuDragGhost = null;
+        return true;
+    }
+
+    function advancedMenuDragTick() {
+        if (!advancedMenuDragging || !advancedMenu || !advancedMenu.IsValid()) {
+            return;
+        }
+        const cursor = advancedCursorPosition();
+        const root = hudRootPanel();
+        if (cursor && root && root.IsValid()
+                && advancedMenuDragStartCursor && advancedMenuDragStartPosition) {
+            const scaleX = Math.max(0.001, Number(advancedMenu.actualuiscale_x || 1));
+            const scaleY = Math.max(0.001, Number(advancedMenu.actualuiscale_y || scaleX));
+            const rootWidth = Number(root.actuallayoutwidth || 0) / scaleX;
+            const rootHeight = Number(root.actuallayoutheight || 0) / scaleY;
+            const menuWidth = Number(advancedMenu.actuallayoutwidth || 0) / scaleX;
+            const menuHeight = Number(advancedMenu.actuallayoutheight || 0) / scaleY;
+            const x = advancedMenuDragStartPosition.x
+                + (cursor.x - advancedMenuDragStartCursor.x) / scaleX;
+            const y = advancedMenuDragStartPosition.y
+                + (cursor.y - advancedMenuDragStartCursor.y) / scaleY;
+            advancedMenu.style.x = Math.max(0, Math.min(Math.max(0, rootWidth - menuWidth), x)) + "px";
+            advancedMenu.style.y = Math.max(0, Math.min(Math.max(0, rootHeight - menuHeight), y)) + "px";
+        }
+        $.Schedule(0.016, advancedMenuDragTick);
+    }
+
+    function advancedStartMenuDrag() {
+        if (!advancedMenu || !advancedMenu.IsValid()) {
+            return true;
+        }
+        if (advancedMenuDragging) {
+            return true;
+        }
+        const cursor = advancedCursorPosition();
+        const menuPosition = advancedPanelWindowPosition(advancedMenu);
+        const root = hudRootPanel();
+        const rootPosition = advancedPanelWindowPosition(root);
+        if (!cursor || !menuPosition || !rootPosition) {
+            return true;
+        }
+        const scaleX = Math.max(0.001, Number(advancedMenu.actualuiscale_x || 1));
+        const scaleY = Math.max(0.001, Number(advancedMenu.actualuiscale_y || scaleX));
+        const localX = (menuPosition.x - rootPosition.x) / scaleX;
+        const localY = (menuPosition.y - rootPosition.y) / scaleY;
+        advancedMenu.style.horizontalAlign = "left";
+        advancedMenu.style.verticalAlign = "top";
+        advancedMenu.style.marginRight = "0px";
+        advancedMenu.style.marginLeft = "0px";
+        advancedMenu.style.marginTop = "0px";
+        advancedMenu.style.x = localX + "px";
+        advancedMenu.style.y = localY + "px";
+        advancedMenuDragStartCursor = cursor;
+        advancedMenuDragStartPosition = { x: localX, y: localY };
+        advancedMenuDragging = true;
+        advancedMenuHoverGeneration += 1;
+        $.Schedule(0, advancedMenuDragTick);
+        return true;
+    }
+
+    function advancedAttachMenuDrag(handle) {
+        if (!handle || !handle.IsValid()) {
+            return;
+        }
+        try { handle.SetDraggable(true); } catch (errDraggable) {}
+        try { handle.SetPanelEvent("onmousedown", advancedStartMenuDrag); } catch (errMouseDown) {}
+        try { handle.SetPanelEvent("onactivate", advancedStopMenuDrag); } catch (errActivate) {}
+        try {
+            $.RegisterEventHandler("DragStart", handle, function (source, dragCallbacks) {
+                advancedStartMenuDrag();
+                const root = hudRootPanel();
+                if (root && root.IsValid()) {
+                    advancedMenuDragGhost = advancedCreatePanel(
+                        "Panel",
+                        root,
+                        "CS2InsightAdvancedDragGhost",
+                    );
+                    const scaleX = Math.max(0.001, Number(advancedMenu.actualuiscale_x || 1));
+                    const scaleY = Math.max(0.001, Number(advancedMenu.actualuiscale_y || scaleX));
+                    const menuWidth = Number(advancedMenu.actuallayoutwidth || 0) / scaleX;
+                    const menuHeight = Number(advancedMenu.actuallayoutheight || 0) / scaleY;
+                    advancedMenuDragGhost.style.width = Math.max(1, menuWidth) + "px";
+                    advancedMenuDragGhost.style.height = Math.max(1, menuHeight) + "px";
+                    advancedMenuDragGhost.style.backgroundColor = "#19191899";
+                    advancedMenuDragGhost.style.border = "1px solid #e07f0a";
+                    advancedMenuDragGhost.style.borderRadius = "10px";
+                    // If GameUI exposes cursor coordinates, the menu itself is
+                    // already following them. Otherwise Panorama's native drag
+                    // ghost provides the fallback position captured on DragEnd.
+                    advancedMenuDragGhost.style.opacity = advancedMenuDragStartCursor ? "0" : "0.55";
+                    advancedMenuDragGhost.hittest = false;
+                    advancedMenuDragGhost.hittestchildren = false;
+                    advancedMenuDragging = true;
+                    advancedMenuHoverGeneration += 1;
+                    if (dragCallbacks) {
+                        dragCallbacks.displayPanel = advancedMenuDragGhost;
+                        dragCallbacks.offsetX = 0;
+                        dragCallbacks.offsetY = 0;
+                    }
+                }
+                return true;
+            });
+            $.RegisterEventHandler("DragEnd", handle, function (source, draggedPanel) {
+                if (!advancedMenuDragStartCursor && advancedMenu && advancedMenu.IsValid()) {
+                    const position = advancedPanelWindowPosition(
+                        draggedPanel && draggedPanel.IsValid()
+                            ? draggedPanel
+                            : advancedMenuDragGhost,
+                    );
+                    const root = hudRootPanel();
+                    const rootPosition = advancedPanelWindowPosition(root);
+                    if (position && rootPosition && root && root.IsValid()) {
+                        const scaleX = Math.max(0.001, Number(advancedMenu.actualuiscale_x || 1));
+                        const scaleY = Math.max(0.001, Number(advancedMenu.actualuiscale_y || scaleX));
+                        const rootWidth = Number(root.actuallayoutwidth || 0) / scaleX;
+                        const rootHeight = Number(root.actuallayoutheight || 0) / scaleY;
+                        const menuWidth = Number(advancedMenu.actuallayoutwidth || 0) / scaleX;
+                        const menuHeight = Number(advancedMenu.actuallayoutheight || 0) / scaleY;
+                        const x = Math.max(0, Math.min(
+                            Math.max(0, rootWidth - menuWidth),
+                            (position.x - rootPosition.x) / scaleX,
+                        ));
+                        const y = Math.max(0, Math.min(
+                            Math.max(0, rootHeight - menuHeight),
+                            (position.y - rootPosition.y) / scaleY,
+                        ));
+                        advancedMenu.style.horizontalAlign = "left";
+                        advancedMenu.style.verticalAlign = "top";
+                        advancedMenu.style.marginRight = "0px";
+                        advancedMenu.style.marginLeft = "0px";
+                        advancedMenu.style.marginTop = "0px";
+                        advancedMenu.style.x = x + "px";
+                        advancedMenu.style.y = y + "px";
+                    }
+                }
+                return advancedStopMenuDrag();
+            });
+        } catch (errDragEvents) {}
+    }
+
+    function advancedScheduleHideMenu() {
+        if (advancedMenuPinned || advancedMenuDragging) {
+            return;
+        }
+        const generation = ++advancedMenuHoverGeneration;
+        $.Schedule(0.3, function () {
+            if (generation !== advancedMenuHoverGeneration || !advancedMenu || !advancedMenu.IsValid()) {
+                return;
+            }
+            if (advancedMenuPinned || advancedMenuDragging) {
+                return;
+            }
+            try {
+                if ((advancedMenu.BHasHoverStyle && advancedMenu.BHasHoverStyle())
+                        || (advancedEdgeTrigger && advancedEdgeTrigger.IsValid()
+                            && advancedEdgeTrigger.BHasHoverStyle
+                            && advancedEdgeTrigger.BHasHoverStyle())) {
+                    advancedMenuHoverGeneration += 1;
+                    return;
+                }
+            } catch (errHoverState) {}
+            advancedMenuVisible = false;
+            advancedMenu.visible = false;
+        });
+    }
+
+    function advancedShowMenu() {
+        if (!advancedMenu || !advancedMenu.IsValid()) {
+            return;
+        }
+        advancedMenuHoverGeneration += 1;
+        advancedMenuVisible = true;
+        advancedMenu.visible = true;
+        advancedRenderMenu();
+    }
+
+    function advancedToggleMenuPinned() {
+        advancedMenuPinned = !advancedMenuPinned;
+        if (advancedMenuPinned) {
+            advancedShowMenu();
+        } else {
+            advancedRenderMenu();
+            advancedScheduleHideMenu();
+        }
+    }
+
+    function advancedEnsureMenu() {
+        if (!advancedPlayback) {
+            return null;
+        }
+        const root = hudRootPanel();
+        if (!root || !root.IsValid()) {
+            return null;
+        }
+        root.hittestchildren = true;
+        if (!advancedEdgeTrigger || !advancedEdgeTrigger.IsValid()) {
+            advancedEdgeTrigger = advancedCreatePanel("Panel", root, "CS2InsightAdvancedEdge");
+            advancedEdgeTrigger.style.width = "18px";
+            advancedEdgeTrigger.style.height = "100%";
+            advancedEdgeTrigger.style.horizontalAlign = "right";
+            advancedEdgeTrigger.style.verticalAlign = "center";
+            advancedEdgeTrigger.style.backgroundColor = "#e07f0a02";
+            advancedEdgeTrigger.style.zIndex = "32000";
+            advancedEdgeTrigger.SetPanelEvent("onmouseover", advancedShowMenu);
+        }
+        if (advancedMenu && advancedMenu.IsValid()) {
+            return advancedMenu;
+        }
+        advancedMenu = advancedCreatePanel("Panel", root, "CS2InsightAdvancedMenu");
+        advancedMenu.style.width = "500px";
+        advancedMenu.style.height = "640px";
+        advancedMenu.style.maxHeight = "92%";
+        advancedMenu.style.horizontalAlign = "right";
+        advancedMenu.style.verticalAlign = "center";
+        advancedMenu.style.marginRight = "6px";
+        advancedMenu.style.padding = "12px";
+        advancedMenu.style.flowChildren = "down";
+        advancedMenu.style.backgroundColor = "#191918f7";
+        advancedMenu.style.border = "1px solid #494844";
+        advancedMenu.style.borderRadius = "10px";
+        advancedMenu.style.boxShadow = "0px 8px 32px 4.0 #000000bb";
+        advancedMenu.style.zIndex = "32001";
+        advancedMenu.style.overflow = "clip";
+        advancedMenuVisible = advancedMenuPinned;
+        advancedMenu.visible = advancedMenuPinned;
+        advancedMenu.SetPanelEvent("onmouseover", function () {
+            advancedMenuHoverGeneration += 1;
+        });
+        advancedMenu.SetPanelEvent("onmouseout", advancedScheduleHideMenu);
+
+        const titleRow = advancedCreatePanel("Panel", advancedMenu, "");
+        titleRow.style.width = "100%";
+        titleRow.style.height = "30px";
+        titleRow.style.marginBottom = "2px";
+        titleRow.style.flowChildren = "right";
+        const dragHandle = advancedCreatePanel(
+            "Button",
+            titleRow,
+            "CS2InsightAdvancedDragHandle",
+        );
+        dragHandle.style.width = "fill-parent-flow(1.0)";
+        dragHandle.style.height = "25px";
+        dragHandle.style.backgroundColor = "#00000001";
+        dragHandle.style.border = "0px";
+        const title = advancedCreateLabel(dragHandle, "INSIGHT · " + advancedCopy("高级播放", "ADVANCED PLAYBACK"), 17, "#e07f0a");
+        title.style.width = "100%";
+        title.style.horizontalAlign = "left";
+        advancedAttachMenuDrag(dragHandle);
+        advancedMenuTickLabel = advancedCreateLabel(titleRow, "", 11, "#7c7b74");
+        advancedMenuTickLabel.style.width = "70px";
+        advancedPinButton = advancedCreateButton(titleRow, "", advancedToggleMenuPinned, "62px");
+        advancedPinButton.style.height = "25px";
+        advancedPinButton.style.paddingLeft = "4px";
+        advancedPinButton.style.paddingRight = "4px";
+        const close = advancedCreateButton(titleRow, "×", function () {
+            advancedStopMenuDrag();
+            advancedMenuHoverGeneration += 1;
+            advancedMenuPinned = false;
+            advancedMenuVisible = false;
+            advancedMenu.visible = false;
+        }, "30px");
+        close.style.height = "25px";
+        close.style.marginRight = "0px";
+
+        const viewRow = advancedCreatePanel("Panel", advancedMenu, "");
+        viewRow.style.width = "100%";
+        viewRow.style.height = "30px";
+        viewRow.style.flowChildren = "right";
+        advancedCreateLabel(viewRow, "HUD", 12, "#b5b3ad").style.width = "40px";
+        const pov = advancedCreateButton(viewRow, "POV HUD", function () { advancedApplyPlaybackProfile("pov"); }, "112px");
+        const demo = advancedCreateButton(viewRow, "DEMO HUD", function () { advancedApplyPlaybackProfile("demo"); }, "112px");
+        advancedProfileButtons.pov = pov;
+        advancedProfileButtons.demo = demo;
+        pov.style.marginRight = "5px";
+        demo.style.marginRight = "5px";
+        advancedStyleButton(pov, advancedPovVisualsEnabled);
+        advancedStyleButton(demo, !advancedPovVisualsEnabled);
+        [pov, demo].forEach(function (button) { button.style.height = "25px"; });
+
+        const voiceRow = advancedCreatePanel("Panel", advancedMenu, "");
+        voiceRow.style.width = "100%";
+        voiceRow.style.height = "30px";
+        voiceRow.style.flowChildren = "right";
+        advancedCreateLabel(voiceRow, advancedCopy("语音", "Voice"), 12, "#b5b3ad").style.width = "40px";
+        [
+            ["team", advancedCopy("本队", "Team")],
+            ["all", advancedCopy("全部", "All")],
+            ["mute", advancedCopy("静音", "Mute")],
+            ["custom", advancedCopy("自选", "Custom")],
+        ].forEach(function (entry) {
+            const button = advancedCreateButton(voiceRow, entry[1], function () { advancedSetVoicePolicy(entry[0]); }, "66px");
+            button.style.height = "25px";
+            advancedVoiceButtons[entry[0]] = button;
+            advancedStyleButton(button, advancedVoicePolicy === entry[0]);
+        });
+
+        const optionRow = advancedCreatePanel("Panel", advancedMenu, "");
+        optionRow.style.width = "100%";
+        optionRow.style.height = "30px";
+        optionRow.style.flowChildren = "right";
+        advancedCreateLabel(optionRow, advancedCopy("显示", "View"), 12, "#b5b3ad").style.width = "40px";
+        [
+            ["xray", advancedCopy("X光", "X-ray"), "135px"],
+            ["radar", advancedCopy("雷达", "Radar"), "135px"],
+            ["overhead", advancedCopy("标识", "IDs"), "135px"],
+        ].forEach(function (entry) {
+            const button = advancedCreateButton(
+                optionRow,
+                "",
+                function () { advancedToggleQuickOption(entry[0]); },
+                entry[2],
+            );
+            button.style.height = "25px";
+            advancedOptionButtons[entry[0]] = button;
+            advancedOptionLabels[entry[0]] = entry[1];
+        });
+        advancedRefreshQuickOptionButtons();
+
+        const timeline = advancedCreatePanel("Panel", advancedMenu, "CS2InsightAdvancedTimeline");
+        timeline.style.width = "100%";
+        timeline.style.height = "108px";
+        timeline.style.marginTop = "6px";
+        timeline.style.flowChildren = "down";
+        timeline.style.backgroundColor = "#111110aa";
+        timeline.style.border = "1px solid #3b3a37";
+        timeline.style.borderRadius = "6px";
+        timeline.style.paddingLeft = "7px";
+        timeline.style.paddingRight = "7px";
+        advancedProgressLabel = advancedCreateLabel(timeline, "", 11, "#b5b3ad");
+        advancedProgressLabel.style.width = "100%";
+        advancedProgressLabel.style.height = "18px";
+        advancedProgressTrack = advancedCreatePanel("Panel", timeline, "CS2InsightAdvancedProgress");
+        advancedProgressTrack.style.width = "100%";
+        advancedProgressTrack.style.height = "12px";
+        advancedProgressTrack.style.backgroundColor = "#222221";
+        advancedProgressTrack.style.border = "1px solid #494844";
+        advancedProgressTrack.style.borderRadius = "6px";
+        advancedProgressTrack.style.overflow = "clip";
+        advancedProgressFill = advancedCreatePanel("Panel", advancedProgressTrack, "CS2InsightAdvancedProgressFill");
+        advancedProgressFill.hittest = false;
+        advancedProgressFill.hittestchildren = false;
+        advancedProgressFill.style.width = "0%";
+        advancedProgressFill.style.height = "100%";
+        advancedProgressFill.style.backgroundColor = "#e07f0a";
+        advancedProgressSlider = advancedCreatePanel(
+            "Slider",
+            advancedProgressTrack,
+            "CS2InsightAdvancedProgressSlider",
+        );
+        advancedProgressSlider.AddClass("HorizontalSlider");
+        try { advancedProgressSlider.SetAttributeString("direction", "horizontal"); } catch (errDirection) {}
+        try { advancedProgressSlider.direction = "horizontal"; } catch (errDirectionProperty) {}
+        advancedProgressSlider.style.width = "100%";
+        advancedProgressSlider.style.height = "100%";
+        advancedProgressSlider.style.zIndex = "3";
+        advancedProgressSlider.style.opacity = "0.01";
+        advancedProgressSlider.min = 0;
+        advancedProgressSlider.max = Math.max(1, advancedPlayback.totalTick);
+        $.RegisterEventHandler(
+            "SliderReleased",
+            advancedProgressSlider,
+            advancedSeekFromProgressSlider,
+        );
+        $.RegisterEventHandler(
+            "SliderValueChanged",
+            advancedProgressSlider,
+            function (panel, value) { return advancedPreviewProgressTick(value); },
+        );
+        const timelineControls = advancedCreatePanel("Panel", timeline, "");
+        timelineControls.style.width = "100%";
+        timelineControls.style.height = "31px";
+        timelineControls.style.marginTop = "7px";
+        timelineControls.style.flowChildren = "right";
+        const back = advancedCreateButton(timelineControls, "-15s", function () { advancedStepSeconds(-15); }, "52px");
+        advancedPlayPauseButton = advancedCreateButton(timelineControls, advancedCopy("暂停", "Pause"), advancedTogglePlayback, "56px");
+        const forward = advancedCreateButton(timelineControls, "+15s", function () { advancedStepSeconds(15); }, "52px");
+        const timelineSpacer = advancedCreatePanel("Panel", timelineControls, "");
+        timelineSpacer.style.width = "fill-parent-flow(1.0)";
+        const tickCaption = advancedCreateLabel(timelineControls, "tick", 11, "#7c7b74");
+        tickCaption.style.width = "32px";
+        advancedTickInput = advancedCreateButton(
+            timelineControls,
+            "tick",
+            function () {
+                advancedOpenNumericPad(
+                    advancedTickInput,
+                    advancedSubmitTick,
+                    advancedCopy("输入 tick", "Enter tick"),
+                );
+                return true;
+            },
+            "110px",
+        );
+        advancedTickInput.style.width = "110px";
+        advancedTickInput.style.height = "25px";
+        advancedTickInput.style.marginRight = "5px";
+        advancedTickInput.style.paddingLeft = "7px";
+        advancedTickInput.style.paddingRight = "7px";
+        advancedTickInput.style.backgroundColor = "#222221";
+        advancedTickInput.style.border = "1px solid #494844";
+        advancedTickInput.style.color = "#eeeeec";
+        advancedTickInput.style.fontSize = "12px";
+        advancedTickInput._insightNumericButton = true;
+        advancedTickInput._insightNumericValue = "";
+        advancedTickInput._insightPlaceholder = "tick";
+        advancedTickInput.maxchars = 10;
+        const jump = advancedCreateButton(timelineControls, advancedCopy("跳转", "Go"), advancedSubmitTick, "54px");
+        jump.style.marginRight = "0px";
+
+        const roundControls = advancedCreatePanel("Panel", timeline, "");
+        roundControls.style.width = "100%";
+        roundControls.style.height = "31px";
+        roundControls.style.marginTop = "3px";
+        roundControls.style.flowChildren = "right";
+        const roundCaption = advancedCreateLabel(roundControls, advancedCopy("回合", "Round"), 11, "#7c7b74");
+        roundCaption.style.width = "40px";
+        const previousRound = advancedCreateButton(roundControls, advancedCopy("上一回", "Prev"), function () { advancedStepRound(-1); }, "54px");
+        advancedRoundInput = advancedCreateButton(
+            roundControls,
+            advancedCopy("回合号", "No."),
+            function () {
+                advancedOpenNumericPad(
+                    advancedRoundInput,
+                    advancedSubmitRound,
+                    advancedCopy("输入回合", "Enter round"),
+                );
+                return true;
+            },
+            "64px",
+        );
+        advancedRoundInput.style.width = "64px";
+        advancedRoundInput.style.height = "25px";
+        advancedRoundInput.style.marginRight = "5px";
+        advancedRoundInput.style.paddingLeft = "7px";
+        advancedRoundInput.style.paddingRight = "7px";
+        advancedRoundInput.style.backgroundColor = "#222221";
+        advancedRoundInput.style.border = "1px solid #494844";
+        advancedRoundInput.style.color = "#eeeeec";
+        advancedRoundInput.style.fontSize = "12px";
+        advancedRoundInput._insightNumericButton = true;
+        advancedRoundInput._insightNumericValue = "";
+        advancedRoundInput._insightPlaceholder = advancedCopy("回合号", "No.");
+        advancedRoundInput.maxchars = 3;
+        const locateRound = advancedCreateButton(roundControls, advancedCopy("定位", "Go"), advancedSubmitRound, "48px");
+        const nextRound = advancedCreateButton(roundControls, advancedCopy("下一回", "Next"), function () { advancedStepRound(1); }, "54px");
+        advancedRoundLabel = advancedCreateLabel(roundControls, "", 11, "#e07f0a");
+        advancedRoundLabel.style.width = "fill-parent-flow(1.0)";
+        advancedRoundLabel.style.textAlign = "center";
+        [back, advancedPlayPauseButton, forward, jump, previousRound, locateRound, nextRound].forEach(function (button) {
+            button.style.height = "25px";
+        });
+
+        advancedPlayerListPanel = advancedCreatePanel("Panel", advancedMenu, "CS2InsightAdvancedPlayers");
+        advancedPlayerListPanel.style.width = "100%";
+        advancedPlayerListPanel.style.height = "154px";
+        advancedPlayerListPanel.style.marginTop = "8px";
+        advancedPlayerListPanel.style.flowChildren = "right";
+        advancedPlayerListPanel.style.overflow = "clip";
+        advancedPlayerListPanel.style.backgroundColor = "#11111088";
+        advancedPlayerListPanel.style.border = "1px solid #3b3a37";
+        advancedPlayerListPanel.style.borderRadius = "6px";
+
+        const filterRow = advancedCreatePanel("Panel", advancedMenu, "");
+        filterRow.style.width = "100%";
+        filterRow.style.height = "30px";
+        filterRow.style.marginTop = "8px";
+        filterRow.style.flowChildren = "right";
+        [
+            ["all", advancedCopy("全部事件", "All")],
+            ["kill", advancedCopy("击杀", "Kills")],
+            ["death", advancedCopy("死亡", "Deaths")],
+            ["utility", advancedCopy("道具", "Utility")],
+        ].forEach(function (entry) {
+            const button = advancedCreateButton(filterRow, entry[1], function () {
+                advancedEventFilter = entry[0];
+                advancedEventPage = 0;
+                advancedRenderMenu();
+            }, "62px");
+            button.style.height = "25px";
+            advancedFilterButtons[entry[0]] = button;
+            advancedStyleButton(button, advancedEventFilter === entry[0]);
+        });
+        const pagerPrevious = advancedCreateButton(filterRow, "‹", function () {
+            advancedEventPage = Math.max(0, advancedEventPage - 1);
+            advancedRenderEvents();
+        }, "28px");
+        pagerPrevious.style.height = "25px";
+        pagerPrevious.style.marginRight = "3px";
+        advancedEventPagerLabel = advancedCreateLabel(filterRow, "", 11, "#7c7b74");
+        advancedEventPagerLabel.style.width = "fill-parent-flow(1.0)";
+        advancedEventPagerLabel.style.textAlign = "center";
+        const pagerNext = advancedCreateButton(filterRow, "›", function () {
+            advancedEventPage += 1;
+            advancedRenderEvents();
+        }, "28px");
+        pagerNext.style.height = "25px";
+        pagerNext.style.marginRight = "0px";
+        advancedEventListPanel = advancedCreatePanel("Panel", advancedMenu, "CS2InsightAdvancedEvents");
+        advancedEventListPanel.style.width = "100%";
+        advancedEventListPanel.style.height = "140px";
+        advancedEventListPanel.style.marginTop = "4px";
+        advancedEventListPanel.style.flowChildren = "down";
+        advancedEventListPanel.style.overflow = "clip";
+        advancedEventListPanel.style.backgroundColor = "#11111088";
+        advancedEventListPanel.style.border = "1px solid #3b3a37";
+        advancedEventListPanel.style.borderRadius = "6px";
+        const footerSpacer = advancedCreatePanel("Panel", advancedMenu, "");
+        footerSpacer.style.width = "100%";
+        footerSpacer.style.height = "18px";
+        footerSpacer.hittest = false;
+        footerSpacer.hittestchildren = false;
+
+        advancedApplyQuickOptions();
+        advancedRenderMenu();
+        return advancedMenu;
+    }
+
+    function advancedMenuTick() {
+        if (!advancedPlayback) {
+            return;
+        }
+        advancedEnsureMenu();
+        if (advancedMenuPinned && advancedMenu && advancedMenu.IsValid() && !advancedMenuVisible) {
+            advancedShowMenu();
+        }
+        const state = controller.GetDemoControllerState();
+        advancedUpdateProgress(state);
+        advancedUpdateRoundLabel(state);
+        if (advancedMenuTickLabel && advancedMenuTickLabel.IsValid() && state) {
+            advancedMenuTickLabel.text = "tick " + Number(state.nTick || 0);
+        }
+        if (advancedMenuVisible && state) {
+            const tick = Number(state.nTick || 0);
+            const teamSignature = advancedPlayback.players.map(function (player) {
+                return player.xuid + ":" + (resolvePovTeam(player.xuid, tick) || player.team);
+            }).join("|");
+            if (teamSignature !== advancedPlayerTeamSignature) {
+                advancedRenderPlayers();
+            }
+            const current = currentPovXuid(state);
+            if (current && current !== advancedSelectedXuid && !advancedSpecOperation) {
+                advancedSelectedXuid = current;
+                advancedEventPage = 0;
+                advancedRenderMenu();
+            }
+        }
+        $.Schedule(0.1, advancedMenuTick);
+    }
+
     $.Schedule(0, ensureDemoVoicesUnmuted);
     $.Schedule(0, update);
     $.Schedule(0, updateInputHud);
@@ -4388,5 +6583,10 @@
     }
     if (radioTrack || killFeedbackTrack) {
         $.Schedule(0, updateRadioHud);
+    }
+    if (advancedPlayback) {
+        $.Schedule(0, advancedGuardNativeDemoUi);
+        $.Schedule(0, advancedGuardSpectatorHud);
+        $.Schedule(0, advancedMenuTick);
     }
 })();

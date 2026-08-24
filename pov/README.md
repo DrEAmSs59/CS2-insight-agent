@@ -30,13 +30,61 @@ fallback for stripped GOTV demos.
 The baked Panorama script also drives the rest of the POV HUD:
 
 - Top teamcounter: ally HP / C4 / defuser visible; enemy detail strip hidden
-- Bottom health bar: fill tinted from demo `player_color` / radar `colorSlot`
-  (not GOTV team cyan/yellow)
+- Bottom health bar: left to CS2's native runtime state in both recording and
+  Advanced playback; Insight does not apply a VPK/player-color wash to the fill
 - Native teammate overhead: name and equipment stay on the engine-positioned
   `CCSGO_HudReticle` player panel; Insight fills its native centered extra-info
   row with green economy only (no HP row)
 - Both Insight entry points (demo POV play and POV highlight recording) install
   the same generated `pov.vpk` via `PovHudManager`
+
+Insight's direct **Advanced playback** entry additionally fills payload index
+12 with the XUID roster and a delta-tick event index. Moving the free demo
+cursor into the 18px strip at the right screen edge opens a Panorama menu; the
+panel hides again after the pointer leaves it. It provides:
+
+- Compact CT/T player columns and XUID-verified player switching
+- A hot POV HUD / DEMO-compatible HUD switch that does not change the active
+  camera. Advanced playback intentionally omits the four POV-only compiled
+  health, radar, team-counter, and equipment styles, so DEMO HUD can return to
+  CS2's native resources without restarting; ordinary POV recording still uses
+  those styles from `pov_default.vpk`.
+- An Insight-owned tick-range Slider, wired like CS2's stock demo controller,
+  with play/pause and ±15-second controls plus mouse numeric pads for direct
+  tick/round entry. Every seek preserves whether playback was running or paused;
+  Advanced playback hides only CS2's native demo
+  controller context panel, leaving the rest of the HUD intact
+- Per-player kill, death, and utility-release events, including exact-tick
+  paused seek and a playing three-second pre-roll. Chinese clients use Chinese
+  event tags, grenade names, and “爆头” instead of K/D/U and HS abbreviations;
+  every row also displays the round resolved from the demo's parsed
+  `round_start` / `round_freeze_end` timeline.
+- Team, all-player, muted, and custom per-player voice audience policies
+- Compact on/off controls for X-ray, radar, and overhead IDs. Message ownership
+  follows the HUD profile automatically: POV HUD uses
+  Insight's reconstructed feed and DEMO HUD uses CS2's native feed and lifetime.
+- DEMO HUD restores CS2's native square, non-rotating spectator radar (including
+  its CT/T colors and 1-5 player numbers) instead of drawing Insight markers.
+- Event filters with five visible rows by default and pagination embedded in the
+  filter row so it cannot be clipped off the bottom of the menu
+- Previous/next-round controls, direct round-number input, and a live
+  “第 N/M 回合” label on the timeline
+- A pin switch that chooses between the default always-visible panel and
+  right-edge mouse reveal; all structural panel regions consume mouse clicks so
+  spectator MOUSE1 bindings cannot leak through the menu
+- A draggable title bar; Panorama's native drag ghost is used as a fallback when
+  the HUD script cannot query an absolute cursor position
+
+The generated Advanced-playback VPK contains only the demo-controller injection
+and the Insight HUD-alert integration. The compiled health/ammo, radar,
+teamcounter, and equipment-info CSS replacements remain isolated to the static
+`pov_default.vpk` used by ordinary POV recording.
+
+The menu payload is generated only for direct Advanced playback. Highlight
+recording continues to use the same POV assets and tracks but leaves index 12
+empty, so recording automation never receives an interactive edge menu. Unlike
+ordinary POV generation, Advanced playback fails the launch preparation if its
+event index cannot be built instead of silently falling back to the static VPK.
 
 While POV is active, Insight also forces `cl_hud_color 12` (teammate / player
 color) through `POV_CORE_FORCED_COMMANDS`, so stock HA accents follow slot
@@ -93,7 +141,7 @@ If a demo has no usable voice packets, the generated package keeps a
 roster-only payload so radar and kill-feedback tracks can still attach. If the
 dynamic build fails or the compact payload does not fit the fixed template
 slot, installation falls back to `pov_default.vpk` rather than installing a
-partial package.
+partial package. The direct Advanced playback exception is described above.
 
 Every POV kill plays the stock body/headshot attacker-feedback event and the
 stock `UI.KillCard.1` confirmation layer (`kill_doof_01.vsnd`) together. The

@@ -13,7 +13,7 @@ export default function DemoPlayOptionsModal({
   onClose,
   onRetry,
   onPlayNormal,
-  onPlayPov,
+  onPlayAdvanced,
 }) {
   const t = useT();
   const launching = !!launchingMode;
@@ -97,12 +97,12 @@ export default function DemoPlayOptionsModal({
               <button
                 type="button"
                 disabled={launching}
-                onClick={onPlayPov}
-                data-testid="demo-play-pov-option"
+                onClick={onPlayAdvanced}
+                data-testid="demo-play-advanced-option"
                 className="group flex min-h-[112px] flex-col items-stretch justify-start rounded-lg border border-amber-500/30 bg-cs2-amber-surface p-3.5 text-left transition-colors hover:border-amber-400/60 disabled:opacity-50"
               >
                 <div className="flex h-5 shrink-0 items-center gap-2">
-                  {launchingMode === "pov" ? <Loader2 className="h-4 w-4 animate-spin text-cs2-amber-on-surface" /> : <Eye className="h-4 w-4 text-cs2-amber-on-surface" />}
+                  {launchingMode === "advanced" ? <Loader2 className="h-4 w-4 animate-spin text-cs2-amber-on-surface" /> : <Eye className="h-4 w-4 text-cs2-amber-on-surface" />}
                   <span className="text-[13px] font-bold leading-5 text-cs2-amber-on-surface">{t("playDemo.povTitle")}</span>
                 </div>
                 <p className="mt-1.5 text-[11px] leading-[1.55] text-cs2-text-secondary">{t("playDemo.povDesc")}</p>

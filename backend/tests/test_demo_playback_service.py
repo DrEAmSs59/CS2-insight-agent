@@ -17,6 +17,7 @@ class _FakePovManager:
     def __init__(self, _config):
         self.installed = 0
         self.installed_demo_paths = []
+        self.advanced_playback_flags = []
         self.restored = 0
         self.needs_restore = False
         self.__class__.instances.append(self)
@@ -28,9 +29,10 @@ class _FakePovManager:
             "original_gameinfo_sha256": "a" * 64 if self.needs_restore else None,
         }
 
-    def install(self, *, demo_path=None):
+    def install(self, *, demo_path=None, advanced_playback_enabled=False):
         self.installed += 1
         self.installed_demo_paths.append(demo_path)
+        self.advanced_playback_flags.append(bool(advanced_playback_enabled))
         self.needs_restore = True
 
     def restore(self):
@@ -160,8 +162,11 @@ def test_pov_playback_installs_cfg_and_restores_after_exit(monkeypatch, tmp_path
     assert result["pov_hud_enabled"] is True
     assert manager.installed == 1
     assert manager.installed_demo_paths == [demo]
+    assert manager.advanced_playback_flags == [True]
     assert session is not None and session.copied_cfg is not None
     cfg_text = session.copied_cfg.read_text(encoding="ascii")
+    assert "sv_cheats 1\ndemoui false\n" in cfg_text
+    assert "demo_ui_mode" not in cfg_text
     assert "cl_draw_only_deathnotices false" in cfg_text
     assert "snd_disable_radar_visualize 0" in cfg_text
     assert "cl_drawhud_force_radar -1" in cfg_text

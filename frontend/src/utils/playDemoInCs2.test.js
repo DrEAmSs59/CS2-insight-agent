@@ -33,11 +33,11 @@ describe("playDemoInCs2", () => {
     });
   });
 
-  it("passes POV HUD session options", async () => {
+  it("passes advanced playback session options through the compatible API field", async () => {
     API.post.mockResolvedValue({ data: { ok: true } });
     await playDemoInCs2({
       id: 7,
-      povHud: { enabled: true, radar_mode: -1, teamcounter_numeric: true },
+      advancedPlayback: { enabled: true, radar_mode: -1, teamcounter_numeric: true },
     });
     expect(API.post).toHaveBeenCalledWith("/demos/7/play", {
       pov_hud: { enabled: true, radar_mode: -1, teamcounter_numeric: true },

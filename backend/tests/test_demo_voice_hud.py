@@ -13,6 +13,7 @@ from app.demo_voice_hud import (
     _build_player_sound_track,
     _kill_cash_award,
     _weapon_fire_sound_radius,
+    add_advanced_playback_track_to_payload,
     add_flash_blind_track_to_payload,
     add_input_tracks_to_payload,
     add_kill_feedback_track_to_payload,
@@ -79,6 +80,69 @@ def test_voice_payload_compacts_intervals_and_location_changes():
     ]
     assert input_tracks == []
     assert roster == [["111", 0, 2], ["222", 1, 3]]
+
+
+def test_advanced_playback_payload_indexes_players_kills_deaths_and_utility():
+    class _AdvancedParser(_FakeParser):
+        @staticmethod
+        def parse_event(name, **_kwargs):
+            if name == "round_announce_match_start":
+                return {"tick": [10]}
+            if name == "round_start":
+                return {"tick": [20, 200]}
+            if name == "player_death":
+                return {
+                    "tick": [100],
+                    "attacker_steamid": [111],
+                    "user_steamid": [222],
+                    "weapon": ["ak47"],
+                    "headshot": [True],
+                }
+            if name == "grenade_thrown":
+                return {
+                    "tick": [120],
+                    "user_steamid": [111],
+                    "weapon": ["smokegrenade"],
+                }
+            if name == "weapon_fire":
+                return {
+                    "tick": [110],
+                    "user_steamid": [111],
+                    "weapon": ["smokegrenade"],
+                }
+            return {"tick": []}
+
+        @staticmethod
+        def parse_header():
+            return {"playback_ticks": 6400, "playback_time": 100.0}
+
+    voice_payload, _voice_stats = build_voice_payload(
+        "match.dem",
+        parser_factory=_AdvancedParser,
+    )
+    payload, stats = add_advanced_playback_track_to_payload(
+        voice_payload,
+        "match.dem",
+        parser_factory=_AdvancedParser,
+    )
+    advanced = json.loads(payload)[12]
+
+    assert stats["advanced_playback_enabled"] == 1
+    assert stats["advanced_playback_players"] == 2
+    assert stats["advanced_playback_events"] == 2
+    assert stats["advanced_playback_rounds"] == 2
+    assert stats["advanced_playback_total_tick"] == 6400
+    assert advanced[0] == 1
+    assert advanced[1] == 64000
+    assert advanced[2] == [
+        ["111", "one", 2, 0],
+        ["222", "two", 3, 1],
+    ]
+    assert "ak47" in advanced[3]
+    assert "烟雾弹" in advanced[3]
+    assert len(advanced[4].split(",")) == 2
+    assert advanced[5] == 6400
+    assert advanced[6] == [[1, 20, 199], [2, 200, 6400]]
 
 
 def test_voice_payload_reuses_tick_roster_when_player_info_is_empty():
@@ -254,6 +318,7 @@ def test_voice_payload_injection_is_bounded_and_rebuilds_vpk():
 
 def test_checked_in_voice_template_contains_only_an_empty_payload():
     template_path = Path(__file__).resolve().parents[2] / "pov" / "pov_voice_template.vpk"
+    injection_source = template_path.with_name("voice_hud_injection.js").read_bytes()
     entries = read_inline_vpk(template_path.read_bytes())
     alert_script = entries["panorama/scripts/hud/hudalerts_insight.vjs_c"]
     alert_style = entries["panorama/styles/hud/hudalerts_insight.vcss_c"]
@@ -264,6 +329,10 @@ def test_checked_in_voice_template_contains_only_an_empty_payload():
     assert script[start:end].rstrip() == b"[[], [], [], []]"
     assert "panorama/layout/hud/hudalerts.vxml_c" in entries
     assert "panorama/styles/hud/hudalerts.vcss_c" not in entries
+    assert "panorama/styles/hud/hudhealthammocenter.vcss_c" not in entries
+    assert "panorama/styles/hud/hudradar.vcss_c" not in entries
+    assert "panorama/styles/hud/hudteamcounter-equipmentinfo.vcss_c" not in entries
+    assert "panorama/styles/hud/hudteamcounter.vcss_c" not in entries
     assert b"CSGOHudAlerts.CS2InsightSeekSuppress" in alert_style
     assert b"CSGOHudAlerts.CS2InsightPausedSeekSuppress" in alert_style
     assert b"PanoramaGameTimeJumpEvent" in alert_script
@@ -325,7 +394,7 @@ def test_checked_in_voice_template_contains_only_an_empty_payload():
     assert b"updatePovSoundRings(nativeRadar, tick, povXuid, povSample)" in script
     assert b"nativeSoundComplete describes the event source, not Panorama playback" in script
     assert b"setNativeSoundRingsVisible(nativeRadar, false)" in script
-    assert b"setNativeSoundRingsVisible(nativeRadar, true)" not in script
+    assert b"setNativeSoundRingsVisible(nativeRadar, true)" in script
     assert b"updatePovUnclipFx(nativeRadar, tick, povXuid, povSample, povTeam)" in script
     assert b"const MAX_POV_SOUND_RINGS = 10" in script
     assert b"fx.soundRings[soundIndex]" in script
@@ -443,6 +512,86 @@ def test_checked_in_voice_template_contains_only_an_empty_payload():
     assert b"event.attackerXuid === povXuid" in script
     assert b"#Player_Cash_Award_Killed_Enemy_Generic" in script
     assert b"function cashAwardEventHtml(event)" in script
+    assert b"CS2InsightAdvancedEdge" in script
+    assert b"CS2InsightAdvancedMenu" in script
+    assert b"function advancedAdvanceSpecOperation()" in script
+    assert b"function advancedTogglePlayerVoice(xuid)" in script
+    assert b"function advancedApplyPlaybackProfile(profile)" in script
+    profile_start = script.index(b"function advancedApplyPlaybackProfile(profile)")
+    profile_end = script.index(b"function advancedSetVoicePolicy(policy)", profile_start)
+    assert b"spec_mode" not in script[profile_start:profile_end]
+    assert b"CS2InsightAdvancedProgress" in script
+    assert b"CS2InsightAdvancedProgressSlider" in script
+    assert b"function advancedNumericEntryText(entry)" in script
+    assert b"function advancedSetNumericEntryText(entry, value)" in script
+    assert b'GameInterfaceAPI.ConsoleCommand("demoui false")' in script
+    assert b"demo_ui_mode" not in injection_source
+    assert b'DemoControllerHidden' not in injection_source
+    assert b'controller.visible = false' in script
+    assert b'"SliderReleased"' in script
+    assert b"advancedSeekFromProgressSlider" in script
+    assert b'advancedProgressFill.style.backgroundColor = "#e07f0a"' in script
+    assert b'advancedCopy("\xe8\xaf\xad\xe9\x9f\xb3\xe5\xbc\x80", "ON")' in script
+    assert b'advancedCopy("\xe8\xaf\xad\xe9\x9f\xb3\xe5\x85\xb3", "OFF")' in script
+    assert b'advancedMenu.style.height = "640px"' in script
+    assert b'advancedEventListPanel.style.height = "140px"' in script
+    assert b'footerSpacer.style.height = "18px"' in script
+    assert b'advancedMenuSelectionLabel' not in script
+    assert b'const pageSize = 5' in script
+    assert "advancedCopy(\"[击杀] \", \"[Kill] \")".encode() in script
+    assert "advancedCopy(\" · 爆头\", \" · Headshot\")".encode() in script
+    assert b"state.RoundIntervals" not in injection_source
+    assert b"Array.isArray(raw[6])" in script
+    assert b"function advancedStepRound(delta)" in script
+    assert b"function advancedSubmitRound()" in script
+    assert "第\" + roundNumber + \"回合".encode() in script
+    assert "advancedCopy(\"X光\", \"X-ray\")".encode() in script
+    assert b'advancedMenuPinned ? "PIN ON" : "PIN OFF"' in script
+    assert b'panel.SetPanelEvent("onactivate", function () { return true; })' in script
+    assert b"advancedFocusTextEntry(advancedTickInput)" not in script
+    assert b"let advancedMenuPinned = true" in script
+    assert b"function advancedOpenNumericPad(entry, submit, title)" in script
+    assert b"CS2InsightAdvancedNumericPad" in script
+    assert script.count(b"_insightNumericButton = true") == 2
+    assert b'advancedTickInput.SetAttributeString("textmode", "numeric")' not in script
+    assert b'advancedRoundInput.SetAttributeString("textmode", "numeric")' not in script
+    assert b"function advancedSliderTick(panel, value)" not in script
+    assert b"advancedProgressSlider.min = 0" in script
+    assert b"advancedProgressSlider.max = advancedPlayback.totalTick" in script
+    assert b"advancedProgressSlider.max = 1" not in script
+    assert b"advancedQuickOptions.messages" not in script
+    assert b'["messages", advancedCopy(' not in script
+    assert b"advancedQuickOptions.input" not in script
+    assert b'["input", advancedCopy(' not in script
+    assert b'"tv_nochat 0"' in script
+    assert b"advancedNativeMessagesRestored" in script
+    assert b'cl_drawhud_force_radar " + (advancedQuickOptions.radar ? 0 : -1)' in script
+    assert script.count(b'"mp_forcecamera 0"') >= 2
+    assert b'"cl_radar_square_when_spectating 1"' in script
+    assert b'"cl_radar_rotate false"' in script
+    assert b'"cl_radar_square_always true"' in script
+    assert b'"cl_radar_always_centered 0"' in script
+    assert b"restoreNativeRadarForAdvancedSpectator();" in script
+    assert b'side.RemoveClass("CS2InsightPovEnemy")' in script
+    assert b"spectatorAllPlayers" in script
+    assert b'findHudTraverse("HudHealthAmmoCenter")' in script
+    assert b"fixPovHealthHudColor(povXuid, state);" not in script
+    assert b"Leave the native health fill untouched in both recording POV" in script
+    assert b'"HudSpecplayerParentContainer"' in script
+    assert b'"cl_spec_stats 1"' in script
+    assert b'"cl_teamid_overhead_maxdist 9999"' in script
+    assert b"_insightOriginalOverheadText" in script
+    assert b"_insightOriginalNormalHealthClass" in script
+    assert b"advancedNativeOverheadRestored" in script
+    assert b'panel.visible = false' in script
+    assert b'"RI_BombDefuserPackage"' in script
+    assert b"resumeAfterSeek" in script
+    assert b"CS2InsightAdvancedDragHandle" in script
+    assert b'$.RegisterEventHandler("DragStart", handle' in script
+    assert b'$.RegisterEventHandler("DragEnd", handle' in script
+    assert b'renderTeam(3, "CT", "#5ebaf0")' in script
+    assert b'renderTeam(2, "T", "#e7bd53")' in script
+    assert b'GameInterfaceAPI.ConsoleCommand("demo_gototick " + initialSeekTick)' in script
     assert b'return color ? radioHtmlSpan(color, "\xe2\x97\x8f ") : ""' in script
     assert b'createClassedPanel("Label", notice, "VoiceMarker", "VoiceText")' in script
     assert b'marker.text = markerColor ? "\xe2\x97\x8f " : ""' in script
@@ -472,6 +621,10 @@ def test_static_pov_package_resets_only_stale_match_alert_toasts():
     alert_style = entries["panorama/styles/hud/hudalerts_insight.vcss_c"]
     assert "panorama/layout/hud/hudalerts.vxml_c" in entries
     assert "panorama/styles/hud/hudalerts.vcss_c" not in entries
+    assert "panorama/styles/hud/hudhealthammocenter.vcss_c" in entries
+    assert "panorama/styles/hud/hudradar.vcss_c" in entries
+    assert "panorama/styles/hud/hudteamcounter-equipmentinfo.vcss_c" in entries
+    assert "panorama/styles/hud/hudteamcounter.vcss_c" in entries
     assert b"CSGOHudAlerts.CS2InsightSeekSuppress" in alert_style
     assert b"CSGOHudAlerts.CS2InsightPausedSeekSuppress" in alert_style
     assert b"PanoramaGameTimeJumpEvent" in alert_script
@@ -1478,8 +1631,23 @@ def test_pov_manager_installs_generated_voice_package(monkeypatch, tmp_path: Pat
     )
     calls = []
 
-    def fake_build(demo_path, template_path, *, input_track_report=None, voice_enabled=True):
-        calls.append((Path(demo_path), Path(template_path), input_track_report, voice_enabled))
+    def fake_build(
+        demo_path,
+        template_path,
+        *,
+        input_track_report=None,
+        voice_enabled=True,
+        advanced_playback_enabled=False,
+    ):
+        calls.append(
+            (
+                Path(demo_path),
+                Path(template_path),
+                input_track_report,
+                voice_enabled,
+                advanced_playback_enabled,
+            )
+        )
         return built
 
     monkeypatch.setattr(pov_hud_manager, "build_demo_voice_hud_vpk", fake_build)
@@ -1489,7 +1657,7 @@ def test_pov_manager_installs_generated_voice_package(monkeypatch, tmp_path: Pat
     result = manager.install(demo_path=demo)
 
     assert result is built
-    assert calls == [(demo, template, None, True)]
+    assert calls == [(demo, template, None, True, False)]
     assert (csgo / "pov.vpk").read_bytes() == b"generated"
     manifest = json.loads(manager.get_manifest_path().read_text(encoding="utf-8"))
     assert manifest["demo_voice_hud_generated"] is True

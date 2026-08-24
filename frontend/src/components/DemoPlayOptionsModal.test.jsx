@@ -9,27 +9,27 @@ describe("DemoPlayOptionsModal", () => {
     useLocaleStore.getState().hydrate("zh");
   });
 
-  it("offers normal and POV playback after preflight", () => {
+  it("offers normal and advanced playback after preflight", () => {
     const onPlayNormal = vi.fn();
-    const onPlayPov = vi.fn();
+    const onPlayAdvanced = vi.fn();
     render(
       <DemoPlayOptionsModal
         open
         demoLabel="match.dem"
         onPlayNormal={onPlayNormal}
-        onPlayPov={onPlayPov}
+        onPlayAdvanced={onPlayAdvanced}
         onClose={() => {}}
       />,
     );
 
     fireEvent.click(screen.getByRole("button", { name: /普通播放/ }));
-    fireEvent.click(screen.getByRole("button", { name: /实验功能：POV HUD/ }));
+    fireEvent.click(screen.getByRole("button", { name: /高级播放/ }));
     expect(onPlayNormal).toHaveBeenCalledTimes(1);
-    expect(onPlayPov).toHaveBeenCalledTimes(1);
+    expect(onPlayAdvanced).toHaveBeenCalledTimes(1);
     expect(screen.getByTestId("demo-play-normal-option").className).toContain("justify-start");
-    expect(screen.getByTestId("demo-play-pov-option").className).toContain("justify-start");
+    expect(screen.getByTestId("demo-play-advanced-option").className).toContain("justify-start");
     expect(screen.getByTestId("demo-play-normal-option").className).toContain("min-h-[112px]");
-    expect(screen.getByTestId("demo-play-pov-option").className).toContain("min-h-[112px]");
+    expect(screen.getByTestId("demo-play-advanced-option").className).toContain("min-h-[112px]");
   });
 
   it("blocks playback while CS2 is running and allows a recheck", () => {

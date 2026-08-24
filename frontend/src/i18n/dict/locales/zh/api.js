@@ -13,7 +13,7 @@ export default {
   "api.err.demoPlaybackBusy": "已有 Demo 播放会话正在启动、运行或清理，请先退出 CS2 后重试。",
   "api.err.demoPlaybackCs2PathMissing": "未配置有效的 CS2 路径，请先在设置中选择 cs2.exe。",
   "api.err.demoPlaybackDemoNotFound": "Demo 文件不存在：{path}",
-  "api.err.demoPlaybackPovFailed": "POV HUD 准备失败：{err}",
+  "api.err.demoPlaybackPovFailed": "高级播放准备失败：{err}",
   "api.err.demoPlaybackLaunchFailed": "启动 CS2 播放 Demo 失败：{err}",
   "api.err.demoFileNotFound": "Demo 文件已经移动、删除或无法访问，请重新选择该文件。",
   "api.err.demoInvalidExtension": "所选文件不是 .dem 文件。请选择后缀为 .dem 的 CS2 Demo。",

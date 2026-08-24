@@ -102,8 +102,8 @@ export function useDemoPlaybackDialog() {
       const launchResult = await playDemoInCs2({
         id: target.id,
         path: target.path,
-        povHud: {
-          enabled: mode === "pov",
+        advancedPlayback: {
+          enabled: mode === "advanced",
           radar_mode: 0,
           teamcounter_numeric: false,
         },
@@ -111,7 +111,7 @@ export function useDemoPlaybackDialog() {
       setOpen(false);
       setTarget(null);
       setBlockedReason("");
-      if (mode === "pov" && launchResult?.session_id) {
+      if (mode === "advanced" && launchResult?.session_id) {
         setRestorePollError("");
         setRestoreMonitor({
           sessionId: String(launchResult.session_id),
@@ -164,7 +164,7 @@ export function useDemoPlaybackDialog() {
         onClose={close}
         onRetry={runPreflight}
         onPlayNormal={() => void launch("normal")}
-        onPlayPov={() => void launch("pov")}
+        onPlayAdvanced={() => void launch("advanced")}
       />
       <PlayDemoToast />
       <DemoPlaybackRestoreModal
