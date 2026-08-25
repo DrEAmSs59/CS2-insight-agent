@@ -372,4 +372,10 @@ export default {
   "weaponKills.clipTitle": "{weapon} kill compilation",
   "weaponKills.queueSummary": "{weapon} · {n} {n, plural, one=kill, other=kills}",
   "weaponKills.contextCount": "{n} {n, plural, one=kill, other=kills}",
+  "analysis.radarGenerateAll": "Auto-record radar charts for all players",
+  "analysis.radarGenerateAllTitle": "Generate CS Data Chart radar cards for every player of this match for the montage workbench",
+  "analysis.radarNoPlayers": "No player data in this match; cannot generate radar charts.",
+  "analysis.radarGenerated": "Generated radar cards for {n} players. Open the CS Data Chart column in the montage workbench to insert them before clips.",
+  "analysis.radarGenerateFail": "Radar generation failed. Please retry.",
+  "analysis.radarGoMontage": "Open Montage Workbench",
 };
