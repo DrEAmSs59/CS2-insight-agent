@@ -165,7 +165,8 @@ def test_pov_playback_installs_cfg_and_restores_after_exit(monkeypatch, tmp_path
     assert manager.advanced_playback_flags == [True]
     assert session is not None and session.copied_cfg is not None
     cfg_text = session.copied_cfg.read_text(encoding="ascii")
-    assert "sv_cheats 1\ndemoui false\n" in cfg_text
+    assert "demoui false" not in cfg_text
+    assert cfg_text.rstrip().endswith(f'playdemo "{session.copied_demo.stem}.dem"\ndemoui true')
     assert "demo_ui_mode" not in cfg_text
     assert "cl_draw_only_deathnotices false" in cfg_text
     assert "snd_disable_radar_visualize 0" in cfg_text

@@ -19,6 +19,8 @@ import struct
 from typing import Any, Callable, Iterable, Mapping
 import zlib
 
+from .pov_constants import DEFAULT_POV_VOICE_MODE, normalize_pov_voice_mode
+
 # Radar overview edge mask for CT dropped-C4 LOS (grid^2 bits, hex-packed).
 RADAR_OCCLUSION_GRID = 96
 
@@ -43,12 +45,14 @@ class DemoVoiceHudError(RuntimeError):
 # Index 8 is the custom radar track; index 9 is POV kill/HS feedback audio;
 # index 10 is POV flash-blind intervals (HUD wash + tinnitus cues); index 11
 # is the fully reconstructed lower-left feed (radio, chat, server notices);
-# index 12 is the interactive advanced-playback roster/event index.
+# index 12 is the interactive advanced-playback roster/event index; index 13
+# stores the fixed recording voice audience (advanced playback has live controls).
 RADAR_PAYLOAD_INDEX = 8
 KILL_FEEDBACK_PAYLOAD_INDEX = 9
 FLASH_BLIND_PAYLOAD_INDEX = 10
 RADIO_PAYLOAD_INDEX = 11
 ADVANCED_PLAYBACK_PAYLOAD_INDEX = 12
+VOICE_MODE_PAYLOAD_INDEX = 13
 RADAR_SAMPLE_HZ = 8
 _GROUND_ENTITY_FIELD = "CCSPlayerPawn.m_hGroundEntity"
 _LAST_JUMP_TICK_FIELD = (
@@ -349,7 +353,7 @@ def _normalize_map_name(raw: Any) -> str:
 
 def _pad_payload_slots(
     packed: list[Any],
-    length: int = ADVANCED_PLAYBACK_PAYLOAD_INDEX + 1,
+    length: int = VOICE_MODE_PAYLOAD_INDEX + 1,
 ) -> list[Any]:
     if not isinstance(packed, list):
         raise DemoVoiceHudError("voice HUD payload has an unsupported shape")
@@ -3170,13 +3174,13 @@ def add_radio_track_to_payload(
 
 _ADVANCED_EVENT_KILL = 0
 _ADVANCED_EVENT_UTILITY = 1
-_ADVANCED_UTILITY_LABELS = {
-    0: "烟雾弹",
-    1: "闪光弹",
-    2: "高爆手雷",
-    3: "燃烧瓶",
-    4: "燃烧弹",
-    5: "诱饵弹",
+_ADVANCED_UTILITY_STEMS = {
+    0: "smokegrenade",
+    1: "flashbang",
+    2: "hegrenade",
+    3: "molotov",
+    4: "incgrenade",
+    5: "decoy",
 }
 
 
@@ -3387,6 +3391,11 @@ def add_advanced_playback_track_to_payload(
         victims = _row_values(deaths, "user_steamid")
         weapons = _row_values(deaths, "weapon")
         headshots = _row_values(deaths, "headshot")
+        through_smokes = _row_values(deaths, "thrusmoke", "through_smoke")
+        penetrated = _row_values(deaths, "penetrated")
+        noscopes = _row_values(deaths, "noscope")
+        attacker_blinds = _row_values(deaths, "attackerblind", "attacker_blind")
+        assisted_flashes = _row_values(deaths, "assistedflash", "assisted_flash")
         count = min(len(ticks), len(victims))
         for index in range(count):
             tick = _as_int(ticks[index])
@@ -3397,7 +3406,19 @@ def add_advanced_playback_track_to_payload(
             if tick is None or tick < 0 or (actor_index < 0 and victim_index < 0):
                 continue
             weapon = weapons[index] if index < len(weapons) else ""
-            flags = 1 if index < len(headshots) and bool(headshots[index]) else 0
+            flags = (
+                (1 if index < len(headshots) and bool(headshots[index]) else 0)
+                | (2 if index < len(through_smokes) and bool(through_smokes[index]) else 0)
+                | (
+                    4
+                    if index < len(penetrated)
+                    and (_as_int(penetrated[index]) or 0) > 0
+                    else 0
+                )
+                | (8 if index < len(noscopes) and bool(noscopes[index]) else 0)
+                | (16 if index < len(attacker_blinds) and bool(attacker_blinds[index]) else 0)
+                | (32 if index < len(assisted_flashes) and bool(assisted_flashes[index]) else 0)
+            )
             events.append(
                 (
                     tick,
@@ -3442,7 +3463,7 @@ def add_advanced_playback_track_to_payload(
                 _ADVANCED_EVENT_UTILITY,
                 actor_index,
                 -1,
-                detail_index(_ADVANCED_UTILITY_LABELS.get(event.kind, "道具")),
+                detail_index(_ADVANCED_UTILITY_STEMS.get(event.kind, "utility")),
                 1 if event.native else 0,
             )
         )
@@ -3514,6 +3535,7 @@ def build_demo_voice_hud_vpk(
     parser_factory: Callable[[str], Any] | None = None,
     input_track_report: Mapping[str, Any] | None = None,
     voice_enabled: bool = True,
+    voice_mode: str = DEFAULT_POV_VOICE_MODE,
     advanced_playback_enabled: bool = False,
 ) -> DemoVoiceHudBuild:
     payload, stats = build_voice_payload(demo_path, parser_factory=parser_factory)
@@ -3651,11 +3673,24 @@ def build_demo_voice_hud_vpk(
             }
             raise
 
-    if not voice_enabled:
+    resolved_voice_mode = normalize_pov_voice_mode(
+        voice_mode,
+        legacy_voice_disabled=not voice_enabled,
+    )
+    packed = _pad_payload_slots(json.loads(payload.decode("ascii")))
+    packed[VOICE_MODE_PAYLOAD_INDEX] = resolved_voice_mode
+    payload = json.dumps(
+        packed,
+        ensure_ascii=True,
+        separators=(",", ":"),
+    ).encode("ascii")
+    stats["payload_bytes"] = len(payload)
+
+    if resolved_voice_mode == "mute":
         # Keep roster, input, radar, kill-feedback, flash, and radio tracks intact.
         # Only remove the precomputed speaking schedule that drives the custom
         # lower-left notice; native voice volume is muted by the warmup policy.
-        packed = json.loads(payload.decode("ascii"))
+        packed = _pad_payload_slots(json.loads(payload.decode("ascii")))
         packed[0] = [""]
         packed[1] = []
         payload = json.dumps(

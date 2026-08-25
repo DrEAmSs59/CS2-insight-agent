@@ -37,11 +37,32 @@ describe("RecordWarmupModal skybox override", () => {
     expect(screen.queryByText(/首片段预热/)).toBeNull();
     expect(screen.getByText(/此处修改仅作用于本次录制/)).toBeTruthy();
     expect(selector.value).toBe("xuejing");
+    expect(screen.getByTestId("experimental-feature-card").contains(selector)).toBe(true);
     fireEvent.change(selector, { target: { value: "cartoon3" } });
     fireEvent.click(screen.getByRole("button", { name: "开始录制" }));
 
     expect(onConfirm).toHaveBeenCalledWith(
-      expect.objectContaining({ recording_skybox: "cartoon3" }),
+      expect.objectContaining({ recording_skybox: "cartoon3", pov_voice_mode: "team" }),
+    );
+  });
+
+  it("submits the selected POV voice audience for this recording", () => {
+    const onConfirm = vi.fn();
+    render(
+      <RecordWarmupModal
+        open
+        onClose={() => {}}
+        onConfirm={onConfirm}
+        experimentalPovEnabled
+      />,
+    );
+
+    const voiceSelect = screen.getByRole("combobox", { name: "语音控制" });
+    fireEvent.change(voiceSelect, { target: { value: "enemy" } });
+    fireEvent.click(screen.getByRole("button", { name: "开始录制" }));
+
+    expect(onConfirm).toHaveBeenCalledWith(
+      expect.objectContaining({ experimental_pov_enabled: true, pov_voice_mode: "enemy" }),
     );
   });
 });

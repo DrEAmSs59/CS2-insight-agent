@@ -61,4 +61,53 @@ describe("recording preset share JSON", () => {
     const file = buildRecordingPresetFile({ ...preset, recording_skybox: "other" });
     expect(() => parseRecordingPresetFile(file, RECORD_WARMUP_DEFAULT_OPTIONS)).toThrow();
   });
+
+  test("round trips the POV voice audience", () => {
+    const next = {
+      ...preset,
+      default_record_warmup: {
+        ...preset.default_record_warmup,
+        pov_voice_mode: "enemy",
+      },
+    };
+    expect(parseRecordingPresetFile(buildRecordingPresetFile(next), RECORD_WARMUP_DEFAULT_OPTIONS))
+      .toEqual(next);
+  });
+
+  test("migrates the legacy disabled voice switch", () => {
+    const { pov_voice_mode: _removed, ...legacyWarmup } = preset.default_record_warmup;
+    const next = {
+      ...preset,
+      default_record_warmup: {
+        ...legacyWarmup,
+        pov_voice_disabled: true,
+      },
+    };
+    expect(parseRecordingPresetFile(buildRecordingPresetFile(next), RECORD_WARMUP_DEFAULT_OPTIONS)
+      .default_record_warmup.pov_voice_mode).toBe("mute");
+  });
+
+  test("rejects an unknown POV voice audience", () => {
+    const next = {
+      ...preset,
+      default_record_warmup: {
+        ...preset.default_record_warmup,
+        pov_voice_mode: "spectators",
+      },
+    };
+    expect(() => parseRecordingPresetFile(buildRecordingPresetFile(next), RECORD_WARMUP_DEFAULT_OPTIONS))
+      .toThrow();
+  });
+
+  test("normalizes legacy hidden-radar presets to the fixed visible radar", () => {
+    const next = {
+      ...preset,
+      default_record_warmup: {
+        ...preset.default_record_warmup,
+        pov_radar_mode: -1,
+      },
+    };
+    expect(parseRecordingPresetFile(buildRecordingPresetFile(next), RECORD_WARMUP_DEFAULT_OPTIONS)
+      .default_record_warmup.pov_radar_mode).toBe(0);
+  });
 });

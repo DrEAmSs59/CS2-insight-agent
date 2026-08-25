@@ -1,4 +1,5 @@
 import { normalizeRecordingSkyboxId } from "./recordingSkybox.js";
+import { normalizePovVoiceMode } from "./povVoiceMode.js";
 
 function gcdInt(a, b) {
   let x = Math.abs(a);
@@ -120,9 +121,9 @@ export function warmupUiOptsToPersisted(opts) {
     aspect_ratio: opts.aspect_ratio != null ? String(opts.aspect_ratio) : "",
     resolution_width: rw != null && rw !== "" ? String(rw) : "",
     resolution_height: rh != null && rh !== "" ? String(rh) : "",
-    pov_radar_mode: Number(opts.pov_radar_mode) === 0 ? 0 : -1,
+    pov_radar_mode: 0,
     pov_teamcounter_numeric: !!opts.pov_teamcounter_numeric,
-    pov_voice_disabled: !!opts.pov_voice_disabled,
+    pov_voice_mode: normalizePovVoiceMode(opts.pov_voice_mode, opts.pov_voice_disabled === true),
   };
 }
 
@@ -159,9 +160,12 @@ export function warmupApiPayloadToPersisted(warmup) {
     aspect_ratio: warmup.aspect_ratio != null ? String(warmup.aspect_ratio) : "",
     resolution_width: rw != null && rw !== "" ? String(rw) : "",
     resolution_height: rh != null && rh !== "" ? String(rh) : "",
-    pov_radar_mode: Number(warmup.pov_radar_mode) === 0 ? 0 : -1,
+    pov_radar_mode: 0,
     pov_teamcounter_numeric: !!warmup.pov_teamcounter_numeric,
-    pov_voice_disabled: !!warmup.pov_voice_disabled,
+    pov_voice_mode: normalizePovVoiceMode(
+      warmup.pov_voice_mode,
+      warmup.pov_voice_disabled === true,
+    ),
   };
 }
 

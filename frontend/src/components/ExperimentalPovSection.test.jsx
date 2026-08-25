@@ -28,7 +28,7 @@ describe("ExperimentalPovSection POV recovery", () => {
     useLocaleStore.getState().hydrate("zh");
   });
 
-  it("shows voice disable unchecked above the radar control", () => {
+  it("offers four synchronized voice audiences and removes the radar control", () => {
     API.get.mockReturnValue(new Promise(() => {}));
     const onVoiceChange = vi.fn();
     render(
@@ -36,25 +36,29 @@ describe("ExperimentalPovSection POV recovery", () => {
         visible
         experimentalPovEnabled
         onExperimentalPovChange={() => {}}
-        povRadarMode={0}
-        onPovRadarModeChange={() => {}}
         povTeamcounterNumeric={false}
         onPovTeamcounterNumericChange={() => {}}
-        povVoiceDisabled={false}
-        onPovVoiceDisabledChange={onVoiceChange}
+        povVoiceMode="team"
+        onPovVoiceModeChange={onVoiceChange}
       />,
     );
 
-    const voiceToggle = screen.getByRole("checkbox", { name: /禁用玩家语音/ });
-    const voiceRow = voiceToggle.closest("label");
-    expect(voiceToggle.checked).toBe(false);
-    expect(voiceRow?.nextElementSibling?.textContent).toContain("雷达");
+    const voiceSelect = screen.getByRole("combobox", { name: "语音控制" });
+    expect(voiceSelect.value).toBe("team");
+    expect(Array.from(voiceSelect.options).map(({ value }) => value)).toEqual([
+      "all",
+      "team",
+      "enemy",
+      "mute",
+    ]);
+    expect(screen.queryByRole("combobox", { name: "雷达" })).toBeNull();
+    expect(screen.getByRole("checkbox", { name: /局内玩家显示/ })).toBeTruthy();
 
-    fireEvent.click(voiceToggle);
-    expect(onVoiceChange).toHaveBeenCalledWith(true);
+    fireEvent.change(voiceSelect, { target: { value: "enemy" } });
+    expect(onVoiceChange).toHaveBeenCalledWith("enemy");
   });
 
-  it("renders the skybox as a separate card beside the POV feature", () => {
+  it("renders POV and skybox inside one experimental feature card", () => {
     API.get.mockReturnValue(new Promise(() => {}));
     const onSkyboxChange = vi.fn();
     render(
@@ -68,14 +72,42 @@ describe("ExperimentalPovSection POV recovery", () => {
     );
 
     const selector = screen.getByRole("combobox", { name: "录制天空盒" });
+    const featureCard = screen.getByTestId("experimental-feature-card");
     const povCard = screen.getByTestId("experimental-pov-card");
     const skyboxCard = screen.getByTestId("experimental-skybox-card");
     expect(selector.value).toBe("xuejing");
     expect(povCard.contains(selector)).toBe(false);
     expect(skyboxCard.contains(selector)).toBe(true);
-    expect(skyboxCard.parentElement).toBe(povCard.parentElement);
+    expect(featureCard.contains(povCard)).toBe(true);
+    expect(featureCard.contains(skyboxCard)).toBe(true);
+    expect(povCard.className).not.toContain("bg-");
+    expect(skyboxCard.className).not.toContain("bg-");
     fireEvent.change(selector, { target: { value: "yinhezhanjian" } });
     expect(onSkyboxChange).toHaveBeenCalledWith("yinhezhanjian");
+  });
+
+  it("does not add a second experimental background when embedded in the preset", () => {
+    API.get.mockReturnValue(new Promise(() => {}));
+    render(
+      <ExperimentalPovSection
+        visible
+        experimentalPovEnabled
+        onExperimentalPovChange={() => {}}
+        povVoiceMode="all"
+        onPovVoiceModeChange={() => {}}
+        onPovTeamcounterNumericChange={() => {}}
+        recordingSkybox="default"
+        onRecordingSkyboxChange={() => {}}
+        omitEyebrow
+        embedded
+      />,
+    );
+
+    const featureCard = screen.getByTestId("experimental-feature-card");
+    expect(featureCard.className).not.toContain("bg-");
+    expect(featureCard.className).not.toContain("border-");
+    expect(featureCard.contains(screen.getByRole("combobox", { name: "语音控制" }))).toBe(true);
+    expect(featureCard.contains(screen.getByRole("combobox", { name: "录制天空盒" }))).toBe(true);
   });
 
   it("can omit the POV disclaimer in the recording dialog", () => {

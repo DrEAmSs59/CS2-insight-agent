@@ -16,6 +16,7 @@ import {
   buildRecordingQueueRequestsFromQueue,
 } from "../../utils/recordingBatch";
 import { splitRecordWarmupConfirmPayload } from "../../utils/warmupDefaults";
+import { normalizePovVoiceMode } from "../../utils/povVoiceMode.js";
 
 /** Owns one recording session from preflight through recovery and result reporting. */
 export function useRecordingSessionController({
@@ -167,9 +168,9 @@ export function useRecordingSessionController({
       const povHud = session.experimental_pov_enabled
         ? {
             enabled: true,
-            radar_mode: Number(warmupForApi?.pov_radar_mode ?? 0),
+            radar_mode: 0,
             teamcounter_numeric: Boolean(warmupForApi?.pov_teamcounter_numeric),
-            voice_disabled: Boolean(warmupForApi?.pov_voice_disabled),
+            voice_mode: normalizePovVoiceMode(warmupForApi?.pov_voice_mode),
           }
         : undefined;
       const body = {

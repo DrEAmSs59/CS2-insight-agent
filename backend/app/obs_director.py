@@ -58,7 +58,11 @@ from .gsi_ready import (
     reset_gsi_ready,
     wait_gsi_payload_after,
 )
-from .pov_constants import POV_CORE_FORCED_COMMANDS, pov_tail_commands
+from .pov_constants import (
+    POV_CORE_FORCED_COMMANDS,
+    normalize_pov_voice_mode,
+    pov_tail_commands,
+)
 from .win_cs2_console import ensure_cs2_foreground, find_cs2_hwnd, inject_console_sequence, send_cs2_space_taps
 
 logger = logging.getLogger(__name__)
@@ -1824,7 +1828,9 @@ class RecordingWarmupExtras:
     # 实验性 POV：与 pov_tail_commands 对应（仅 pov_enabled 时注入末尾）
     pov_radar_mode: int = 0  # cl_drawhud_force_radar：-1 隐藏，0 显示
     pov_teamcounter_numeric: bool = False  # cl_teamcounter_playercount_instead_of_avatars
-    # Mute native demo voice and omit the custom lower-left speaking schedule.
+    # Fixed recording voice audience; None lets old pov_voice_disabled migrate.
+    pov_voice_mode: Optional[str] = None
+    # Legacy compatibility for saved presets/older clients.
     pov_voice_disabled: bool = False
     # RecordingV3 queue: enable POV HUD lifecycle (install vpk + patch gameinfo.gi)
     pov_hud_enabled: bool = False
@@ -1994,17 +2000,22 @@ def _apply_recording_voice_policy(
     lines,
     *,
     pov_enabled: bool,
+    pov_voice_mode: Optional[str] = None,
     pov_voice_disabled: bool = False,
 ) -> list[str]:
     """Apply the sole recording voice policy after removing stale client settings.
 
     POV normally owns native voice enablement and audience masks through its
-    forced commands and Panorama script. Without POV, or when the POV voice
-    switch is disabled, recording zeros global voice volume while intentionally
-    leaving ``voice_modenable`` untouched.
+    forced commands and Panorama script. Without POV, or when its audience is
+    ``mute``, recording zeros global voice volume while intentionally leaving
+    ``voice_modenable`` untouched.
     """
     clean = _without_voice_console_lines(lines)
-    if pov_enabled and not pov_voice_disabled:
+    voice_mode = normalize_pov_voice_mode(
+        pov_voice_mode,
+        legacy_voice_disabled=pov_voice_disabled,
+    )
+    if pov_enabled and voice_mode != "mute":
         return clean
     return [*clean, "snd_voipvolume 0"]
 
@@ -3479,6 +3490,7 @@ class OBSDirector:
             return _apply_recording_voice_policy(
                 lines,
                 pov_enabled=pov_enabled,
+                pov_voice_mode=getattr(w, "pov_voice_mode", None),
                 pov_voice_disabled=bool(getattr(w, "pov_voice_disabled", False)),
             )
         lines: list[str] = []
@@ -3535,6 +3547,7 @@ class OBSDirector:
         return _apply_recording_voice_policy(
             lines,
             pov_enabled=pov_enabled,
+            pov_voice_mode=getattr(w, "pov_voice_mode", None),
             pov_voice_disabled=bool(getattr(w, "pov_voice_disabled", False)),
         )
 
@@ -3584,6 +3597,12 @@ class OBSDirector:
 
         pov_mgr_v3: "Optional[PovHudManager]" = None
         pov_on_v3 = bool(warmup and getattr(warmup, "pov_hud_enabled", False))
+        pov_voice_mode_v3 = normalize_pov_voice_mode(
+            getattr(warmup, "pov_voice_mode", None) if warmup else None,
+            legacy_voice_disabled=bool(
+                warmup and getattr(warmup, "pov_voice_disabled", False)
+            ),
+        )
         skybox_id_v3 = normalize_skybox_id(
             getattr(warmup, "skybox_id", DEFAULT_SKYBOX_ID) if warmup else DEFAULT_SKYBOX_ID
         )
@@ -3786,25 +3805,19 @@ class OBSDirector:
                             demo_map_name,
                         )
                         pov_install_attempted = True
-                        if pov_on_v3 and bool(getattr(warmup, "pov_voice_disabled", False)):
+                        if pov_on_v3:
                             if skybox_on_v3:
                                 pov_mgr_v3.install(
                                     map_name=demo_map_name,
                                     demo_path=demo_abs,
-                                    voice_enabled=False,
+                                    voice_mode=pov_voice_mode_v3,
                                     skybox_id=skybox_id_v3,
                                 )
                             else:
-                                pov_mgr_v3.install(demo_path=demo_abs, voice_enabled=False)
-                        elif pov_on_v3:
-                            if skybox_on_v3:
                                 pov_mgr_v3.install(
-                                    map_name=demo_map_name,
                                     demo_path=demo_abs,
-                                    skybox_id=skybox_id_v3,
+                                    voice_mode=pov_voice_mode_v3,
                                 )
-                            else:
-                                pov_mgr_v3.install(demo_path=demo_abs)
                         else:
                             pov_mgr_v3.install(
                                 map_name=demo_map_name,
@@ -3879,9 +3892,9 @@ class OBSDirector:
                 # KP_5/KP_6 are bound here so that demo_pause_silent/demo_resume_silent
                 # can send a keypress instead of opening the console during recording.
                 _V3_DEMO_KEY_BINDINGS = ["bind KP_5 demo_pause", "bind KP_6 demo_resume"]
-                # Voice ownership is no longer user-configurable. POV manages its
-                # dynamic audience mask; non-POV recording only mutes global volume.
-                # In both cases the per-segment backend mask injector stays disabled.
+                # POV manages the selected dynamic audience mask and matching
+                # speaking notices; non-POV recording only mutes global volume.
+                # The per-segment backend mask injector stays disabled.
                 _warmup_inject_ok = False
                 effective_warmup_cmds: list[str] = []
                 if warmup is not None:
@@ -3896,6 +3909,7 @@ class OBSDirector:
                             *pov_tail_commands(
                                 teamcounter_numeric=warmup.pov_teamcounter_numeric,
                                 radar_mode=warmup.pov_radar_mode,
+                                voice_mode=pov_voice_mode_v3,
                                 voice_disabled=warmup.pov_voice_disabled,
                             ),
                         ]

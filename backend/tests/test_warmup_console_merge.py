@@ -124,6 +124,33 @@ def test_pov_voice_disable_mutes_after_pov_voice_enablement():
     assert commands.index("snd_voipvolume 0") > commands.index("snd_voipvolume 1")
 
 
+@pytest.mark.parametrize("mode", ["all", "team", "enemy"])
+def test_active_pov_voice_audiences_leave_volume_to_the_panorama_mask(mode):
+    director = _director("")
+    warmup = RecordingWarmupExtras(pov_voice_mode=mode)
+
+    assert _voice_lines(
+        director._recording_warmup_console_lines(warmup, pov_enabled=True)
+    ) == []
+
+
+def test_pov_all_off_mutes_after_pov_voice_enablement():
+    director = _director("")
+    warmup = RecordingWarmupExtras(pov_voice_mode="mute")
+    lines = director._recording_warmup_console_lines(warmup, pov_enabled=True)
+
+    assert _voice_lines(lines) == ["snd_voipvolume 0"]
+    commands = [
+        *POV_CORE_FORCED_COMMANDS,
+        *pov_tail_commands(
+            teamcounter_numeric=False,
+            radar_mode=0,
+            voice_mode="mute",
+        ),
+    ]
+    assert commands.index("snd_voipvolume 0") > commands.index("snd_voipvolume 1")
+
+
 def test_stale_client_voice_commands_cannot_override_non_pov_policy():
     director = _director("voice_modenable 1\nsnd_voipvolume 1")
     lines = director._recording_warmup_console_lines(

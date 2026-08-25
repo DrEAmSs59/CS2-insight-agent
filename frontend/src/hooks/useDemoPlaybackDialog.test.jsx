@@ -37,7 +37,7 @@ describe("useDemoPlaybackDialog restoration monitor", () => {
     playDemoInCs2.mockReset();
   });
 
-  it("opens the factual restoration result returned by the backend after advanced playback", async () => {
+  it("launches advanced playback directly from the preview and opens factual restoration", async () => {
     getDemoPlaybackPreflight.mockResolvedValue({
       cs2_path_configured: true,
       cs2_running: false,
@@ -61,8 +61,8 @@ describe("useDemoPlaybackDialog restoration monitor", () => {
 
     render(<Harness />);
     fireEvent.click(screen.getByRole("button", { name: "open" }));
-    await screen.findByRole("button", { name: /高级播放/ });
-    fireEvent.click(screen.getByRole("button", { name: /高级播放/ }));
+    await screen.findByRole("button", { name: /启动高级播放 Demo/ });
+    fireEvent.click(screen.getByRole("button", { name: /启动高级播放 Demo/ }));
 
     await screen.findByText("POV 文件已按备份完整恢复");
     expect(playDemoInCs2).toHaveBeenCalledWith(expect.objectContaining({

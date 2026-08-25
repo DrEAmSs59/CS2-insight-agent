@@ -9,27 +9,25 @@ describe("DemoPlayOptionsModal", () => {
     useLocaleStore.getState().hydrate("zh");
   });
 
-  it("offers normal and advanced playback after preflight", () => {
-    const onPlayNormal = vi.fn();
+  it("previews the in-game layout and offers advanced playback after preflight", () => {
     const onPlayAdvanced = vi.fn();
     render(
       <DemoPlayOptionsModal
         open
         demoLabel="match.dem"
-        onPlayNormal={onPlayNormal}
         onPlayAdvanced={onPlayAdvanced}
         onClose={() => {}}
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: /普通播放/ }));
-    fireEvent.click(screen.getByRole("button", { name: /高级播放/ }));
-    expect(onPlayNormal).toHaveBeenCalledTimes(1);
+    expect(screen.getByText("游戏内 INSIGHT UI 预览")).toBeTruthy();
+    expect(screen.getByText("第 2 回合 ▾")).toBeTruthy();
+    expect(screen.getByText("点击选择全部回合")).toBeTruthy();
+    expect(screen.queryByText("原生 DemoUI · 进度与播放控制")).toBeNull();
+    expect(screen.getByText("将临时修改 CS2 文件")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /普通播放/ })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /启动高级播放 Demo/ }));
     expect(onPlayAdvanced).toHaveBeenCalledTimes(1);
-    expect(screen.getByTestId("demo-play-normal-option").className).toContain("justify-start");
-    expect(screen.getByTestId("demo-play-advanced-option").className).toContain("justify-start");
-    expect(screen.getByTestId("demo-play-normal-option").className).toContain("min-h-[112px]");
-    expect(screen.getByTestId("demo-play-advanced-option").className).toContain("min-h-[112px]");
   });
 
   it("blocks playback while CS2 is running and allows a recheck", () => {
@@ -45,7 +43,7 @@ describe("DemoPlayOptionsModal", () => {
     );
 
     expect(screen.getByText(/CS2\.exe 正在运行/)).toBeTruthy();
-    expect(screen.queryByRole("button", { name: /普通播放/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /启动高级播放 Demo/ })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: /重新检测/ }));
     expect(onRetry).toHaveBeenCalledTimes(1);
   });

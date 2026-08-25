@@ -6,7 +6,7 @@ export default {
   "analysis.workspace.waitForAll": "The scoreboard will open automatically after every demo finishes parsing.",
   "analysis.workspace.resetDemos": "Reset Demos",
   "analysis.workspace.switchDemo": "Switch Demo",
-  "analysis.workspace.playDemo": "Play Demo",
+  "analysis.workspace.playDemo": "Advanced Demo Playback",
   "analysis.workspace.demoViews": "Demo analysis views",
   "analysis.workspace.demoSelector": "Switch demo",
   "analysis.workspace.noDemoLoaded": "No demo loaded",

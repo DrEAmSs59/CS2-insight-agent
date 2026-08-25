@@ -18,6 +18,7 @@ from typing import Any, Callable, Mapping, Optional
 
 from .cs2_config_backup import is_cs2_running
 from .demo_voice_hud import DemoVoiceHudBuild, DemoVoiceHudError, build_demo_voice_hud_vpk
+from .pov_constants import DEFAULT_POV_VOICE_MODE, normalize_pov_voice_mode
 from .skybox_vpk import (
     DEFAULT_SKYBOX_ID,
     SkyboxVpkError,
@@ -285,8 +286,17 @@ class PovHudManager:
     def get_pov_vpk_source_path(self, map_name: Optional[str] = None) -> Path:
         return resolve_pov_vpk_source_in_project_pov_dir(self.get_project_pov_dir(), map_name)
 
-    def get_voice_hud_template_path(self) -> Path:
-        return self.get_project_pov_dir() / "pov_voice_template.vpk"
+    def get_voice_hud_template_path(
+        self,
+        *,
+        advanced_playback_enabled: bool = False,
+    ) -> Path:
+        filename = (
+            "pov_advanced_playback_template.vpk"
+            if advanced_playback_enabled
+            else "pov_voice_template.vpk"
+        )
+        return self.get_project_pov_dir() / filename
 
     def get_skybox_assets_path(self) -> Path:
         return self.get_project_pov_dir() / "skybox_assets.vpk"
@@ -431,6 +441,7 @@ class PovHudManager:
         demo_path: Optional[str | Path] = None,
         input_track_report: Optional[Mapping[str, Any]] = None,
         voice_enabled: bool = True,
+        voice_mode: str = DEFAULT_POV_VOICE_MODE,
         advanced_playback_enabled: bool = False,
         skybox_id: str = DEFAULT_SKYBOX_ID,
     ) -> Optional[DemoVoiceHudBuild]:
@@ -455,8 +466,20 @@ class PovHudManager:
             if not pov_src.is_file():
                 raise PovHudError("未找到 POV HUD 资源文件，请确认 pov 目录下资源完整。")
 
+        resolved_voice_mode = normalize_pov_voice_mode(
+            voice_mode,
+            legacy_voice_disabled=not voice_enabled,
+        )
         voice_build: Optional[DemoVoiceHudBuild] = None
-        voice_template = self.get_voice_hud_template_path()
+        voice_template = self.get_voice_hud_template_path(
+            advanced_playback_enabled=advanced_playback_enabled,
+        )
+        if (
+            demo_path is not None
+            and advanced_playback_enabled
+            and not voice_template.is_file()
+        ):
+            raise PovHudError(f"未找到高级播放 HUD 模板：{voice_template}")
         if demo_path is not None and voice_template.is_file():
             try:
                 voice_build = build_demo_voice_hud_vpk(
@@ -464,6 +487,7 @@ class PovHudManager:
                     voice_template,
                     input_track_report=input_track_report,
                     voice_enabled=voice_enabled,
+                    voice_mode=resolved_voice_mode,
                     advanced_playback_enabled=advanced_playback_enabled,
                 )
                 logger.info(
@@ -571,6 +595,7 @@ class PovHudManager:
             "demo_voice_hud": (
                 {
                     "voice_packets": voice_build.voice_packets,
+                    "voice_mode": resolved_voice_mode,
                     "speakers": voice_build.speakers,
                     "intervals": voice_build.intervals,
                     "location_changes": voice_build.location_changes,

@@ -150,13 +150,13 @@ class DemoPlaybackService:
         commands = [
             "con_enable 1",
             "sv_cheats 1",
-            "demoui false",
             *POV_CORE_FORCED_COMMANDS,
             *pov_tail_commands(
                 teamcounter_numeric=bool(options.teamcounter_numeric),
                 radar_mode=int(options.radar_mode),
             ),
             f'playdemo "{demo_stem}.dem"',
+            "demoui true",
         ]
         cfg_path.write_text("\n".join(commands) + "\n", encoding="ascii")
 

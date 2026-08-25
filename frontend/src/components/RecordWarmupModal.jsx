@@ -13,6 +13,7 @@ import Cs2LaunchConsoleFields from "./Cs2LaunchConsoleFields";
 import { POV_CONFLICT_HUD, RecordingHudCard } from "./RecordingHudCard";
 import { useT } from "../i18n/useT.js";
 import { normalizeRecordingSkyboxId } from "../utils/recordingSkybox.js";
+import { DEFAULT_POV_VOICE_MODE, normalizePovVoiceMode } from "../utils/povVoiceMode.js";
 
 /** 拼装随观战选项变化的 cvar（顺序与后端一致）；固定 cvar 见 record_inject_console_lines 配置 */
 export function buildWarmupConsoleCommands(o) {
@@ -82,12 +83,12 @@ export const RECORD_WARMUP_DEFAULT_OPTIONS = {
   aspect_ratio: "",
   resolution_width: "",
   resolution_height: "",
-  /** POV：cl_drawhud_force_radar，-1 隐藏，0 显示（与 POV 成片默认「开雷达」一致） */
+  /** POV 雷达不再提供录制选项，成片固定显示。 */
   pov_radar_mode: 0,
   /** POV：true 正上方显示存活人数；false 显示双方十人头像（默认关存活人数条） */
   pov_teamcounter_numeric: false,
-  /** POV: mute player voice and hide speaking notices. Voice stays enabled by default. */
-  pov_voice_disabled: false,
+  /** POV：语音播放与左下角说话标识使用同一受众范围。 */
+  pov_voice_mode: DEFAULT_POV_VOICE_MODE,
 };
 
 /** 录制预热弹窗每次打开时的 OBS 转场推荐默认值；勾选关闭则提交 null 沿用服务器全局配置 */
@@ -191,6 +192,11 @@ export default function RecordWarmupModal({
         }
       }
     }
+    base.pov_voice_mode = normalizePovVoiceMode(
+      o?.pov_voice_mode,
+      o?.pov_voice_disabled === true,
+    );
+    base.pov_radar_mode = 0;
     setOpts(base);
     setResolutionError("");
     setObsTransEnabled(!!initObsTransEnabled);
@@ -270,9 +276,9 @@ export default function RecordWarmupModal({
       resolution_width: rw,
       resolution_height: rh,
       aspect_ratio: ar || null,
-      pov_radar_mode: opts.pov_radar_mode === 0 ? 0 : -1,
+      pov_radar_mode: 0,
       pov_teamcounter_numeric: !!opts.pov_teamcounter_numeric,
-      pov_voice_disabled: !!opts.pov_voice_disabled,
+      pov_voice_mode: normalizePovVoiceMode(opts.pov_voice_mode),
     };
     const console_cmds = buildWarmupConsoleCommands({
       ...opts,
@@ -699,12 +705,10 @@ export default function RecordWarmupModal({
             visible={open}
             experimentalPovEnabled={sessionPovEnabled}
             onExperimentalPovChange={setSessionPovEnabled}
-            povRadarMode={opts.pov_radar_mode}
-            onPovRadarModeChange={(v) => set({ pov_radar_mode: v })}
             povTeamcounterNumeric={opts.pov_teamcounter_numeric}
             onPovTeamcounterNumericChange={(v) => set({ pov_teamcounter_numeric: v })}
-            povVoiceDisabled={opts.pov_voice_disabled}
-            onPovVoiceDisabledChange={(v) => set({ pov_voice_disabled: v })}
+            povVoiceMode={opts.pov_voice_mode}
+            onPovVoiceModeChange={(v) => set({ pov_voice_mode: v })}
             recordingSkybox={sessionSkybox}
             onRecordingSkyboxChange={setSessionSkybox}
             omitDisclaimer

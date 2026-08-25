@@ -16,7 +16,8 @@ from backend.app.demo_voice_hud import (  # noqa: E402
 )
 
 
-TEMPLATE = ROOT / "pov" / "pov_voice_template.vpk"
+POV_TEMPLATE = ROOT / "pov" / "pov_voice_template.vpk"
+ADVANCED_PLAYBACK_TEMPLATE = ROOT / "pov" / "pov_advanced_playback_template.vpk"
 STATIC_PACKAGE = ROOT / "pov" / "pov_default.vpk"
 INJECTION = ROOT / "pov" / "voice_hud_injection.js"
 STOCK_HUD_ALERTS_STYLE_PATH = "panorama/styles/hud/hudalerts.vcss_c"
@@ -25,11 +26,15 @@ HUD_ALERTS_RESOURCES = {
     "panorama/scripts/hud/hudalerts_insight.vjs_c": ROOT / "pov" / "hudalerts_insight.vjs_c",
     "panorama/styles/hud/hudalerts_insight.vcss_c": ROOT / "pov" / "hudalerts_insight.vcss_c",
 }
-ADVANCED_HOT_SWITCH_STYLE_PATHS = {
-    "panorama/styles/hud/hudhealthammocenter.vcss_c",
+HEALTHAMMO_STYLE_PATH = "panorama/styles/hud/hudhealthammocenter.vcss_c"
+POV_RECORDING_STYLE_PATHS = {
     "panorama/styles/hud/hudradar.vcss_c",
     "panorama/styles/hud/hudteamcounter-equipmentinfo.vcss_c",
     "panorama/styles/hud/hudteamcounter.vcss_c",
+}
+ADVANCED_HOT_SWITCH_STYLE_PATHS = {
+    HEALTHAMMO_STYLE_PATH,
+    "panorama/styles/hud/hudradar.vcss_c",
 }
 PAYLOAD_CAPACITY = 8_000_000
 
@@ -72,7 +77,20 @@ def replace_data_block(resource: bytes, script: bytes) -> bytes:
 
 
 def main() -> None:
-    entries = read_inline_vpk(TEMPLATE.read_bytes())
+    entries = read_inline_vpk(POV_TEMPLATE.read_bytes())
+    static_entries = read_inline_vpk(STATIC_PACKAGE.read_bytes())
+    # Health/ammo must come from the installed CS2 build. Shipping this old
+    # compiled replacement overrides cl_hud_color 12 with its own parent
+    # gradients even when the direct ProgressBarLeft rule is removed.
+    entries.pop(HEALTHAMMO_STYLE_PATH, None)
+    static_entries.pop(HEALTHAMMO_STYLE_PATH, None)
+    for resource_path in POV_RECORDING_STYLE_PATHS:
+        resource = static_entries.get(resource_path)
+        if resource is None:
+            raise RuntimeError(
+                f"static POV package is missing required recording style: {resource_path}"
+            )
+        entries[resource_path] = resource
     compiled = entries[VOICE_SCRIPT_PATH]
 
     block_count = struct.unpack_from("<I", compiled, 12)[0]
@@ -127,29 +145,34 @@ def main() -> None:
     )
     combined_source = stock_source + b"\n" + injection
     entries[VOICE_SCRIPT_PATH] = replace_data_block(compiled, combined_source)
-    # Advanced playback must switch back to the native DEMO HUD without a CS2
-    # restart. These four POV-only compiled styles cannot be unloaded at
-    # runtime, so keep them exclusively in pov_default.vpk (recording) and let
-    # the generated advanced package use CS2's stock styles plus JS/cvars.
-    for resource_path in ADVANCED_HOT_SWITCH_STYLE_PATHS:
-        entries.pop(resource_path, None)
     entries.pop(STOCK_HUD_ALERTS_STYLE_PATH, None)
     for resource_path, source_path in HUD_ALERTS_RESOURCES.items():
         entries[resource_path] = source_path.read_bytes()
-    TEMPLATE.write_bytes(write_inline_vpk(entries))
+    POV_TEMPLATE.write_bytes(write_inline_vpk(entries))
 
-    static_entries = read_inline_vpk(STATIC_PACKAGE.read_bytes())
+    # Advanced playback uses the same top counter resources as POV recording so
+    # POV HUD is visually identical. Health/ammo and radar remain native because
+    # those two resources cannot be restored reliably during a hot HUD switch;
+    # equipment rows are reversible through explicit Panorama runtime styles.
+    advanced_entries = dict(entries)
+    for resource_path in ADVANCED_HOT_SWITCH_STYLE_PATHS:
+        advanced_entries.pop(resource_path, None)
+    ADVANCED_PLAYBACK_TEMPLATE.write_bytes(write_inline_vpk(advanced_entries))
+
     static_entries.pop(STOCK_HUD_ALERTS_STYLE_PATH, None)
     for resource_path, source_path in HUD_ALERTS_RESOURCES.items():
         static_entries[resource_path] = source_path.read_bytes()
     STATIC_PACKAGE.write_bytes(write_inline_vpk(static_entries))
-    print(f"template={TEMPLATE}")
+    print(f"pov_template={POV_TEMPLATE}")
+    print(f"advanced_playback_template={ADVANCED_PLAYBACK_TEMPLATE}")
     print(f"static_package={STATIC_PACKAGE}")
     print("hudalerts_resources=" + ",".join(HUD_ALERTS_RESOURCES))
+    print(f"native_healthammo_style={HEALTHAMMO_STYLE_PATH}")
     print("advanced_removed_styles=" + ",".join(sorted(ADVANCED_HOT_SWITCH_STYLE_PATHS)))
     print(f"payload_capacity={PAYLOAD_CAPACITY}")
     print(f"panorama_source_bytes={len(combined_source)}")
-    print(f"vpk_bytes={TEMPLATE.stat().st_size}")
+    print(f"pov_vpk_bytes={POV_TEMPLATE.stat().st_size}")
+    print(f"advanced_vpk_bytes={ADVANCED_PLAYBACK_TEMPLATE.stat().st_size}")
 
 
 if __name__ == "__main__":

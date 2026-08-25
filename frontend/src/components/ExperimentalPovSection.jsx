@@ -5,26 +5,26 @@ import {
   normalizeRecordingSkyboxId,
   RECORDING_SKYBOX_OPTIONS,
 } from "../utils/recordingSkybox.js";
+import { normalizePovVoiceMode, POV_VOICE_MODES } from "../utils/povVoiceMode.js";
 
 /**
  * 实验性 POV：与常用参数 / 录制前观战弹窗共用；勾选写入 experimental.pov_enabled。
- * POV 开启时可调节雷达与 HUD 正上方玩家显示（写入预热参数）。
+ * POV 开启时可调节语音受众与 HUD 正上方玩家显示（写入预热参数）。
  */
 export default function ExperimentalPovSection({
   visible,
   experimentalPovEnabled,
   onExperimentalPovChange,
   checkboxDisabled = false,
-  povRadarMode = 0,
-  onPovRadarModeChange,
   povTeamcounterNumeric = false,
   onPovTeamcounterNumericChange,
-  povVoiceDisabled = false,
-  onPovVoiceDisabledChange,
+  povVoiceMode = "team",
+  onPovVoiceModeChange,
   recordingSkybox = "default",
   onRecordingSkyboxChange,
   omitEyebrow = false,
   omitDisclaimer = false,
+  embedded = false,
   className,
 }) {
   const t = useT();
@@ -33,8 +33,6 @@ export default function ExperimentalPovSection({
   const [povStatusError, setPovStatusError] = useState("");
   const [povRestoreBusy, setPovRestoreBusy] = useState(false);
   const [povRestoreResult, setPovRestoreResult] = useState(null);
-
-  const radarVal = povRadarMode === 0 ? 0 : -1;
 
   const loadPovStatus = useCallback(async () => {
     setPovStatusLoading(true);
@@ -66,18 +64,19 @@ export default function ExperimentalPovSection({
       ? "pov.restoreCorrupted"
       : "pov.restoreManaged";
 
-  const rootClass = className ?? "space-y-3";
+  const rootClass = className ?? "min-w-0";
 
   return (
     <div className={rootClass}>
-      {!omitEyebrow ? (
-        <p className="text-[10px] font-bold uppercase tracking-wider text-cs2-amber-on-surface">{t("pov.eyebrowLabel")}</p>
-      ) : null}
       <section
-        className="rounded-lg border border-amber-500/25 bg-cs2-amber-surface p-3"
-        data-testid="experimental-pov-card"
+        className={embedded ? "min-w-0" : "min-w-0 rounded-lg border border-amber-500/25 bg-cs2-amber-surface p-3"}
+        data-testid="experimental-feature-card"
       >
-      <label className="flex cursor-pointer items-start gap-2 rounded-lg border border-cs2-border bg-cs2-bg-card px-3 py-2">
+      {!omitEyebrow ? (
+        <p className="mb-3 text-[10px] font-bold uppercase tracking-wider text-cs2-amber-on-surface">{t("pov.eyebrowLabel")}</p>
+      ) : null}
+      <div data-testid="experimental-pov-card">
+      <label className="flex cursor-pointer items-start gap-2 py-1">
         <input
           type="checkbox"
           disabled={checkboxDisabled || !onExperimentalPovChange}
@@ -98,36 +97,23 @@ export default function ExperimentalPovSection({
         </p>
       ) : null}
 
-      {experimentalPovEnabled && onPovRadarModeChange && onPovTeamcounterNumericChange ? (
+      {experimentalPovEnabled && onPovTeamcounterNumericChange ? (
         <div className="mt-3 space-y-4 rounded-lg border border-cs2-border bg-cs2-bg-elevated px-3 py-2.5">
-          <label className="flex cursor-pointer items-start gap-2 rounded-md border border-cs2-border bg-cs2-bg-card px-2 py-2">
-            <input
-              type="checkbox"
-              disabled={!onPovVoiceDisabledChange}
-              checked={!!povVoiceDisabled}
-              onChange={(e) => onPovVoiceDisabledChange?.(e.target.checked)}
-              className="mt-0.5 h-4 w-4 shrink-0 rounded border-cs2-border accent-cs2-orange disabled:opacity-40"
-            />
-            <span className="min-w-0 text-[11px] leading-snug text-cs2-text-secondary">
-              <span className="font-semibold text-cs2-text-primary">{t("pov.voiceDisabledTitle")}</span>
-              <span className="mt-0.5 block text-[10px] leading-relaxed text-cs2-text-muted">
-                {t("pov.voiceDisabledHint")}
-              </span>
-            </span>
-          </label>
-
           <label className="block text-[11px] text-cs2-text-secondary">
-            <span className="mb-1 block font-medium text-cs2-text-secondary">{t("pov.radarLabel")}</span>
+            <span className="mb-1 block font-medium text-cs2-text-secondary">{t("pov.voiceModeLabel")}</span>
             <select
-              value={String(radarVal)}
-              onChange={(e) => onPovRadarModeChange(parseInt(e.target.value, 10))}
-              className="mt-1 w-full rounded border border-cs2-border bg-cs2-bg-input px-2 py-1.5 font-mono text-xs text-cs2-text-primary outline-none focus:border-cs2-accent/50"
+              aria-label={t("pov.voiceModeLabel")}
+              value={normalizePovVoiceMode(povVoiceMode)}
+              disabled={!onPovVoiceModeChange}
+              onChange={(event) => onPovVoiceModeChange?.(event.target.value)}
+              className="mt-1 w-full rounded border border-cs2-border bg-cs2-bg-input px-2 py-1.5 text-xs text-cs2-text-primary outline-none focus:border-cs2-accent/50 disabled:opacity-40"
             >
-              <option value="-1">{t("pov.radarHide")}</option>
-              <option value="0">{t("pov.radarShow")}</option>
+              {POV_VOICE_MODES.map((mode) => (
+                <option key={mode} value={mode}>{t(`pov.voiceMode.${mode}`)}</option>
+              ))}
             </select>
             <span className="mt-1 block text-[10px] leading-relaxed text-cs2-text-muted">
-              {t("pov.radarHint")}
+              {t("pov.voiceModeHint")}
             </span>
           </label>
 
@@ -234,11 +220,11 @@ export default function ExperimentalPovSection({
           {t(povRestoreResult.messageKey)}
         </div>
       ) : null}
-      </section>
+      </div>
 
       {onRecordingSkyboxChange ? (
-        <section
-          className="rounded-lg border border-cs2-border bg-cs2-bg-card p-3"
+        <div
+          className="mt-4 border-t border-amber-500/20 pt-4"
           data-testid="experimental-skybox-card"
         >
           <label className="block text-[11px] text-cs2-text-secondary">
@@ -268,8 +254,9 @@ export default function ExperimentalPovSection({
               {t("record.skyboxOutcome")}
             </p>
           ) : null}
-        </section>
+        </div>
       ) : null}
+      </section>
     </div>
   );
 }

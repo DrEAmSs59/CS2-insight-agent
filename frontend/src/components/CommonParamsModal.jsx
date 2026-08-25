@@ -15,6 +15,7 @@ import {
 } from "../utils/warmupDefaults";
 import { useT } from "../i18n/useT.js";
 import { normalizeRecordingSkyboxId } from "../utils/recordingSkybox.js";
+import { normalizePovVoiceMode } from "../utils/povVoiceMode.js";
 import {
   buildRecordingPresetFile,
   parseRecordingPresetFile,
@@ -265,6 +266,11 @@ export default function CommonParamsModal({
         }
       }
     }
+    base.pov_voice_mode = normalizePovVoiceMode(
+      o?.pov_voice_mode,
+      o?.pov_voice_disabled === true,
+    );
+    base.pov_radar_mode = 0;
     setWarmupOpts(base);
     setObsTransEnabled(!!initObsTransitionEnabled);
     setObsTransName(initObsTransitionName);
@@ -827,15 +833,14 @@ export default function CommonParamsModal({
                 experimentalPovEnabled={povEnabled}
                 onExperimentalPovChange={setPovEnabled}
                 checkboxDisabled={batchRecording}
-                povRadarMode={warmupOpts.pov_radar_mode}
-                onPovRadarModeChange={(v) => patchWarmup({ pov_radar_mode: v })}
                 povTeamcounterNumeric={warmupOpts.pov_teamcounter_numeric}
                 onPovTeamcounterNumericChange={(v) => patchWarmup({ pov_teamcounter_numeric: v })}
-                povVoiceDisabled={warmupOpts.pov_voice_disabled}
-                onPovVoiceDisabledChange={(v) => patchWarmup({ pov_voice_disabled: v })}
+                povVoiceMode={warmupOpts.pov_voice_mode}
+                onPovVoiceModeChange={(v) => patchWarmup({ pov_voice_mode: v })}
                 recordingSkybox={skyboxId}
                 onRecordingSkyboxChange={setSkyboxId}
                 omitEyebrow
+                embedded
               />
             </div>
 

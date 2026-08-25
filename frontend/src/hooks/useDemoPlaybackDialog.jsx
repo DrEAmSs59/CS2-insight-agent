@@ -94,16 +94,16 @@ export function useDemoPlaybackDialog() {
     setError("");
   }, [launchingMode]);
 
-  const launch = useCallback(async (mode) => {
+  const launch = useCallback(async () => {
     if (!target || launchingMode) return;
-    setLaunchingMode(mode);
+    setLaunchingMode("advanced");
     setError("");
     try {
       const launchResult = await playDemoInCs2({
         id: target.id,
         path: target.path,
         advancedPlayback: {
-          enabled: mode === "advanced",
+          enabled: true,
           radar_mode: 0,
           teamcounter_numeric: false,
         },
@@ -111,7 +111,7 @@ export function useDemoPlaybackDialog() {
       setOpen(false);
       setTarget(null);
       setBlockedReason("");
-      if (mode === "advanced" && launchResult?.session_id) {
+      if (launchResult?.session_id) {
         setRestorePollError("");
         setRestoreMonitor({
           sessionId: String(launchResult.session_id),
@@ -163,8 +163,7 @@ export function useDemoPlaybackDialog() {
         launchingMode={launchingMode}
         onClose={close}
         onRetry={runPreflight}
-        onPlayNormal={() => void launch("normal")}
-        onPlayAdvanced={() => void launch("advanced")}
+        onPlayAdvanced={() => void launch()}
       />
       <PlayDemoToast />
       <DemoPlaybackRestoreModal

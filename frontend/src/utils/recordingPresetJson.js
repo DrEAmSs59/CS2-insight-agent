@@ -1,4 +1,5 @@
 import { isRecordingSkyboxId } from "./recordingSkybox.js";
+import { isPovVoiceMode, normalizePovVoiceMode } from "./povVoiceMode.js";
 
 export const RECORDING_PRESET_FORMAT = "cs2-insight-recording-preset";
 export const RECORDING_PRESET_VERSION = 3;
@@ -58,6 +59,9 @@ function parsePacing(value) {
 
 function parseWarmup(value, defaults) {
   if (!isObject(value)) invalid("default_record_warmup", "type");
+  const legacyVoiceDisabled = Object.hasOwn(value, "pov_voice_disabled")
+    ? requireBoolean(value.pov_voice_disabled, "default_record_warmup.pov_voice_disabled")
+    : false;
   const result = { ...defaults };
   for (const [key, defaultValue] of Object.entries(defaults)) {
     if (!Object.hasOwn(value, key)) continue;
@@ -69,6 +73,10 @@ function parseWarmup(value, defaults) {
       const n = requireNumber(value[key], field, -1, 0, true);
       if (n !== -1 && n !== 0) invalid(field, "range");
       result[key] = n;
+    } else if (key === "pov_voice_mode") {
+      const text = requireString(value[key], field, 16);
+      if (!isPovVoiceMode(text)) invalid(field, "range");
+      result[key] = text;
     } else if (key === "aspect_ratio") {
       const text = requireString(value[key], field, 8);
       if (!["", "4:3", "16:9", "16:10"].includes(text)) invalid(field, "range");
@@ -79,6 +87,11 @@ function parseWarmup(value, defaults) {
       result[key] = text;
     }
   }
+  result.pov_voice_mode = normalizePovVoiceMode(
+    Object.hasOwn(value, "pov_voice_mode") ? result.pov_voice_mode : undefined,
+    legacyVoiceDisabled,
+  );
+  result.pov_radar_mode = 0;
   return result;
 }
 

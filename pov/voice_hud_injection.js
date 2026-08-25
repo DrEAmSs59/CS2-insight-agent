@@ -1,11 +1,13 @@
 /*__CS2_INSIGHT_INJECTION_BEGIN__*/
 // Injected into the stock Panorama huddemocontroller script in
-// pov_voice_template.vpk. demo_voice_hud.py replaces only the bounded payload
+// the separate POV-recording and Advanced-playback templates.
+// demo_voice_hud.py replaces only the bounded payload
 // between the two marker comments before installing the package. The payload
 // contains [location tokens, voice speakers, exact svc_UserCmd input tracks,
 // SteamID/slot/team roster, reserved slots, radar track at index 8,
 // kill/HS attacker-feedback cues at index 9, flash-blind intervals at index 10,
-// reconstructed team radio at index 11, advanced-playback menu data at index 12].
+// reconstructed team radio at index 11, advanced-playback menu data at index 12,
+// fixed recording voice audience at index 13].
 ;(function CS2InsightDemoVoiceHud() {
     "use strict";
 
@@ -19,6 +21,10 @@
     const encodedFlashBlind = packed[10] || null;
     const encodedRadio = packed[11] || null;
     const encodedAdvancedPlayback = packed[12] || null;
+    const encodedRecordingVoiceMode = String(packed[13] || "team");
+    const recordingVoiceMode = ["all", "team", "enemy", "mute"].indexOf(encodedRecordingVoiceMode) >= 0
+        ? encodedRecordingVoiceMode
+        : "team";
     const PLAYER_COLOR_HEX = ["#88CEF5", "#009E80", "#F1E441", "#E6802A", "#BD2C96"];
     const RADAR_MAP_SIZE = 1024;
     const POV_RADAR_SCALE = 0.4;
@@ -609,30 +615,24 @@
     let advancedPlayerListPanel = null;
     let advancedEventListPanel = null;
     let advancedEventPagerLabel = null;
-    let advancedProgressFill = null;
-    let advancedProgressTrack = null;
-    let advancedProgressSlider = null;
-    let advancedProgressLabel = null;
-    let advancedTickInput = null;
-    let advancedPlayPauseButton = null;
-    let advancedRoundLabel = null;
-    let advancedRoundInput = null;
     let advancedPinButton = null;
-    let advancedNumericPad = null;
-    let advancedNumericEntry = null;
-    let advancedNumericSubmit = null;
+    let advancedRoundButton = null;
+    let advancedRoundHintLabel = null;
+    let advancedRoundPickerPanel = null;
+    let advancedRoundPickerOpen = false;
+    const advancedRoundButtons = [];
     let advancedMenuPinned = true;
     let advancedNativeMessagesRestored = false;
     let advancedNativeRadarRestored = false;
     let advancedNativeOverheadRestored = false;
     let advancedMenuDragging = false;
+    let advancedMenuDragGhost = null;
     let advancedMenuDragStartCursor = null;
     let advancedMenuDragStartPosition = null;
-    let advancedMenuDragGhost = null;
+    let advancedMenuPosition = null;
     let advancedRoundIntervals = advancedPlayback && advancedPlayback.rounds
         ? advancedPlayback.rounds.slice()
         : [];
-    let advancedNativeDemoUiCommandAttempts = 0;
     const advancedProfileButtons = {};
     const advancedVoiceButtons = {};
     const advancedFilterButtons = {};
@@ -643,7 +643,6 @@
     const advancedCustomVoiceXuids = {};
     const advancedRestrictedTeamCounterPanels = [];
     const advancedModifiedTeamSides = [];
-    const advancedModifiedHealthPanels = [];
     const advancedQuickOptions = {
         xray: false,
         radar: true,
@@ -829,14 +828,25 @@
         return -1;
     }
 
+    function activeVoicePolicy() {
+        return advancedPlayback ? advancedVoicePolicy : recordingVoiceMode;
+    }
+
     function advancedVoiceAllows(xuid, povTeam, tick) {
-        if (!advancedPlayback || advancedVoicePolicy === "team") {
+        const policy = activeVoicePolicy();
+        if (policy === "team") {
             return povTeam !== 0 && resolvePovTeam(xuid, tick) === povTeam;
         }
-        if (advancedVoicePolicy === "all") {
+        if (policy === "enemy") {
+            const speakerTeam = resolvePovTeam(xuid, tick);
+            return povTeam !== 0
+                && (speakerTeam === 2 || speakerTeam === 3)
+                && speakerTeam !== povTeam;
+        }
+        if (policy === "all") {
             return true;
         }
-        if (advancedVoicePolicy === "mute") {
+        if (policy === "mute") {
             return false;
         }
         return Boolean(advancedCustomVoiceXuids[normalizeXuid(xuid)]);
@@ -854,9 +864,10 @@
 
         let low = 0;
         let high = 0;
-        if ((povTeam === 2 || povTeam === 3) || (advancedPlayback && advancedVoicePolicy !== "team")) {
-            const swapped = rosterTeamSwappedAt(tick);
-            // Resolve runtime slots from XUIDs; map roster team through half-swap once.
+        const voicePolicy = activeVoicePolicy();
+        if ((povTeam === 2 || povTeam === 3) || voicePolicy === "all" || voicePolicy === "mute") {
+            // Resolve runtime slots from XUIDs; the shared policy resolver tracks
+            // live sides across half-time swaps for team/enemy audiences.
             for (let slot = 0; slot < 64; slot += 1) {
                 const slotXuid = normalizeXuid(
                     GameStateAPI.GetPlayerXuidStringFromPlayerSlot(slot) || "",
@@ -865,13 +876,7 @@
                 if (!slotPlayer) {
                     continue;
                 }
-                let slotTeam = slotPlayer.team;
-                if (swapped) {
-                    slotTeam = slotTeam === 2 ? 3 : 2;
-                }
-                const allowed = advancedPlayback
-                    ? advancedVoiceAllows(slotXuid, povTeam, tick)
-                    : slotTeam === povTeam;
+                const allowed = advancedVoiceAllows(slotXuid, povTeam, tick);
                 if (!allowed) {
                     continue;
                 }
@@ -885,8 +890,7 @@
 
         low |= 0;
         high |= 0;
-        const signature = (advancedPlayback ? advancedVoicePolicy : "team")
-            + ":" + low + ":" + high;
+        const signature = voicePolicy + ":" + low + ":" + high;
         if (targetChanged || signature !== audienceMaskSignature) {
             applyVoiceAudienceMask(low, high);
             audienceMaskSignature = signature;
@@ -1257,6 +1261,25 @@
         }
     }
 
+    function restrictPovTeamCounterEquipment() {
+        const root = hudRootPanel();
+        if (!root || !root.IsValid() || !root.FindChildrenWithClassTraverse) {
+            return;
+        }
+        // Spectator mode expands the selected player's equipment card below the
+        // top bar. POV HUD owns that information at the bottom, so remove every
+        // stock variant no matter where a HUD rebuild placed it.
+        [
+            "equipinfo-root",
+            "hudteamcounter-equipmentinfo",
+        ].forEach(function (className) {
+            const panels = root.FindChildrenWithClassTraverse(className) || [];
+            for (let index = 0; index < panels.length; index += 1) {
+                setTeamCounterPanelRestricted(panels[index], true);
+            }
+        });
+    }
+
     function teamContainerAncestor(panel) {
         let current = panel;
         let guard = 0;
@@ -1310,72 +1333,9 @@
                 setTeamCounterPanelRestricted(equips[i], true);
             }
         }
-    }
-
-    function normalizeHudHex(hex) {
-        const text = String(hex || "").trim().toUpperCase();
-        if (!text) {
-            return "";
+        if (advancedPlayback) {
+            restrictPovTeamCounterEquipment();
         }
-        // #RGB / #RRGGBB / #RRGGBBAA / rgb(r,g,b)
-        if (text.charAt(0) === "#") {
-            let h = text.replace(/[^0-9A-F]/g, "");
-            if (h.length === 3) {
-                h = h[0] + h[0] + h[1] + h[1] + h[2] + h[2];
-            }
-            return h.slice(0, 6);
-        }
-        const rgb = text.match(/(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/);
-        if (rgb) {
-            return [rgb[1], rgb[2], rgb[3]].map(function (part) {
-                const n = Math.max(0, Math.min(255, Number(part) || 0));
-                const s = n.toString(16).toUpperCase();
-                return s.length < 2 ? ("0" + s) : s;
-            }).join("");
-        }
-        return text.replace(/[^0-9A-F]/g, "").slice(0, 6);
-    }
-
-    function nearestColorSlot(hex) {
-        const target = normalizeHudHex(hex);
-        if (!target || target.length < 6) {
-            return -1;
-        }
-        const tr = parseInt(target.slice(0, 2), 16);
-        const tg = parseInt(target.slice(2, 4), 16);
-        const tb = parseInt(target.slice(4, 6), 16);
-        // White/#defaultColor is nearer to light-blue than yellow — never map it.
-        if (tr > 230 && tg > 230 && tb > 230) {
-            return -1;
-        }
-        if (tr < 25 && tg < 25 && tb < 25) {
-            return -1;
-        }
-        // Damage-flash red on health UI.
-        if (tr > 200 && tg < 90 && tb < 90) {
-            return -1;
-        }
-        let best = -1;
-        let bestDist = 999999;
-        for (let i = 0; i < PLAYER_COLOR_HEX.length; i += 1) {
-            const cand = normalizeHudHex(PLAYER_COLOR_HEX[i]);
-            if (cand === target) {
-                return i;
-            }
-            const cr = parseInt(cand.slice(0, 2), 16);
-            const cg = parseInt(cand.slice(2, 4), 16);
-            const cb = parseInt(cand.slice(4, 6), 16);
-            const dist = (tr - cr) * (tr - cr) + (tg - cg) * (tg - cg) + (tb - cb) * (tb - cb);
-            if (dist < bestDist) {
-                bestDist = dist;
-                best = i;
-            }
-        }
-        // Reject weak matches (e.g. random greys).
-        if (bestDist > 14000) {
-            return -1;
-        }
-        return best;
     }
 
     function povColorSlot(povXuid) {
@@ -1405,304 +1365,6 @@
         return slot;
     }
 
-    function sampleHaTeammateSlot(host) {
-        if (!host || !host.IsValid() || !host.FindChildrenWithClassTraverse) {
-            return -1;
-        }
-        function slotFromPanel(panel, props) {
-            if (!panel || !panel.IsValid()) {
-                return -1;
-            }
-            for (let p = 0; p < props.length; p += 1) {
-                try {
-                    const slot = nearestColorSlot(panel.style[props[p]]);
-                    if (slot >= 0) {
-                        return slot;
-                    }
-                } catch (errRead) {}
-            }
-            return -1;
-        }
-        const iconClasses = [
-            "hud-HA-icon--helmet",
-            "hud-HA-icon--armor",
-            "hud-HA-icon",
-        ];
-        for (let c = 0; c < iconClasses.length; c += 1) {
-            const icons = host.FindChildrenWithClassTraverse(iconClasses[c]) || [];
-            for (let i = 0; i < icons.length; i += 1) {
-                const slot = slotFromPanel(icons[i], ["washColor", "color"]);
-                if (slot >= 0) {
-                    return slot;
-                }
-            }
-        }
-        const labels = host.FindChildrenWithClassTraverse("hud-HA-health_or_ammo-label") || [];
-        for (let j = 0; j < labels.length; j += 1) {
-            const slot = slotFromPanel(labels[j], ["color", "washColor"]);
-            if (slot >= 0) {
-                return slot;
-            }
-        }
-        return -1;
-    }
-
-    function applyHaSlotClass(panel, slot) {
-        if (!panel || !panel.IsValid() || !panel.AddClass || !panel.RemoveClass) {
-            return;
-        }
-        for (let i = 0; i < PLAYER_COLOR_HEX.length; i += 1) {
-            const name = "Ci" + i;
-            if (slot >= 0 && i === slot) {
-                panel.AddClass(name);
-            } else {
-                panel.RemoveClass(name);
-            }
-        }
-    }
-
-    function isAmmoProgressBar(bar) {
-        // Only treat the clip ProgressBar as ammo. Do NOT match ids that merely
-        // contain "Ammo" — HudHealthAmmoCenter would false-positive and skip HP.
-        let current = bar;
-        let guard = 0;
-        while (current && current.IsValid() && guard < 14) {
-            const id = String(current.id || "");
-            if (id === "HudHealthAmmoCenter" || id === "CSGOHudHealthAmmoCenter") {
-                return false;
-            }
-            if (id === "AmmoClipBar") {
-                return true;
-            }
-            try {
-                if (current.BHasClass) {
-                    if (current.BHasClass("hud-WPN-ammo")
-                        || current.BHasClass("hud-WPN-ammo-reserve")
-                        || current.BHasClass("hud-WPN-main")) {
-                        return true;
-                    }
-                }
-            } catch (errAmmo) {}
-            current = current.GetParent ? current.GetParent() : null;
-            guard += 1;
-        }
-        return false;
-    }
-
-    function isBottomHealthFill(bar) {
-        // Must sit under the bottom HA strip (.hud-HA-bar / .hud-HA-health), not
-        // teamcounter avatar bars, and not ammo.
-        if (!bar || !bar.IsValid() || isAmmoProgressBar(bar)) {
-            return false;
-        }
-        let current = bar;
-        let guard = 0;
-        while (current && current.IsValid() && guard < 16) {
-            try {
-                if (current.BHasClass) {
-                    if (current.BHasClass("hud-HA-bar")
-                        || current.BHasClass("hud-HA-health")
-                        || current.BHasClass("hud-HA-main")
-                        || current.BHasClass("hud-HA")) {
-                        return true;
-                    }
-                }
-            } catch (errHa) {}
-            const id = String(current.id || "");
-            if (id === "HudHealthAmmoCenter" || id === "CSGOHudHealthAmmoCenter") {
-                return true;
-            }
-            if (id === "AmmoClipBar") {
-                return false;
-            }
-            current = current.GetParent ? current.GetParent() : null;
-            guard += 1;
-        }
-        return false;
-    }
-
-    function paintHealthFillPanel(panel, color) {
-        if (!panel || !panel.IsValid() || !color) {
-            return;
-        }
-        if (advancedPlayback && advancedModifiedHealthPanels.indexOf(panel) < 0) {
-            advancedModifiedHealthPanels.push(panel);
-        }
-        const fill = color.length === 7 ? (color + "ff") : color;
-        try {
-            panel.style.washColor = "#ffffffff";
-        } catch (errWash) {
-            try {
-                panel.style.washColor = "none";
-            } catch (errNone) {}
-        }
-        try {
-            panel.style.backgroundColor = fill;
-        } catch (errBg) {
-            try {
-                panel.style.backgroundColor = color;
-            } catch (errBg2) {}
-        }
-    }
-
-    function collectHealthFillPanels(host) {
-        const out = [];
-        const seen = [];
-        function add(panel) {
-            if (!panel || !panel.IsValid() || !isBottomHealthFill(panel)) {
-                return;
-            }
-            for (let s = 0; s < seen.length; s += 1) {
-                if (seen[s] === panel) {
-                    return;
-                }
-            }
-            seen.push(panel);
-            out.push(panel);
-        }
-        if (!host || !host.FindChildrenWithClassTraverse) {
-            return out;
-        }
-        const lefts = host.FindChildrenWithClassTraverse("ProgressBarLeft") || [];
-        for (let i = 0; i < lefts.length; i += 1) {
-            add(lefts[i]);
-        }
-        const haBars = host.FindChildrenWithClassTraverse("hud-HA-bar") || [];
-        for (let h = 0; h < haBars.length; h += 1) {
-            const ha = haBars[h];
-            if (!ha || !ha.IsValid()) {
-                continue;
-            }
-            if (ha.FindChildrenWithClassTraverse) {
-                const kids = ha.FindChildrenWithClassTraverse("ProgressBarLeft") || [];
-                for (let k = 0; k < kids.length; k += 1) {
-                    add(kids[k]);
-                }
-            }
-            if (typeof ha.GetChildCount === "function" && typeof ha.GetChild === "function") {
-                const n = ha.GetChildCount();
-                for (let c = 0; c < n; c += 1) {
-                    const child = ha.GetChild(c);
-                    if (child && child.BHasClass && child.BHasClass("ProgressBarLeft")) {
-                        add(child);
-                    }
-                }
-            }
-        }
-        return out;
-    }
-
-    function resolvePovColorSlot(povXuid, state) {
-        function tryXuid(raw) {
-            const slot = povColorSlot(raw);
-            return slot;
-        }
-        let slot = tryXuid(povXuid);
-        if (slot >= 0) {
-            return slot;
-        }
-        try {
-            slot = tryXuid(GameStateAPI.GetHudPlayerXuid());
-            if (slot >= 0) {
-                return slot;
-            }
-        } catch (errHud) {}
-        if (state && state.nSpectatingPlayerId >= 0) {
-            const sid = Number(state.nSpectatingPlayerId);
-            for (let r = 0; r < roster.length; r += 1) {
-                if (Number(roster[r].slot) === sid) {
-                    slot = tryXuid(roster[r].xuid);
-                    if (slot >= 0) {
-                        return slot;
-                    }
-                }
-            }
-            try {
-                slot = tryXuid(
-                    GameStateAPI.GetPlayerXuidStringFromPlayerSlot(sid) || "",
-                );
-                if (slot >= 0) {
-                    return slot;
-                }
-            } catch (errSlot) {}
-        }
-        // Name match against radar xuids when SteamID formats disagree.
-        if (!radarTrack || !radarTrack.players) {
-            return -1;
-        }
-        const nameSeeds = [];
-        function pushName(xuid) {
-            const want = normalizeXuid(xuid);
-            if (!want) {
-                return;
-            }
-            try {
-                const name = String(GameStateAPI.GetPlayerName(want) || "").trim().toLowerCase();
-                if (name) {
-                    nameSeeds.push(name);
-                }
-            } catch (errName) {}
-        }
-        pushName(povXuid);
-        if (state && state.nSpectatingPlayerId >= 0) {
-            try {
-                pushName(GameStateAPI.GetPlayerXuidStringFromPlayerSlot(state.nSpectatingPlayerId));
-            } catch (errSlotName) {}
-        }
-        if (!nameSeeds.length) {
-            return -1;
-        }
-        for (let i = 0; i < radarTrack.players.length; i += 1) {
-            const player = radarTrack.players[i];
-            let name = "";
-            try {
-                name = String(GameStateAPI.GetPlayerName(player.xuid) || "").trim().toLowerCase();
-            } catch (errPlayerName) {}
-            if (!name) {
-                continue;
-            }
-            for (let n = 0; n < nameSeeds.length; n += 1) {
-                if (name === nameSeeds[n]) {
-                    const namedSlot = Number(player.colorSlot);
-                    if (isFinite(namedSlot) && namedSlot >= 0 && namedSlot < PLAYER_COLOR_HEX.length) {
-                        return namedSlot;
-                    }
-                }
-            }
-        }
-        return -1;
-    }
-
-    function fixPovHealthHudColor(povXuid, state) {
-        const root = hudRootPanel();
-        if (!root) {
-            return;
-        }
-        // Prefer HA host, but fall back to full HUD root — demo ids vary and CSS
-        // already proved .hud-HA-bar .ProgressBarLeft is the live fill.
-        let host = null;
-        if (root.FindChildTraverse) {
-            host = root.FindChildTraverse("HudHealthAmmoCenter")
-                || root.FindChildTraverse("CSGOHudHealthAmmoCenter");
-        }
-        if (!host || !host.IsValid()) {
-            host = root;
-        }
-        let slot = resolvePovColorSlot(povXuid, state);
-        if (slot < 0) {
-            slot = sampleHaTeammateSlot(host);
-        }
-        if (slot < 0) {
-            return;
-        }
-        const color = PLAYER_COLOR_HEX[slot];
-        const bars = collectHealthFillPanels(host);
-        for (let b = 0; b < bars.length; b += 1) {
-            applyHaSlotClass(bars[b], slot);
-            paintHealthFillPanel(bars[b], color);
-        }
-    }
-
     function tickTeamCounterHud() {
         const state = controller.GetDemoControllerState();
         if (!state) {
@@ -1712,7 +1374,6 @@
         const povTeam = updateVoiceAudience(state);
         if (!advancedPovVisualsActive()) {
             restoreAdvancedTeamCounterPanels();
-            restoreAdvancedHealthPanels();
             $.Schedule(0.1, tickTeamCounterHud);
             return;
         }
@@ -4771,15 +4432,6 @@
         }
 
         const povTeam = updateVoiceAudience(state);
-        if (!advancedPovVisualsActive()) {
-            speakers.forEach(function (speaker) {
-                if (speaker.panel && speaker.panel.IsValid()) {
-                    speaker.panel.AddClass("Hidden");
-                }
-            });
-            $.Schedule(0.1, update);
-            return;
-        }
 
         const voicePanel = findVoicePanel();
         if (!voicePanel || !voicePanel.IsValid()) {
@@ -4962,23 +4614,6 @@
         }
     }
 
-    function restoreAdvancedHealthPanels() {
-        for (let index = advancedModifiedHealthPanels.length - 1; index >= 0; index -= 1) {
-            const panel = advancedModifiedHealthPanels[index];
-            if (!panel || !panel.IsValid()) {
-                continue;
-            }
-            applyHaSlotClass(panel, -1);
-            try { panel.style.backgroundColor = null; } catch (errBackground) {
-                try { panel.style.backgroundColor = "#ffffffff"; } catch (errWhite) {}
-            }
-            try { panel.style.washColor = null; } catch (errWash) {
-                try { panel.style.washColor = "none"; } catch (errNone) {}
-            }
-        }
-        advancedModifiedHealthPanels.length = 0;
-    }
-
     function advancedPlayerName(xuid) {
         const normalized = normalizeXuid(xuid);
         const packedPlayer = advancedPlayback && advancedPlayback.byXuid[normalized];
@@ -5009,87 +4644,10 @@
         }
         for (let index = 1; index < rounds.length; index += 1) {
             if (value < rounds[index].start) {
-                return index;
+                return rounds[index - 1].number;
             }
         }
-        return rounds.length;
-    }
-
-    function advancedUpdateRoundLabel(state) {
-        const rounds = advancedRefreshRoundIntervals(state);
-        const current = state ? advancedRoundNumberAtTick(state.nTick) : 0;
-        if (advancedRoundLabel && advancedRoundLabel.IsValid()) {
-            advancedRoundLabel.text = advancedChinese()
-                ? ("第" + current + "/" + rounds.length + "回合")
-                : ("R " + current + "/" + rounds.length);
-        }
-    }
-
-    function advancedNumericEntryText(entry) {
-        if (!entry || !entry.IsValid()) {
-            return "";
-        }
-        if (entry._insightNumericButton) {
-            return String(entry._insightNumericValue || "");
-        }
-        return String(entry.text || "");
-    }
-
-    function advancedSetNumericEntryText(entry, value) {
-        if (!entry || !entry.IsValid()) {
-            return;
-        }
-        const text = String(value || "").replace(/[^0-9]/g, "");
-        if (entry._insightNumericButton) {
-            entry._insightNumericValue = text;
-            advancedSetButtonText(entry, text || entry._insightPlaceholder || "");
-            return;
-        }
-        entry.text = text;
-    }
-
-    function advancedSubmitRound() {
-        if (!advancedRoundInput || !advancedRoundInput.IsValid()) {
-            return;
-        }
-        const raw = advancedNumericEntryText(advancedRoundInput).replace(/[^0-9]/g, "");
-        const wanted = Number(raw);
-        const rounds = advancedRefreshRoundIntervals(null);
-        if (!raw || !isFinite(wanted) || wanted < 1 || wanted > rounds.length) {
-            advancedOpenNumericPad(
-                advancedRoundInput,
-                advancedSubmitRound,
-                advancedCopy("输入回合", "Enter round"),
-            );
-            return;
-        }
-        const target = rounds[wanted - 1];
-        advancedSetNumericEntryText(advancedRoundInput, "");
-        advancedCloseNumericPad();
-        advancedEventPage = 0;
-        advancedSeekToTick(target.start);
-    }
-
-    function advancedStepRound(delta) {
-        const state = controller.GetDemoControllerState();
-        const rounds = advancedRefreshRoundIntervals(null);
-        if (!rounds.length) {
-            return;
-        }
-        const currentNumber = state ? advancedRoundNumberAtTick(state.nTick) : 0;
-        const currentIndex = currentNumber > 0
-            ? currentNumber - 1
-            : (Number(delta || 0) > 0 ? -1 : 0);
-        const targetIndex = Math.max(
-            0,
-            Math.min(rounds.length - 1, currentIndex + Number(delta || 0)),
-        );
-        advancedEventPage = 0;
-        advancedSeekToTick(rounds[targetIndex].start);
-    }
-
-    function advancedClampTick(tick) {
-        return Math.max(0, Math.min(advancedPlayback.totalTick, Math.round(Number(tick) || 0)));
+        return rounds[rounds.length - 1].number;
     }
 
     function advancedSetButtonText(button, value) {
@@ -5100,194 +4658,6 @@
         if (label && label.IsValid()) {
             label.text = String(value || "");
         }
-    }
-
-    function advancedSeekToTick(tick) {
-        const targetTick = advancedClampTick(tick);
-        if (advancedSelectedXuid && advancedPlayback.byXuid[advancedSelectedXuid]) {
-            advancedSelectPlayer(advancedSelectedXuid, { tick: targetTick });
-            return;
-        }
-        const state = controller.GetDemoControllerState();
-        const resumeAfterSeek = Boolean(state && !state.bIsPaused);
-        try {
-            if (controller.SetPaused) {
-                controller.SetPaused(true);
-            } else {
-                GameInterfaceAPI.ConsoleCommand("demo_pause");
-            }
-            if (controller.GotoTick) {
-                controller.GotoTick(targetTick);
-            } else {
-                GameInterfaceAPI.ConsoleCommand("demo_gototick " + targetTick);
-            }
-        } catch (errSeekTick) {}
-        if (resumeAfterSeek) {
-            $.Schedule(0.05, function () {
-                try {
-                    if (controller.SetPaused) {
-                        controller.SetPaused(false);
-                    } else {
-                        GameInterfaceAPI.ConsoleCommand("demo_resume");
-                    }
-                } catch (errResumeSeek) {}
-            });
-        }
-    }
-
-    function advancedStepSeconds(seconds) {
-        const state = controller.GetDemoControllerState();
-        const current = state ? Number(state.nTick || 0) : 0;
-        advancedSeekToTick(current + Number(seconds || 0) * advancedPlayback.tickRate);
-    }
-
-    function advancedTogglePlayback() {
-        const state = controller.GetDemoControllerState();
-        try {
-            if (controller.SetPaused) {
-                controller.SetPaused(!(state && state.bIsPaused));
-            } else {
-                GameInterfaceAPI.ConsoleCommand(state && state.bIsPaused ? "demo_resume" : "demo_pause");
-            }
-        } catch (errTogglePlayback) {}
-    }
-
-    function advancedSubmitTick() {
-        if (!advancedTickInput || !advancedTickInput.IsValid()) {
-            return;
-        }
-        const raw = advancedNumericEntryText(advancedTickInput).replace(/[^0-9]/g, "");
-        if (!raw) {
-            advancedOpenNumericPad(
-                advancedTickInput,
-                advancedSubmitTick,
-                advancedCopy("输入 tick", "Enter tick"),
-            );
-            return;
-        }
-        const value = Number(raw);
-        if (!isFinite(value)) {
-            return;
-        }
-        advancedSetNumericEntryText(advancedTickInput, "");
-        advancedCloseNumericPad();
-        advancedSeekToTick(value);
-    }
-
-    function advancedFocusTextEntry(entry) {
-        if (!entry || !entry.IsValid()) {
-            return;
-        }
-        try { entry.SetFocus(); } catch (errFocus) {}
-        try { $.DispatchEvent("SetInputFocus", entry); } catch (errDispatchFocus) {}
-    }
-
-    function advancedCloseNumericPad() {
-        advancedNumericEntry = null;
-        advancedNumericSubmit = null;
-        if (advancedNumericPad && advancedNumericPad.IsValid()) {
-            try { advancedNumericPad.DeleteAsync(0); } catch (errDeletePad) {}
-        }
-        advancedNumericPad = null;
-    }
-
-    function advancedNumericPadAppend(value) {
-        if (!advancedNumericEntry || !advancedNumericEntry.IsValid()) {
-            advancedCloseNumericPad();
-            return;
-        }
-        const current = advancedNumericEntryText(advancedNumericEntry).replace(/[^0-9]/g, "");
-        const limit = Math.max(1, Number(advancedNumericEntry.maxchars || 10));
-        advancedSetNumericEntryText(
-            advancedNumericEntry,
-            (current + String(value || "")).slice(0, limit),
-        );
-    }
-
-    function advancedOpenNumericPad(entry, submit, title) {
-        if (!advancedMenu || !advancedMenu.IsValid() || !entry || !entry.IsValid()) {
-            return;
-        }
-        advancedCloseNumericPad();
-        advancedNumericEntry = entry;
-        advancedNumericSubmit = submit;
-        advancedNumericPad = advancedCreatePanel("Panel", advancedMenu, "CS2InsightAdvancedNumericPad");
-        advancedNumericPad.style.width = "230px";
-        advancedNumericPad.style.height = "244px";
-        advancedNumericPad.style.horizontalAlign = "center";
-        advancedNumericPad.style.verticalAlign = "center";
-        advancedNumericPad.style.ignoreParentFlow = "true";
-        advancedNumericPad.style.flowChildren = "down";
-        advancedNumericPad.style.padding = "10px";
-        advancedNumericPad.style.backgroundColor = "#191918fe";
-        advancedNumericPad.style.border = "1px solid #e07f0a";
-        advancedNumericPad.style.borderRadius = "8px";
-        advancedNumericPad.style.boxShadow = "0px 4px 18px 3.0 #000000dd";
-        advancedNumericPad.style.zIndex = "32100";
-
-        const heading = advancedCreateLabel(advancedNumericPad, title, 13, "#e07f0a");
-        heading.style.width = "100%";
-        heading.style.height = "24px";
-        heading.style.textAlign = "center";
-
-        [["1", "2", "3"], ["4", "5", "6"], ["7", "8", "9"]].forEach(function (digits) {
-            const row = advancedCreatePanel("Panel", advancedNumericPad, "");
-            row.style.width = "100%";
-            row.style.height = "36px";
-            row.style.flowChildren = "right";
-            digits.forEach(function (digit, digitIndex) {
-                const button = advancedCreateButton(row, digit, function () {
-                    advancedNumericPadAppend(digit);
-                    return true;
-                }, "64px");
-                button.style.height = "31px";
-                button.style.marginRight = digitIndex === 2 ? "0px" : "5px";
-            });
-        });
-
-        const editRow = advancedCreatePanel("Panel", advancedNumericPad, "");
-        editRow.style.width = "100%";
-        editRow.style.height = "36px";
-        editRow.style.flowChildren = "right";
-        const clear = advancedCreateButton(editRow, advancedCopy("清空", "Clear"), function () {
-            if (advancedNumericEntry && advancedNumericEntry.IsValid()) {
-                advancedSetNumericEntryText(advancedNumericEntry, "");
-            }
-            return true;
-        }, "64px");
-        const zero = advancedCreateButton(editRow, "0", function () {
-            advancedNumericPadAppend("0");
-            return true;
-        }, "64px");
-        const erase = advancedCreateButton(editRow, "⌫", function () {
-            if (advancedNumericEntry && advancedNumericEntry.IsValid()) {
-                const current = advancedNumericEntryText(advancedNumericEntry).replace(/[^0-9]/g, "");
-                advancedSetNumericEntryText(advancedNumericEntry, current.slice(0, -1));
-            }
-            return true;
-        }, "64px");
-        [clear, zero, erase].forEach(function (button, index) {
-            button.style.height = "31px";
-            button.style.marginRight = index === 2 ? "0px" : "5px";
-        });
-
-        const actionRow = advancedCreatePanel("Panel", advancedNumericPad, "");
-        actionRow.style.width = "100%";
-        actionRow.style.height = "37px";
-        actionRow.style.marginTop = "3px";
-        actionRow.style.flowChildren = "right";
-        const cancel = advancedCreateButton(actionRow, advancedCopy("取消", "Cancel"), advancedCloseNumericPad, "98px");
-        const confirm = advancedCreateButton(actionRow, advancedCopy("确定", "OK"), function () {
-            const callback = advancedNumericSubmit;
-            if (callback) {
-                callback();
-            }
-            return true;
-        }, "98px");
-        cancel.style.height = "31px";
-        confirm.style.height = "31px";
-        confirm.style.marginRight = "0px";
-        advancedStyleButton(confirm, true);
     }
 
     function advancedCursorPosition() {
@@ -5346,92 +4716,6 @@
         return { x: x, y: y };
     }
 
-    function advancedPreviewProgressTick(value) {
-        const target = advancedClampTick(value);
-        if (advancedProgressFill && advancedProgressFill.IsValid()) {
-            advancedProgressFill.style.width = (
-                100 * target / Math.max(1, advancedPlayback.totalTick)
-            ).toFixed(2) + "%";
-        }
-        if (advancedProgressLabel && advancedProgressLabel.IsValid()) {
-            advancedProgressLabel.text = advancedFormatTick(target) + " / "
-                + advancedFormatTick(advancedPlayback.totalTick) + "  ·  tick " + target;
-        }
-        return true;
-    }
-
-    function advancedSeekFromProgressSlider(panel, value) {
-        const target = advancedClampTick(value);
-        advancedPreviewProgressTick(target);
-        advancedSeekToTick(target);
-        return true;
-    }
-
-    function advancedUpdateProgress(state) {
-        if (!state) {
-            return;
-        }
-        advancedPlayback.totalTick = Math.max(
-            1,
-            advancedPlayback.totalTick,
-            Number(state.nTotalTicks || 0),
-        );
-        const current = advancedClampTick(state.nTick);
-        if (advancedProgressFill && advancedProgressFill.IsValid()) {
-            advancedProgressFill.style.width = (100 * current / Math.max(1, advancedPlayback.totalTick)).toFixed(2) + "%";
-        }
-        if (advancedProgressSlider && advancedProgressSlider.IsValid()) {
-            // Match CS2's stock HudDemoController exactly: Slider values are
-            // absolute ticks. A normalized 0..1 Slider is integer-quantized by
-            // Panorama and therefore returned 0 for almost every click.
-            advancedProgressSlider.min = 0;
-            advancedProgressSlider.max = advancedPlayback.totalTick;
-            if (!advancedProgressSlider.mousedown) {
-                advancedProgressSlider.value = current;
-            }
-        }
-        if (advancedProgressLabel && advancedProgressLabel.IsValid()) {
-            advancedProgressLabel.text = advancedFormatTick(current) + " / "
-                + advancedFormatTick(advancedPlayback.totalTick) + "  ·  tick " + current;
-        }
-        advancedSetButtonText(
-            advancedPlayPauseButton,
-            state.bIsPaused ? advancedCopy("播放", "Play") : advancedCopy("暂停", "Pause"),
-        );
-    }
-
-    function advancedHideNativeDemoUi() {
-        // The injected script runs on the stock huddemocontroller context panel.
-        // Hide that panel only; its parent owns the rest of the game HUD.
-        try {
-            controller.visible = false;
-            controller.hittest = false;
-            controller.hittestchildren = false;
-            controller.style.opacity = "0";
-        } catch (errNativeController) {}
-        if (advancedNativeDemoUiCommandAttempts >= 12) {
-            return;
-        }
-        let state = null;
-        try { state = controller.GetDemoControllerState(); } catch (errState) {}
-        if (!state || Number(state.nTotalTicks || 0) <= 0) {
-            return;
-        }
-        if (advancedNativeDemoUiCommandAttempts === 0) {
-            try { GameInterfaceAPI.ConsoleCommand("sv_cheats 1"); } catch (errCheats) {}
-        }
-        advancedNativeDemoUiCommandAttempts += 1;
-        try { GameInterfaceAPI.ConsoleCommand("demoui false"); } catch (errDemoUi) {}
-    }
-
-    function advancedGuardNativeDemoUi() {
-        if (!advancedPlayback) {
-            return;
-        }
-        advancedHideNativeDemoUi();
-        $.Schedule(1, advancedGuardNativeDemoUi);
-    }
-
     function advancedLocalizedUtilityName(raw) {
         const text = String(raw || "").trim();
         let key = text.toLowerCase();
@@ -5455,51 +4739,218 @@
         return names[key] ? advancedCopy(names[key][0], names[key][1]) : text;
     }
 
-    function advancedEventTitle(event) {
-        const peer = event.peerXuid ? advancedPlayerName(event.peerXuid) : "";
-        const roundNumber = advancedRoundNumberAtTick(event.tick);
-        const roundText = roundNumber > 0
-            ? advancedCopy("第" + roundNumber + "回合 · ", "R" + roundNumber + " · ")
-            : "";
-        const eventDetail = event.type === "utility"
-            ? advancedLocalizedUtilityName(event.detail)
-            : event.detail;
-        const detail = eventDetail ? " · " + eventDetail : "";
-        const headshot = (event.flags & 1) && event.type !== "utility"
-            ? advancedCopy(" · 爆头", " · Headshot")
-            : "";
-        if (event.type === "kill") {
-            return advancedCopy("[击杀] ", "[Kill] ") + roundText + advancedFormatTick(event.tick)
-                + "  " + peer + detail + headshot;
+    function advancedEquipmentIconStem(raw) {
+        let key = String(raw || "").trim().toLowerCase();
+        const localized = {
+            "烟雾弹": "smokegrenade",
+            "闪光弹": "flashbang",
+            "高爆手雷": "hegrenade",
+            "燃烧瓶": "molotov",
+            "燃烧弹": "incgrenade",
+            "诱饵弹": "decoy",
+            "道具": "utility",
+        };
+        if (localized[key]) {
+            return localized[key];
         }
-        if (event.type === "death") {
-            return advancedCopy("[死亡] ", "[Death] ") + roundText + advancedFormatTick(event.tick)
-                + "  " + (peer || advancedCopy("世界", "World")) + detail + headshot;
+        key = key.replace(/^weapon_/, "").replace(/[\- ]/g, "_");
+        const compact = key.replace(/_/g, "");
+        const aliases = {
+            mac_10: "mac10",
+            m4a1_s: "m4a1_silencer",
+            usp_s: "usp_silencer",
+            incendiary: "incgrenade",
+            incendiarygrenade: "incgrenade",
+            smoke: "smokegrenade",
+            flash: "flashbang",
+            he: "hegrenade",
+            world: "suicide",
+        };
+        if (aliases[key]) {
+            return aliases[key];
         }
-        return advancedCopy("[道具] ", "[Utility] ") + roundText + advancedFormatTick(event.tick)
-            + "  " + (eventDetail || advancedCopy("道具", "Utility"));
+        const stems = [
+            "m4a1_silencer_off", "m4a1_silencer", "usp_silencer_off", "usp_silencer",
+            "knife_m9_bayonet", "knife_butterfly", "knife_falchion", "knife_karambit",
+            "knife_stiletto", "knife_tactical", "knife_widowmaker", "smokegrenade",
+            "flashbang", "hegrenade", "incgrenade", "fiveseven", "hkp2000", "sawedoff",
+            "galilar", "revolver", "cz75a", "g3sg1", "scar20", "sg556", "ssg08",
+            "xm1014", "molotov", "inferno", "deagle", "glock", "mac10", "ump45",
+            "mp5sd", "bizon", "negev", "mag7", "famas", "m4a1", "ak47", "awp",
+            "aug", "p90", "mp9", "mp7", "tec9", "p250", "nova", "m249", "elite",
+            "taser", "decoy", "bayonet", "knife", "c4", "suicide",
+        ];
+        for (let index = 0; index < stems.length; index += 1) {
+            if (compact.indexOf(stems[index].replace(/_/g, "")) >= 0) {
+                return stems[index];
+            }
+        }
+        return key || "suicide";
     }
 
-    function advancedSpecCandidates(xuid) {
-        const values = [];
-        function add(value) {
-            const number = Number(value);
-            if (!isFinite(number) || number < 0 || number > 64 || values.indexOf(number) >= 0) {
-                return;
-            }
-            values.push(number);
+    function advancedCreateEventIcon(parent, folder, stem, width) {
+        const icon = advancedCreatePanel("Image", parent, "");
+        icon.hittest = false;
+        icon.hittestchildren = false;
+        icon.style.width = String(width || 12) + "px";
+        icon.style.height = "12px";
+        icon.style.marginLeft = "1px";
+        icon.style.marginRight = "1px";
+        icon.style.verticalAlign = "center";
+        icon.style.washColor = "#ece9e2";
+        icon.style.imgShadow = "0px 0px 1px 1 #00000080";
+        try {
+            icon.SetImage("s2r://panorama/images/icons/" + folder + "/" + stem + ".svg");
+        } catch (errImage) {}
+        return icon;
+    }
+
+    function advancedEventPlayerColor(xuid, tick) {
+        const team = xuid ? resolvePovTeam(xuid, tick) : 0;
+        return team === 3 ? "#7ed9ff" : (team === 2 ? "#ffd46d" : "#b5b3ad");
+    }
+
+    function advancedCreateEventName(parent, xuid, fallback, tick, align) {
+        const label = advancedCreateLabel(
+            parent,
+            xuid ? advancedPlayerName(xuid) : fallback,
+            11,
+            advancedEventPlayerColor(xuid, tick),
+        );
+        label.style.width = "fill-parent-flow(1.0)";
+        label.style.height = "100%";
+        label.style.textAlign = align;
+        label.style.textOverflow = "shrink";
+        return label;
+    }
+
+    function advancedAppendKillModifiers(parent, flags) {
+        if (flags & 1) {
+            advancedCreateEventIcon(parent, "death_notice", "headshot", 12);
         }
+        if (flags & 8) {
+            advancedCreateEventIcon(parent, "death_notice", "noscope", 12);
+        }
+        if (flags & 2) {
+            advancedCreateEventIcon(parent, "death_notice", "throughsmoke", 12);
+        }
+        if (flags & 4) {
+            advancedCreateEventIcon(parent, "death_notice", "penetrate", 12);
+        }
+        if (flags & 32) {
+            advancedCreateEventIcon(parent, "death_notice", "flashbang_assist", 12);
+        }
+    }
+
+    function advancedCreateEventLocateButton(row, event) {
+        const locate = advancedCreatePanel("Button", row, "");
+        locate.style.width = "fill-parent-flow(1.0)";
+        locate.style.height = "24px";
+        locate.style.marginRight = "6px";
+        locate.style.paddingLeft = "4px";
+        locate.style.paddingRight = "4px";
+        locate.style.flowChildren = "right";
+        advancedStyleButton(locate, false);
+        locate.SetPanelEvent("onactivate", function () {
+            advancedSelectPlayer(advancedSelectedXuid, { tick: event.tick });
+            return true;
+        });
+
+        const roundNumber = advancedRoundNumberAtTick(event.tick);
+        const time = advancedCreateLabel(
+            locate,
+            (roundNumber > 0 ? "R" + roundNumber + " · " : "") + advancedFormatTick(event.tick),
+            9,
+            "#807f79",
+        );
+        time.style.width = "63px";
+        time.style.height = "100%";
+        time.style.textAlign = "left";
+
+        const feed = advancedCreatePanel("Panel", locate, "");
+        feed.hittest = false;
+        feed.hittestchildren = false;
+        feed.style.width = "fill-parent-flow(1.0)";
+        feed.style.height = "100%";
+        feed.style.flowChildren = "right";
+
+        if (event.type === "utility") {
+            advancedCreateEventName(feed, advancedSelectedXuid, "", event.tick, "right");
+            const verb = advancedCreateLabel(feed, advancedCopy("投掷", "threw"), 10, "#aaa8a2");
+            verb.style.width = advancedChinese() ? "27px" : "34px";
+            verb.style.height = "100%";
+            verb.style.textAlign = "center";
+            const utilityStem = advancedEquipmentIconStem(event.detail);
+            advancedCreateEventIcon(feed, "equipment", utilityStem, 18);
+            const utility = advancedCreateLabel(
+                feed,
+                advancedLocalizedUtilityName(event.detail),
+                10,
+                "#ece9e2",
+            );
+            utility.style.width = "fill-parent-flow(1.0)";
+            utility.style.height = "100%";
+            utility.style.textAlign = "left";
+            utility.style.textOverflow = "shrink";
+            return locate;
+        }
+
+        const actorXuid = event.type === "kill" ? advancedSelectedXuid : event.peerXuid;
+        const targetXuid = event.type === "kill" ? event.peerXuid : advancedSelectedXuid;
+        advancedCreateEventName(
+            feed,
+            actorXuid,
+            advancedCopy("世界", "World"),
+            event.tick,
+            "right",
+        );
+        if (event.flags & 16) {
+            advancedCreateEventIcon(feed, "death_notice", "blindkill", 12);
+        }
+        advancedCreateEventIcon(feed, "equipment", advancedEquipmentIconStem(event.detail), 28);
+        advancedAppendKillModifiers(feed, event.flags);
+        advancedCreateEventName(feed, targetXuid, advancedCopy("世界", "World"), event.tick, "left");
+        return locate;
+    }
+
+    function advancedSpecTargetSlot(xuid) {
         const runtimeSlot = runtimeSlotForXuid(xuid);
-        const player = advancedPlayback.byXuid[normalizeXuid(xuid)];
-        if (runtimeSlot >= 0) {
-            add(runtimeSlot);
-            add(runtimeSlot + 1);
+        // GameStateAPI player slots are zero-based, while spec_player expects the
+        // one-based entity index. Trying both values visibly visits another POV.
+        return runtimeSlot >= 0 && runtimeSlot < 64 ? runtimeSlot + 1 : -1;
+    }
+
+    function advancedPlayerAliveAtTick(xuid, tick) {
+        const normalized = normalizeXuid(xuid);
+        const tracked = findRadarPlayerByXuid(normalized);
+        if (tracked && radarTrack) {
+            const sample = radarSampleAt(tracked, Number(tick) || 0, radarTrack.stride);
+            if (sample) {
+                return Boolean(sample.alive);
+            }
         }
-        if (player) {
-            add(player.parserSlot);
-            add(player.parserSlot + 1);
+
+        // Advanced playback normally includes the radar track. Keep a round-aware
+        // event fallback so a partially decoded demo still disables dead players.
+        let roundStart = 0;
+        for (let index = 0; index < advancedRoundIntervals.length; index += 1) {
+            const round = advancedRoundIntervals[index];
+            if (Number(round.start || 0) <= Number(tick || 0)) {
+                roundStart = Number(round.start || 0);
+            } else {
+                break;
+            }
         }
-        return values;
+        const events = advancedPlayback.eventsByXuid[normalized] || [];
+        for (let index = 0; index < events.length; index += 1) {
+            const event = events[index];
+            if (event.type === "death"
+                    && Number(event.tick || 0) >= roundStart
+                    && Number(event.tick || 0) <= Number(tick || 0)) {
+                return false;
+            }
+        }
+        return true;
     }
 
     function advancedFinishSpecOperation(success) {
@@ -5577,29 +5028,24 @@
             advancedFinishSpecOperation(true);
             return;
         }
-        if (operation.candidates.length === 0) {
+        if (operation.targetSlot < 1) {
             advancedFinishSpecOperation(false);
             return;
         }
-        if (operation.index >= operation.candidates.length) {
-            operation.index = 0;
-            operation.cycles += 1;
-            if (!operation.resumedForSpec && state.bIsPaused) {
-                operation.resumedForSpec = true;
-                try { GameInterfaceAPI.ConsoleCommand("demo_resume"); } catch (errResume) {}
-                $.Schedule(0.12, advancedAdvanceSpecOperation);
-                return;
-            }
-            if (operation.cycles >= 3) {
-                advancedFinishSpecOperation(false);
-                return;
-            }
+        if (operation.attempts > 0 && !operation.resumedForSpec && state.bIsPaused) {
+            operation.resumedForSpec = true;
+            try { GameInterfaceAPI.ConsoleCommand("demo_resume"); } catch (errResume) {}
+            $.Schedule(0.12, advancedAdvanceSpecOperation);
+            return;
         }
-        const candidate = operation.candidates[operation.index];
-        operation.index += 1;
+        if (operation.attempts >= 4) {
+            advancedFinishSpecOperation(false);
+            return;
+        }
+        operation.attempts += 1;
         try {
             GameInterfaceAPI.ConsoleCommand("spec_mode " + operation.mode);
-            GameInterfaceAPI.ConsoleCommand("spec_player " + candidate);
+            GameInterfaceAPI.ConsoleCommand("spec_player " + operation.targetSlot);
         } catch (errSpec) {}
         $.Schedule(0.16, advancedAdvanceSpecOperation);
     }
@@ -5612,6 +5058,9 @@
         const state = controller.GetDemoControllerState();
         const opts = options || {};
         const exactTick = isFinite(Number(opts.tick)) ? Math.max(0, Number(opts.tick) | 0) : -1;
+        if (exactTick < 0 && !advancedPlayerAliveAtTick(normalized, state ? Number(state.nTick || 0) : 0)) {
+            return;
+        }
         const playAfter = Boolean(opts.playAfter);
         const resumeAfterSeek = playAfter || Boolean(state && !state.bIsPaused);
         const initialSeekTick = exactTick >= 0
@@ -5636,9 +5085,8 @@
         advancedSpecOperation = {
             xuid: normalized,
             mode: advancedViewMode === 1 ? 5 : advancedViewMode,
-            candidates: advancedSpecCandidates(normalized),
-            index: 0,
-            cycles: 0,
+            targetSlot: advancedSpecTargetSlot(normalized),
+            attempts: 0,
             seekWaits: 0,
             seekTick: exactTick,
             initialSeekTick: initialSeekTick,
@@ -5661,6 +5109,26 @@
             panel.style.opacity = visible ? "1" : "0";
             panel.style.visibility = visible ? "visible" : "collapse";
         } catch (errStyle) {}
+    }
+
+    function advancedRestoreDemoTeamCounterEquipment() {
+        const root = hudRootPanel();
+        if (!root || !root.IsValid() || !root.FindChildrenWithClassTraverse) {
+            return;
+        }
+        const equipmentRoots = root.FindChildrenWithClassTraverse("equipinfo-root") || [];
+        equipmentRoots.forEach(function (panel) {
+            advancedSetPanelRuntimeVisible(panel, true);
+            try {
+                panel.style.transform = "translateY(0px)";
+                panel.RemoveClass("Invisible");
+            } catch (errEquipmentRoot) {}
+        });
+        const backgrounds = root.FindChildrenWithClassTraverse("equipinfo__bg-container") || [];
+        backgrounds.forEach(function (panel) {
+            advancedSetPanelRuntimeVisible(panel, true);
+            try { panel.RemoveClass("Invisible"); } catch (errBackground) {}
+        });
     }
 
     function advancedSpectatorInfoPanels() {
@@ -5721,23 +5189,22 @@
 
         if (enabled) {
             restoreAdvancedTeamCounterPanels();
-            const teamCounter = findTeamCounterRoot();
-            if (teamCounter && teamCounter.IsValid() && teamCounter.FindChildrenWithClassTraverse) {
-                const equipment = teamCounter.FindChildrenWithClassTraverse("hudteamcounter-equipmentinfo") || [];
-                equipment.forEach(function (panel) {
-                    advancedSetPanelRuntimeVisible(panel, true);
-                    try { panel.RemoveClass("Invisible"); } catch (errInvisible) {}
-                });
-            }
+            advancedRestoreDemoTeamCounterEquipment();
+        } else {
+            restrictPovTeamCounterEquipment();
         }
     }
 
-    function advancedGuardSpectatorHud() {
-        if (!advancedPlayback) {
-            return;
-        }
-        advancedApplyNativeSpectatorHud(!advancedPovVisualsEnabled);
-        $.Schedule(0.25, advancedGuardSpectatorHud);
+    function guardSpectatorHudProfile() {
+        // Recording POV and Advanced's POV profile share the same native
+        // container selection: show HudHealthAmmoCenter (with CS2's CT/T logo)
+        // and hide the demo-only Steam-avatar card. This changes only root
+        // visibility; health fill, wash, gradients, and colors remain native.
+        const demoSpectatorHudEnabled = Boolean(
+            advancedPlayback && !advancedPovVisualsEnabled
+        );
+        advancedApplyNativeSpectatorHud(demoSpectatorHudEnabled);
+        $.Schedule(0.25, guardSpectatorHudProfile);
     }
 
     function advancedApplyPlaybackProfile(profile) {
@@ -5796,7 +5263,6 @@
         advancedApplyNativeSpectatorHud(!advancedPovVisualsEnabled);
         if (!advancedPovVisualsEnabled) {
             restoreAdvancedTeamCounterPanels();
-            restoreAdvancedHealthPanels();
             if (inputHud && inputHud.IsValid()) {
                 inputHud.visible = false;
             }
@@ -5808,11 +5274,6 @@
             }
             restoreNativeRadarForAdvancedSpectator();
             hideRadioHud();
-            speakers.forEach(function (speaker) {
-                if (speaker.panel && speaker.panel.IsValid()) {
-                    speaker.panel.AddClass("Hidden");
-                }
-            });
             $.Schedule(0.05, function () {
                 advancedApplyNativeSpectatorHud(true);
             });
@@ -5850,6 +5311,88 @@
         return advancedVoiceAllows(xuid, povTeam, tick);
     }
 
+    function advancedRoundButtonText(roundNumber) {
+        if (roundNumber <= 0) {
+            return advancedCopy("选择回合 ▾", "Select round ▾");
+        }
+        return advancedCopy("第 " + roundNumber + " 回合 ▾", "Round " + roundNumber + " ▾");
+    }
+
+    function advancedRefreshRoundSelector(state) {
+        const tick = state ? Number(state.nTick || 0) : 0;
+        const currentRound = advancedRoundNumberAtTick(tick);
+        if (advancedRoundButton && advancedRoundButton.IsValid()) {
+            advancedSetButtonText(advancedRoundButton, advancedRoundButtonText(currentRound));
+            advancedStyleButton(advancedRoundButton, advancedRoundPickerOpen);
+        }
+        if (advancedRoundHintLabel && advancedRoundHintLabel.IsValid()) {
+            advancedRoundHintLabel.text = advancedCopy(
+                "共 " + advancedRoundIntervals.length + " 回合",
+                advancedRoundIntervals.length + " rounds",
+            );
+        }
+        advancedRoundButtons.forEach(function (button) {
+            if (!button || !button.IsValid()) {
+                return;
+            }
+            advancedStyleButton(button, Number(button._insightRoundNumber || 0) === currentRound);
+        });
+    }
+
+    function advancedRenderRoundPicker() {
+        if (!advancedRoundPickerPanel || !advancedRoundPickerPanel.IsValid()) {
+            return;
+        }
+        advancedClearPanel(advancedRoundPickerPanel);
+        advancedRoundButtons.length = 0;
+        const rounds = advancedRoundIntervals;
+        const rowCount = Math.max(1, Math.ceil(rounds.length / 8));
+        advancedRoundPickerPanel.visible = advancedRoundPickerOpen;
+        advancedRoundPickerPanel.style.visibility = advancedRoundPickerOpen ? "visible" : "collapse";
+        advancedRoundPickerPanel.style.height = advancedRoundPickerOpen
+            ? (rowCount * 28 + 8) + "px"
+            : "0px";
+        advancedRoundPickerPanel.style.marginBottom = advancedRoundPickerOpen ? "4px" : "0px";
+        if (!advancedRoundPickerOpen) {
+            return;
+        }
+        rounds.forEach(function (round) {
+            const button = advancedCreateButton(
+                advancedRoundPickerPanel,
+                String(round.number),
+                function () {
+                    advancedRoundPickerOpen = false;
+                    advancedRenderRoundPicker();
+                    const state = controller.GetDemoControllerState();
+                    const xuid = advancedSelectedXuid || (state ? currentPovXuid(state) : "");
+                    if (xuid && advancedPlayback.byXuid[normalizeXuid(xuid)]) {
+                        advancedSelectPlayer(xuid, { tick: round.start });
+                    }
+                },
+                "48px",
+            );
+            button._insightRoundNumber = round.number;
+            button.style.height = "24px";
+            button.style.marginRight = "4px";
+            button.style.marginBottom = "4px";
+            button.style.paddingLeft = "2px";
+            button.style.paddingRight = "2px";
+            advancedRoundButtons.push(button);
+        });
+        advancedRefreshRoundSelector(controller.GetDemoControllerState());
+    }
+
+    function advancedToggleRoundPicker() {
+        advancedRoundPickerOpen = !advancedRoundPickerOpen;
+        advancedRenderRoundPicker();
+        advancedRefreshRoundSelector(controller.GetDemoControllerState());
+        if (advancedMenuPosition) {
+            $.Schedule(0, function () {
+                advancedSetMenuPosition(advancedMenuPosition.x, advancedMenuPosition.y);
+            });
+        }
+    }
+
     function advancedRenderPlayers() {
         if (!advancedPlayerListPanel || !advancedPlayerListPanel.IsValid()) {
             return;
@@ -5861,8 +5404,10 @@
         const teamSignature = [];
         advancedPlayback.players.forEach(function (player) {
             const liveTeam = resolvePovTeam(player.xuid, tick) || player.team;
+            const alive = advancedPlayerAliveAtTick(player.xuid, tick);
             grouped[liveTeam === 3 ? 3 : 2].push(player);
-            teamSignature.push(player.xuid + ":" + liveTeam);
+            player._insightAlive = alive;
+            teamSignature.push(player.xuid + ":" + liveTeam + ":" + (alive ? "1" : "0"));
         });
         advancedPlayerTeamSignature = teamSignature.join("|");
 
@@ -5881,6 +5426,7 @@
             header.style.height = "20px";
             header.style.textAlign = "center";
             grouped[team].forEach(function (player) {
+                const alive = player._insightAlive !== false;
                 const row = advancedCreatePanel("Panel", column, "");
                 row.style.width = "100%";
                 row.style.height = "25px";
@@ -5888,13 +5434,26 @@
                 row.style.marginBottom = "1px";
                 const button = advancedCreateButton(
                     row,
-                    advancedPlayerName(player.xuid),
-                    function () { advancedSelectPlayer(player.xuid, {}); },
+                    alive
+                        ? advancedPlayerName(player.xuid)
+                        : advancedCopy("☠ " + advancedPlayerName(player.xuid) + "（死亡）", "☠ " + advancedPlayerName(player.xuid) + " (dead)"),
+                    alive
+                        ? function () { advancedSelectPlayer(player.xuid, {}); }
+                        : function () { return true; },
                     "fill-parent-flow(1.0)",
                 );
                 button.style.height = "23px";
                 button.style.marginRight = "3px";
-                advancedStyleButton(button, sameXuid(player.xuid, advancedSelectedXuid));
+                advancedStyleButton(button, alive && sameXuid(player.xuid, advancedSelectedXuid));
+                if (!alive) {
+                    button.style.backgroundColor = "#2b1818f2";
+                    button.style.border = "1px solid #704040";
+                    button.style.brightness = "0.78";
+                    const deadLabel = button.GetChild(0);
+                    if (deadLabel && deadLabel.IsValid()) {
+                        deadLabel.style.color = "#d88e8e";
+                    }
+                }
                 const voiceEnabled = advancedPlayerVoiceEnabled(player.xuid);
                 const voiceText = voiceEnabled
                     ? advancedCopy("语音开", "ON")
@@ -5935,32 +5494,28 @@
         const pageCount = Math.max(1, Math.ceil(events.length / pageSize));
         advancedEventPage = Math.max(0, Math.min(advancedEventPage, pageCount - 1));
         const visible = events.slice(advancedEventPage * pageSize, (advancedEventPage + 1) * pageSize);
-        if (!visible.length) {
-            const empty = advancedCreateLabel(
-                advancedEventListPanel,
-                advancedCopy("当前筛选没有事件", "No events for this filter"),
-                14,
-                "#8ea1aa",
-            );
-            empty.style.height = "32px";
-        }
-        visible.forEach(function (event) {
+        for (let slot = 0; slot < pageSize; slot += 1) {
+            const event = visible[slot];
             const row = advancedCreatePanel("Panel", advancedEventListPanel, "");
             row.style.width = "100%";
             row.style.height = "26px";
             row.style.flowChildren = "right";
-            row.style.marginBottom = "1px";
-            const locate = advancedCreateButton(
-                row,
-                advancedEventTitle(event),
-                function () { advancedSelectPlayer(advancedSelectedXuid, { tick: event.tick }); },
-                "fill-parent-flow(1.0)",
-            );
-            locate.style.height = "24px";
-            locate.style.marginRight = "6px";
-            if (locate.GetChildCount && locate.GetChildCount() > 0) {
-                locate.GetChild(0).style.textOverflow = "shrink";
+            row.style.marginBottom = slot === pageSize - 1 ? "0px" : "1px";
+            if (!event) {
+                if (slot === 0 && visible.length === 0) {
+                    const empty = advancedCreateLabel(
+                        row,
+                        advancedCopy("当前筛选没有事件", "No events for this filter"),
+                        12,
+                        "#8ea1aa",
+                    );
+                    empty.style.width = "100%";
+                    empty.style.height = "24px";
+                    empty.style.textAlign = "center";
+                }
+                continue;
             }
+            advancedCreateEventLocateButton(row, event);
             const preroll = advancedCreateButton(
                 row,
                 "▶ -3s",
@@ -5971,7 +5526,7 @@
             );
             preroll.style.height = "24px";
             preroll.style.marginRight = "0px";
-        });
+        }
         if (advancedEventPagerLabel && advancedEventPagerLabel.IsValid()) {
             advancedEventPagerLabel.text = (advancedEventPage + 1) + " / " + pageCount
                 + "  ·  " + events.length;
@@ -5998,6 +5553,8 @@
         Object.keys(advancedFilterButtons).forEach(function (key) {
             advancedStyleButton(advancedFilterButtons[key], key === advancedEventFilter);
         });
+        advancedRenderRoundPicker();
+        advancedRefreshRoundSelector(state);
         if (advancedPinButton && advancedPinButton.IsValid()) {
             advancedSetButtonText(
                 advancedPinButton,
@@ -6021,59 +5578,84 @@
         return true;
     }
 
-    function advancedMenuDragTick() {
-        if (!advancedMenuDragging || !advancedMenu || !advancedMenu.IsValid()) {
+    function advancedSetMenuPosition(x, y) {
+        if (!advancedMenu || !advancedMenu.IsValid()) {
             return;
         }
-        const cursor = advancedCursorPosition();
         const root = hudRootPanel();
-        if (cursor && root && root.IsValid()
-                && advancedMenuDragStartCursor && advancedMenuDragStartPosition) {
-            const scaleX = Math.max(0.001, Number(advancedMenu.actualuiscale_x || 1));
-            const scaleY = Math.max(0.001, Number(advancedMenu.actualuiscale_y || scaleX));
-            const rootWidth = Number(root.actuallayoutwidth || 0) / scaleX;
-            const rootHeight = Number(root.actuallayoutheight || 0) / scaleY;
-            const menuWidth = Number(advancedMenu.actuallayoutwidth || 0) / scaleX;
-            const menuHeight = Number(advancedMenu.actuallayoutheight || 0) / scaleY;
-            const x = advancedMenuDragStartPosition.x
-                + (cursor.x - advancedMenuDragStartCursor.x) / scaleX;
-            const y = advancedMenuDragStartPosition.y
-                + (cursor.y - advancedMenuDragStartCursor.y) / scaleY;
-            advancedMenu.style.x = Math.max(0, Math.min(Math.max(0, rootWidth - menuWidth), x)) + "px";
-            advancedMenu.style.y = Math.max(0, Math.min(Math.max(0, rootHeight - menuHeight), y)) + "px";
-        }
-        $.Schedule(0.016, advancedMenuDragTick);
-    }
-
-    function advancedStartMenuDrag() {
-        if (!advancedMenu || !advancedMenu.IsValid()) {
-            return true;
-        }
-        if (advancedMenuDragging) {
-            return true;
-        }
-        const cursor = advancedCursorPosition();
-        const menuPosition = advancedPanelWindowPosition(advancedMenu);
-        const root = hudRootPanel();
-        const rootPosition = advancedPanelWindowPosition(root);
-        if (!cursor || !menuPosition || !rootPosition) {
-            return true;
+        if (!root || !root.IsValid()) {
+            return;
         }
         const scaleX = Math.max(0.001, Number(advancedMenu.actualuiscale_x || 1));
         const scaleY = Math.max(0.001, Number(advancedMenu.actualuiscale_y || scaleX));
-        const localX = (menuPosition.x - rootPosition.x) / scaleX;
-        const localY = (menuPosition.y - rootPosition.y) / scaleY;
+        const rootWidth = Math.max(0, Number(root.actuallayoutwidth || 0) / scaleX);
+        const rootHeight = Math.max(0, Number(root.actuallayoutheight || 0) / scaleY);
+        const menuWidth = Math.max(0, Number(advancedMenu.actuallayoutwidth || 500) / scaleX);
+        const menuHeight = Math.max(0, Number(advancedMenu.actuallayoutheight || 0) / scaleY);
+        const clampedX = Math.max(0, Math.min(Math.max(0, rootWidth - menuWidth), Number(x) || 0));
+        const clampedY = Math.max(0, Math.min(Math.max(0, rootHeight - menuHeight), Number(y) || 0));
+        advancedMenuPosition = { x: clampedX, y: clampedY };
         advancedMenu.style.horizontalAlign = "left";
         advancedMenu.style.verticalAlign = "top";
         advancedMenu.style.marginRight = "0px";
         advancedMenu.style.marginLeft = "0px";
         advancedMenu.style.marginTop = "0px";
-        advancedMenu.style.x = localX + "px";
-        advancedMenu.style.y = localY + "px";
+        advancedMenu.style.transform = "translate3d(" + clampedX + "px, " + clampedY + "px, 0px)";
+    }
+
+    function advancedCurrentMenuPosition() {
+        if (advancedMenuPosition) {
+            return { x: advancedMenuPosition.x, y: advancedMenuPosition.y };
+        }
+        const root = hudRootPanel();
+        if (!root || !root.IsValid() || !advancedMenu || !advancedMenu.IsValid()) {
+            return null;
+        }
+        const scaleX = Math.max(0.001, Number(advancedMenu.actualuiscale_x || 1));
+        const scaleY = Math.max(0.001, Number(advancedMenu.actualuiscale_y || scaleX));
+        const rootWidth = Number(root.actuallayoutwidth || 0) / scaleX;
+        const rootHeight = Number(root.actuallayoutheight || 0) / scaleY;
+        const menuWidth = Number(advancedMenu.actuallayoutwidth || 500) / scaleX;
+        const menuHeight = Number(advancedMenu.actuallayoutheight || 0) / scaleY;
+        return {
+            x: Math.max(0, rootWidth - menuWidth - 6),
+            y: Math.max(0, (rootHeight - menuHeight) * 0.5),
+        };
+    }
+
+    function advancedMenuDragTick() {
+        if (!advancedMenuDragging || !advancedMenuDragStartCursor
+                || !advancedMenuDragStartPosition || !advancedMenu || !advancedMenu.IsValid()) {
+            return;
+        }
+        const cursor = advancedCursorPosition();
+        if (cursor) {
+            const scaleX = Math.max(0.001, Number(advancedMenu.actualuiscale_x || 1));
+            const scaleY = Math.max(0.001, Number(advancedMenu.actualuiscale_y || scaleX));
+            advancedSetMenuPosition(
+                advancedMenuDragStartPosition.x
+                    + (cursor.x - advancedMenuDragStartCursor.x) / scaleX,
+                advancedMenuDragStartPosition.y
+                    + (cursor.y - advancedMenuDragStartCursor.y) / scaleY,
+            );
+        }
+        $.Schedule(0.016, advancedMenuDragTick);
+    }
+
+    function advancedStartMenuDrag() {
+        if (!advancedMenu || !advancedMenu.IsValid() || advancedMenuDragging) {
+            return true;
+        }
+        const cursor = advancedCursorPosition();
+        const position = advancedCurrentMenuPosition();
+        if (!cursor || !position) {
+            return true;
+        }
         advancedMenuDragStartCursor = cursor;
-        advancedMenuDragStartPosition = { x: localX, y: localY };
+        advancedMenuDragStartPosition = position;
         advancedMenuDragging = true;
         advancedMenuHoverGeneration += 1;
+        advancedSetMenuPosition(position.x, position.y);
         $.Schedule(0, advancedMenuDragTick);
         return true;
     }
@@ -6083,13 +5665,25 @@
             return;
         }
         try { handle.SetDraggable(true); } catch (errDraggable) {}
+        try { handle.draggable = true; } catch (errDraggableProperty) {}
+        try { handle.style.cursor = "move"; } catch (errCursor) {}
         try { handle.SetPanelEvent("onmousedown", advancedStartMenuDrag); } catch (errMouseDown) {}
-        try { handle.SetPanelEvent("onactivate", advancedStopMenuDrag); } catch (errActivate) {}
+        try {
+            handle.SetPanelEvent("onactivate", function () {
+                return advancedMenuDragGhost ? true : advancedStopMenuDrag();
+            });
+        } catch (errActivate) {}
         try {
             $.RegisterEventHandler("DragStart", handle, function (source, dragCallbacks) {
                 advancedStartMenuDrag();
+                if (advancedMenuDragGhost && advancedMenuDragGhost.IsValid()) {
+                    try { advancedMenuDragGhost.DeleteAsync(0); } catch (errOldGhost) {}
+                    advancedMenuDragGhost = null;
+                }
                 const root = hudRootPanel();
-                if (root && root.IsValid()) {
+                const menuPosition = advancedPanelWindowPosition(advancedMenu);
+                const rootPosition = advancedPanelWindowPosition(root);
+                if (root && root.IsValid() && menuPosition && rootPosition) {
                     advancedMenuDragGhost = advancedCreatePanel(
                         "Panel",
                         root,
@@ -6099,14 +5693,17 @@
                     const scaleY = Math.max(0.001, Number(advancedMenu.actualuiscale_y || scaleX));
                     const menuWidth = Number(advancedMenu.actuallayoutwidth || 0) / scaleX;
                     const menuHeight = Number(advancedMenu.actuallayoutheight || 0) / scaleY;
+                    const startX = (menuPosition.x - rootPosition.x) / scaleX;
+                    const startY = (menuPosition.y - rootPosition.y) / scaleY;
                     advancedMenuDragGhost.style.width = Math.max(1, menuWidth) + "px";
                     advancedMenuDragGhost.style.height = Math.max(1, menuHeight) + "px";
+                    advancedMenuDragGhost.style.horizontalAlign = "left";
+                    advancedMenuDragGhost.style.verticalAlign = "top";
+                    advancedMenuDragGhost.style.transform = "translate3d(" + startX + "px, "
+                        + startY + "px, 0px)";
                     advancedMenuDragGhost.style.backgroundColor = "#19191899";
                     advancedMenuDragGhost.style.border = "1px solid #e07f0a";
                     advancedMenuDragGhost.style.borderRadius = "10px";
-                    // If GameUI exposes cursor coordinates, the menu itself is
-                    // already following them. Otherwise Panorama's native drag
-                    // ghost provides the fallback position captured on DragEnd.
                     advancedMenuDragGhost.style.opacity = advancedMenuDragStartCursor ? "0" : "0.55";
                     advancedMenuDragGhost.hittest = false;
                     advancedMenuDragGhost.hittestchildren = false;
@@ -6114,43 +5711,34 @@
                     advancedMenuHoverGeneration += 1;
                     if (dragCallbacks) {
                         dragCallbacks.displayPanel = advancedMenuDragGhost;
-                        dragCallbacks.offsetX = 0;
-                        dragCallbacks.offsetY = 0;
+                        const cursor = advancedCursorPosition();
+                        if (cursor) {
+                            dragCallbacks.offsetX = Math.max(0, (cursor.x - menuPosition.x) / scaleX);
+                            dragCallbacks.offsetY = Math.max(0, (cursor.y - menuPosition.y) / scaleY);
+                        }
                     }
                 }
                 return true;
             });
             $.RegisterEventHandler("DragEnd", handle, function (source, draggedPanel) {
                 if (!advancedMenuDragStartCursor && advancedMenu && advancedMenu.IsValid()) {
-                    const position = advancedPanelWindowPosition(
-                        draggedPanel && draggedPanel.IsValid()
-                            ? draggedPanel
-                            : advancedMenuDragGhost,
-                    );
+                    // Panorama may report the draggable title handle even
+                    // though displayPanel is the object it actually moved.
+                    const moved = advancedMenuDragGhost
+                        && advancedMenuDragGhost.IsValid
+                        && advancedMenuDragGhost.IsValid()
+                        ? advancedMenuDragGhost
+                        : draggedPanel;
+                    const position = advancedPanelWindowPosition(moved);
                     const root = hudRootPanel();
                     const rootPosition = advancedPanelWindowPosition(root);
                     if (position && rootPosition && root && root.IsValid()) {
                         const scaleX = Math.max(0.001, Number(advancedMenu.actualuiscale_x || 1));
                         const scaleY = Math.max(0.001, Number(advancedMenu.actualuiscale_y || scaleX));
-                        const rootWidth = Number(root.actuallayoutwidth || 0) / scaleX;
-                        const rootHeight = Number(root.actuallayoutheight || 0) / scaleY;
-                        const menuWidth = Number(advancedMenu.actuallayoutwidth || 0) / scaleX;
-                        const menuHeight = Number(advancedMenu.actuallayoutheight || 0) / scaleY;
-                        const x = Math.max(0, Math.min(
-                            Math.max(0, rootWidth - menuWidth),
+                        advancedSetMenuPosition(
                             (position.x - rootPosition.x) / scaleX,
-                        ));
-                        const y = Math.max(0, Math.min(
-                            Math.max(0, rootHeight - menuHeight),
                             (position.y - rootPosition.y) / scaleY,
-                        ));
-                        advancedMenu.style.horizontalAlign = "left";
-                        advancedMenu.style.verticalAlign = "top";
-                        advancedMenu.style.marginRight = "0px";
-                        advancedMenu.style.marginLeft = "0px";
-                        advancedMenu.style.marginTop = "0px";
-                        advancedMenu.style.x = x + "px";
-                        advancedMenu.style.y = y + "px";
+                        );
                     }
                 }
                 return advancedStopMenuDrag();
@@ -6228,11 +5816,16 @@
         }
         advancedMenu = advancedCreatePanel("Panel", root, "CS2InsightAdvancedMenu");
         advancedMenu.style.width = "500px";
-        advancedMenu.style.height = "640px";
+        advancedMenu.style.height = "fit-children";
         advancedMenu.style.maxHeight = "92%";
+        // Keep the first layout deterministic. Absolute positioning begins only
+        // after the first completed drag.
         advancedMenu.style.horizontalAlign = "right";
         advancedMenu.style.verticalAlign = "center";
         advancedMenu.style.marginRight = "6px";
+        advancedMenu.style.marginLeft = "0px";
+        advancedMenu.style.marginTop = "0px";
+        advancedMenu.style.transform = "translate3d(0px, 0px, 0px)";
         advancedMenu.style.padding = "12px";
         advancedMenu.style.flowChildren = "down";
         advancedMenu.style.backgroundColor = "#191918f7";
@@ -6314,166 +5907,49 @@
             advancedStyleButton(button, advancedVoicePolicy === entry[0]);
         });
 
-        const optionRow = advancedCreatePanel("Panel", advancedMenu, "");
-        optionRow.style.width = "100%";
-        optionRow.style.height = "30px";
-        optionRow.style.flowChildren = "right";
-        advancedCreateLabel(optionRow, advancedCopy("显示", "View"), 12, "#b5b3ad").style.width = "40px";
-        [
-            ["xray", advancedCopy("X光", "X-ray"), "135px"],
-            ["radar", advancedCopy("雷达", "Radar"), "135px"],
-            ["overhead", advancedCopy("标识", "IDs"), "135px"],
-        ].forEach(function (entry) {
-            const button = advancedCreateButton(
-                optionRow,
-                "",
-                function () { advancedToggleQuickOption(entry[0]); },
-                entry[2],
-            );
-            button.style.height = "25px";
-            advancedOptionButtons[entry[0]] = button;
-            advancedOptionLabels[entry[0]] = entry[1];
-        });
-        advancedRefreshQuickOptionButtons();
+        const roundRow = advancedCreatePanel("Panel", advancedMenu, "");
+        roundRow.style.width = "100%";
+        roundRow.style.height = "30px";
+        roundRow.style.marginTop = "2px";
+        roundRow.style.flowChildren = "right";
+        advancedCreateLabel(roundRow, advancedCopy("回合", "Round"), 12, "#b5b3ad").style.width = "40px";
+        advancedRoundButton = advancedCreateButton(roundRow, "", advancedToggleRoundPicker, "132px");
+        advancedRoundButton.style.height = "25px";
+        advancedRoundHintLabel = advancedCreateLabel(roundRow, "", 10, "#7c7b74");
+        advancedRoundHintLabel.style.width = "fill-parent-flow(1.0)";
+        advancedRoundHintLabel.style.textAlign = "center";
 
-        const timeline = advancedCreatePanel("Panel", advancedMenu, "CS2InsightAdvancedTimeline");
-        timeline.style.width = "100%";
-        timeline.style.height = "108px";
-        timeline.style.marginTop = "6px";
-        timeline.style.flowChildren = "down";
-        timeline.style.backgroundColor = "#111110aa";
-        timeline.style.border = "1px solid #3b3a37";
-        timeline.style.borderRadius = "6px";
-        timeline.style.paddingLeft = "7px";
-        timeline.style.paddingRight = "7px";
-        advancedProgressLabel = advancedCreateLabel(timeline, "", 11, "#b5b3ad");
-        advancedProgressLabel.style.width = "100%";
-        advancedProgressLabel.style.height = "18px";
-        advancedProgressTrack = advancedCreatePanel("Panel", timeline, "CS2InsightAdvancedProgress");
-        advancedProgressTrack.style.width = "100%";
-        advancedProgressTrack.style.height = "12px";
-        advancedProgressTrack.style.backgroundColor = "#222221";
-        advancedProgressTrack.style.border = "1px solid #494844";
-        advancedProgressTrack.style.borderRadius = "6px";
-        advancedProgressTrack.style.overflow = "clip";
-        advancedProgressFill = advancedCreatePanel("Panel", advancedProgressTrack, "CS2InsightAdvancedProgressFill");
-        advancedProgressFill.hittest = false;
-        advancedProgressFill.hittestchildren = false;
-        advancedProgressFill.style.width = "0%";
-        advancedProgressFill.style.height = "100%";
-        advancedProgressFill.style.backgroundColor = "#e07f0a";
-        advancedProgressSlider = advancedCreatePanel(
-            "Slider",
-            advancedProgressTrack,
-            "CS2InsightAdvancedProgressSlider",
+        advancedRoundPickerPanel = advancedCreatePanel(
+            "Panel",
+            advancedMenu,
+            "CS2InsightAdvancedRoundPicker",
         );
-        advancedProgressSlider.AddClass("HorizontalSlider");
-        try { advancedProgressSlider.SetAttributeString("direction", "horizontal"); } catch (errDirection) {}
-        try { advancedProgressSlider.direction = "horizontal"; } catch (errDirectionProperty) {}
-        advancedProgressSlider.style.width = "100%";
-        advancedProgressSlider.style.height = "100%";
-        advancedProgressSlider.style.zIndex = "3";
-        advancedProgressSlider.style.opacity = "0.01";
-        advancedProgressSlider.min = 0;
-        advancedProgressSlider.max = Math.max(1, advancedPlayback.totalTick);
-        $.RegisterEventHandler(
-            "SliderReleased",
-            advancedProgressSlider,
-            advancedSeekFromProgressSlider,
-        );
-        $.RegisterEventHandler(
-            "SliderValueChanged",
-            advancedProgressSlider,
-            function (panel, value) { return advancedPreviewProgressTick(value); },
-        );
-        const timelineControls = advancedCreatePanel("Panel", timeline, "");
-        timelineControls.style.width = "100%";
-        timelineControls.style.height = "31px";
-        timelineControls.style.marginTop = "7px";
-        timelineControls.style.flowChildren = "right";
-        const back = advancedCreateButton(timelineControls, "-15s", function () { advancedStepSeconds(-15); }, "52px");
-        advancedPlayPauseButton = advancedCreateButton(timelineControls, advancedCopy("暂停", "Pause"), advancedTogglePlayback, "56px");
-        const forward = advancedCreateButton(timelineControls, "+15s", function () { advancedStepSeconds(15); }, "52px");
-        const timelineSpacer = advancedCreatePanel("Panel", timelineControls, "");
-        timelineSpacer.style.width = "fill-parent-flow(1.0)";
-        const tickCaption = advancedCreateLabel(timelineControls, "tick", 11, "#7c7b74");
-        tickCaption.style.width = "32px";
-        advancedTickInput = advancedCreateButton(
-            timelineControls,
-            "tick",
-            function () {
-                advancedOpenNumericPad(
-                    advancedTickInput,
-                    advancedSubmitTick,
-                    advancedCopy("输入 tick", "Enter tick"),
-                );
-                return true;
-            },
-            "110px",
-        );
-        advancedTickInput.style.width = "110px";
-        advancedTickInput.style.height = "25px";
-        advancedTickInput.style.marginRight = "5px";
-        advancedTickInput.style.paddingLeft = "7px";
-        advancedTickInput.style.paddingRight = "7px";
-        advancedTickInput.style.backgroundColor = "#222221";
-        advancedTickInput.style.border = "1px solid #494844";
-        advancedTickInput.style.color = "#eeeeec";
-        advancedTickInput.style.fontSize = "12px";
-        advancedTickInput._insightNumericButton = true;
-        advancedTickInput._insightNumericValue = "";
-        advancedTickInput._insightPlaceholder = "tick";
-        advancedTickInput.maxchars = 10;
-        const jump = advancedCreateButton(timelineControls, advancedCopy("跳转", "Go"), advancedSubmitTick, "54px");
-        jump.style.marginRight = "0px";
+        advancedRoundPickerPanel.style.width = "100%";
+        advancedRoundPickerPanel.style.height = "0px";
+        advancedRoundPickerPanel.style.paddingLeft = "40px";
+        advancedRoundPickerPanel.style.paddingTop = "4px";
+        advancedRoundPickerPanel.style.paddingBottom = "4px";
+        advancedRoundPickerPanel.style.flowChildren = "right-wrap";
+        advancedRoundPickerPanel.style.overflow = "clip";
+        advancedRoundPickerPanel.style.backgroundColor = "#111110dd";
+        advancedRoundPickerPanel.style.border = "1px solid #3b3a37";
+        advancedRoundPickerPanel.style.borderRadius = "6px";
+        advancedRoundPickerPanel.style.visibility = "collapse";
+        advancedRoundPickerPanel.visible = false;
 
-        const roundControls = advancedCreatePanel("Panel", timeline, "");
-        roundControls.style.width = "100%";
-        roundControls.style.height = "31px";
-        roundControls.style.marginTop = "3px";
-        roundControls.style.flowChildren = "right";
-        const roundCaption = advancedCreateLabel(roundControls, advancedCopy("回合", "Round"), 11, "#7c7b74");
-        roundCaption.style.width = "40px";
-        const previousRound = advancedCreateButton(roundControls, advancedCopy("上一回", "Prev"), function () { advancedStepRound(-1); }, "54px");
-        advancedRoundInput = advancedCreateButton(
-            roundControls,
-            advancedCopy("回合号", "No."),
-            function () {
-                advancedOpenNumericPad(
-                    advancedRoundInput,
-                    advancedSubmitRound,
-                    advancedCopy("输入回合", "Enter round"),
-                );
-                return true;
-            },
-            "64px",
-        );
-        advancedRoundInput.style.width = "64px";
-        advancedRoundInput.style.height = "25px";
-        advancedRoundInput.style.marginRight = "5px";
-        advancedRoundInput.style.paddingLeft = "7px";
-        advancedRoundInput.style.paddingRight = "7px";
-        advancedRoundInput.style.backgroundColor = "#222221";
-        advancedRoundInput.style.border = "1px solid #494844";
-        advancedRoundInput.style.color = "#eeeeec";
-        advancedRoundInput.style.fontSize = "12px";
-        advancedRoundInput._insightNumericButton = true;
-        advancedRoundInput._insightNumericValue = "";
-        advancedRoundInput._insightPlaceholder = advancedCopy("回合号", "No.");
-        advancedRoundInput.maxchars = 3;
-        const locateRound = advancedCreateButton(roundControls, advancedCopy("定位", "Go"), advancedSubmitRound, "48px");
-        const nextRound = advancedCreateButton(roundControls, advancedCopy("下一回", "Next"), function () { advancedStepRound(1); }, "54px");
-        advancedRoundLabel = advancedCreateLabel(roundControls, "", 11, "#e07f0a");
-        advancedRoundLabel.style.width = "fill-parent-flow(1.0)";
-        advancedRoundLabel.style.textAlign = "center";
-        [back, advancedPlayPauseButton, forward, jump, previousRound, locateRound, nextRound].forEach(function (button) {
-            button.style.height = "25px";
-        });
+        const teamRow = advancedCreatePanel("Panel", advancedMenu, "");
+        teamRow.style.width = "100%";
+        teamRow.style.height = "24px";
+        teamRow.style.marginTop = "5px";
+        teamRow.style.flowChildren = "right";
+        advancedCreateLabel(teamRow, advancedCopy("阵营", "Teams"), 12, "#b5b3ad").style.width = "40px";
+        const teamHint = advancedCreateLabel(teamRow, "CT / T", 10, "#7c7b74");
+        teamHint.style.width = "fill-parent-flow(1.0)";
 
         advancedPlayerListPanel = advancedCreatePanel("Panel", advancedMenu, "CS2InsightAdvancedPlayers");
         advancedPlayerListPanel.style.width = "100%";
         advancedPlayerListPanel.style.height = "154px";
-        advancedPlayerListPanel.style.marginTop = "8px";
+        advancedPlayerListPanel.style.marginTop = "2px";
         advancedPlayerListPanel.style.flowChildren = "right";
         advancedPlayerListPanel.style.overflow = "clip";
         advancedPlayerListPanel.style.backgroundColor = "#11111088";
@@ -6485,8 +5961,9 @@
         filterRow.style.height = "30px";
         filterRow.style.marginTop = "8px";
         filterRow.style.flowChildren = "right";
+        advancedCreateLabel(filterRow, advancedCopy("事件", "Events"), 12, "#b5b3ad").style.width = "40px";
         [
-            ["all", advancedCopy("全部事件", "All")],
+            ["all", advancedCopy("全部", "All")],
             ["kill", advancedCopy("击杀", "Kills")],
             ["death", advancedCopy("死亡", "Deaths")],
             ["utility", advancedCopy("道具", "Utility")],
@@ -6517,18 +5994,17 @@
         pagerNext.style.marginRight = "0px";
         advancedEventListPanel = advancedCreatePanel("Panel", advancedMenu, "CS2InsightAdvancedEvents");
         advancedEventListPanel.style.width = "100%";
-        advancedEventListPanel.style.height = "140px";
+        advancedEventListPanel.style.height = "145px";
         advancedEventListPanel.style.marginTop = "4px";
+        advancedEventListPanel.style.paddingTop = "5px";
+        advancedEventListPanel.style.paddingBottom = "5px";
+        advancedEventListPanel.style.paddingLeft = "5px";
+        advancedEventListPanel.style.paddingRight = "5px";
         advancedEventListPanel.style.flowChildren = "down";
         advancedEventListPanel.style.overflow = "clip";
         advancedEventListPanel.style.backgroundColor = "#11111088";
         advancedEventListPanel.style.border = "1px solid #3b3a37";
         advancedEventListPanel.style.borderRadius = "6px";
-        const footerSpacer = advancedCreatePanel("Panel", advancedMenu, "");
-        footerSpacer.style.width = "100%";
-        footerSpacer.style.height = "18px";
-        footerSpacer.hittest = false;
-        footerSpacer.hittestchildren = false;
 
         advancedApplyQuickOptions();
         advancedRenderMenu();
@@ -6544,15 +6020,19 @@
             advancedShowMenu();
         }
         const state = controller.GetDemoControllerState();
-        advancedUpdateProgress(state);
-        advancedUpdateRoundLabel(state);
         if (advancedMenuTickLabel && advancedMenuTickLabel.IsValid() && state) {
             advancedMenuTickLabel.text = "tick " + Number(state.nTick || 0);
         }
         if (advancedMenuVisible && state) {
+            advancedRefreshRoundSelector(state);
+            if (advancedMenuPosition && !advancedMenuDragging) {
+                advancedSetMenuPosition(advancedMenuPosition.x, advancedMenuPosition.y);
+            }
             const tick = Number(state.nTick || 0);
             const teamSignature = advancedPlayback.players.map(function (player) {
-                return player.xuid + ":" + (resolvePovTeam(player.xuid, tick) || player.team);
+                const liveTeam = resolvePovTeam(player.xuid, tick) || player.team;
+                const alive = advancedPlayerAliveAtTick(player.xuid, tick);
+                return player.xuid + ":" + liveTeam + ":" + (alive ? "1" : "0");
             }).join("|");
             if (teamSignature !== advancedPlayerTeamSignature) {
                 advancedRenderPlayers();
@@ -6584,9 +6064,8 @@
     if (radioTrack || killFeedbackTrack) {
         $.Schedule(0, updateRadioHud);
     }
+    $.Schedule(0, guardSpectatorHudProfile);
     if (advancedPlayback) {
-        $.Schedule(0, advancedGuardNativeDemoUi);
-        $.Schedule(0, advancedGuardSpectatorHud);
         $.Schedule(0, advancedMenuTick);
     }
 })();

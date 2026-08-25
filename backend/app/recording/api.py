@@ -28,6 +28,7 @@ from ..demo_paths import resolve_working_demo_path
 from ..databases import demo_db
 from ..runtime_session import runtime_session_dependency
 from ..skybox_vpk import DEFAULT_SKYBOX_ID, SkyboxVpkError, normalize_skybox_id
+from ..pov_constants import normalize_pov_voice_mode
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/recording", tags=["recording"])
@@ -570,7 +571,7 @@ class QueueRecordingRequest(BaseModel):
     requests: list[RecordingRequestDTO] = Field(..., min_length=1, max_length=100)
     warmup: Optional[dict] = None
     obs: Optional[dict] = None
-    pov_hud: Optional[dict] = None  # {enabled, radar_mode, teamcounter_numeric, voice_disabled}
+    pov_hud: Optional[dict] = None  # {enabled, radar_mode, teamcounter_numeric, voice_mode}
     skybox: Optional[dict] = None  # {id: default|cartoon3|xuejing|yinhezhanjian}
     # 仅本次录制队列生效，不写入 cs2-insight.config.json
     cs2_extra_launch_args: Optional[str] = None
@@ -774,21 +775,35 @@ async def execute_recording_queue(
         pov_hud_cfg = req.pov_hud
         if warmup_extras is None:
             warmup_extras = RecordingWarmupExtras()
+        explicit_voice_mode = pov_hud_cfg.get("voice_mode")
+        voice_mode = normalize_pov_voice_mode(
+            explicit_voice_mode
+            if explicit_voice_mode is not None
+            else warmup_extras.pov_voice_mode,
+            legacy_voice_disabled=(
+                explicit_voice_mode is None
+                and bool(
+                    pov_hud_cfg.get(
+                        "voice_disabled",
+                        warmup_extras.pov_voice_disabled,
+                    )
+                )
+            ),
+        )
         # Patch warmup extras with POV HUD settings
         warmup_extras = dataclasses.replace(
             warmup_extras,
             pov_hud_enabled=True,
             pov_radar_mode=int(pov_hud_cfg.get("radar_mode", 0)),
             pov_teamcounter_numeric=bool(pov_hud_cfg.get("teamcounter_numeric", False)),
-            pov_voice_disabled=bool(
-                pov_hud_cfg.get("voice_disabled", warmup_extras.pov_voice_disabled)
-            ),
+            pov_voice_mode=voice_mode,
+            pov_voice_disabled=False,
         )
         logger.info(
-            "[RecordingV3] POV HUD enabled: radar_mode=%s, teamcounter_numeric=%s, voice_disabled=%s",
+            "[RecordingV3] POV HUD enabled: radar_mode=%s, teamcounter_numeric=%s, voice_mode=%s",
             warmup_extras.pov_radar_mode,
             warmup_extras.pov_teamcounter_numeric,
-            warmup_extras.pov_voice_disabled,
+            warmup_extras.pov_voice_mode,
         )
 
     saved_skybox_id = getattr(cfg, "recording_skybox", DEFAULT_SKYBOX_ID)
