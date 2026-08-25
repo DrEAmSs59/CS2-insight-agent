@@ -498,8 +498,10 @@ def test_checked_in_voice_template_contains_only_an_empty_payload():
     assert b"const RADIO_FADE_OUT_END = 0.95" in script
     assert b"const NATIVE_VOICE_ALERT_PANEL_COUNT = 16" in script
     assert b'findHudTraverse("AlertPanel" + (index + 1))' in script
+    assert b'FindChildrenWithClassTraverse("AlertPanel")' in script
     assert b"function suppressNativeLowerLeft()" in script
     assert b'panel.style.opacity = "0"' in script
+    assert b'panel.style.visibility = "collapse"' in script
     assert b"nativeVoiceAlertHost" not in script
     assert b'nativeChatHistoryText.style.opacity = "0"' in script
     assert b"nativeChatHistoryText.visible = false" in script
@@ -549,8 +551,10 @@ def test_checked_in_voice_template_contains_only_an_empty_payload():
     assert b'"SliderReleased"' not in injection_source
     assert b"advancedSeekFromProgressSlider" not in script
     assert b'advancedProgressFill.style.backgroundColor = "#e07f0a"' not in script
-    assert b'advancedCopy("\xe8\xaf\xad\xe9\x9f\xb3\xe5\xbc\x80", "ON")' in script
-    assert b'advancedCopy("\xe8\xaf\xad\xe9\x9f\xb3\xe5\x85\xb3", "OFF")' in script
+    assert b'"s2r://panorama/images/icons/ui/"' in script
+    assert b'(voiceEnabled ? "unmuted" : "muted") + ".vsvg"' in script
+    assert b'advancedCopy("\xe8\xaf\xad\xe9\x9f\xb3\xe5\xbc\x80", "ON")' not in script
+    assert b'advancedCopy("\xe8\xaf\xad\xe9\x9f\xb3\xe5\x85\xb3", "OFF")' not in script
     assert b'advancedMenu.style.height = "fit-children"' in script
     assert b'advancedEventListPanel.style.height = "145px"' in script
     assert b'advancedEventListPanel.style.paddingBottom = "5px"' in script
@@ -560,10 +564,13 @@ def test_checked_in_voice_template_contains_only_an_empty_payload():
     assert b'for (let slot = 0; slot < pageSize; slot += 1)' in script
     assert b"function advancedCreateEventLocateButton(row, event)" in script
     assert b'"s2r://panorama/images/icons/" + folder + "/" + stem + ".svg"' in script
-    assert b'advancedCreateEventIcon(parent, "death_notice", "headshot", 12)' in script
-    assert b'advancedCreateEventIcon(parent, "death_notice", "throughsmoke", 12)' in script
-    assert b'advancedCreateEventIcon(parent, "death_notice", "penetrate", 12)' in script
-    assert b'advancedCreateEventIcon(feed, "equipment", advancedEquipmentIconStem(event.detail), 28)' in script
+    assert b'icon.SetScaling("stretch-to-fit-preserve-aspect")' in script
+    assert b'advancedCreateEventIcon(parent, "death_notice", "headshot", 12, 12, 15)' in script
+    assert b'advancedCreateEventIcon(parent, "death_notice", "throughsmoke", 12, 12, 15)' in script
+    assert b'advancedCreateEventIcon(parent, "death_notice", "penetrate", 12, 12, 15)' in script
+    assert b'iconStrip.style.width = "116px"' in script
+    assert b'advancedEquipmentIconStem(event.detail),' in script
+    assert b'advancedCreateEventIcon(action, "equipment", utilityStem, 20, 20, 24)' in script
     assert "advancedCopy(\"投掷\", \"threw\")".encode() in script
     assert b"advancedEventTitle" not in script
     assert b"state.RoundIntervals" not in injection_source
@@ -577,7 +584,8 @@ def test_checked_in_voice_template_contains_only_an_empty_payload():
     assert b"advancedSelectPlayer(xuid, { tick: round.start })" in script
     assert "第 \" + roundNumber + \" 回合 ▾".encode() in script
     assert "advancedCopy(\"X光\", \"X-ray\")".encode() not in script
-    assert "advancedCopy(\"阵营\", \"Teams\")".encode() in script
+    assert "advancedCopy(\"阵营\", \"Teams\")".encode() not in script
+    assert b'playersInset.style.width = "40px"' in script
     assert "advancedCopy(\"事件\", \"Events\")".encode() in script
     assert b'advancedMenuPinned ? "PIN ON" : "PIN OFF"' in script
     assert b'panel.SetPanelEvent("onactivate", function () { return true; })' in script
@@ -629,15 +637,15 @@ def test_checked_in_voice_template_contains_only_an_empty_payload():
     assert b"CS2InsightAdvancedDragHandle" in script
     assert b'$.RegisterEventHandler("DragStart", handle' in script
     assert b'$.RegisterEventHandler("DragEnd", handle' in script
+    assert b"dragCallbacks.displayPanel = advancedMenu" in script
     assert b'advancedMenu.style.transform = "translate3d(" + clampedX' in script
     assert b"let advancedMenuPosition = null" in script
-    assert b"function advancedInitializeMenuPosition()" not in script
-    assert b"function advancedMenuDragTick()" in script
+    assert b"function advancedInitializeMenuPosition(attempt)" in script
+    assert b"function advancedMenuDragTick()" not in script
     assert b"function advancedStartMenuDrag()" in script
-    assert b'handle.SetPanelEvent("onmousedown", advancedStartMenuDrag)' in script
     assert b"advancedCurrentMenuPosition()" in script
     assert b"advancedSetMenuPosition(position.x, position.y)" in script
-    assert b"const moved = advancedMenuDragGhost" in script
+    assert b"advancedMenuDragGhost" not in script
     assert b"handle.draggable = true" in script
     assert b"Number(root.actuallayoutwidth || 0) / scaleX" in script
     assert b"Number(advancedMenu.actuallayoutwidth || 0) / scaleX" in script
@@ -649,8 +657,10 @@ def test_checked_in_voice_template_contains_only_an_empty_payload():
     assert b"function restrictPovTeamCounterEquipment()" in script
     assert b"function advancedRestoreDemoTeamCounterEquipment()" in script
     assert b'FindChildrenWithClassTraverse("equipinfo__bg-container")' in script
-    assert b'renderTeam(3, "CT", "#5ebaf0")' in script
-    assert b'renderTeam(2, "T", "#e7bd53")' in script
+    assert b"renderTeam(3);" in script
+    assert b"renderTeam(2);" in script
+    assert b'FindChildrenWithClassTraverse("hud-HA__stroke")' in script
+    assert b'stroke.style.visibility = enabled ? "visible" : null' in script
     assert b'GameInterfaceAPI.ConsoleCommand("demo_gototick " + initialSeekTick)' in script
     assert b'return color ? radioHtmlSpan(color, "\xe2\x97\x8f ") : ""' in script
     assert b'createClassedPanel("Label", notice, "VoiceMarker", "VoiceText")' in script

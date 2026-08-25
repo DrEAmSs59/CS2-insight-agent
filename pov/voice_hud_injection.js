@@ -626,10 +626,8 @@
     let advancedNativeRadarRestored = false;
     let advancedNativeOverheadRestored = false;
     let advancedMenuDragging = false;
-    let advancedMenuDragGhost = null;
-    let advancedMenuDragStartCursor = null;
-    let advancedMenuDragStartPosition = null;
     let advancedMenuPosition = null;
+    let advancedMenuInitialPositionPending = false;
     let advancedRoundIntervals = advancedPlayback && advancedPlayback.rounds
         ? advancedPlayback.rounds.slice()
         : [];
@@ -643,6 +641,7 @@
     const advancedCustomVoiceXuids = {};
     const advancedRestrictedTeamCounterPanels = [];
     const advancedModifiedTeamSides = [];
+    const advancedPovFactionStrokes = [];
     const advancedQuickOptions = {
         xray: false,
         radar: true,
@@ -3988,16 +3987,30 @@
         return radioEventHtml(event);
     }
 
-    function nativeVoiceAlertPanel(index) {
-        const cached = nativeVoiceAlertPanels[index] || null;
-        if (cached && cached.IsValid()) {
-            return cached;
+    function nativeLowerLeftAlertPanels() {
+        const panels = [];
+        function add(panel) {
+            if (panel && panel.IsValid() && panels.indexOf(panel) < 0) {
+                panels.push(panel);
+            }
         }
-        const resolved = findHudTraverse("AlertPanel" + (index + 1));
-        nativeVoiceAlertPanels[index] = resolved && resolved.IsValid()
-            ? resolved
+        // CS2 recycles and, on some builds, replaces the alert pool while a
+        // demo is running. Resolve the live class every pass instead of
+        // trusting the first set of AlertPanel1..16 handles forever.
+        nativeVoiceAlertPanels.forEach(add);
+        const voicePanel = findVoicePanel();
+        const status = voicePanel && voicePanel.IsValid() && voicePanel.GetParent
+            ? voicePanel.GetParent()
             : null;
-        return nativeVoiceAlertPanels[index];
+        if (status && status.IsValid() && status.FindChildrenWithClassTraverse) {
+            const live = status.FindChildrenWithClassTraverse("AlertPanel") || [];
+            live.forEach(add);
+        }
+        for (let index = 0; index < NATIVE_VOICE_ALERT_PANEL_COUNT; index += 1) {
+            add(findHudTraverse("AlertPanel" + (index + 1)));
+        }
+        nativeVoiceAlertPanels = panels;
+        return panels;
     }
 
     function suppressNativeLowerLeft() {
@@ -4006,16 +4019,11 @@
             // alert/chat panels entirely to CS2. Reapplying opacity/visible on
             // every refresh kept expired Console lines alive indefinitely.
             if (!advancedNativeMessagesRestored) {
-                for (let restoreIndex = 0; restoreIndex < NATIVE_VOICE_ALERT_PANEL_COUNT; restoreIndex += 1) {
-                    const restorePanel = nativeVoiceAlertPanel(restoreIndex);
-                    if (restorePanel && restorePanel.IsValid()) {
-                        try { restorePanel.style.opacity = null; } catch (errRestoreOpacity) {}
-                        try { restorePanel.style.visibility = null; } catch (errRestoreVisibility) {}
-                    }
-                }
-                if (!nativeChatHistoryText || !nativeChatHistoryText.IsValid()) {
-                    nativeChatHistoryText = findHudTraverse("ChatHistoryText");
-                }
+                nativeLowerLeftAlertPanels().forEach(function (restorePanel) {
+                    try { restorePanel.style.opacity = null; } catch (errRestoreOpacity) {}
+                    try { restorePanel.style.visibility = null; } catch (errRestoreVisibility) {}
+                });
+                nativeChatHistoryText = findHudTraverse("ChatHistoryText");
                 if (nativeChatHistoryText && nativeChatHistoryText.IsValid()) {
                     try { nativeChatHistoryText.style.opacity = null; } catch (errChatOpacity) {}
                     try { nativeChatHistoryText.style.visibility = null; } catch (errChatVisibility) {}
@@ -4027,21 +4035,19 @@
             return;
         }
         advancedNativeMessagesRestored = false;
-        for (let index = 0; index < NATIVE_VOICE_ALERT_PANEL_COUNT; index += 1) {
-            const panel = nativeVoiceAlertPanel(index);
-            if (!panel || !panel.IsValid()) {
-                continue;
-            }
-            // Do not change stock animation classes or layout. Opacity is
-            // reapplied because the engine recycles this fixed panel pool.
+        nativeLowerLeftAlertPanels().forEach(function (panel) {
+            // The complete native AlertPanel stream (server, radio, chat and
+            // cash notices) is replaced by the Insight timeline in POV mode.
+            // Collapse the live instances as well as washing opacity so a
+            // newly recycled server row cannot briefly overlap our copy.
             panel.style.opacity = "0";
+            panel.style.visibility = "collapse";
             panel.hittest = false;
-        }
-        if (!nativeChatHistoryText || !nativeChatHistoryText.IsValid()) {
-            nativeChatHistoryText = findHudTraverse("ChatHistoryText");
-        }
+        });
+        nativeChatHistoryText = findHudTraverse("ChatHistoryText");
         if (nativeChatHistoryText && nativeChatHistoryText.IsValid()) {
             nativeChatHistoryText.style.opacity = "0";
+            nativeChatHistoryText.style.visibility = "collapse";
             nativeChatHistoryText.hittest = false;
             nativeChatHistoryText.visible = false;
         }
@@ -4788,21 +4794,30 @@
         return key || "suicide";
     }
 
-    function advancedCreateEventIcon(parent, folder, stem, width) {
-        const icon = advancedCreatePanel("Image", parent, "");
+    function advancedCreateEventIcon(parent, folder, stem, width, height, cellWidth) {
+        const cell = advancedCreatePanel("Panel", parent, "");
+        cell.hittest = false;
+        cell.hittestchildren = false;
+        cell.style.width = String(cellWidth || width || 14) + "px";
+        cell.style.height = "100%";
+        cell.style.overflow = "noclip";
+
+        const icon = advancedCreatePanel("Image", cell, "");
         icon.hittest = false;
         icon.hittestchildren = false;
         icon.style.width = String(width || 12) + "px";
-        icon.style.height = "12px";
-        icon.style.marginLeft = "1px";
-        icon.style.marginRight = "1px";
+        icon.style.height = String(height || width || 12) + "px";
+        icon.style.horizontalAlign = "center";
         icon.style.verticalAlign = "center";
         icon.style.washColor = "#ece9e2";
         icon.style.imgShadow = "0px 0px 1px 1 #00000080";
         try {
             icon.SetImage("s2r://panorama/images/icons/" + folder + "/" + stem + ".svg");
         } catch (errImage) {}
-        return icon;
+        try {
+            icon.SetScaling("stretch-to-fit-preserve-aspect");
+        } catch (errScaling) {}
+        return cell;
     }
 
     function advancedEventPlayerColor(xuid, tick) {
@@ -4821,24 +4836,25 @@
         label.style.height = "100%";
         label.style.textAlign = align;
         label.style.textOverflow = "shrink";
+        label.style.verticalAlign = "center";
         return label;
     }
 
     function advancedAppendKillModifiers(parent, flags) {
         if (flags & 1) {
-            advancedCreateEventIcon(parent, "death_notice", "headshot", 12);
+            advancedCreateEventIcon(parent, "death_notice", "headshot", 12, 12, 15);
         }
         if (flags & 8) {
-            advancedCreateEventIcon(parent, "death_notice", "noscope", 12);
+            advancedCreateEventIcon(parent, "death_notice", "noscope", 12, 12, 15);
         }
         if (flags & 2) {
-            advancedCreateEventIcon(parent, "death_notice", "throughsmoke", 12);
+            advancedCreateEventIcon(parent, "death_notice", "throughsmoke", 12, 12, 15);
         }
         if (flags & 4) {
-            advancedCreateEventIcon(parent, "death_notice", "penetrate", 12);
+            advancedCreateEventIcon(parent, "death_notice", "penetrate", 12, 12, 15);
         }
         if (flags & 32) {
-            advancedCreateEventIcon(parent, "death_notice", "flashbang_assist", 12);
+            advancedCreateEventIcon(parent, "death_notice", "flashbang_assist", 12, 12, 15);
         }
     }
 
@@ -4866,6 +4882,7 @@
         time.style.width = "63px";
         time.style.height = "100%";
         time.style.textAlign = "left";
+        time.style.verticalAlign = "center";
 
         const feed = advancedCreatePanel("Panel", locate, "");
         feed.hittest = false;
@@ -4873,15 +4890,24 @@
         feed.style.width = "fill-parent-flow(1.0)";
         feed.style.height = "100%";
         feed.style.flowChildren = "right";
+        feed.style.verticalAlign = "center";
 
         if (event.type === "utility") {
             advancedCreateEventName(feed, advancedSelectedXuid, "", event.tick, "right");
-            const verb = advancedCreateLabel(feed, advancedCopy("投掷", "threw"), 10, "#aaa8a2");
-            verb.style.width = advancedChinese() ? "27px" : "34px";
+            const action = advancedCreatePanel("Panel", feed, "");
+            action.hittest = false;
+            action.hittestchildren = false;
+            action.style.width = advancedChinese() ? "53px" : "62px";
+            action.style.height = "100%";
+            action.style.flowChildren = "right";
+            action.style.verticalAlign = "center";
+            const verb = advancedCreateLabel(action, advancedCopy("投掷", "threw"), 10, "#aaa8a2");
+            verb.style.width = advancedChinese() ? "29px" : "38px";
             verb.style.height = "100%";
             verb.style.textAlign = "center";
+            verb.style.verticalAlign = "center";
             const utilityStem = advancedEquipmentIconStem(event.detail);
-            advancedCreateEventIcon(feed, "equipment", utilityStem, 18);
+            advancedCreateEventIcon(action, "equipment", utilityStem, 20, 20, 24);
             const utility = advancedCreateLabel(
                 feed,
                 advancedLocalizedUtilityName(event.detail),
@@ -4892,6 +4918,8 @@
             utility.style.height = "100%";
             utility.style.textAlign = "left";
             utility.style.textOverflow = "shrink";
+            utility.style.marginLeft = "4px";
+            utility.style.verticalAlign = "center";
             return locate;
         }
 
@@ -4904,12 +4932,41 @@
             event.tick,
             "right",
         );
+        const iconStrip = advancedCreatePanel("Panel", feed, "");
+        iconStrip.hittest = false;
+        iconStrip.hittestchildren = false;
+        iconStrip.style.width = "116px";
+        iconStrip.style.height = "100%";
+        iconStrip.style.overflow = "noclip";
+        const iconContent = advancedCreatePanel("Panel", iconStrip, "");
+        iconContent.hittest = false;
+        iconContent.hittestchildren = false;
+        iconContent.style.width = "fit-children";
+        iconContent.style.height = "100%";
+        iconContent.style.horizontalAlign = "center";
+        iconContent.style.verticalAlign = "center";
+        iconContent.style.flowChildren = "right";
+        iconContent.style.overflow = "noclip";
         if (event.flags & 16) {
-            advancedCreateEventIcon(feed, "death_notice", "blindkill", 12);
+            advancedCreateEventIcon(iconContent, "death_notice", "blindkill", 12, 12, 15);
         }
-        advancedCreateEventIcon(feed, "equipment", advancedEquipmentIconStem(event.detail), 28);
-        advancedAppendKillModifiers(feed, event.flags);
-        advancedCreateEventName(feed, targetXuid, advancedCopy("世界", "World"), event.tick, "left");
+        advancedCreateEventIcon(
+            iconContent,
+            "equipment",
+            advancedEquipmentIconStem(event.detail),
+            34,
+            16,
+            38,
+        );
+        advancedAppendKillModifiers(iconContent, event.flags);
+        const target = advancedCreateEventName(
+            feed,
+            targetXuid,
+            advancedCopy("世界", "World"),
+            event.tick,
+            "left",
+        );
+        target.style.marginLeft = "4px";
         return locate;
     }
 
@@ -5177,10 +5234,33 @@
         return panels;
     }
 
+    function advancedApplyPovFactionStrokes(healthAmmo, enabled) {
+        function remember(panel) {
+            if (panel && panel.IsValid() && advancedPovFactionStrokes.indexOf(panel) < 0) {
+                advancedPovFactionStrokes.push(panel);
+            }
+        }
+        if (healthAmmo && healthAmmo.IsValid() && healthAmmo.FindChildrenWithClassTraverse) {
+            const live = healthAmmo.FindChildrenWithClassTraverse("hud-HA__stroke") || [];
+            live.forEach(remember);
+        }
+        advancedPovFactionStrokes.forEach(function (stroke) {
+            if (!stroke || !stroke.IsValid()) {
+                return;
+            }
+            // Stock CS2 ships the correct two-sided gradient beside the CT/T
+            // badge, but .HUD--spectating-target collapses it in demos. POV
+            // recording and Advanced POV intentionally present player HUD, so
+            // restore that native stroke with an inline visibility override.
+            try { stroke.style.visibility = enabled ? "visible" : null; } catch (errStroke) {}
+        });
+    }
+
     function advancedApplyNativeSpectatorHud(enabled) {
         const healthAmmo = findHudTraverse("HudHealthAmmoCenter")
             || findHudTraverse("CSGOHudHealthAmmoCenter");
         advancedSetPanelRuntimeVisible(healthAmmo, !enabled);
+        advancedApplyPovFactionStrokes(healthAmmo, !enabled);
 
         advancedSpectatorInfoPanels().forEach(function (panel) {
             advancedSetPanelRuntimeVisible(panel, enabled);
@@ -5411,7 +5491,7 @@
         });
         advancedPlayerTeamSignature = teamSignature.join("|");
 
-        function renderTeam(team, title, color) {
+        function renderTeam(team) {
             const column = advancedCreatePanel("Panel", advancedPlayerListPanel, "");
             column.style.width = "fill-parent-flow(1.0)";
             column.style.height = "100%";
@@ -5421,10 +5501,6 @@
             } else {
                 column.style.marginLeft = "6px";
             }
-            const header = advancedCreateLabel(column, title, 12, color);
-            header.style.width = "100%";
-            header.style.height = "20px";
-            header.style.textAlign = "center";
             grouped[team].forEach(function (player) {
                 const alive = player._insightAlive !== false;
                 const row = advancedCreatePanel("Panel", column, "");
@@ -5455,25 +5531,39 @@
                     }
                 }
                 const voiceEnabled = advancedPlayerVoiceEnabled(player.xuid);
-                const voiceText = voiceEnabled
-                    ? advancedCopy("语音开", "ON")
-                    : advancedCopy("语音关", "OFF");
-                const voice = advancedCreateButton(
-                    row,
-                    voiceText,
-                    function () { advancedTogglePlayerVoice(player.xuid); },
-                    "54px",
-                );
+                const voice = advancedCreatePanel("Button", row, "");
+                voice.SetPanelEvent("onactivate", function () {
+                    advancedTogglePlayerVoice(player.xuid);
+                    return true;
+                });
+                voice.style.width = "27px";
                 voice.style.height = "23px";
                 voice.style.marginRight = "0px";
-                voice.style.paddingLeft = "2px";
-                voice.style.paddingRight = "2px";
-                advancedStyleButton(voice, voiceEnabled);
+                voice.style.backgroundColor = "#222221f2";
+                voice.style.border = "1px solid #494844";
+                voice.style.borderRadius = "6px";
+                const voiceIcon = advancedCreatePanel("Image", voice, "");
+                voiceIcon.hittest = false;
+                voiceIcon.hittestchildren = false;
+                voiceIcon.style.width = "16px";
+                voiceIcon.style.height = "16px";
+                voiceIcon.style.horizontalAlign = "center";
+                voiceIcon.style.verticalAlign = "center";
+                voiceIcon.style.washColor = voiceEnabled ? "#ece9e2" : "#d88e8e";
+                try {
+                    voiceIcon.SetImage(
+                        "s2r://panorama/images/icons/ui/"
+                            + (voiceEnabled ? "unmuted" : "muted") + ".vsvg",
+                    );
+                } catch (errVoiceIcon) {}
+                try {
+                    voiceIcon.SetScaling("stretch-to-fit-preserve-aspect");
+                } catch (errVoiceScaling) {}
             });
         }
 
-        renderTeam(3, "CT", "#5ebaf0");
-        renderTeam(2, "T", "#e7bd53");
+        renderTeam(3);
+        renderTeam(2);
     }
 
     function advancedFilteredEvents() {
@@ -5569,12 +5659,6 @@
 
     function advancedStopMenuDrag() {
         advancedMenuDragging = false;
-        advancedMenuDragStartCursor = null;
-        advancedMenuDragStartPosition = null;
-        if (advancedMenuDragGhost && advancedMenuDragGhost.IsValid()) {
-            try { advancedMenuDragGhost.DeleteAsync(0); } catch (errDeleteGhost) {}
-        }
-        advancedMenuDragGhost = null;
         return true;
     }
 
@@ -5623,40 +5707,48 @@
         };
     }
 
-    function advancedMenuDragTick() {
-        if (!advancedMenuDragging || !advancedMenuDragStartCursor
-                || !advancedMenuDragStartPosition || !advancedMenu || !advancedMenu.IsValid()) {
+    function advancedInitializeMenuPosition(attempt) {
+        if (!advancedMenuInitialPositionPending || advancedMenuPosition
+                || !advancedMenu || !advancedMenu.IsValid()) {
             return;
         }
-        const cursor = advancedCursorPosition();
-        if (cursor) {
-            const scaleX = Math.max(0.001, Number(advancedMenu.actualuiscale_x || 1));
-            const scaleY = Math.max(0.001, Number(advancedMenu.actualuiscale_y || scaleX));
+        const root = hudRootPanel();
+        const scaleX = Math.max(0.001, Number(advancedMenu.actualuiscale_x || 1));
+        const scaleY = Math.max(0.001, Number(advancedMenu.actualuiscale_y || scaleX));
+        const rootWidth = root && root.IsValid()
+            ? Number(root.actuallayoutwidth || 0) / scaleX
+            : 0;
+        const rootHeight = root && root.IsValid()
+            ? Number(root.actuallayoutheight || 0) / scaleY
+            : 0;
+        const menuWidth = Number(advancedMenu.actuallayoutwidth || 0) / scaleX;
+        const menuHeight = Number(advancedMenu.actuallayoutheight || 0) / scaleY;
+        if (rootWidth > 0 && rootHeight > 0 && menuWidth > 0 && menuHeight > 0) {
+            advancedMenuInitialPositionPending = false;
             advancedSetMenuPosition(
-                advancedMenuDragStartPosition.x
-                    + (cursor.x - advancedMenuDragStartCursor.x) / scaleX,
-                advancedMenuDragStartPosition.y
-                    + (cursor.y - advancedMenuDragStartCursor.y) / scaleY,
+                Math.max(0, rootWidth - menuWidth - 6),
+                Math.max(0, (rootHeight - menuHeight) * 0.5),
             );
+            return;
         }
-        $.Schedule(0.016, advancedMenuDragTick);
+        if (Number(attempt || 0) < 30) {
+            $.Schedule(0.05, function () {
+                advancedInitializeMenuPosition(Number(attempt || 0) + 1);
+            });
+        }
     }
 
     function advancedStartMenuDrag() {
         if (!advancedMenu || !advancedMenu.IsValid() || advancedMenuDragging) {
             return true;
         }
-        const cursor = advancedCursorPosition();
         const position = advancedCurrentMenuPosition();
-        if (!cursor || !position) {
+        if (!position) {
             return true;
         }
-        advancedMenuDragStartCursor = cursor;
-        advancedMenuDragStartPosition = position;
         advancedMenuDragging = true;
         advancedMenuHoverGeneration += 1;
         advancedSetMenuPosition(position.x, position.y);
-        $.Schedule(0, advancedMenuDragTick);
         return true;
     }
 
@@ -5667,81 +5759,49 @@
         try { handle.SetDraggable(true); } catch (errDraggable) {}
         try { handle.draggable = true; } catch (errDraggableProperty) {}
         try { handle.style.cursor = "move"; } catch (errCursor) {}
-        try { handle.SetPanelEvent("onmousedown", advancedStartMenuDrag); } catch (errMouseDown) {}
-        try {
-            handle.SetPanelEvent("onactivate", function () {
-                return advancedMenuDragGhost ? true : advancedStopMenuDrag();
-            });
-        } catch (errActivate) {}
         try {
             $.RegisterEventHandler("DragStart", handle, function (source, dragCallbacks) {
                 advancedStartMenuDrag();
-                if (advancedMenuDragGhost && advancedMenuDragGhost.IsValid()) {
-                    try { advancedMenuDragGhost.DeleteAsync(0); } catch (errOldGhost) {}
-                    advancedMenuDragGhost = null;
-                }
-                const root = hudRootPanel();
                 const menuPosition = advancedPanelWindowPosition(advancedMenu);
-                const rootPosition = advancedPanelWindowPosition(root);
-                if (root && root.IsValid() && menuPosition && rootPosition) {
-                    advancedMenuDragGhost = advancedCreatePanel(
-                        "Panel",
-                        root,
-                        "CS2InsightAdvancedDragGhost",
-                    );
+                if (advancedMenu && advancedMenu.IsValid() && menuPosition && dragCallbacks) {
+                    // Move the real menu. The former transparent drag ghost was
+                    // what made the cursor change while the visible UI stayed
+                    // put; Panorama now owns the actual display panel directly.
                     const scaleX = Math.max(0.001, Number(advancedMenu.actualuiscale_x || 1));
                     const scaleY = Math.max(0.001, Number(advancedMenu.actualuiscale_y || scaleX));
-                    const menuWidth = Number(advancedMenu.actuallayoutwidth || 0) / scaleX;
-                    const menuHeight = Number(advancedMenu.actuallayoutheight || 0) / scaleY;
-                    const startX = (menuPosition.x - rootPosition.x) / scaleX;
-                    const startY = (menuPosition.y - rootPosition.y) / scaleY;
-                    advancedMenuDragGhost.style.width = Math.max(1, menuWidth) + "px";
-                    advancedMenuDragGhost.style.height = Math.max(1, menuHeight) + "px";
-                    advancedMenuDragGhost.style.horizontalAlign = "left";
-                    advancedMenuDragGhost.style.verticalAlign = "top";
-                    advancedMenuDragGhost.style.transform = "translate3d(" + startX + "px, "
-                        + startY + "px, 0px)";
-                    advancedMenuDragGhost.style.backgroundColor = "#19191899";
-                    advancedMenuDragGhost.style.border = "1px solid #e07f0a";
-                    advancedMenuDragGhost.style.borderRadius = "10px";
-                    advancedMenuDragGhost.style.opacity = advancedMenuDragStartCursor ? "0" : "0.55";
-                    advancedMenuDragGhost.hittest = false;
-                    advancedMenuDragGhost.hittestchildren = false;
-                    advancedMenuDragging = true;
-                    advancedMenuHoverGeneration += 1;
-                    if (dragCallbacks) {
-                        dragCallbacks.displayPanel = advancedMenuDragGhost;
-                        const cursor = advancedCursorPosition();
-                        if (cursor) {
-                            dragCallbacks.offsetX = Math.max(0, (cursor.x - menuPosition.x) / scaleX);
-                            dragCallbacks.offsetY = Math.max(0, (cursor.y - menuPosition.y) / scaleY);
-                        }
+                    dragCallbacks.displayPanel = advancedMenu;
+                    const cursor = advancedCursorPosition();
+                    if (cursor) {
+                        dragCallbacks.offsetX = Math.max(0, (cursor.x - menuPosition.x) / scaleX);
+                        dragCallbacks.offsetY = Math.max(0, (cursor.y - menuPosition.y) / scaleY);
                     }
                 }
                 return true;
             });
             $.RegisterEventHandler("DragEnd", handle, function (source, draggedPanel) {
-                if (!advancedMenuDragStartCursor && advancedMenu && advancedMenu.IsValid()) {
-                    // Panorama may report the draggable title handle even
-                    // though displayPanel is the object it actually moved.
-                    const moved = advancedMenuDragGhost
-                        && advancedMenuDragGhost.IsValid
-                        && advancedMenuDragGhost.IsValid()
-                        ? advancedMenuDragGhost
-                        : draggedPanel;
-                    const position = advancedPanelWindowPosition(moved);
+                let droppedPosition = null;
+                if (advancedMenu && advancedMenu.IsValid()) {
+                    const position = advancedPanelWindowPosition(advancedMenu);
                     const root = hudRootPanel();
                     const rootPosition = advancedPanelWindowPosition(root);
                     if (position && rootPosition && root && root.IsValid()) {
                         const scaleX = Math.max(0.001, Number(advancedMenu.actualuiscale_x || 1));
                         const scaleY = Math.max(0.001, Number(advancedMenu.actualuiscale_y || scaleX));
-                        advancedSetMenuPosition(
-                            (position.x - rootPosition.x) / scaleX,
-                            (position.y - rootPosition.y) / scaleY,
-                        );
+                        droppedPosition = {
+                            x: (position.x - rootPosition.x) / scaleX,
+                            y: (position.y - rootPosition.y) / scaleY,
+                        };
                     }
                 }
-                return advancedStopMenuDrag();
+                advancedStopMenuDrag();
+                if (droppedPosition) {
+                    // Let Panorama finish clearing its transient drag offset,
+                    // then commit the dropped coordinates as our own transform.
+                    $.Schedule(0, function () {
+                        advancedSetMenuPosition(droppedPosition.x, droppedPosition.y);
+                    });
+                }
+                return true;
             });
         } catch (errDragEvents) {}
     }
@@ -5818,8 +5878,8 @@
         advancedMenu.style.width = "500px";
         advancedMenu.style.height = "fit-children";
         advancedMenu.style.maxHeight = "92%";
-        // Keep the first layout deterministic. Absolute positioning begins only
-        // after the first completed drag.
+        // Start on the right, then resolve the exact absolute position after
+        // Panorama has measured the fit-children menu.
         advancedMenu.style.horizontalAlign = "right";
         advancedMenu.style.verticalAlign = "center";
         advancedMenu.style.marginRight = "6px";
@@ -5937,19 +5997,23 @@
         advancedRoundPickerPanel.style.visibility = "collapse";
         advancedRoundPickerPanel.visible = false;
 
-        const teamRow = advancedCreatePanel("Panel", advancedMenu, "");
-        teamRow.style.width = "100%";
-        teamRow.style.height = "24px";
-        teamRow.style.marginTop = "5px";
-        teamRow.style.flowChildren = "right";
-        advancedCreateLabel(teamRow, advancedCopy("阵营", "Teams"), 12, "#b5b3ad").style.width = "40px";
-        const teamHint = advancedCreateLabel(teamRow, "CT / T", 10, "#7c7b74");
-        teamHint.style.width = "fill-parent-flow(1.0)";
-
-        advancedPlayerListPanel = advancedCreatePanel("Panel", advancedMenu, "CS2InsightAdvancedPlayers");
-        advancedPlayerListPanel.style.width = "100%";
-        advancedPlayerListPanel.style.height = "154px";
-        advancedPlayerListPanel.style.marginTop = "2px";
+        const playersRow = advancedCreatePanel("Panel", advancedMenu, "");
+        playersRow.style.width = "100%";
+        playersRow.style.height = "135px";
+        playersRow.style.marginTop = "5px";
+        playersRow.style.flowChildren = "right";
+        const playersInset = advancedCreatePanel("Panel", playersRow, "");
+        playersInset.style.width = "40px";
+        playersInset.style.height = "100%";
+        advancedPlayerListPanel = advancedCreatePanel(
+            "Panel",
+            playersRow,
+            "CS2InsightAdvancedPlayers",
+        );
+        advancedPlayerListPanel.style.width = "fill-parent-flow(1.0)";
+        advancedPlayerListPanel.style.height = "135px";
+        advancedPlayerListPanel.style.paddingTop = "3px";
+        advancedPlayerListPanel.style.paddingBottom = "2px";
         advancedPlayerListPanel.style.flowChildren = "right";
         advancedPlayerListPanel.style.overflow = "clip";
         advancedPlayerListPanel.style.backgroundColor = "#11111088";
@@ -5959,7 +6023,7 @@
         const filterRow = advancedCreatePanel("Panel", advancedMenu, "");
         filterRow.style.width = "100%";
         filterRow.style.height = "30px";
-        filterRow.style.marginTop = "8px";
+        filterRow.style.marginTop = "7px";
         filterRow.style.flowChildren = "right";
         advancedCreateLabel(filterRow, advancedCopy("事件", "Events"), 12, "#b5b3ad").style.width = "40px";
         [
@@ -6008,6 +6072,8 @@
 
         advancedApplyQuickOptions();
         advancedRenderMenu();
+        advancedMenuInitialPositionPending = !advancedMenuPosition;
+        $.Schedule(0, function () { advancedInitializeMenuPosition(0); });
         return advancedMenu;
     }
 
