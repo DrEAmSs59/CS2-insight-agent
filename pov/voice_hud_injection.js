@@ -611,10 +611,16 @@
     let advancedViewMode = 5;
     let advancedPovVisualsEnabled = true;
     let advancedSpecOperation = null;
-    let advancedMenuTickLabel = null;
+    let advancedMenuBody = null;
+    let advancedMenuTitleLabel = null;
+    let advancedMenuHeaderControls = null;
+    let advancedMenuCollapsed = true;
     let advancedPlayerListPanel = null;
     let advancedEventListPanel = null;
     let advancedEventPagerLabel = null;
+    let advancedFollowRoundButton = null;
+    let advancedFollowCurrentRound = true;
+    let advancedFollowedRoundNumber = -1;
     let advancedPinButton = null;
     let advancedRoundButton = null;
     let advancedRoundHintLabel = null;
@@ -625,9 +631,7 @@
     let advancedNativeMessagesRestored = false;
     let advancedNativeRadarRestored = false;
     let advancedNativeOverheadRestored = false;
-    let advancedMenuDragging = false;
-    let advancedMenuPosition = null;
-    let advancedMenuInitialPositionPending = false;
+    let advancedEdgeRevealArmed = true;
     let advancedRoundIntervals = advancedPlayback && advancedPlayback.rounds
         ? advancedPlayback.rounds.slice()
         : [];
@@ -636,12 +640,13 @@
     const advancedFilterButtons = {};
     const advancedOptionButtons = {};
     const advancedOptionLabels = {};
-    let advancedVoicePolicy = "team";
+    let advancedVoicePolicy = "all";
     let advancedPlayerTeamSignature = "";
     const advancedCustomVoiceXuids = {};
     const advancedRestrictedTeamCounterPanels = [];
     const advancedModifiedTeamSides = [];
     const advancedPovFactionStrokes = [];
+    let advancedPovFactionLineOverlay = null;
     const advancedQuickOptions = {
         xray: false,
         radar: true,
@@ -4536,10 +4541,19 @@
         return label;
     }
 
+    function advancedCreateSectionLabel(parent, text) {
+        const label = advancedCreateLabel(parent, text, 12, "#b5b3ad");
+        label.style.width = "40px";
+        label.style.height = "25px";
+        label.style.verticalAlign = "center";
+        return label;
+    }
+
     function advancedCreateButton(parent, text, onActivate, width) {
         const button = advancedCreatePanel("Button", parent, "");
         button.style.height = "30px";
         button.style.width = width || "fit-children";
+        button.style.verticalAlign = "center";
         button.style.paddingLeft = "10px";
         button.style.paddingRight = "10px";
         button.style.marginRight = "5px";
@@ -4549,6 +4563,92 @@
         const label = advancedCreateLabel(button, text, 12, "#eeeeec");
         label.hittest = false;
         label.style.horizontalAlign = "center";
+        if (onActivate) {
+            button.SetPanelEvent("onactivate", onActivate);
+        }
+        return button;
+    }
+
+    function advancedCreateFilterIcon(parent, kind) {
+        const cell = advancedCreatePanel("Panel", parent, "");
+        cell.hittest = false;
+        cell.hittestchildren = false;
+        cell.style.width = "18px";
+        cell.style.height = "100%";
+        cell.style.overflow = "noclip";
+
+        if (kind === "kill") {
+            const horizontal = advancedCreatePanel("Panel", cell, "");
+            horizontal.hittest = false;
+            horizontal.style.width = "14px";
+            horizontal.style.height = "1px";
+            horizontal.style.horizontalAlign = "center";
+            horizontal.style.verticalAlign = "center";
+            horizontal.style.backgroundColor = "#ece9e2";
+            const vertical = advancedCreatePanel("Panel", cell, "");
+            vertical.hittest = false;
+            vertical.style.width = "1px";
+            vertical.style.height = "14px";
+            vertical.style.horizontalAlign = "center";
+            vertical.style.verticalAlign = "center";
+            vertical.style.backgroundColor = "#ece9e2";
+            const ring = advancedCreatePanel("Panel", cell, "");
+            ring.hittest = false;
+            ring.style.width = "9px";
+            ring.style.height = "9px";
+            ring.style.horizontalAlign = "center";
+            ring.style.verticalAlign = "center";
+            ring.style.backgroundColor = "#222221";
+            ring.style.border = "1px solid #ece9e2";
+            ring.style.borderRadius = "50%";
+            const dot = advancedCreatePanel("Panel", cell, "");
+            dot.hittest = false;
+            dot.style.width = "2px";
+            dot.style.height = "2px";
+            dot.style.horizontalAlign = "center";
+            dot.style.verticalAlign = "center";
+            dot.style.backgroundColor = "#ece9e2";
+            dot.style.borderRadius = "50%";
+        } else if (kind === "death") {
+            const skull = advancedCreateLabel(cell, "☠", 15, "#ece9e2");
+            skull.style.width = "100%";
+            skull.style.height = "18px";
+            skull.style.horizontalAlign = "center";
+            skull.style.verticalAlign = "center";
+            skull.style.textAlign = "center";
+            skull.style.textShadow = "0px 0px 1px 1 #00000080";
+        } else if (kind === "utility") {
+            advancedCreateEventIcon(cell, "equipment", "hegrenade", 16, 16, 18);
+        }
+        return cell;
+    }
+
+    function advancedCreateFilterButton(parent, kind, text, onActivate) {
+        const button = advancedCreatePanel("Button", parent, "");
+        button.style.width = "58px";
+        button.style.height = "25px";
+        button.style.verticalAlign = "center";
+        button.style.paddingLeft = "4px";
+        button.style.paddingRight = "4px";
+        button.style.marginRight = "4px";
+        button.style.flowChildren = "right";
+        button.style.backgroundColor = "#222221f2";
+        button.style.border = "1px solid #494844";
+        button.style.borderRadius = "6px";
+        if (kind !== "all") {
+            advancedCreateFilterIcon(button, kind);
+        }
+        const label = advancedCreateLabel(
+            button,
+            text,
+            advancedChinese() ? 11 : 9,
+            "#eeeeec",
+        );
+        label.style.width = "fill-parent-flow(1.0)";
+        label.style.height = "100%";
+        label.style.textAlign = "center";
+        label.style.textOverflow = "shrink";
+        label.style.verticalAlign = "center";
         if (onActivate) {
             button.SetPanelEvent("onactivate", onActivate);
         }
@@ -4656,6 +4756,17 @@
         return rounds[rounds.length - 1].number;
     }
 
+    function advancedRoundElapsedTick(tick) {
+        const value = Math.max(0, Number(tick) || 0);
+        const rounds = advancedRoundIntervals;
+        for (let index = rounds.length - 1; index >= 0; index -= 1) {
+            if (value >= Number(rounds[index].start || 0)) {
+                return Math.max(0, value - Number(rounds[index].start || 0));
+            }
+        }
+        return value;
+    }
+
     function advancedSetButtonText(button, value) {
         if (!button || !button.IsValid() || !button.GetChildCount || button.GetChildCount() < 1) {
             return;
@@ -4664,62 +4775,6 @@
         if (label && label.IsValid()) {
             label.text = String(value || "");
         }
-    }
-
-    function advancedCursorPosition() {
-        let raw = null;
-        try {
-            if (typeof GameUI !== "undefined" && GameUI.GetCursorPosition) {
-                raw = GameUI.GetCursorPosition();
-            }
-        } catch (errGameUiCursor) {}
-        if (!raw) {
-            try {
-                if ($.GetCursorPosition) {
-                    raw = $.GetCursorPosition();
-                }
-            } catch (errPanoramaCursor) {}
-        }
-        if (!raw) {
-            try {
-                if (GameInterfaceAPI.GetCursorPosition) {
-                    raw = GameInterfaceAPI.GetCursorPosition();
-                }
-            } catch (errInterfaceCursor) {}
-        }
-        if (!raw) {
-            return null;
-        }
-        const x = Number(raw.x !== undefined ? raw.x : raw[0]);
-        const y = Number(raw.y !== undefined ? raw.y : raw[1]);
-        return isFinite(x) && isFinite(y) ? { x: x, y: y } : null;
-    }
-
-    function advancedPanelWindowPosition(panel) {
-        if (!panel || !panel.IsValid()) {
-            return null;
-        }
-        try {
-            if (panel.GetPositionWithinWindow) {
-                const raw = panel.GetPositionWithinWindow();
-                const x = Number(raw.x !== undefined ? raw.x : raw[0]);
-                const y = Number(raw.y !== undefined ? raw.y : raw[1]);
-                if (isFinite(x) && isFinite(y)) {
-                    return { x: x, y: y };
-                }
-            }
-        } catch (errWindowPosition) {}
-        let x = 0;
-        let y = 0;
-        let current = panel;
-        let guard = 0;
-        while (current && current.IsValid() && guard < 32) {
-            x += Number(current.actualxoffset || 0);
-            y += Number(current.actualyoffset || 0);
-            current = current.GetParent ? current.GetParent() : null;
-            guard += 1;
-        }
-        return { x: x, y: y };
     }
 
     function advancedLocalizedUtilityName(raw) {
@@ -4812,7 +4867,19 @@
         icon.style.washColor = "#ece9e2";
         icon.style.imgShadow = "0px 0px 1px 1 #00000080";
         try {
-            icon.SetImage("s2r://panorama/images/icons/" + folder + "/" + stem + ".svg");
+            let resource = "s2r://panorama/images/icons/" + folder + "/" + stem + ".svg";
+            if (folder === "death_notice") {
+                const deathNoticeStems = {
+                    headshot: "icon_headshot",
+                    throughsmoke: "smoke_kill",
+                    blindkill: "blind_kill",
+                };
+                resource = "s2r://panorama/images/hud/deathnotice/"
+                    + (deathNoticeStems[stem] || stem) + ".vsvg";
+            } else if (folder === "equipment" && stem === "flashbang_assist") {
+                resource = "s2r://panorama/images/icons/equipment/flashbang_assist.vsvg";
+            }
+            icon.SetImage(resource);
         } catch (errImage) {}
         try {
             icon.SetScaling("stretch-to-fit-preserve-aspect");
@@ -4854,32 +4921,32 @@
             advancedCreateEventIcon(parent, "death_notice", "penetrate", 12, 12, 15);
         }
         if (flags & 32) {
-            advancedCreateEventIcon(parent, "death_notice", "flashbang_assist", 12, 12, 15);
+            advancedCreateEventIcon(parent, "equipment", "flashbang_assist", 12, 12, 15);
         }
     }
 
     function advancedCreateEventLocateButton(row, event) {
         const locate = advancedCreatePanel("Button", row, "");
         locate.style.width = "fill-parent-flow(1.0)";
-        locate.style.height = "24px";
-        locate.style.marginRight = "6px";
+        locate.style.height = "26px";
+        locate.style.marginRight = "0px";
         locate.style.paddingLeft = "4px";
         locate.style.paddingRight = "4px";
         locate.style.flowChildren = "right";
         advancedStyleButton(locate, false);
+        locate.style.borderRadius = "0px";
         locate.SetPanelEvent("onactivate", function () {
             advancedSelectPlayer(advancedSelectedXuid, { tick: event.tick });
             return true;
         });
 
-        const roundNumber = advancedRoundNumberAtTick(event.tick);
         const time = advancedCreateLabel(
             locate,
-            (roundNumber > 0 ? "R" + roundNumber + " · " : "") + advancedFormatTick(event.tick),
+            advancedFormatTick(advancedRoundElapsedTick(event.tick)),
             9,
             "#807f79",
         );
-        time.style.width = "63px";
+        time.style.width = "38px";
         time.style.height = "100%";
         time.style.textAlign = "left";
         time.style.verticalAlign = "center";
@@ -4935,7 +5002,9 @@
         const iconStrip = advancedCreatePanel("Panel", feed, "");
         iconStrip.hittest = false;
         iconStrip.hittestchildren = false;
-        iconStrip.style.width = "116px";
+        // Use only the space occupied by the weapon and modifiers so the two
+        // player names stay visually attached to the kill/death event.
+        iconStrip.style.width = "fit-children";
         iconStrip.style.height = "100%";
         iconStrip.style.overflow = "noclip";
         const iconContent = advancedCreatePanel("Panel", iconStrip, "");
@@ -5123,8 +5192,11 @@
         const initialSeekTick = exactTick >= 0
             ? Math.max(0, exactTick - (playAfter ? Math.round(advancedPlayback.tickRate * 3) : 0))
             : -1;
+        const playerChanged = normalized !== advancedSelectedXuid;
         advancedSelectedXuid = normalized;
-        advancedEventPage = 0;
+        if (playerChanged) {
+            advancedEventPage = 0;
+        }
         if (initialSeekTick >= 0) {
             try {
                 if (controller.SetPaused) {
@@ -5234,16 +5306,77 @@
         return panels;
     }
 
+    function advancedEnsurePovFactionLineOverlay(healthAmmo, enabled) {
+        if (!healthAmmo || !healthAmmo.IsValid()) {
+            if (advancedPovFactionLineOverlay && advancedPovFactionLineOverlay.IsValid()) {
+                advancedPovFactionLineOverlay.visible = false;
+            }
+            return;
+        }
+        if (advancedPovFactionLineOverlay && advancedPovFactionLineOverlay.IsValid()
+                && advancedPovFactionLineOverlay.GetParent
+                && advancedPovFactionLineOverlay.GetParent() !== healthAmmo) {
+            try { advancedPovFactionLineOverlay.DeleteAsync(0); } catch (errDeleteLines) {}
+            advancedPovFactionLineOverlay = null;
+        }
+        if (!advancedPovFactionLineOverlay || !advancedPovFactionLineOverlay.IsValid()) {
+            let overlay = null;
+            try { overlay = healthAmmo.FindChildTraverse("CS2InsightPovFactionLines"); } catch (errFindLines) {}
+            if (!overlay || !overlay.IsValid()) {
+                overlay = $.CreatePanel("Panel", healthAmmo, "CS2InsightPovFactionLines");
+                overlay.hittest = false;
+                overlay.hittestchildren = false;
+                overlay.style.width = "480px";
+                overlay.style.height = "3px";
+                overlay.style.horizontalAlign = "center";
+                overlay.style.verticalAlign = "bottom";
+                overlay.style.marginBottom = "35px";
+                overlay.style.flowChildren = "right";
+                overlay.style.overflow = "noclip";
+                overlay.style.zIndex = "0";
+
+                const left = $.CreatePanel("Panel", overlay, "");
+                left.hittest = false;
+                left.style.width = "fill-parent-flow(1.0)";
+                left.style.height = "2px";
+                left.style.verticalAlign = "center";
+                left.style.backgroundColor = "gradient( linear, 0% 0%, 100% 0%, from( #eeeeee00 ), color-stop( 0.35, #eeeeee22 ), to( #eeeeeecc ) )";
+
+                const centerGap = $.CreatePanel("Panel", overlay, "");
+                centerGap.hittest = false;
+                centerGap.style.width = "86px";
+                centerGap.style.height = "1px";
+
+                const right = $.CreatePanel("Panel", overlay, "");
+                right.hittest = false;
+                right.style.width = "fill-parent-flow(1.0)";
+                right.style.height = "2px";
+                right.style.verticalAlign = "center";
+                right.style.backgroundColor = "gradient( linear, 0% 0%, 100% 0%, from( #eeeeeecc ), color-stop( 0.65, #eeeeee22 ), to( #eeeeee00 ) )";
+            }
+            advancedPovFactionLineOverlay = overlay;
+        }
+        advancedPovFactionLineOverlay.visible = enabled;
+        try {
+            advancedPovFactionLineOverlay.style.visibility = enabled ? "visible" : "collapse";
+        } catch (errOverlayVisibility) {}
+    }
+
     function advancedApplyPovFactionStrokes(healthAmmo, enabled) {
         function remember(panel) {
             if (panel && panel.IsValid() && advancedPovFactionStrokes.indexOf(panel) < 0) {
                 advancedPovFactionStrokes.push(panel);
             }
         }
-        if (healthAmmo && healthAmmo.IsValid() && healthAmmo.FindChildrenWithClassTraverse) {
-            const live = healthAmmo.FindChildrenWithClassTraverse("hud-HA__stroke") || [];
-            live.forEach(remember);
-        }
+        // HudHealthAmmoCenter may resolve to a nested panel in spectator mode,
+        // so search the HUD root as well. CS2's stock stylesheet collapses
+        // these exact two panels under `.HUD--spectating-target`.
+        [healthAmmo, hudRootPanel()].forEach(function (searchRoot) {
+            if (searchRoot && searchRoot.IsValid() && searchRoot.FindChildrenWithClassTraverse) {
+                const live = searchRoot.FindChildrenWithClassTraverse("hud-HA__stroke") || [];
+                live.forEach(remember);
+            }
+        });
         advancedPovFactionStrokes.forEach(function (stroke) {
             if (!stroke || !stroke.IsValid()) {
                 return;
@@ -5251,9 +5384,16 @@
             // Stock CS2 ships the correct two-sided gradient beside the CT/T
             // badge, but .HUD--spectating-target collapses it in demos. POV
             // recording and Advanced POV intentionally present player HUD, so
-            // restore that native stroke with an inline visibility override.
-            try { stroke.style.visibility = enabled ? "visible" : null; } catch (errStroke) {}
+            // Override both runtime and inline visibility so the native player
+            // HUD gradients reliably return in POV mode, then collapse again
+            // when switching back to DEMO HUD.
+            try { stroke.visible = enabled; } catch (errVisible) {}
+            try { stroke.style.visibility = enabled ? "visible" : "collapse"; } catch (errStroke) {}
         });
+        // Some spectator HUD variants remove the native stroke panels from the
+        // rendered tree entirely. Keep a matching two-sided gradient owned by
+        // INSIGHT so both recording POV and Advanced POV are deterministic.
+        advancedEnsurePovFactionLineOverlay(healthAmmo, enabled);
     }
 
     function advancedApplyNativeSpectatorHud(enabled) {
@@ -5363,7 +5503,7 @@
     }
 
     function advancedSetVoicePolicy(policy) {
-        if (["team", "all", "mute", "custom"].indexOf(policy) < 0) {
+        if (["all", "team", "enemy", "mute", "custom"].indexOf(policy) < 0) {
             return;
         }
         advancedVoicePolicy = policy;
@@ -5374,8 +5514,22 @@
     function advancedTogglePlayerVoice(xuid) {
         const normalized = normalizeXuid(xuid);
         if (advancedVoicePolicy !== "custom") {
+            const state = controller.GetDemoControllerState();
+            const tick = state ? Number(state.nTick || 0) : 0;
+            const povTeam = state ? resolvePovTeam(currentPovXuid(state), tick) : 0;
             Object.keys(advancedCustomVoiceXuids).forEach(function (key) {
                 delete advancedCustomVoiceXuids[key];
+            });
+            // Preserve the currently visible policy as the initial custom
+            // mask. Clicking one speaker under "All" therefore mutes only
+            // that speaker instead of clearing everybody else first.
+            advancedPlayback.players.forEach(function (player) {
+                const playerXuid = normalizeXuid(player.xuid);
+                advancedCustomVoiceXuids[playerXuid] = advancedVoiceAllows(
+                    playerXuid,
+                    povTeam,
+                    tick,
+                );
             });
             advancedVoicePolicy = "custom";
         }
@@ -5436,29 +5590,34 @@
         if (!advancedRoundPickerOpen) {
             return;
         }
-        rounds.forEach(function (round) {
-            const button = advancedCreateButton(
-                advancedRoundPickerPanel,
-                String(round.number),
-                function () {
-                    advancedRoundPickerOpen = false;
-                    advancedRenderRoundPicker();
-                    const state = controller.GetDemoControllerState();
-                    const xuid = advancedSelectedXuid || (state ? currentPovXuid(state) : "");
-                    if (xuid && advancedPlayback.byXuid[normalizeXuid(xuid)]) {
-                        advancedSelectPlayer(xuid, { tick: round.start });
-                    }
-                },
-                "48px",
-            );
-            button._insightRoundNumber = round.number;
-            button.style.height = "24px";
-            button.style.marginRight = "4px";
-            button.style.marginBottom = "4px";
-            button.style.paddingLeft = "2px";
-            button.style.paddingRight = "2px";
-            advancedRoundButtons.push(button);
-        });
+        for (let rowIndex = 0; rowIndex < rowCount; rowIndex += 1) {
+            const pickerRow = advancedCreatePanel("Panel", advancedRoundPickerPanel, "");
+            pickerRow.style.width = "100%";
+            pickerRow.style.height = "28px";
+            pickerRow.style.flowChildren = "right";
+            rounds.slice(rowIndex * 8, (rowIndex + 1) * 8).forEach(function (round) {
+                const button = advancedCreateButton(
+                    pickerRow,
+                    String(round.number),
+                    function () {
+                        advancedRoundPickerOpen = false;
+                        advancedRenderRoundPicker();
+                        const state = controller.GetDemoControllerState();
+                        const xuid = advancedSelectedXuid || (state ? currentPovXuid(state) : "");
+                        if (xuid && advancedPlayback.byXuid[normalizeXuid(xuid)]) {
+                            advancedSelectPlayer(xuid, { tick: round.start });
+                        }
+                    },
+                    "48px",
+                );
+                button._insightRoundNumber = round.number;
+                button.style.height = "24px";
+                button.style.marginRight = "4px";
+                button.style.paddingLeft = "2px";
+                button.style.paddingRight = "2px";
+                advancedRoundButtons.push(button);
+            });
+        }
         advancedRefreshRoundSelector(controller.GetDemoControllerState());
     }
 
@@ -5466,11 +5625,6 @@
         advancedRoundPickerOpen = !advancedRoundPickerOpen;
         advancedRenderRoundPicker();
         advancedRefreshRoundSelector(controller.GetDemoControllerState());
-        if (advancedMenuPosition) {
-            $.Schedule(0, function () {
-                advancedSetMenuPosition(advancedMenuPosition.x, advancedMenuPosition.y);
-            });
-        }
     }
 
     function advancedRenderPlayers() {
@@ -5501,6 +5655,16 @@
             } else {
                 column.style.marginLeft = "6px";
             }
+            const teamLabel = advancedCreateLabel(
+                column,
+                team === 3 ? "CT" : "T",
+                11,
+                team === 3 ? "#7ed9ff" : "#ffd46d",
+            );
+            teamLabel.style.width = "100%";
+            teamLabel.style.height = "20px";
+            teamLabel.style.textAlign = "center";
+            teamLabel.style.fontWeight = "bold";
             grouped[team].forEach(function (player) {
                 const alive = player._insightAlive !== false;
                 const row = advancedCreatePanel("Panel", column, "");
@@ -5508,6 +5672,15 @@
                 row.style.height = "25px";
                 row.style.flowChildren = "right";
                 row.style.marginBottom = "1px";
+                const marker = advancedCreateLabel(
+                    row,
+                    "●",
+                    11,
+                    radioPlayerColor(player.xuid) || (team === 3 ? "#7ed9ff" : "#ffd46d"),
+                );
+                marker.style.width = "14px";
+                marker.style.height = "23px";
+                marker.style.textAlign = "center";
                 const button = advancedCreateButton(
                     row,
                     alive
@@ -5538,6 +5711,7 @@
                 });
                 voice.style.width = "27px";
                 voice.style.height = "23px";
+                voice.style.verticalAlign = "center";
                 voice.style.marginRight = "0px";
                 voice.style.backgroundColor = "#222221f2";
                 voice.style.border = "1px solid #494844";
@@ -5566,12 +5740,30 @@
         renderTeam(2);
     }
 
+    function advancedCurrentRoundNumber() {
+        const state = controller.GetDemoControllerState();
+        return advancedRoundNumberAtTick(state ? Number(state.nTick || 0) : 0);
+    }
+
+    function advancedToggleFollowCurrentRound() {
+        advancedFollowCurrentRound = !advancedFollowCurrentRound;
+        advancedEventPage = 0;
+        advancedRenderMenu();
+        return true;
+    }
+
     function advancedFilteredEvents() {
-        const events = advancedPlayback.eventsByXuid[advancedSelectedXuid] || [];
-        if (advancedEventFilter === "all") {
-            return events;
+        let events = advancedPlayback.eventsByXuid[advancedSelectedXuid] || [];
+        if (advancedEventFilter !== "all") {
+            events = events.filter(function (event) { return event.type === advancedEventFilter; });
         }
-        return events.filter(function (event) { return event.type === advancedEventFilter; });
+        if (advancedFollowCurrentRound) {
+            const currentRound = advancedCurrentRoundNumber();
+            events = events.filter(function (event) {
+                return advancedRoundNumberAtTick(event.tick) === currentRound;
+            });
+        }
+        return events;
     }
 
     function advancedRenderEvents() {
@@ -5579,43 +5771,86 @@
             return;
         }
         advancedClearPanel(advancedEventListPanel);
+        advancedFollowedRoundNumber = advancedFollowCurrentRound
+            ? advancedCurrentRoundNumber()
+            : -1;
         const events = advancedFilteredEvents();
         const pageSize = 5;
         const pageCount = Math.max(1, Math.ceil(events.length / pageSize));
         advancedEventPage = Math.max(0, Math.min(advancedEventPage, pageCount - 1));
         const visible = events.slice(advancedEventPage * pageSize, (advancedEventPage + 1) * pageSize);
-        for (let slot = 0; slot < pageSize; slot += 1) {
-            const event = visible[slot];
-            const row = advancedCreatePanel("Panel", advancedEventListPanel, "");
-            row.style.width = "100%";
-            row.style.height = "26px";
-            row.style.flowChildren = "right";
-            row.style.marginBottom = slot === pageSize - 1 ? "0px" : "1px";
-            if (!event) {
-                if (slot === 0 && visible.length === 0) {
-                    const empty = advancedCreateLabel(
-                        row,
-                        advancedCopy("当前筛选没有事件", "No events for this filter"),
-                        12,
-                        "#8ea1aa",
-                    );
-                    empty.style.width = "100%";
-                    empty.style.height = "24px";
-                    empty.style.textAlign = "center";
-                }
-                continue;
-            }
-            advancedCreateEventLocateButton(row, event);
-            const preroll = advancedCreateButton(
-                row,
-                "▶ -3s",
-                function () {
-                    advancedSelectPlayer(advancedSelectedXuid, { tick: event.tick, playAfter: true });
-                },
-                "58px",
+        if (!visible.length) {
+            const empty = advancedCreateLabel(
+                advancedEventListPanel,
+                advancedCopy("当前筛选没有事件", "No events for this filter"),
+                12,
+                "#8ea1aa",
             );
-            preroll.style.height = "24px";
-            preroll.style.marginRight = "0px";
+            empty.style.width = "100%";
+            empty.style.height = "24px";
+            empty.style.textAlign = "center";
+        }
+        let visibleIndex = 0;
+        while (visibleIndex < visible.length) {
+            const roundNumber = advancedRoundNumberAtTick(visible[visibleIndex].tick);
+            const groupedEvents = [];
+            while (visibleIndex < visible.length
+                    && advancedRoundNumberAtTick(visible[visibleIndex].tick) === roundNumber) {
+                groupedEvents.push(visible[visibleIndex]);
+                visibleIndex += 1;
+            }
+            const group = advancedCreatePanel("Panel", advancedEventListPanel, "");
+            group.style.width = "100%";
+            group.style.height = (groupedEvents.length * 26) + "px";
+            group.style.flowChildren = "right";
+            group.style.marginBottom = "0px";
+
+            const roundCell = advancedCreatePanel("Panel", group, "");
+            roundCell.style.width = "46px";
+            roundCell.style.height = "100%";
+            roundCell.style.marginRight = "0px";
+            roundCell.style.backgroundColor = "#181817f2";
+            roundCell.style.border = "1px solid #494844";
+            roundCell.style.borderRadius = "0px";
+            const roundLabel = advancedCreateLabel(
+                roundCell,
+                roundNumber > 0 ? "R" + roundNumber : "—",
+                11,
+                "#e0a13d",
+            );
+            roundLabel.style.width = "100%";
+            // Keep the label itself text-height so verticalAlign centers the
+            // text box inside a multi-row merged round cell. A 100%-high label
+            // leaves Panorama drawing the glyphs against the top edge.
+            roundLabel.style.height = "20px";
+            roundLabel.style.textAlign = "center";
+            roundLabel.style.horizontalAlign = "center";
+            roundLabel.style.verticalAlign = "center";
+            roundLabel.style.fontWeight = "bold";
+
+            const eventRows = advancedCreatePanel("Panel", group, "");
+            eventRows.style.width = "fill-parent-flow(1.0)";
+            eventRows.style.height = "100%";
+            eventRows.style.flowChildren = "down";
+            groupedEvents.forEach(function (event, groupIndex) {
+                const row = advancedCreatePanel("Panel", eventRows, "");
+                row.style.width = "100%";
+                row.style.height = "26px";
+                row.style.flowChildren = "right";
+                row.style.marginBottom = "0px";
+                advancedCreateEventLocateButton(row, event);
+                const preroll = advancedCreateButton(
+                    row,
+                    "▶ -3s",
+                    function () {
+                        advancedSelectPlayer(advancedSelectedXuid, { tick: event.tick, playAfter: true });
+                    },
+                    "58px",
+                );
+                preroll.style.height = "26px";
+                preroll.style.marginRight = "0px";
+                preroll.style.borderRadius = "0px";
+            });
         }
         if (advancedEventPagerLabel && advancedEventPagerLabel.IsValid()) {
             advancedEventPagerLabel.text = (advancedEventPage + 1) + " / " + pageCount
@@ -5652,170 +5887,56 @@
             );
             advancedStyleButton(advancedPinButton, advancedMenuPinned);
         }
+        if (advancedFollowRoundButton && advancedFollowRoundButton.IsValid()) {
+            advancedSetButtonText(
+                advancedFollowRoundButton,
+                advancedCopy(
+                    advancedFollowCurrentRound ? "跟随回合开" : "跟随回合关",
+                    advancedFollowCurrentRound ? "ROUND ON" : "ROUND OFF",
+                ),
+            );
+            advancedStyleButton(advancedFollowRoundButton, advancedFollowCurrentRound);
+        }
         advancedRefreshQuickOptionButtons();
         advancedRenderPlayers();
         advancedRenderEvents();
+        advancedApplyMenuCollapsedState();
     }
 
-    function advancedStopMenuDrag() {
-        advancedMenuDragging = false;
-        return true;
-    }
-
-    function advancedSetMenuPosition(x, y) {
-        if (!advancedMenu || !advancedMenu.IsValid()) {
-            return;
+    function advancedApplyMenuCollapsedState() {
+        if (advancedMenu && advancedMenu.IsValid()) {
+            advancedMenu.style.width = advancedMenuCollapsed
+                ? (advancedChinese() ? "220px" : "280px")
+                : "500px";
         }
-        const root = hudRootPanel();
-        if (!root || !root.IsValid()) {
-            return;
+        if (advancedMenuTitleLabel && advancedMenuTitleLabel.IsValid()) {
+            advancedMenuTitleLabel.style.textAlign = advancedMenuCollapsed ? "center" : "left";
         }
-        const scaleX = Math.max(0.001, Number(advancedMenu.actualuiscale_x || 1));
-        const scaleY = Math.max(0.001, Number(advancedMenu.actualuiscale_y || scaleX));
-        const rootWidth = Math.max(0, Number(root.actuallayoutwidth || 0) / scaleX);
-        const rootHeight = Math.max(0, Number(root.actuallayoutheight || 0) / scaleY);
-        const menuWidth = Math.max(0, Number(advancedMenu.actuallayoutwidth || 500) / scaleX);
-        const menuHeight = Math.max(0, Number(advancedMenu.actuallayoutheight || 0) / scaleY);
-        const clampedX = Math.max(0, Math.min(Math.max(0, rootWidth - menuWidth), Number(x) || 0));
-        const clampedY = Math.max(0, Math.min(Math.max(0, rootHeight - menuHeight), Number(y) || 0));
-        advancedMenuPosition = { x: clampedX, y: clampedY };
-        advancedMenu.style.horizontalAlign = "left";
-        advancedMenu.style.verticalAlign = "top";
-        advancedMenu.style.marginRight = "0px";
-        advancedMenu.style.marginLeft = "0px";
-        advancedMenu.style.marginTop = "0px";
-        advancedMenu.style.transform = "translate3d(" + clampedX + "px, " + clampedY + "px, 0px)";
-    }
-
-    function advancedCurrentMenuPosition() {
-        if (advancedMenuPosition) {
-            return { x: advancedMenuPosition.x, y: advancedMenuPosition.y };
+        if (advancedMenuBody && advancedMenuBody.IsValid()) {
+            advancedMenuBody.visible = !advancedMenuCollapsed;
+            advancedMenuBody.style.visibility = advancedMenuCollapsed ? "collapse" : "visible";
+            advancedMenuBody.style.height = advancedMenuCollapsed ? "0px" : "fit-children";
         }
-        const root = hudRootPanel();
-        if (!root || !root.IsValid() || !advancedMenu || !advancedMenu.IsValid()) {
-            return null;
-        }
-        const scaleX = Math.max(0.001, Number(advancedMenu.actualuiscale_x || 1));
-        const scaleY = Math.max(0.001, Number(advancedMenu.actualuiscale_y || scaleX));
-        const rootWidth = Number(root.actuallayoutwidth || 0) / scaleX;
-        const rootHeight = Number(root.actuallayoutheight || 0) / scaleY;
-        const menuWidth = Number(advancedMenu.actuallayoutwidth || 500) / scaleX;
-        const menuHeight = Number(advancedMenu.actuallayoutheight || 0) / scaleY;
-        return {
-            x: Math.max(0, rootWidth - menuWidth - 6),
-            y: Math.max(0, (rootHeight - menuHeight) * 0.5),
-        };
-    }
-
-    function advancedInitializeMenuPosition(attempt) {
-        if (!advancedMenuInitialPositionPending || advancedMenuPosition
-                || !advancedMenu || !advancedMenu.IsValid()) {
-            return;
-        }
-        const root = hudRootPanel();
-        const scaleX = Math.max(0.001, Number(advancedMenu.actualuiscale_x || 1));
-        const scaleY = Math.max(0.001, Number(advancedMenu.actualuiscale_y || scaleX));
-        const rootWidth = root && root.IsValid()
-            ? Number(root.actuallayoutwidth || 0) / scaleX
-            : 0;
-        const rootHeight = root && root.IsValid()
-            ? Number(root.actuallayoutheight || 0) / scaleY
-            : 0;
-        const menuWidth = Number(advancedMenu.actuallayoutwidth || 0) / scaleX;
-        const menuHeight = Number(advancedMenu.actuallayoutheight || 0) / scaleY;
-        if (rootWidth > 0 && rootHeight > 0 && menuWidth > 0 && menuHeight > 0) {
-            advancedMenuInitialPositionPending = false;
-            advancedSetMenuPosition(
-                Math.max(0, rootWidth - menuWidth - 6),
-                Math.max(0, (rootHeight - menuHeight) * 0.5),
-            );
-            return;
-        }
-        if (Number(attempt || 0) < 30) {
-            $.Schedule(0.05, function () {
-                advancedInitializeMenuPosition(Number(attempt || 0) + 1);
-            });
+        if (advancedMenuHeaderControls && advancedMenuHeaderControls.IsValid()) {
+            advancedMenuHeaderControls.visible = !advancedMenuCollapsed;
+            advancedMenuHeaderControls.style.visibility = advancedMenuCollapsed ? "collapse" : "visible";
+            advancedMenuHeaderControls.style.width = advancedMenuCollapsed ? "0px" : "fit-children";
         }
     }
 
-    function advancedStartMenuDrag() {
-        if (!advancedMenu || !advancedMenu.IsValid() || advancedMenuDragging) {
-            return true;
+    function advancedSetMenuCollapsed(collapsed) {
+        advancedMenuCollapsed = Boolean(collapsed);
+        if (advancedMenuCollapsed && advancedRoundPickerOpen) {
+            advancedRoundPickerOpen = false;
+            advancedRenderRoundPicker();
         }
-        const position = advancedCurrentMenuPosition();
-        if (!position) {
-            return true;
-        }
-        advancedMenuDragging = true;
-        advancedMenuHoverGeneration += 1;
-        advancedSetMenuPosition(position.x, position.y);
-        return true;
-    }
-
-    function advancedAttachMenuDrag(handle) {
-        if (!handle || !handle.IsValid()) {
-            return;
-        }
-        try { handle.SetDraggable(true); } catch (errDraggable) {}
-        try { handle.draggable = true; } catch (errDraggableProperty) {}
-        try { handle.style.cursor = "move"; } catch (errCursor) {}
-        try {
-            $.RegisterEventHandler("DragStart", handle, function (source, dragCallbacks) {
-                advancedStartMenuDrag();
-                const menuPosition = advancedPanelWindowPosition(advancedMenu);
-                if (advancedMenu && advancedMenu.IsValid() && menuPosition && dragCallbacks) {
-                    // Move the real menu. The former transparent drag ghost was
-                    // what made the cursor change while the visible UI stayed
-                    // put; Panorama now owns the actual display panel directly.
-                    const scaleX = Math.max(0.001, Number(advancedMenu.actualuiscale_x || 1));
-                    const scaleY = Math.max(0.001, Number(advancedMenu.actualuiscale_y || scaleX));
-                    dragCallbacks.displayPanel = advancedMenu;
-                    const cursor = advancedCursorPosition();
-                    if (cursor) {
-                        dragCallbacks.offsetX = Math.max(0, (cursor.x - menuPosition.x) / scaleX);
-                        dragCallbacks.offsetY = Math.max(0, (cursor.y - menuPosition.y) / scaleY);
-                    }
-                }
-                return true;
-            });
-            $.RegisterEventHandler("DragEnd", handle, function (source, draggedPanel) {
-                let droppedPosition = null;
-                if (advancedMenu && advancedMenu.IsValid()) {
-                    const position = advancedPanelWindowPosition(advancedMenu);
-                    const root = hudRootPanel();
-                    const rootPosition = advancedPanelWindowPosition(root);
-                    if (position && rootPosition && root && root.IsValid()) {
-                        const scaleX = Math.max(0.001, Number(advancedMenu.actualuiscale_x || 1));
-                        const scaleY = Math.max(0.001, Number(advancedMenu.actualuiscale_y || scaleX));
-                        droppedPosition = {
-                            x: (position.x - rootPosition.x) / scaleX,
-                            y: (position.y - rootPosition.y) / scaleY,
-                        };
-                    }
-                }
-                advancedStopMenuDrag();
-                if (droppedPosition) {
-                    // Let Panorama finish clearing its transient drag offset,
-                    // then commit the dropped coordinates as our own transform.
-                    $.Schedule(0, function () {
-                        advancedSetMenuPosition(droppedPosition.x, droppedPosition.y);
-                    });
-                }
-                return true;
-            });
-        } catch (errDragEvents) {}
+        advancedApplyMenuCollapsedState();
     }
 
     function advancedScheduleHideMenu() {
-        if (advancedMenuPinned || advancedMenuDragging) {
-            return;
-        }
         const generation = ++advancedMenuHoverGeneration;
-        $.Schedule(0.3, function () {
+        $.Schedule(0.18, function () {
             if (generation !== advancedMenuHoverGeneration || !advancedMenu || !advancedMenu.IsValid()) {
-                return;
-            }
-            if (advancedMenuPinned || advancedMenuDragging) {
                 return;
             }
             try {
@@ -5827,8 +5948,12 @@
                     return;
                 }
             } catch (errHoverState) {}
-            advancedMenuVisible = false;
-            advancedMenu.visible = false;
+            if (advancedMenuPinned) {
+                advancedSetMenuCollapsed(true);
+            } else {
+                advancedMenuVisible = false;
+                advancedMenu.visible = false;
+            }
         });
     }
 
@@ -5839,6 +5964,7 @@
         advancedMenuHoverGeneration += 1;
         advancedMenuVisible = true;
         advancedMenu.visible = true;
+        advancedMenuCollapsed = false;
         advancedRenderMenu();
     }
 
@@ -5850,6 +5976,28 @@
             advancedRenderMenu();
             advancedScheduleHideMenu();
         }
+    }
+
+    function advancedCloseMenu() {
+        advancedMenuHoverGeneration += 1;
+        advancedMenuPinned = false;
+        advancedMenuVisible = false;
+        advancedEdgeRevealArmed = false;
+        if (advancedEdgeTrigger && advancedEdgeTrigger.IsValid()) {
+            advancedEdgeTrigger.hittest = false;
+        }
+        if (advancedMenu && advancedMenu.IsValid()) {
+            advancedMenu.visible = false;
+        }
+        // Briefly disable the edge trigger so the close click cannot
+        // immediately reopen the menu under the same pointer position.
+        $.Schedule(0.35, function () {
+            advancedEdgeRevealArmed = true;
+            if (advancedEdgeTrigger && advancedEdgeTrigger.IsValid()) {
+                advancedEdgeTrigger.hittest = true;
+            }
+        });
+        return true;
     }
 
     function advancedEnsureMenu() {
@@ -5869,7 +6017,14 @@
             advancedEdgeTrigger.style.verticalAlign = "center";
             advancedEdgeTrigger.style.backgroundColor = "#e07f0a02";
             advancedEdgeTrigger.style.zIndex = "32000";
-            advancedEdgeTrigger.SetPanelEvent("onmouseover", advancedShowMenu);
+            advancedEdgeTrigger.SetPanelEvent("onmouseover", function () {
+                if (advancedEdgeRevealArmed) {
+                    advancedShowMenu();
+                }
+            });
+            advancedEdgeTrigger.SetPanelEvent("onmouseout", function () {
+                advancedEdgeRevealArmed = true;
+            });
         }
         if (advancedMenu && advancedMenu.IsValid()) {
             return advancedMenu;
@@ -5878,8 +6033,6 @@
         advancedMenu.style.width = "500px";
         advancedMenu.style.height = "fit-children";
         advancedMenu.style.maxHeight = "92%";
-        // Start on the right, then resolve the exact absolute position after
-        // Panorama has measured the fit-children menu.
         advancedMenu.style.horizontalAlign = "right";
         advancedMenu.style.verticalAlign = "center";
         advancedMenu.style.marginRight = "6px";
@@ -5898,6 +6051,9 @@
         advancedMenu.visible = advancedMenuPinned;
         advancedMenu.SetPanelEvent("onmouseover", function () {
             advancedMenuHoverGeneration += 1;
+            if (advancedMenuCollapsed) {
+                advancedSetMenuCollapsed(false);
+            }
         });
         advancedMenu.SetPanelEvent("onmouseout", advancedScheduleHideMenu);
 
@@ -5906,40 +6062,42 @@
         titleRow.style.height = "30px";
         titleRow.style.marginBottom = "2px";
         titleRow.style.flowChildren = "right";
-        const dragHandle = advancedCreatePanel(
-            "Button",
-            titleRow,
-            "CS2InsightAdvancedDragHandle",
+        advancedMenuTitleLabel = advancedCreateLabel(titleRow, "INSIGHT · " + advancedCopy("高级播放", "ADVANCED PLAYBACK"), 17, "#e07f0a");
+        advancedMenuTitleLabel.style.width = "fill-parent-flow(1.0)";
+        advancedMenuTitleLabel.style.horizontalAlign = "left";
+        advancedMenuHeaderControls = advancedCreatePanel("Panel", titleRow, "");
+        advancedMenuHeaderControls.style.width = "fit-children";
+        advancedMenuHeaderControls.style.height = "25px";
+        advancedMenuHeaderControls.style.flowChildren = "right";
+        advancedPinButton = advancedCreateButton(
+            advancedMenuHeaderControls,
+            "",
+            advancedToggleMenuPinned,
+            "62px",
         );
-        dragHandle.style.width = "fill-parent-flow(1.0)";
-        dragHandle.style.height = "25px";
-        dragHandle.style.backgroundColor = "#00000001";
-        dragHandle.style.border = "0px";
-        const title = advancedCreateLabel(dragHandle, "INSIGHT · " + advancedCopy("高级播放", "ADVANCED PLAYBACK"), 17, "#e07f0a");
-        title.style.width = "100%";
-        title.style.horizontalAlign = "left";
-        advancedAttachMenuDrag(dragHandle);
-        advancedMenuTickLabel = advancedCreateLabel(titleRow, "", 11, "#7c7b74");
-        advancedMenuTickLabel.style.width = "70px";
-        advancedPinButton = advancedCreateButton(titleRow, "", advancedToggleMenuPinned, "62px");
         advancedPinButton.style.height = "25px";
         advancedPinButton.style.paddingLeft = "4px";
         advancedPinButton.style.paddingRight = "4px";
-        const close = advancedCreateButton(titleRow, "×", function () {
-            advancedStopMenuDrag();
-            advancedMenuHoverGeneration += 1;
-            advancedMenuPinned = false;
-            advancedMenuVisible = false;
-            advancedMenu.visible = false;
-        }, "30px");
+        const close = advancedCreateButton(
+            advancedMenuHeaderControls,
+            "×",
+            advancedCloseMenu,
+            "30px",
+        );
         close.style.height = "25px";
         close.style.marginRight = "0px";
+        close.style.zIndex = "4";
 
-        const viewRow = advancedCreatePanel("Panel", advancedMenu, "");
+        advancedMenuBody = advancedCreatePanel("Panel", advancedMenu, "CS2InsightAdvancedBody");
+        advancedMenuBody.style.width = "100%";
+        advancedMenuBody.style.height = "fit-children";
+        advancedMenuBody.style.flowChildren = "down";
+
+        const viewRow = advancedCreatePanel("Panel", advancedMenuBody, "");
         viewRow.style.width = "100%";
         viewRow.style.height = "30px";
         viewRow.style.flowChildren = "right";
-        advancedCreateLabel(viewRow, "HUD", 12, "#b5b3ad").style.width = "40px";
+        advancedCreateSectionLabel(viewRow, "HUD");
         const pov = advancedCreateButton(viewRow, "POV HUD", function () { advancedApplyPlaybackProfile("pov"); }, "112px");
         const demo = advancedCreateButton(viewRow, "DEMO HUD", function () { advancedApplyPlaybackProfile("demo"); }, "112px");
         advancedProfileButtons.pov = pov;
@@ -5950,16 +6108,16 @@
         advancedStyleButton(demo, !advancedPovVisualsEnabled);
         [pov, demo].forEach(function (button) { button.style.height = "25px"; });
 
-        const voiceRow = advancedCreatePanel("Panel", advancedMenu, "");
+        const voiceRow = advancedCreatePanel("Panel", advancedMenuBody, "");
         voiceRow.style.width = "100%";
         voiceRow.style.height = "30px";
         voiceRow.style.flowChildren = "right";
-        advancedCreateLabel(voiceRow, advancedCopy("语音", "Voice"), 12, "#b5b3ad").style.width = "40px";
+        advancedCreateSectionLabel(voiceRow, advancedCopy("语音", "Voice"));
         [
-            ["team", advancedCopy("本队", "Team")],
             ["all", advancedCopy("全部", "All")],
+            ["team", advancedCopy("己方", "Team")],
+            ["enemy", advancedCopy("对方", "Enemy")],
             ["mute", advancedCopy("静音", "Mute")],
-            ["custom", advancedCopy("自选", "Custom")],
         ].forEach(function (entry) {
             const button = advancedCreateButton(voiceRow, entry[1], function () { advancedSetVoicePolicy(entry[0]); }, "66px");
             button.style.height = "25px";
@@ -5967,21 +6125,38 @@
             advancedStyleButton(button, advancedVoicePolicy === entry[0]);
         });
 
-        const roundRow = advancedCreatePanel("Panel", advancedMenu, "");
+        const roundRow = advancedCreatePanel("Panel", advancedMenuBody, "");
         roundRow.style.width = "100%";
         roundRow.style.height = "30px";
         roundRow.style.marginTop = "2px";
         roundRow.style.flowChildren = "right";
-        advancedCreateLabel(roundRow, advancedCopy("回合", "Round"), 12, "#b5b3ad").style.width = "40px";
+        advancedCreateSectionLabel(roundRow, advancedCopy("回合", "Round"));
         advancedRoundButton = advancedCreateButton(roundRow, "", advancedToggleRoundPicker, "132px");
         advancedRoundButton.style.height = "25px";
         advancedRoundHintLabel = advancedCreateLabel(roundRow, "", 10, "#7c7b74");
-        advancedRoundHintLabel.style.width = "fill-parent-flow(1.0)";
-        advancedRoundHintLabel.style.textAlign = "center";
+        advancedRoundHintLabel.style.width = "62px";
+        advancedRoundHintLabel.style.height = "25px";
+        advancedRoundHintLabel.style.marginLeft = "6px";
+        advancedRoundHintLabel.style.textAlign = "left";
+        advancedRoundHintLabel.style.verticalAlign = "center";
+        const playerHelp = advancedCreateLabel(
+            roundRow,
+            advancedCopy(
+                "点名称切换视角 · 点喇叭开关语音",
+                "Name: switch POV · Speaker: voice",
+            ),
+            9,
+            "#8f8d86",
+        );
+        playerHelp.style.width = "fill-parent-flow(1.0)";
+        playerHelp.style.height = "25px";
+        playerHelp.style.marginLeft = "4px";
+        playerHelp.style.textAlign = "left";
+        playerHelp.style.verticalAlign = "center";
 
         advancedRoundPickerPanel = advancedCreatePanel(
             "Panel",
-            advancedMenu,
+            advancedMenuBody,
             "CS2InsightAdvancedRoundPicker",
         );
         advancedRoundPickerPanel.style.width = "100%";
@@ -5989,7 +6164,7 @@
         advancedRoundPickerPanel.style.paddingLeft = "40px";
         advancedRoundPickerPanel.style.paddingTop = "4px";
         advancedRoundPickerPanel.style.paddingBottom = "4px";
-        advancedRoundPickerPanel.style.flowChildren = "right-wrap";
+        advancedRoundPickerPanel.style.flowChildren = "down";
         advancedRoundPickerPanel.style.overflow = "clip";
         advancedRoundPickerPanel.style.backgroundColor = "#111110dd";
         advancedRoundPickerPanel.style.border = "1px solid #3b3a37";
@@ -5997,21 +6172,24 @@
         advancedRoundPickerPanel.style.visibility = "collapse";
         advancedRoundPickerPanel.visible = false;
 
-        const playersRow = advancedCreatePanel("Panel", advancedMenu, "");
+        const playersRow = advancedCreatePanel("Panel", advancedMenuBody, "");
         playersRow.style.width = "100%";
-        playersRow.style.height = "135px";
+        playersRow.style.height = "155px";
         playersRow.style.marginTop = "5px";
         playersRow.style.flowChildren = "right";
-        const playersInset = advancedCreatePanel("Panel", playersRow, "");
-        playersInset.style.width = "40px";
-        playersInset.style.height = "100%";
+        const playersTitle = advancedCreateSectionLabel(
+            playersRow,
+            advancedCopy("阵营", "Teams"),
+        );
+        playersTitle.style.verticalAlign = "top";
+        playersTitle.style.marginTop = "3px";
         advancedPlayerListPanel = advancedCreatePanel(
             "Panel",
             playersRow,
             "CS2InsightAdvancedPlayers",
         );
         advancedPlayerListPanel.style.width = "fill-parent-flow(1.0)";
-        advancedPlayerListPanel.style.height = "135px";
+        advancedPlayerListPanel.style.height = "155px";
         advancedPlayerListPanel.style.paddingTop = "3px";
         advancedPlayerListPanel.style.paddingBottom = "2px";
         advancedPlayerListPanel.style.flowChildren = "right";
@@ -6020,24 +6198,33 @@
         advancedPlayerListPanel.style.border = "1px solid #3b3a37";
         advancedPlayerListPanel.style.borderRadius = "6px";
 
-        const filterRow = advancedCreatePanel("Panel", advancedMenu, "");
+        const filterRow = advancedCreatePanel("Panel", advancedMenuBody, "");
         filterRow.style.width = "100%";
         filterRow.style.height = "30px";
         filterRow.style.marginTop = "7px";
         filterRow.style.flowChildren = "right";
-        advancedCreateLabel(filterRow, advancedCopy("事件", "Events"), 12, "#b5b3ad").style.width = "40px";
+        advancedCreateSectionLabel(filterRow, advancedCopy("事件", "Events"));
+        advancedFollowRoundButton = advancedCreateButton(
+            filterRow,
+            "",
+            advancedToggleFollowCurrentRound,
+            advancedChinese() ? "76px" : "80px",
+        );
+        advancedFollowRoundButton.style.height = "25px";
+        advancedFollowRoundButton.style.paddingLeft = "3px";
+        advancedFollowRoundButton.style.paddingRight = "3px";
+        advancedStyleButton(advancedFollowRoundButton, advancedFollowCurrentRound);
         [
             ["all", advancedCopy("全部", "All")],
             ["kill", advancedCopy("击杀", "Kills")],
             ["death", advancedCopy("死亡", "Deaths")],
             ["utility", advancedCopy("道具", "Utility")],
         ].forEach(function (entry) {
-            const button = advancedCreateButton(filterRow, entry[1], function () {
+            const button = advancedCreateFilterButton(filterRow, entry[0], entry[1], function () {
                 advancedEventFilter = entry[0];
                 advancedEventPage = 0;
                 advancedRenderMenu();
-            }, "62px");
-            button.style.height = "25px";
+            });
             advancedFilterButtons[entry[0]] = button;
             advancedStyleButton(button, advancedEventFilter === entry[0]);
         });
@@ -6056,7 +6243,7 @@
         }, "28px");
         pagerNext.style.height = "25px";
         pagerNext.style.marginRight = "0px";
-        advancedEventListPanel = advancedCreatePanel("Panel", advancedMenu, "CS2InsightAdvancedEvents");
+        advancedEventListPanel = advancedCreatePanel("Panel", advancedMenuBody, "CS2InsightAdvancedEvents");
         advancedEventListPanel.style.width = "100%";
         advancedEventListPanel.style.height = "145px";
         advancedEventListPanel.style.marginTop = "4px";
@@ -6072,8 +6259,6 @@
 
         advancedApplyQuickOptions();
         advancedRenderMenu();
-        advancedMenuInitialPositionPending = !advancedMenuPosition;
-        $.Schedule(0, function () { advancedInitializeMenuPosition(0); });
         return advancedMenu;
     }
 
@@ -6086,15 +6271,14 @@
             advancedShowMenu();
         }
         const state = controller.GetDemoControllerState();
-        if (advancedMenuTickLabel && advancedMenuTickLabel.IsValid() && state) {
-            advancedMenuTickLabel.text = "tick " + Number(state.nTick || 0);
-        }
         if (advancedMenuVisible && state) {
             advancedRefreshRoundSelector(state);
-            if (advancedMenuPosition && !advancedMenuDragging) {
-                advancedSetMenuPosition(advancedMenuPosition.x, advancedMenuPosition.y);
-            }
             const tick = Number(state.nTick || 0);
+            const currentRound = advancedRoundNumberAtTick(tick);
+            if (advancedFollowCurrentRound && currentRound !== advancedFollowedRoundNumber) {
+                advancedEventPage = 0;
+                advancedRenderEvents();
+            }
             const teamSignature = advancedPlayback.players.map(function (player) {
                 const liveTeam = resolvePovTeam(player.xuid, tick) || player.team;
                 const alive = advancedPlayerAliveAtTick(player.xuid, tick);

@@ -536,6 +536,12 @@ def test_checked_in_voice_template_contains_only_an_empty_payload():
     assert b'button.style.backgroundColor = "#2b1818f2"' in script
     assert b'liveTeam + ":" + (alive ? "1" : "0")' in script
     assert b"function advancedTogglePlayerVoice(xuid)" in script
+    assert b'let advancedVoicePolicy = "all"' in script
+    assert b'["all", advancedCopy("\xe5\x85\xa8\xe9\x83\xa8", "All")]' in script
+    assert b'["team", advancedCopy("\xe5\xb7\xb1\xe6\x96\xb9", "Team")]' in script
+    assert b'["enemy", advancedCopy("\xe5\xaf\xb9\xe6\x96\xb9", "Enemy")]' in script
+    assert b"advancedPlayback.players.forEach(function (player)" in script
+    assert b"advancedCustomVoiceXuids[playerXuid] = advancedVoiceAllows(" in script
     assert b"function advancedApplyPlaybackProfile(profile)" in script
     profile_start = script.index(b"function advancedApplyPlaybackProfile(profile)")
     profile_end = script.index(b"function advancedSetVoicePolicy(policy)", profile_start)
@@ -556,19 +562,35 @@ def test_checked_in_voice_template_contains_only_an_empty_payload():
     assert b'advancedCopy("\xe8\xaf\xad\xe9\x9f\xb3\xe5\xbc\x80", "ON")' not in script
     assert b'advancedCopy("\xe8\xaf\xad\xe9\x9f\xb3\xe5\x85\xb3", "OFF")' not in script
     assert b'advancedMenu.style.height = "fit-children"' in script
+    assert b"advancedMenuTickLabel" not in script
     assert b'advancedEventListPanel.style.height = "145px"' in script
     assert b'advancedEventListPanel.style.paddingBottom = "5px"' in script
     assert b"footerSpacer" not in script
     assert b'advancedMenuSelectionLabel' not in script
     assert b'const pageSize = 5' in script
-    assert b'for (let slot = 0; slot < pageSize; slot += 1)' in script
+    assert b"const groupedEvents = []" in script
+    assert b'group.style.height = (groupedEvents.length * 26) + "px"' in script
+    assert b'roundCell.style.height = "100%"' in script
+    assert b'roundCell.style.marginRight = "0px"' in script
+    assert b'roundCell.style.borderRadius = "0px"' in script
+    assert b'roundLabel.style.height = "20px"' in script
+    assert b'roundLabel.style.horizontalAlign = "center"' in script
+    assert b'roundLabel.style.verticalAlign = "center"' in script
+    assert b'locate.style.marginRight = "0px"' in script
+    assert b'locate.style.borderRadius = "0px"' in script
+    assert b'roundNumber > 0 ? "R" + roundNumber : "\xe2\x80\x94"' in script
     assert b"function advancedCreateEventLocateButton(row, event)" in script
     assert b'"s2r://panorama/images/icons/" + folder + "/" + stem + ".svg"' in script
     assert b'icon.SetScaling("stretch-to-fit-preserve-aspect")' in script
     assert b'advancedCreateEventIcon(parent, "death_notice", "headshot", 12, 12, 15)' in script
     assert b'advancedCreateEventIcon(parent, "death_notice", "throughsmoke", 12, 12, 15)' in script
     assert b'advancedCreateEventIcon(parent, "death_notice", "penetrate", 12, 12, 15)' in script
-    assert b'iconStrip.style.width = "116px"' in script
+    assert b'headshot: "icon_headshot"' in script
+    assert b'throughsmoke: "smoke_kill"' in script
+    assert b'blindkill: "blind_kill"' in script
+    assert b'"s2r://panorama/images/hud/deathnotice/"' in script
+    assert b'"s2r://panorama/images/icons/equipment/flashbang_assist.vsvg"' in script
+    assert b'iconStrip.style.width = "fit-children"' in script
     assert b'advancedEquipmentIconStem(event.detail),' in script
     assert b'advancedCreateEventIcon(action, "equipment", utilityStem, 20, 20, 24)' in script
     assert "advancedCopy(\"投掷\", \"threw\")".encode() in script
@@ -580,14 +602,39 @@ def test_checked_in_voice_template_contains_only_an_empty_payload():
     assert b"CS2InsightAdvancedRoundPicker" in script
     assert b"function advancedToggleRoundPicker()" in script
     assert b'advancedCopy("\xe5\x9b\x9e\xe5\x90\x88", "Round")' in script
-    assert b"advancedRoundPickerPanel.style.flowChildren = \"right-wrap\"" in script
+    assert b'advancedRoundPickerPanel.style.flowChildren = "down"' in script
+    assert b'pickerRow.style.flowChildren = "right"' in script
+    assert b'rounds.slice(rowIndex * 8, (rowIndex + 1) * 8)' in script
     assert b"advancedSelectPlayer(xuid, { tick: round.start })" in script
+    assert b"function advancedRoundElapsedTick(tick)" in script
+    assert b"advancedFormatTick(advancedRoundElapsedTick(event.tick))" in script
+    assert b'advancedRoundHintLabel.style.width = "62px"' in script
+    assert b'advancedRoundHintLabel.style.height = "25px"' in script
+    assert b'advancedRoundHintLabel.style.marginLeft = "6px"' in script
     assert "第 \" + roundNumber + \" 回合 ▾".encode() in script
     assert "advancedCopy(\"X光\", \"X-ray\")".encode() not in script
-    assert "advancedCopy(\"阵营\", \"Teams\")".encode() not in script
-    assert b'playersInset.style.width = "40px"' in script
+    assert "advancedCopy(\"阵营\", \"Teams\")".encode() in script
+    assert b'label.style.height = "25px"' in script
+    assert b'playersTitle.style.marginTop = "3px"' in script
+    assert b'team === 3 ? "CT" : "T"' in script
+    assert b'radioPlayerColor(player.xuid) || (team === 3 ? "#7ed9ff" : "#ffd46d")' in script
+    assert "点名称切换视角 · 点喇叭开关语音".encode() in script
+    assert b'playerHelp.style.verticalAlign = "center"' in script
+    assert b'advancedPlayerListPanel.style.height = "155px"' in script
+    assert b'playersInset.style.width = "40px"' not in script
     assert "advancedCopy(\"事件\", \"Events\")".encode() in script
+    assert b"let advancedFollowCurrentRound = true" in script
+    assert b"function advancedToggleFollowCurrentRound()" in script
+    assert b'advancedFollowCurrentRound ? "\xe8\xb7\x9f\xe9\x9a\x8f\xe5\x9b\x9e\xe5\x90\x88\xe5\xbc\x80" : "\xe8\xb7\x9f\xe9\x9a\x8f\xe5\x9b\x9e\xe5\x90\x88\xe5\x85\xb3"' in script
+    assert b"function advancedCreateFilterIcon(parent, kind)" in script
+    assert b"function advancedCreateFilterButton(parent, kind, text, onActivate)" in script
+    assert b'advancedCreateEventIcon(cell, "equipment", "hegrenade", 16, 16, 18)' in script
+    assert b'advancedCreateLabel(cell, "\xe2\x98\xa0", 15, "#ece9e2")' in script
+    assert b"advancedRoundNumberAtTick(event.tick) === currentRound" in script
+    assert b"currentRound !== advancedFollowedRoundNumber" in script
     assert b'advancedMenuPinned ? "PIN ON" : "PIN OFF"' in script
+    assert b"const playerChanged = normalized !== advancedSelectedXuid" in script
+    assert b"if (playerChanged)" in script
     assert b'panel.SetPanelEvent("onactivate", function () { return true; })' in script
     assert b"advancedFocusTextEntry(advancedTickInput)" not in script
     assert b"let advancedMenuPinned = true" in script
@@ -634,24 +681,27 @@ def test_checked_in_voice_template_contains_only_an_empty_payload():
     assert b'panel.visible = false' in script
     assert b'"RI_BombDefuserPackage"' in script
     assert b"resumeAfterSeek" in script
-    assert b"CS2InsightAdvancedDragHandle" in script
-    assert b'$.RegisterEventHandler("DragStart", handle' in script
-    assert b'$.RegisterEventHandler("DragEnd", handle' in script
-    assert b"dragCallbacks.displayPanel = advancedMenu" in script
-    assert b'advancedMenu.style.transform = "translate3d(" + clampedX' in script
-    assert b"let advancedMenuPosition = null" in script
-    assert b"function advancedInitializeMenuPosition(attempt)" in script
-    assert b"function advancedMenuDragTick()" not in script
-    assert b"function advancedStartMenuDrag()" in script
-    assert b"advancedCurrentMenuPosition()" in script
-    assert b"advancedSetMenuPosition(position.x, position.y)" in script
+    assert b"CS2InsightAdvancedDragHandle" not in script
+    assert b'$.RegisterEventHandler("DragStart", handle' not in script
     assert b"advancedMenuDragGhost" not in script
-    assert b"handle.draggable = true" in script
-    assert b"Number(root.actuallayoutwidth || 0) / scaleX" in script
-    assert b"Number(advancedMenu.actuallayoutwidth || 0) / scaleX" in script
+    assert b"let advancedMenuPosition = null" not in script
+    assert b"let advancedMenuCollapsed = true" in script
+    assert b"CS2InsightAdvancedBody" in script
+    assert b"function advancedSetMenuCollapsed(collapsed)" in script
+    assert b"advancedFoldButton" not in script
+    assert b'advancedMenuBody.style.visibility = advancedMenuCollapsed ? "collapse" : "visible"' in script
+    assert b'advancedMenuHeaderControls.style.visibility = advancedMenuCollapsed ? "collapse" : "visible"' in script
+    assert b'advancedChinese() ? "220px" : "280px"' in script
+    assert b'advancedMenuTitleLabel.style.textAlign = advancedMenuCollapsed ? "center" : "left"' in script
+    assert b'$.Schedule(0.18, function ()' in script
+    assert b"advancedSetMenuCollapsed(true)" in script
+    assert b"advancedSetMenuCollapsed(false)" in script
     assert b'advancedMenu.style.horizontalAlign = "right"' in script
     assert b'advancedMenu.style.verticalAlign = "center"' in script
     assert b'advancedMenu.style.marginRight = "6px"' in script
+    assert b'advancedMenu.style.marginTop = "0px"' in script
+    assert b'advancedEdgeTrigger.style.height = "100%"' in script
+    assert b'advancedEdgeTrigger.style.verticalAlign = "center"' in script
     assert b"advancedMenu.style.x =" not in script
     assert b"advancedMenu.style.y =" not in script
     assert b"function restrictPovTeamCounterEquipment()" in script
@@ -660,7 +710,20 @@ def test_checked_in_voice_template_contains_only_an_empty_payload():
     assert b"renderTeam(3);" in script
     assert b"renderTeam(2);" in script
     assert b'FindChildrenWithClassTraverse("hud-HA__stroke")' in script
-    assert b'stroke.style.visibility = enabled ? "visible" : null' in script
+    assert b"[healthAmmo, hudRootPanel()]" in script
+    assert b"stroke.visible = enabled" in script
+    assert b'stroke.style.visibility = enabled ? "visible" : "collapse"' in script
+    assert b"CS2InsightPovFactionLines" in script
+    assert b'overlay.style.marginBottom = "35px"' in script
+    assert b"advancedEnsurePovFactionLineOverlay(healthAmmo, enabled)" in script
+    assert b"function advancedCloseMenu()" in script
+    assert b"advancedEdgeRevealArmed = false" in script
+    assert b"advancedEdgeTrigger.hittest = false" in script
+    assert b"$.Schedule(0.35, function ()" in script
+    assert b"advancedEdgeTrigger.hittest = true" in script
+    assert b"advancedSyncMenuToDragPanel" not in script
+    assert b"function advancedCreateSectionLabel(parent, text)" in script
+    assert b'button.style.verticalAlign = "center"' in script
     assert b'GameInterfaceAPI.ConsoleCommand("demo_gototick " + initialSeekTick)' in script
     assert b'return color ? radioHtmlSpan(color, "\xe2\x97\x8f ") : ""' in script
     assert b'createClassedPanel("Label", notice, "VoiceMarker", "VoiceText")' in script
