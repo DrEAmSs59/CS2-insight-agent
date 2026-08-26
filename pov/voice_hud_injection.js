@@ -610,6 +610,7 @@
     let advancedEventPage = 0;
     let advancedViewMode = 5;
     let advancedPovVisualsEnabled = true;
+    let advancedHudHidden = false;
     let advancedSpecOperation = null;
     let advancedMenuBody = null;
     let advancedMenuTitleLabel = null;
@@ -622,7 +623,9 @@
     let advancedFollowCurrentRound = true;
     let advancedFollowedRoundNumber = -1;
     let advancedPinButton = null;
+    let advancedPreviousRoundButton = null;
     let advancedRoundButton = null;
+    let advancedNextRoundButton = null;
     let advancedRoundHintLabel = null;
     let advancedRoundPickerPanel = null;
     let advancedRoundPickerOpen = false;
@@ -640,6 +643,17 @@
     const advancedFilterButtons = {};
     const advancedOptionButtons = {};
     const advancedOptionLabels = {};
+    const ADVANCED_EVENT_ICON_HEIGHT = 16;
+    const ADVANCED_EVENT_ICON_TRACK_HEIGHT = 20;
+    const ADVANCED_FILTER_ICON_SIZE = 14;
+    const ADVANCED_FILTER_ICON_CELL = 18;
+    const ADVANCED_EVENT_ROW_HEIGHT = 24;
+    const ADVANCED_EVENT_GROUP_GAP = 4;
+    const ADVANCED_EVENT_GROUP_ODD_SURFACE = "#101010f7";
+    const ADVANCED_EVENT_GROUP_EVEN_SURFACE = "#232323f7";
+    const ADVANCED_EVENT_GROUP_BORDER = "#505050";
+    // Keep round navigation accents identical to the title and selected tabs.
+    const ADVANCED_EVENT_ROUND_ACCENT = "#e07f0a";
     let advancedVoicePolicy = "all";
     let advancedPlayerTeamSignature = "";
     const advancedCustomVoiceXuids = {};
@@ -977,13 +991,70 @@
         if (!panel || !panel.IsValid()) {
             return;
         }
+        let advancedHealthbar = false;
+        try {
+            advancedHealthbar = Boolean(
+                advancedPlayback
+                && panel.BHasClass
+                && panel.BHasClass("healthbar-container")
+            );
+        } catch (errHealthbarClass) {}
+        if (advancedHealthbar) {
+            const trackedHealthbar = advancedRestrictedTeamCounterPanels.indexOf(panel) >= 0;
+            const healthNumbers = panel.FindChildrenWithClassTraverse
+                ? (panel.FindChildrenWithClassTraverse("healthbar__health-number") || [])
+                : [];
+            if (advancedPovVisualsActive()) {
+                if (!trackedHealthbar) {
+                    advancedRestrictedTeamCounterPanels.push(panel);
+                }
+                try {
+                    // Match the original POV stylesheet: every healthbar keeps
+                    // the same 4px layout slot, while enemy information is only
+                    // transparent. Collapsing the panel removes its flow height
+                    // and makes the following HTC__kills row jump vertically.
+                    panel.style.height = "4px";
+                    panel.style.opacity = restricted ? "0" : null;
+                } catch (errPovHealthbar) {}
+                for (let numberIndex = 0; numberIndex < healthNumbers.length; numberIndex += 1) {
+                    try {
+                        // SHOW-EQUIPINFO exposes a 14px numeric child. The old
+                        // POV stylesheet hid it; otherwise fixing the parent at
+                        // 4px leaves clipped fragments of "100" below avatars.
+                        healthNumbers[numberIndex].style.opacity = "0";
+                    } catch (errPovHealthNumber) {}
+                }
+                return;
+            }
+            if (!trackedHealthbar) {
+                return;
+            }
+            try {
+                // DEMO HUD owns SHOW-EQUIPINFO and dead/alive sizing. Clear only
+                // the two inline values written above; never force visibility.
+                panel.style.height = null;
+                panel.style.opacity = null;
+            } catch (errRestoreHealthbar) {}
+            for (let numberIndex = 0; numberIndex < healthNumbers.length; numberIndex += 1) {
+                try {
+                    // Do not force visibility: current CS2 decides whether DEMO
+                    // HUD health numbers are present through SHOW-EQUIPINFO.
+                    healthNumbers[numberIndex].style.opacity = null;
+                } catch (errRestoreHealthNumber) {}
+            }
+            return;
+        }
         // Never zero width/height — Panorama often cannot restore "" and bars stay gone.
         if (restricted) {
-            if (advancedPlayback && advancedRestrictedTeamCounterPanels.indexOf(panel) < 0) {
-                advancedRestrictedTeamCounterPanels.push(panel);
-            }
+            // A stock panel may already be collapsed for its own gameplay
+            // state. Do not claim ownership of that state: restoring it later
+            // would expand native health/equipment containers with the wrong
+            // dimensions after the Advanced template returns to stock CSS.
             if (teamCounterPanelIsRestricted(panel)) {
                 return;
+            }
+            if (advancedPlayback && advancedRestrictedTeamCounterPanels.indexOf(panel) < 0) {
+                advancedRestrictedTeamCounterPanels.push(panel);
             }
             panel.visible = false;
             try {
@@ -993,6 +1064,10 @@
             if (panel.AddClass) {
                 panel.AddClass("Invisible");
             }
+            return;
+        }
+        const trackedRestriction = advancedRestrictedTeamCounterPanels.indexOf(panel) >= 0;
+        if (advancedPlayback && !trackedRestriction) {
             return;
         }
         try {
@@ -1011,8 +1086,12 @@
         }
         panel.visible = true;
         try {
-            panel.style.opacity = "1";
-            panel.style.visibility = "visible";
+            // Remove only the inline values written by INSIGHT. The current
+            // game's stylesheet must decide whether inactive equipment and
+            // health panels are visible; forcing 1/visible expands every
+            // previously observed player's 176px equipment background.
+            panel.style.opacity = null;
+            panel.style.visibility = null;
         } catch (err2) {}
         if (panel.RemoveClass) {
             panel.RemoveClass("Invisible");
@@ -1274,14 +1353,38 @@
         // top bar. POV HUD owns that information at the bottom, so remove every
         // stock variant no matter where a HUD rebuild placed it.
         [
+            // Native spectator-target highlight. Its stock rule expands this
+            // teammate-color panel to 120px below the selected avatar.
+            "AvatarL_BG",
             "equipinfo-root",
             "hudteamcounter-equipmentinfo",
+            "equipinfo__bg-container",
         ].forEach(function (className) {
             const panels = root.FindChildrenWithClassTraverse(className) || [];
             for (let index = 0; index < panels.length; index += 1) {
+                // The current CS2 equipment stylesheet keeps its 176px
+                // background in a sibling panel. Hide every player background
+                // but preserve the score/time center, which shares the class.
+                if (className === "equipinfo__bg-container"
+                        && panelHasAncestorId(panels[index], "ScoreAndTimeAndBomb")) {
+                    continue;
+                }
                 setTeamCounterPanelRestricted(panels[index], true);
             }
         });
+    }
+
+    function panelHasAncestorId(panel, wantedId) {
+        let current = panel;
+        let guard = 0;
+        while (current && current.IsValid() && guard < 24) {
+            if (String(current.id || "") === wantedId) {
+                return true;
+            }
+            current = current.GetParent ? current.GetParent() : null;
+            guard += 1;
+        }
+        return false;
     }
 
     function teamContainerAncestor(panel) {
@@ -1376,6 +1479,11 @@
             return;
         }
         const povTeam = updateVoiceAudience(state);
+        if (advancedPlayback && advancedHudHidden) {
+            advancedSetPanelRuntimeVisible(findTeamCounterRoot(), false);
+            $.Schedule(0.1, tickTeamCounterHud);
+            return;
+        }
         if (!advancedPovVisualsActive()) {
             restoreAdvancedTeamCounterPanels();
             $.Schedule(0.1, tickTeamCounterHud);
@@ -2941,6 +3049,17 @@
 
     function updateRadarHud() {
         if (!radarTrack) {
+            return;
+        }
+        if (advancedPlayback && advancedHudHidden) {
+            if (radarHud && radarHud.IsValid()) {
+                radarHud.visible = false;
+            }
+            if (radarUnclipHud && radarUnclipHud.IsValid()) {
+                radarUnclipHud.visible = false;
+            }
+            advancedSetPanelRuntimeVisible(findNativeRadar(), false);
+            $.Schedule(0.1, updateRadarHud);
             return;
         }
         const spectatorAllPlayers = Boolean(
@@ -4573,14 +4692,15 @@
         const cell = advancedCreatePanel("Panel", parent, "");
         cell.hittest = false;
         cell.hittestchildren = false;
-        cell.style.width = "18px";
-        cell.style.height = "100%";
+        cell.style.width = ADVANCED_FILTER_ICON_CELL + "px";
+        cell.style.height = ADVANCED_FILTER_ICON_CELL + "px";
+        cell.style.verticalAlign = "center";
         cell.style.overflow = "noclip";
 
         if (kind === "kill") {
             const horizontal = advancedCreatePanel("Panel", cell, "");
             horizontal.hittest = false;
-            horizontal.style.width = "14px";
+            horizontal.style.width = ADVANCED_FILTER_ICON_SIZE + "px";
             horizontal.style.height = "1px";
             horizontal.style.horizontalAlign = "center";
             horizontal.style.verticalAlign = "center";
@@ -4588,7 +4708,7 @@
             const vertical = advancedCreatePanel("Panel", cell, "");
             vertical.hittest = false;
             vertical.style.width = "1px";
-            vertical.style.height = "14px";
+            vertical.style.height = ADVANCED_FILTER_ICON_SIZE + "px";
             vertical.style.horizontalAlign = "center";
             vertical.style.verticalAlign = "center";
             vertical.style.backgroundColor = "#ece9e2";
@@ -4610,15 +4730,26 @@
             dot.style.backgroundColor = "#ece9e2";
             dot.style.borderRadius = "50%";
         } else if (kind === "death") {
-            const skull = advancedCreateLabel(cell, "☠", 15, "#ece9e2");
-            skull.style.width = "100%";
-            skull.style.height = "18px";
+            const skull = advancedCreateLabel(cell, "☠", ADVANCED_FILTER_ICON_SIZE, "#ece9e2");
+            skull.style.width = ADVANCED_FILTER_ICON_CELL + "px";
+            skull.style.height = "16px";
             skull.style.horizontalAlign = "center";
             skull.style.verticalAlign = "center";
             skull.style.textAlign = "center";
             skull.style.textShadow = "0px 0px 1px 1 #00000080";
+            skull.style.transform = "translateY(-1px)";
         } else if (kind === "utility") {
-            advancedCreateEventIcon(cell, "equipment", "hegrenade", 16, 16, 18);
+            const utilityIcon = advancedCreateEventIcon(
+                cell,
+                "equipment",
+                "hegrenade",
+                ADVANCED_FILTER_ICON_SIZE,
+                ADVANCED_FILTER_ICON_SIZE,
+                ADVANCED_FILTER_ICON_SIZE,
+            );
+            utilityIcon.style.horizontalAlign = "center";
+            utilityIcon.style.verticalAlign = "center";
+            utilityIcon.style.transform = "translateY(-1px)";
         }
         return cell;
     }
@@ -4645,7 +4776,7 @@
             "#eeeeec",
         );
         label.style.width = "fill-parent-flow(1.0)";
-        label.style.height = "100%";
+        label.style.height = "16px";
         label.style.textAlign = "center";
         label.style.textOverflow = "shrink";
         label.style.verticalAlign = "center";
@@ -4677,12 +4808,15 @@
     }
 
     function advancedApplyQuickOptions() {
-        const overheadMode = advancedQuickOptions.overhead
+        const overheadMode = !advancedHudHidden && advancedQuickOptions.overhead
             ? 1
+            : -1;
+        const radarMode = !advancedHudHidden && advancedQuickOptions.radar
+            ? 0
             : -1;
         const commands = [
             "spec_show_xray " + (advancedQuickOptions.xray ? 1 : 0),
-            "cl_drawhud_force_radar " + (advancedQuickOptions.radar ? 0 : -1),
+            "cl_drawhud_force_radar " + radarMode,
             "cl_drawhud_force_teamid_overhead " + overheadMode,
             // Messages are profile-owned: reconstructed in POV HUD, native in
             // DEMO HUD. Always leave CS2 chat enabled so the DEMO profile can
@@ -4900,7 +5034,7 @@
             advancedEventPlayerColor(xuid, tick),
         );
         label.style.width = "fill-parent-flow(1.0)";
-        label.style.height = "100%";
+        label.style.height = "16px";
         label.style.textAlign = align;
         label.style.textOverflow = "shrink";
         label.style.verticalAlign = "center";
@@ -4909,31 +5043,35 @@
 
     function advancedAppendKillModifiers(parent, flags) {
         if (flags & 1) {
-            advancedCreateEventIcon(parent, "death_notice", "headshot", 12, 12, 15);
+            advancedCreateEventIcon(parent, "death_notice", "headshot", ADVANCED_EVENT_ICON_HEIGHT, ADVANCED_EVENT_ICON_HEIGHT, ADVANCED_EVENT_ICON_TRACK_HEIGHT);
         }
         if (flags & 8) {
-            advancedCreateEventIcon(parent, "death_notice", "noscope", 12, 12, 15);
+            advancedCreateEventIcon(parent, "death_notice", "noscope", ADVANCED_EVENT_ICON_HEIGHT, ADVANCED_EVENT_ICON_HEIGHT, ADVANCED_EVENT_ICON_TRACK_HEIGHT);
         }
         if (flags & 2) {
-            advancedCreateEventIcon(parent, "death_notice", "throughsmoke", 12, 12, 15);
+            advancedCreateEventIcon(parent, "death_notice", "throughsmoke", ADVANCED_EVENT_ICON_HEIGHT, ADVANCED_EVENT_ICON_HEIGHT, ADVANCED_EVENT_ICON_TRACK_HEIGHT);
         }
         if (flags & 4) {
-            advancedCreateEventIcon(parent, "death_notice", "penetrate", 12, 12, 15);
+            advancedCreateEventIcon(parent, "death_notice", "penetrate", ADVANCED_EVENT_ICON_HEIGHT, ADVANCED_EVENT_ICON_HEIGHT, ADVANCED_EVENT_ICON_TRACK_HEIGHT);
         }
         if (flags & 32) {
-            advancedCreateEventIcon(parent, "equipment", "flashbang_assist", 12, 12, 15);
+            advancedCreateEventIcon(parent, "equipment", "flashbang_assist", ADVANCED_EVENT_ICON_HEIGHT, ADVANCED_EVENT_ICON_HEIGHT, ADVANCED_EVENT_ICON_TRACK_HEIGHT);
         }
     }
 
     function advancedCreateEventLocateButton(row, event) {
         const locate = advancedCreatePanel("Button", row, "");
         locate.style.width = "fill-parent-flow(1.0)";
-        locate.style.height = "26px";
+        locate.style.height = ADVANCED_EVENT_ROW_HEIGHT + "px";
         locate.style.marginRight = "0px";
         locate.style.paddingLeft = "4px";
         locate.style.paddingRight = "4px";
         locate.style.flowChildren = "right";
         advancedStyleButton(locate, false);
+        // The round group owns the surface color. Transparent row buttons let
+        // the alternating grayscale remain visible across the complete table.
+        locate.style.backgroundColor = "#00000000";
+        locate.style.border = "0px solid #00000000";
         locate.style.borderRadius = "0px";
         locate.SetPanelEvent("onactivate", function () {
             advancedSelectPlayer(advancedSelectedXuid, { tick: event.tick });
@@ -4947,7 +5085,7 @@
             "#807f79",
         );
         time.style.width = "38px";
-        time.style.height = "100%";
+        time.style.height = "14px";
         time.style.textAlign = "left";
         time.style.verticalAlign = "center";
 
@@ -4970,7 +5108,7 @@
             action.style.verticalAlign = "center";
             const verb = advancedCreateLabel(action, advancedCopy("投掷", "threw"), 10, "#aaa8a2");
             verb.style.width = advancedChinese() ? "29px" : "38px";
-            verb.style.height = "100%";
+            verb.style.height = "16px";
             verb.style.textAlign = "center";
             verb.style.verticalAlign = "center";
             const utilityStem = advancedEquipmentIconStem(event.detail);
@@ -4982,7 +5120,7 @@
                 "#ece9e2",
             );
             utility.style.width = "fill-parent-flow(1.0)";
-            utility.style.height = "100%";
+            utility.style.height = "16px";
             utility.style.textAlign = "left";
             utility.style.textOverflow = "shrink";
             utility.style.marginLeft = "4px";
@@ -5002,30 +5140,33 @@
         const iconStrip = advancedCreatePanel("Panel", feed, "");
         iconStrip.hittest = false;
         iconStrip.hittestchildren = false;
-        // Use only the space occupied by the weapon and modifiers so the two
-        // player names stay visually attached to the kill/death event.
+        // Keep the icon lane content-sized, but add symmetric breathing room
+        // so both player names do not touch wide rifle or modifier artwork.
         iconStrip.style.width = "fit-children";
-        iconStrip.style.height = "100%";
+        iconStrip.style.height = ADVANCED_EVENT_ICON_TRACK_HEIGHT + "px";
+        iconStrip.style.verticalAlign = "center";
+        iconStrip.style.marginLeft = "6px";
+        iconStrip.style.marginRight = "6px";
         iconStrip.style.overflow = "noclip";
         const iconContent = advancedCreatePanel("Panel", iconStrip, "");
         iconContent.hittest = false;
         iconContent.hittestchildren = false;
         iconContent.style.width = "fit-children";
-        iconContent.style.height = "100%";
+        iconContent.style.height = ADVANCED_EVENT_ICON_TRACK_HEIGHT + "px";
         iconContent.style.horizontalAlign = "center";
         iconContent.style.verticalAlign = "center";
         iconContent.style.flowChildren = "right";
         iconContent.style.overflow = "noclip";
         if (event.flags & 16) {
-            advancedCreateEventIcon(iconContent, "death_notice", "blindkill", 12, 12, 15);
+            advancedCreateEventIcon(iconContent, "death_notice", "blindkill", ADVANCED_EVENT_ICON_HEIGHT, ADVANCED_EVENT_ICON_HEIGHT, ADVANCED_EVENT_ICON_TRACK_HEIGHT);
         }
         advancedCreateEventIcon(
             iconContent,
             "equipment",
             advancedEquipmentIconStem(event.detail),
-            34,
-            16,
-            38,
+            36,
+            ADVANCED_EVENT_ICON_HEIGHT,
+            40,
         );
         advancedAppendKillModifiers(iconContent, event.flags);
         const target = advancedCreateEventName(
@@ -5240,26 +5381,6 @@
         } catch (errStyle) {}
     }
 
-    function advancedRestoreDemoTeamCounterEquipment() {
-        const root = hudRootPanel();
-        if (!root || !root.IsValid() || !root.FindChildrenWithClassTraverse) {
-            return;
-        }
-        const equipmentRoots = root.FindChildrenWithClassTraverse("equipinfo-root") || [];
-        equipmentRoots.forEach(function (panel) {
-            advancedSetPanelRuntimeVisible(panel, true);
-            try {
-                panel.style.transform = "translateY(0px)";
-                panel.RemoveClass("Invisible");
-            } catch (errEquipmentRoot) {}
-        });
-        const backgrounds = root.FindChildrenWithClassTraverse("equipinfo__bg-container") || [];
-        backgrounds.forEach(function (panel) {
-            advancedSetPanelRuntimeVisible(panel, true);
-            try { panel.RemoveClass("Invisible"); } catch (errBackground) {}
-        });
-    }
-
     function advancedSpectatorInfoPanels() {
         const root = hudRootPanel();
         const panels = [];
@@ -5409,7 +5530,6 @@
 
         if (enabled) {
             restoreAdvancedTeamCounterPanels();
-            advancedRestoreDemoTeamCounterEquipment();
         } else {
             restrictPovTeamCounterEquipment();
         }
@@ -5420,6 +5540,17 @@
         // container selection: show HudHealthAmmoCenter (with CS2's CT/T logo)
         // and hide the demo-only Steam-avatar card. This changes only root
         // visibility; health fill, wash, gradients, and colors remain native.
+        if (advancedPlayback && advancedHudHidden) {
+            const healthAmmo = findHudTraverse("HudHealthAmmoCenter")
+                || findHudTraverse("CSGOHudHealthAmmoCenter");
+            advancedSetPanelRuntimeVisible(healthAmmo, false);
+            advancedSpectatorInfoPanels().forEach(function (panel) {
+                advancedSetPanelRuntimeVisible(panel, false);
+            });
+            advancedSetPanelRuntimeVisible(findTeamCounterRoot(), false);
+            $.Schedule(0.25, guardSpectatorHudProfile);
+            return;
+        }
         const demoSpectatorHudEnabled = Boolean(
             advancedPlayback && !advancedPovVisualsEnabled
         );
@@ -5428,11 +5559,16 @@
     }
 
     function advancedApplyPlaybackProfile(profile) {
-        if (profile !== "pov" && profile !== "demo") {
+        if (profile !== "pov" && profile !== "demo" && profile !== "hidden") {
             return;
         }
+        advancedHudHidden = profile === "hidden";
         advancedPovVisualsEnabled = profile === "pov";
-        const commands = advancedPovVisualsEnabled ? [
+        const commands = advancedHudHidden ? [
+            "cl_draw_only_deathnotices true",
+            "cl_drawhud_force_radar -1",
+            "cl_drawhud_force_teamid_overhead -1",
+        ] : advancedPovVisualsEnabled ? [
             "cl_draw_only_deathnotices false",
             "mp_forcecamera 0",
             "cl_trueview_show_status 0",
@@ -5478,9 +5614,27 @@
         for (let index = 0; index < commands.length; index += 1) {
             try { GameInterfaceAPI.ConsoleCommand(commands[index]); } catch (errCommand) {}
         }
-        advancedApplyQuickOptions();
+        if (advancedHudHidden) {
+            advancedRefreshQuickOptionButtons();
+        } else {
+            advancedApplyQuickOptions();
+        }
         advancedNativeOverheadRestored = false;
-        advancedApplyNativeSpectatorHud(!advancedPovVisualsEnabled);
+        advancedSetPanelRuntimeVisible(findTeamCounterRoot(), !advancedHudHidden);
+        advancedSetPanelRuntimeVisible(
+            findNativeRadar(),
+            !advancedHudHidden && advancedQuickOptions.radar,
+        );
+        if (advancedHudHidden) {
+            const healthAmmo = findHudTraverse("HudHealthAmmoCenter")
+                || findHudTraverse("CSGOHudHealthAmmoCenter");
+            advancedSetPanelRuntimeVisible(healthAmmo, false);
+            advancedSpectatorInfoPanels().forEach(function (panel) {
+                advancedSetPanelRuntimeVisible(panel, false);
+            });
+        } else {
+            advancedApplyNativeSpectatorHud(!advancedPovVisualsEnabled);
+        }
         if (!advancedPovVisualsEnabled) {
             restoreAdvancedTeamCounterPanels();
             if (inputHud && inputHud.IsValid()) {
@@ -5492,11 +5646,15 @@
             if (radarUnclipHud && radarUnclipHud.IsValid()) {
                 radarUnclipHud.visible = false;
             }
-            restoreNativeRadarForAdvancedSpectator();
+            if (!advancedHudHidden) {
+                restoreNativeRadarForAdvancedSpectator();
+            }
             hideRadioHud();
-            $.Schedule(0.05, function () {
-                advancedApplyNativeSpectatorHud(true);
-            });
+            if (!advancedHudHidden) {
+                $.Schedule(0.05, function () {
+                    advancedApplyNativeSpectatorHud(true);
+                });
+            }
         }
         audienceRefreshFrames = 0;
         advancedRenderMenu();
@@ -5552,9 +5710,66 @@
         return advancedCopy("第 " + roundNumber + " 回合 ▾", "Round " + roundNumber + " ▾");
     }
 
+    function advancedRoundIndexAtTick(tick) {
+        if (!advancedRoundIntervals.length) {
+            return -1;
+        }
+        const currentRound = advancedRoundNumberAtTick(tick);
+        for (let index = 0; index < advancedRoundIntervals.length; index += 1) {
+            if (Number(advancedRoundIntervals[index].number || 0) === currentRound) {
+                return index;
+            }
+        }
+        let closestIndex = -1;
+        for (let index = 0; index < advancedRoundIntervals.length; index += 1) {
+            if (Number(advancedRoundIntervals[index].start || 0) <= tick) {
+                closestIndex = index;
+            } else {
+                break;
+            }
+        }
+        return closestIndex;
+    }
+
+    function advancedSetRoundStepEnabled(button, enabled) {
+        if (!button || !button.IsValid()) {
+            return;
+        }
+        button.enabled = enabled;
+        button.hittest = enabled;
+        button.style.opacity = enabled ? "1" : "0.35";
+        button.style.brightness = enabled ? "1" : "0.7";
+    }
+
+    function advancedSeekRelativeRound(delta) {
+        const state = controller.GetDemoControllerState();
+        const tick = state ? Number(state.nTick || 0) : 0;
+        const currentIndex = advancedRoundIndexAtTick(tick);
+        const targetIndex = Math.max(
+            0,
+            Math.min(advancedRoundIntervals.length - 1, currentIndex + Number(delta || 0)),
+        );
+        if (currentIndex < 0 || targetIndex === currentIndex || !advancedRoundIntervals[targetIndex]) {
+            return true;
+        }
+        advancedRoundPickerOpen = false;
+        advancedRenderRoundPicker();
+        const xuid = advancedSelectedXuid || (state ? currentPovXuid(state) : "");
+        if (xuid && advancedPlayback.byXuid[normalizeXuid(xuid)]) {
+            advancedSelectPlayer(xuid, { tick: advancedRoundIntervals[targetIndex].start });
+        }
+        return true;
+    }
+
     function advancedRefreshRoundSelector(state) {
         const tick = state ? Number(state.nTick || 0) : 0;
         const currentRound = advancedRoundNumberAtTick(tick);
+        const currentIndex = advancedRoundIndexAtTick(tick);
+        advancedSetRoundStepEnabled(advancedPreviousRoundButton, currentIndex > 0);
+        advancedSetRoundStepEnabled(
+            advancedNextRoundButton,
+            currentIndex >= 0 && currentIndex < advancedRoundIntervals.length - 1,
+        );
         if (advancedRoundButton && advancedRoundButton.IsValid()) {
             advancedSetButtonText(advancedRoundButton, advancedRoundButtonText(currentRound));
             advancedStyleButton(advancedRoundButton, advancedRoundPickerOpen);
@@ -5646,28 +5861,58 @@
         advancedPlayerTeamSignature = teamSignature.join("|");
 
         function renderTeam(team) {
+            const isCt = team === 3;
+            const teamAccent = isCt ? "#67c7ef" : "#e7bb4b";
+            const teamBorder = isCt ? "#315666" : "#65501f";
+            const teamSurface = isCt ? "#10242bcc" : "#2a2413cc";
+            const teamHeaderSurface = isCt ? "#173946f2" : "#4a3a12f2";
+            const rowSurface = isCt ? "#16252cba" : "#292517ba";
+            const rowBorder = isCt ? "#3a535db8" : "#5d4d28b8";
             const column = advancedCreatePanel("Panel", advancedPlayerListPanel, "");
             column.style.width = "fill-parent-flow(1.0)";
             column.style.height = "100%";
             column.style.flowChildren = "down";
-            if (team === 3) {
-                column.style.marginRight = "6px";
+            column.style.backgroundColor = teamSurface;
+            column.style.border = "1px solid " + teamBorder;
+            column.style.borderRadius = "6px";
+            column.style.overflow = "clip";
+            if (isCt) {
+                column.style.marginRight = "3px";
             } else {
-                column.style.marginLeft = "6px";
+                column.style.marginLeft = "3px";
             }
+
+            const teamHeader = advancedCreatePanel("Panel", column, "");
+            teamHeader.style.width = "100%";
+            teamHeader.style.height = "25px";
+            teamHeader.style.flowChildren = "right";
+            teamHeader.style.backgroundColor = teamHeaderSurface;
+            teamHeader.style.borderBottom = "1px solid " + teamBorder;
             const teamLabel = advancedCreateLabel(
-                column,
-                team === 3 ? "CT" : "T",
+                teamHeader,
+                isCt ? "CT" : "T",
                 11,
-                team === 3 ? "#7ed9ff" : "#ffd46d",
+                teamAccent,
             );
             teamLabel.style.width = "100%";
-            teamLabel.style.height = "20px";
-            teamLabel.style.textAlign = "center";
+            teamLabel.style.height = "16px";
+            teamLabel.style.paddingLeft = "9px";
+            teamLabel.style.textAlign = "left";
+            teamLabel.style.verticalAlign = "center";
             teamLabel.style.fontWeight = "bold";
+            teamLabel.style.letterSpacing = "0.7px";
+
+            const playerRows = advancedCreatePanel("Panel", column, "");
+            playerRows.style.width = "100%";
+            playerRows.style.height = "fill-parent-flow(1.0)";
+            playerRows.style.flowChildren = "down";
+            playerRows.style.paddingTop = "4px";
+            playerRows.style.paddingLeft = "5px";
+            playerRows.style.paddingRight = "5px";
+            playerRows.style.paddingBottom = "2px";
             grouped[team].forEach(function (player) {
                 const alive = player._insightAlive !== false;
-                const row = advancedCreatePanel("Panel", column, "");
+                const row = advancedCreatePanel("Panel", playerRows, "");
                 row.style.width = "100%";
                 row.style.height = "25px";
                 row.style.flowChildren = "right";
@@ -5679,8 +5924,9 @@
                     radioPlayerColor(player.xuid) || (team === 3 ? "#7ed9ff" : "#ffd46d"),
                 );
                 marker.style.width = "14px";
-                marker.style.height = "23px";
+                marker.style.height = "14px";
                 marker.style.textAlign = "center";
+                marker.style.verticalAlign = "center";
                 const button = advancedCreateButton(
                     row,
                     alive
@@ -5694,8 +5940,12 @@
                 button.style.height = "23px";
                 button.style.marginRight = "3px";
                 advancedStyleButton(button, alive && sameXuid(player.xuid, advancedSelectedXuid));
+                if (alive && !sameXuid(player.xuid, advancedSelectedXuid)) {
+                    button.style.backgroundColor = rowSurface;
+                    button.style.border = "1px solid " + rowBorder;
+                }
                 if (!alive) {
-                    button.style.backgroundColor = "#2b1818f2";
+                    button.style.backgroundColor = "#3a2020c8";
                     button.style.border = "1px solid #704040";
                     button.style.brightness = "0.78";
                     const deadLabel = button.GetChild(0);
@@ -5713,8 +5963,8 @@
                 voice.style.height = "23px";
                 voice.style.verticalAlign = "center";
                 voice.style.marginRight = "0px";
-                voice.style.backgroundColor = "#222221f2";
-                voice.style.border = "1px solid #494844";
+                voice.style.backgroundColor = rowSurface;
+                voice.style.border = "1px solid " + rowBorder;
                 voice.style.borderRadius = "6px";
                 const voiceIcon = advancedCreatePanel("Image", voice, "");
                 voiceIcon.hittest = false;
@@ -5800,23 +6050,41 @@
                 visibleIndex += 1;
             }
             const group = advancedCreatePanel("Panel", advancedEventListPanel, "");
+            const groupSurface = roundNumber % 2 === 0
+                ? ADVANCED_EVENT_GROUP_EVEN_SURFACE
+                : ADVANCED_EVENT_GROUP_ODD_SURFACE;
             group.style.width = "100%";
-            group.style.height = (groupedEvents.length * 26) + "px";
+            group.style.height = (groupedEvents.length * ADVANCED_EVENT_ROW_HEIGHT) + "px";
             group.style.flowChildren = "right";
-            group.style.marginBottom = "0px";
+            group.style.marginBottom = visibleIndex < visible.length
+                ? ADVANCED_EVENT_GROUP_GAP + "px"
+                : "0px";
+            group.style.backgroundColor = groupSurface;
+            group.style.border = "1px solid " + ADVANCED_EVENT_GROUP_BORDER;
+            group.style.borderRadius = "6px";
+            group.style.overflow = "clip";
 
             const roundCell = advancedCreatePanel("Panel", group, "");
             roundCell.style.width = "46px";
             roundCell.style.height = "100%";
             roundCell.style.marginRight = "0px";
-            roundCell.style.backgroundColor = "#181817f2";
-            roundCell.style.border = "1px solid #494844";
+            roundCell.style.backgroundColor = "#00000020";
+            roundCell.style.borderRight = "1px solid #505050";
             roundCell.style.borderRadius = "0px";
+            const roundRail = advancedCreatePanel("Panel", roundCell, "");
+            roundRail.hittest = false;
+            roundRail.hittestchildren = false;
+            roundRail.style.width = "3px";
+            roundRail.style.height = "80%";
+            roundRail.style.marginLeft = "5px";
+            roundRail.style.verticalAlign = "center";
+            roundRail.style.backgroundColor = ADVANCED_EVENT_ROUND_ACCENT;
+            roundRail.style.borderRadius = "2px";
             const roundLabel = advancedCreateLabel(
                 roundCell,
                 roundNumber > 0 ? "R" + roundNumber : "—",
                 11,
-                "#e0a13d",
+                ADVANCED_EVENT_ROUND_ACCENT,
             );
             roundLabel.style.width = "100%";
             // Keep the label itself text-height so verticalAlign centers the
@@ -5835,9 +6103,12 @@
             groupedEvents.forEach(function (event, groupIndex) {
                 const row = advancedCreatePanel("Panel", eventRows, "");
                 row.style.width = "100%";
-                row.style.height = "26px";
+                row.style.height = ADVANCED_EVENT_ROW_HEIGHT + "px";
                 row.style.flowChildren = "right";
                 row.style.marginBottom = "0px";
+                row.style.borderBottom = groupIndex < groupedEvents.length - 1
+                    ? "1px solid #414141"
+                    : "0px solid #00000000";
                 advancedCreateEventLocateButton(row, event);
                 const preroll = advancedCreateButton(
                     row,
@@ -5847,14 +6118,20 @@
                     },
                     "58px",
                 );
-                preroll.style.height = "26px";
+                preroll.style.height = ADVANCED_EVENT_ROW_HEIGHT + "px";
                 preroll.style.marginRight = "0px";
+                preroll.style.backgroundColor = "#00000000";
+                preroll.style.border = "0px solid #00000000";
+                preroll.style.borderLeft = "1px solid #505050";
                 preroll.style.borderRadius = "0px";
             });
         }
         if (advancedEventPagerLabel && advancedEventPagerLabel.IsValid()) {
-            advancedEventPagerLabel.text = (advancedEventPage + 1) + " / " + pageCount
-                + "  ·  " + events.length;
+            const eventCountText = advancedChinese()
+                ? events.length + " 条事件"
+                : events.length + " events";
+            advancedEventPagerLabel.text = eventCountText + "  ·  "
+                + (advancedEventPage + 1) + " / " + pageCount;
         }
     }
 
@@ -5870,8 +6147,15 @@
         if (!advancedPlayback.byXuid[advancedSelectedXuid]) {
             advancedSelectedXuid = advancedPlayback.players[0].xuid;
         }
-        advancedStyleButton(advancedProfileButtons.pov, advancedPovVisualsEnabled);
-        advancedStyleButton(advancedProfileButtons.demo, !advancedPovVisualsEnabled);
+        advancedStyleButton(
+            advancedProfileButtons.pov,
+            advancedPovVisualsEnabled && !advancedHudHidden,
+        );
+        advancedStyleButton(
+            advancedProfileButtons.demo,
+            !advancedPovVisualsEnabled && !advancedHudHidden,
+        );
+        advancedStyleButton(advancedProfileButtons.hidden, advancedHudHidden);
         Object.keys(advancedVoiceButtons).forEach(function (key) {
             advancedStyleButton(advancedVoiceButtons[key], key === advancedVoicePolicy);
         });
@@ -5883,7 +6167,10 @@
         if (advancedPinButton && advancedPinButton.IsValid()) {
             advancedSetButtonText(
                 advancedPinButton,
-                advancedCopy(advancedMenuPinned ? "常显开" : "常显关", advancedMenuPinned ? "PIN ON" : "PIN OFF"),
+                advancedCopy(
+                    advancedMenuPinned ? "标题条开" : "标题条关",
+                    advancedMenuPinned ? "TITLE ON" : "TITLE OFF",
+                ),
             );
             advancedStyleButton(advancedPinButton, advancedMenuPinned);
         }
@@ -5906,11 +6193,15 @@
     function advancedApplyMenuCollapsedState() {
         if (advancedMenu && advancedMenu.IsValid()) {
             advancedMenu.style.width = advancedMenuCollapsed
-                ? (advancedChinese() ? "220px" : "280px")
+                ? (advancedChinese() ? "108px" : "148px")
                 : "500px";
+            advancedMenu.style.padding = advancedMenuCollapsed ? "3px 6px" : "12px";
         }
         if (advancedMenuTitleLabel && advancedMenuTitleLabel.IsValid()) {
             advancedMenuTitleLabel.style.textAlign = advancedMenuCollapsed ? "center" : "left";
+            advancedMenuTitleLabel.style.transform = advancedMenuCollapsed
+                ? "translateY(1px)"
+                : "translateY(0px)";
         }
         if (advancedMenuBody && advancedMenuBody.IsValid()) {
             advancedMenuBody.visible = !advancedMenuCollapsed;
@@ -6015,7 +6306,9 @@
             advancedEdgeTrigger.style.height = "100%";
             advancedEdgeTrigger.style.horizontalAlign = "right";
             advancedEdgeTrigger.style.verticalAlign = "center";
-            advancedEdgeTrigger.style.backgroundColor = "#e07f0a02";
+            advancedEdgeTrigger.style.backgroundColor = "#00000000";
+            advancedEdgeTrigger.style.border = "0px solid #00000000";
+            advancedEdgeTrigger.style.boxShadow = "none";
             advancedEdgeTrigger.style.zIndex = "32000";
             advancedEdgeTrigger.SetPanelEvent("onmouseover", function () {
                 if (advancedEdgeRevealArmed) {
@@ -6059,34 +6352,84 @@
 
         const titleRow = advancedCreatePanel("Panel", advancedMenu, "");
         titleRow.style.width = "100%";
-        titleRow.style.height = "30px";
+        titleRow.style.height = "32px";
         titleRow.style.marginBottom = "2px";
         titleRow.style.flowChildren = "right";
-        advancedMenuTitleLabel = advancedCreateLabel(titleRow, "INSIGHT · " + advancedCopy("高级播放", "ADVANCED PLAYBACK"), 17, "#e07f0a");
+        advancedMenuTitleLabel = advancedCreateLabel(
+            titleRow,
+            advancedCopy("INSIGHT AGENT\n高级播放", "INSIGHT AGENT\nADVANCED PLAYBACK"),
+            13,
+            "#e07f0a",
+        );
         advancedMenuTitleLabel.style.width = "fill-parent-flow(1.0)";
+        advancedMenuTitleLabel.style.height = "30px";
         advancedMenuTitleLabel.style.horizontalAlign = "left";
+        advancedMenuTitleLabel.style.verticalAlign = "center";
+        advancedMenuTitleLabel.style.whiteSpace = "normal";
+        advancedMenuTitleLabel.style.lineHeight = "14px";
+        advancedMenuTitleLabel.style.textOverflow = "clip";
         advancedMenuHeaderControls = advancedCreatePanel("Panel", titleRow, "");
         advancedMenuHeaderControls.style.width = "fit-children";
         advancedMenuHeaderControls.style.height = "25px";
         advancedMenuHeaderControls.style.flowChildren = "right";
+        advancedMenuHeaderControls.style.verticalAlign = "center";
+        const revealHelp = advancedCreateLabel(
+            advancedMenuHeaderControls,
+            advancedCopy("鼠标移至屏幕右侧展开", "Move cursor to right edge"),
+            9,
+            "#8f8d86",
+        );
+        revealHelp.style.width = advancedChinese() ? "112px" : "136px";
+        revealHelp.style.height = "16px";
+        revealHelp.style.marginRight = "6px";
+        revealHelp.style.textAlign = "right";
+        revealHelp.style.verticalAlign = "center";
+        revealHelp.style.textOverflow = "shrink";
         advancedPinButton = advancedCreateButton(
             advancedMenuHeaderControls,
             "",
             advancedToggleMenuPinned,
-            "62px",
+            "72px",
         );
         advancedPinButton.style.height = "25px";
         advancedPinButton.style.paddingLeft = "4px";
         advancedPinButton.style.paddingRight = "4px";
+        advancedPinButton.style.marginRight = "4px";
         const close = advancedCreateButton(
             advancedMenuHeaderControls,
-            "×",
+            "",
             advancedCloseMenu,
-            "30px",
+            "26px",
         );
         close.style.height = "25px";
+        close.style.paddingLeft = "0px";
+        close.style.paddingRight = "0px";
         close.style.marginRight = "0px";
         close.style.zIndex = "4";
+        close.style.flowChildren = "none";
+        const closeLabel = close.GetChild ? close.GetChild(0) : null;
+        if (closeLabel && closeLabel.IsValid()) {
+            closeLabel.visible = false;
+        }
+        const closeIcon = advancedCreatePanel("Panel", close, "");
+        closeIcon.hittest = false;
+        closeIcon.hittestchildren = false;
+        closeIcon.style.width = "12px";
+        closeIcon.style.height = "12px";
+        closeIcon.style.horizontalAlign = "center";
+        closeIcon.style.verticalAlign = "center";
+        closeIcon.style.flowChildren = "none";
+        ["45deg", "-45deg"].forEach(function (rotation) {
+            const stroke = advancedCreatePanel("Panel", closeIcon, "");
+            stroke.hittest = false;
+            stroke.style.width = "12px";
+            stroke.style.height = "2px";
+            stroke.style.horizontalAlign = "center";
+            stroke.style.verticalAlign = "center";
+            stroke.style.backgroundColor = "#eeeeec";
+            stroke.style.borderRadius = "1px";
+            stroke.style.transform = "rotateZ(" + rotation + ")";
+        });
 
         advancedMenuBody = advancedCreatePanel("Panel", advancedMenu, "CS2InsightAdvancedBody");
         advancedMenuBody.style.width = "100%";
@@ -6100,13 +6443,22 @@
         advancedCreateSectionLabel(viewRow, "HUD");
         const pov = advancedCreateButton(viewRow, "POV HUD", function () { advancedApplyPlaybackProfile("pov"); }, "112px");
         const demo = advancedCreateButton(viewRow, "DEMO HUD", function () { advancedApplyPlaybackProfile("demo"); }, "112px");
+        const hidden = advancedCreateButton(
+            viewRow,
+            advancedCopy("隐藏 HUD", "HIDE HUD"),
+            function () { advancedApplyPlaybackProfile("hidden"); },
+            advancedChinese() ? "88px" : "96px",
+        );
         advancedProfileButtons.pov = pov;
         advancedProfileButtons.demo = demo;
+        advancedProfileButtons.hidden = hidden;
         pov.style.marginRight = "5px";
         demo.style.marginRight = "5px";
-        advancedStyleButton(pov, advancedPovVisualsEnabled);
-        advancedStyleButton(demo, !advancedPovVisualsEnabled);
-        [pov, demo].forEach(function (button) { button.style.height = "25px"; });
+        hidden.style.marginRight = "0px";
+        advancedStyleButton(pov, advancedPovVisualsEnabled && !advancedHudHidden);
+        advancedStyleButton(demo, !advancedPovVisualsEnabled && !advancedHudHidden);
+        advancedStyleButton(hidden, advancedHudHidden);
+        [pov, demo, hidden].forEach(function (button) { button.style.height = "25px"; });
 
         const voiceRow = advancedCreatePanel("Panel", advancedMenuBody, "");
         voiceRow.style.width = "100%";
@@ -6131,28 +6483,37 @@
         roundRow.style.marginTop = "2px";
         roundRow.style.flowChildren = "right";
         advancedCreateSectionLabel(roundRow, advancedCopy("回合", "Round"));
-        advancedRoundButton = advancedCreateButton(roundRow, "", advancedToggleRoundPicker, "132px");
+        advancedPreviousRoundButton = advancedCreateButton(
+            roundRow,
+            advancedCopy("上一局", "Prev"),
+            function () { return advancedSeekRelativeRound(-1); },
+            "58px",
+        );
+        advancedPreviousRoundButton.style.height = "25px";
+        advancedPreviousRoundButton.style.paddingLeft = "6px";
+        advancedPreviousRoundButton.style.paddingRight = "6px";
+        advancedPreviousRoundButton.style.marginRight = "3px";
+        advancedPreviousRoundButton.style.borderRadius = "6px";
+        advancedRoundButton = advancedCreateButton(roundRow, "", advancedToggleRoundPicker, "96px");
         advancedRoundButton.style.height = "25px";
-        advancedRoundHintLabel = advancedCreateLabel(roundRow, "", 10, "#7c7b74");
-        advancedRoundHintLabel.style.width = "62px";
-        advancedRoundHintLabel.style.height = "25px";
+        advancedRoundButton.style.marginRight = "3px";
+        advancedNextRoundButton = advancedCreateButton(
+            roundRow,
+            advancedCopy("下一局", "Next"),
+            function () { return advancedSeekRelativeRound(1); },
+            "58px",
+        );
+        advancedNextRoundButton.style.height = "25px";
+        advancedNextRoundButton.style.paddingLeft = "6px";
+        advancedNextRoundButton.style.paddingRight = "6px";
+        advancedNextRoundButton.style.marginRight = "3px";
+        advancedNextRoundButton.style.borderRadius = "6px";
+        advancedRoundHintLabel = advancedCreateLabel(roundRow, "", 11, "#aaa8a2");
+        advancedRoundHintLabel.style.width = "72px";
+        advancedRoundHintLabel.style.height = "16px";
         advancedRoundHintLabel.style.marginLeft = "6px";
         advancedRoundHintLabel.style.textAlign = "left";
         advancedRoundHintLabel.style.verticalAlign = "center";
-        const playerHelp = advancedCreateLabel(
-            roundRow,
-            advancedCopy(
-                "点名称切换视角 · 点喇叭开关语音",
-                "Name: switch POV · Speaker: voice",
-            ),
-            9,
-            "#8f8d86",
-        );
-        playerHelp.style.width = "fill-parent-flow(1.0)";
-        playerHelp.style.height = "25px";
-        playerHelp.style.marginLeft = "4px";
-        playerHelp.style.textAlign = "left";
-        playerHelp.style.verticalAlign = "center";
 
         advancedRoundPickerPanel = advancedCreatePanel(
             "Panel",
@@ -6172,10 +6533,30 @@
         advancedRoundPickerPanel.style.visibility = "collapse";
         advancedRoundPickerPanel.visible = false;
 
+        const playerHelpRow = advancedCreatePanel("Panel", advancedMenuBody, "");
+        playerHelpRow.style.width = "100%";
+        playerHelpRow.style.height = "20px";
+        playerHelpRow.style.marginTop = "2px";
+        playerHelpRow.style.paddingLeft = "40px";
+        playerHelpRow.style.flowChildren = "right";
+        const playerHelp = advancedCreateLabel(
+            playerHelpRow,
+            advancedCopy(
+                "点名称切换视角 · 点喇叭开关语音",
+                "Name: switch POV · Speaker: voice",
+            ),
+            11,
+            "#aaa8a2",
+        );
+        playerHelp.style.width = "fill-parent-flow(1.0)";
+        playerHelp.style.height = "16px";
+        playerHelp.style.textAlign = "left";
+        playerHelp.style.verticalAlign = "center";
+
         const playersRow = advancedCreatePanel("Panel", advancedMenuBody, "");
         playersRow.style.width = "100%";
         playersRow.style.height = "155px";
-        playersRow.style.marginTop = "5px";
+        playersRow.style.marginTop = "2px";
         playersRow.style.flowChildren = "right";
         const playersTitle = advancedCreateSectionLabel(
             playersRow,
@@ -6190,17 +6571,12 @@
         );
         advancedPlayerListPanel.style.width = "fill-parent-flow(1.0)";
         advancedPlayerListPanel.style.height = "155px";
-        advancedPlayerListPanel.style.paddingTop = "3px";
-        advancedPlayerListPanel.style.paddingBottom = "2px";
         advancedPlayerListPanel.style.flowChildren = "right";
         advancedPlayerListPanel.style.overflow = "clip";
-        advancedPlayerListPanel.style.backgroundColor = "#11111088";
-        advancedPlayerListPanel.style.border = "1px solid #3b3a37";
-        advancedPlayerListPanel.style.borderRadius = "6px";
 
         const filterRow = advancedCreatePanel("Panel", advancedMenuBody, "");
         filterRow.style.width = "100%";
-        filterRow.style.height = "30px";
+        filterRow.style.height = "25px";
         filterRow.style.marginTop = "7px";
         filterRow.style.flowChildren = "right";
         advancedCreateSectionLabel(filterRow, advancedCopy("事件", "Events"));
@@ -6234,9 +6610,11 @@
         }, "28px");
         pagerPrevious.style.height = "25px";
         pagerPrevious.style.marginRight = "3px";
-        advancedEventPagerLabel = advancedCreateLabel(filterRow, "", 11, "#7c7b74");
+        advancedEventPagerLabel = advancedCreateLabel(filterRow, "", 10, "#aaa8a2");
         advancedEventPagerLabel.style.width = "fill-parent-flow(1.0)";
+        advancedEventPagerLabel.style.height = "25px";
         advancedEventPagerLabel.style.textAlign = "center";
+        advancedEventPagerLabel.style.textOverflow = "shrink";
         const pagerNext = advancedCreateButton(filterRow, "›", function () {
             advancedEventPage += 1;
             advancedRenderEvents();
@@ -6247,8 +6625,8 @@
         advancedEventListPanel.style.width = "100%";
         advancedEventListPanel.style.height = "145px";
         advancedEventListPanel.style.marginTop = "4px";
-        advancedEventListPanel.style.paddingTop = "5px";
-        advancedEventListPanel.style.paddingBottom = "5px";
+        advancedEventListPanel.style.paddingTop = "4px";
+        advancedEventListPanel.style.paddingBottom = "4px";
         advancedEventListPanel.style.paddingLeft = "5px";
         advancedEventListPanel.style.paddingRight = "5px";
         advancedEventListPanel.style.flowChildren = "down";

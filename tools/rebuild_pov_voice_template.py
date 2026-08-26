@@ -35,6 +35,8 @@ POV_RECORDING_STYLE_PATHS = {
 ADVANCED_HOT_SWITCH_STYLE_PATHS = {
     HEALTHAMMO_STYLE_PATH,
     "panorama/styles/hud/hudradar.vcss_c",
+    "panorama/styles/hud/hudteamcounter-equipmentinfo.vcss_c",
+    "panorama/styles/hud/hudteamcounter.vcss_c",
 }
 PAYLOAD_CAPACITY = 8_000_000
 
@@ -150,10 +152,10 @@ def main() -> None:
         entries[resource_path] = source_path.read_bytes()
     POV_TEMPLATE.write_bytes(write_inline_vpk(entries))
 
-    # Advanced playback uses the same top counter resources as POV recording so
-    # POV HUD is visually identical. Health/ammo and radar remain native because
-    # those two resources cannot be restored reliably during a hot HUD switch;
-    # equipment rows are reversible through explicit Panorama runtime styles.
+    # Advanced playback hot-switches back to CS2's native spectator HUD. Keep
+    # every stock layout stylesheet native: a compiled replacement remains
+    # active after switching profiles and can retain stale positioning from the
+    # CS2 build it was captured from. POV-only visibility is applied at runtime.
     advanced_entries = dict(entries)
     for resource_path in ADVANCED_HOT_SWITCH_STYLE_PATHS:
         advanced_entries.pop(resource_path, None)

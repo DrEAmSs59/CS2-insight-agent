@@ -1,5 +1,6 @@
 import json
 from pathlib import Path
+import struct
 from types import SimpleNamespace
 
 import pytest
@@ -10,6 +11,7 @@ from app.demo_voice_hud import (
     VOICE_DATA_BEGIN,
     VOICE_DATA_END,
     VOICE_SCRIPT_PATH,
+    _advanced_round_starts,
     _build_player_sound_track,
     _kill_cash_award,
     _weapon_fire_sound_radius,
@@ -90,6 +92,8 @@ def test_advanced_playback_payload_indexes_players_kills_deaths_and_utility():
                 return {"tick": [10]}
             if name == "round_start":
                 return {"tick": [20, 200]}
+            if name == "round_freeze_end":
+                return {"tick": [50, 230]}
             if name == "player_death":
                 return {
                     "tick": [100],
@@ -149,7 +153,22 @@ def test_advanced_playback_payload_indexes_players_kills_deaths_and_utility():
     kill_fields = advanced[4].split(",")[0].split(".")
     assert int(kill_fields[5], 36) == 63
     assert advanced[5] == 6400
-    assert advanced[6] == [[1, 20, 199], [2, 200, 6400]]
+    assert advanced[6] == [[1, 50, 229], [2, 230, 6400]]
+
+
+def test_advanced_playback_round_starts_fall_back_when_freeze_end_is_incomplete():
+    class _IncompleteFreezeParser:
+        @staticmethod
+        def parse_event(name, **_kwargs):
+            if name == "round_announce_match_start":
+                return {"tick": [10]}
+            if name == "round_start":
+                return {"tick": [20, 200]}
+            if name == "round_freeze_end":
+                return {"tick": [50]}
+            return {"tick": []}
+
+    assert _advanced_round_starts(_IncompleteFreezeParser()) == [(1, 20), (2, 200)]
 
 
 def test_voice_payload_reuses_tick_roster_when_player_info_is_empty():
@@ -705,8 +724,6 @@ def test_checked_in_voice_template_contains_only_an_empty_payload():
     assert b"advancedMenu.style.x =" not in script
     assert b"advancedMenu.style.y =" not in script
     assert b"function restrictPovTeamCounterEquipment()" in script
-    assert b"function advancedRestoreDemoTeamCounterEquipment()" in script
-    assert b'FindChildrenWithClassTraverse("equipinfo__bg-container")' in script
     assert b"renderTeam(3);" in script
     assert b"renderTeam(2);" in script
     assert b'FindChildrenWithClassTraverse("hud-HA__stroke")' in script
@@ -754,7 +771,7 @@ def test_checked_in_voice_template_contains_only_an_empty_payload():
     assert b"765611" not in script
 
 
-def test_advanced_playback_template_keeps_pov_counter_but_omits_nonreversible_styles():
+def test_advanced_playback_template_uses_native_hot_switchable_hud_styles():
     template_path = (
         Path(__file__).resolve().parents[2]
         / "pov"
@@ -762,6 +779,13 @@ def test_advanced_playback_template_keeps_pov_counter_but_omits_nonreversible_st
     )
     entries = read_inline_vpk(template_path.read_bytes())
     script = entries[VOICE_SCRIPT_PATH]
+    assert struct.unpack_from("<I", script, 0)[0] == len(script)
+    block_count = struct.unpack_from("<I", script, 12)[0]
+    for index in range(block_count):
+        descriptor = 16 + index * 12
+        relative_offset, block_size = struct.unpack_from("<II", script, descriptor + 4)
+        block_start = descriptor + 4 + relative_offset
+        assert block_start + block_size <= len(script)
     start = script.index(VOICE_DATA_BEGIN) + len(VOICE_DATA_BEGIN)
     end = script.index(VOICE_DATA_END)
 
@@ -769,8 +793,166 @@ def test_advanced_playback_template_keeps_pov_counter_but_omits_nonreversible_st
     assert "panorama/layout/hud/hudalerts.vxml_c" in entries
     assert "panorama/styles/hud/hudhealthammocenter.vcss_c" not in entries
     assert "panorama/styles/hud/hudradar.vcss_c" not in entries
-    assert "panorama/styles/hud/hudteamcounter-equipmentinfo.vcss_c" in entries
-    assert "panorama/styles/hud/hudteamcounter.vcss_c" in entries
+    assert "panorama/styles/hud/hudteamcounter-equipmentinfo.vcss_c" not in entries
+    assert "panorama/styles/hud/hudteamcounter.vcss_c" not in entries
+    assert b'const isCt = team === 3' in script
+    assert b'const teamAccent = isCt ? "#67c7ef" : "#e7bb4b"' in script
+    assert b'const teamSurface = isCt ? "#10242bcc" : "#2a2413cc"' in script
+    assert b'const rowSurface = isCt ? "#16252cba" : "#292517ba"' in script
+    assert b'const rowBorder = isCt ? "#3a535db8" : "#5d4d28b8"' in script
+    assert b'column.style.backgroundColor = teamSurface' in script
+    assert b'column.style.border = "1px solid " + teamBorder' in script
+    assert b'teamHeader.style.backgroundColor = teamHeaderSurface' in script
+    assert b'teamHeader.style.height = "25px"' in script
+    assert b'teamHeader.style.borderBottom = "1px solid " + teamBorder' in script
+    assert b'isCt ? "CT" : "T"' in script
+    assert b'teamLabel.style.height = "16px"' in script
+    assert b'teamLabel.style.textAlign = "left"' in script
+    assert b'teamLabel.style.verticalAlign = "center"' in script
+    assert b'const row = advancedCreatePanel("Panel", playerRows, "")' in script
+    assert b'button.style.backgroundColor = rowSurface' in script
+    assert b'voice.style.backgroundColor = rowSurface' in script
+    assert b'button.style.backgroundColor = "#3a2020c8"' in script
+    assert b'filterRow.style.height = "25px"' in script
+    assert b'advancedEventPagerLabel.style.height = "25px"' in script
+    assert 'events.length + " 条事件"'.encode() in script
+    assert 'advancedEventPagerLabel.text = eventCountText + "  ·  "'.encode() in script
+    assert b'advancedEventPagerLabel = advancedCreateLabel(filterRow, "", 10, "#aaa8a2")' in script
+    assert b'advancedEventPagerLabel.style.textOverflow = "shrink"' in script
+    assert b"const ADVANCED_EVENT_ICON_HEIGHT = 16" in script
+    assert b"const ADVANCED_EVENT_ICON_TRACK_HEIGHT = 20" in script
+    assert b"const ADVANCED_FILTER_ICON_SIZE = 14" in script
+    assert b"const ADVANCED_FILTER_ICON_CELL = 18" in script
+    assert b"const ADVANCED_EVENT_ROW_HEIGHT = 24" in script
+    assert b"const ADVANCED_EVENT_GROUP_GAP = 4" in script
+    assert b'const ADVANCED_EVENT_GROUP_ODD_SURFACE = "#101010f7"' in script
+    assert b'const ADVANCED_EVENT_GROUP_EVEN_SURFACE = "#232323f7"' in script
+    assert b'const ADVANCED_EVENT_GROUP_BORDER = "#505050"' in script
+    assert b'const ADVANCED_EVENT_ROUND_ACCENT = "#e07f0a"' in script
+    assert b'label.style.height = "16px"' in script
+    assert b'time.style.height = "14px"' in script
+    assert b'iconStrip.style.height = ADVANCED_EVENT_ICON_TRACK_HEIGHT + "px"' in script
+    assert b'iconContent.style.height = ADVANCED_EVENT_ICON_TRACK_HEIGHT + "px"' in script
+    assert b'"headshot", ADVANCED_EVENT_ICON_HEIGHT, ADVANCED_EVENT_ICON_HEIGHT, ADVANCED_EVENT_ICON_TRACK_HEIGHT' in script
+    assert b'"throughsmoke", ADVANCED_EVENT_ICON_HEIGHT, ADVANCED_EVENT_ICON_HEIGHT, ADVANCED_EVENT_ICON_TRACK_HEIGHT' in script
+    assert b'"penetrate", ADVANCED_EVENT_ICON_HEIGHT, ADVANCED_EVENT_ICON_HEIGHT, ADVANCED_EVENT_ICON_TRACK_HEIGHT' in script
+    assert b'cell.style.width = ADVANCED_FILTER_ICON_CELL + "px"' in script
+    assert b'cell.style.height = ADVANCED_FILTER_ICON_CELL + "px"' in script
+    assert 'advancedCreateLabel(cell, "☠", ADVANCED_FILTER_ICON_SIZE, "#ece9e2")'.encode() in script
+    assert b'utilityIcon.style.horizontalAlign = "center"' in script
+    assert b'skull.style.transform = "translateY(-1px)"' in script
+    assert b'utilityIcon.style.transform = "translateY(-1px)"' in script
+    assert b'iconStrip.style.marginLeft = "6px"' in script
+    assert b'iconStrip.style.marginRight = "6px"' in script
+    assert b'locate.style.height = ADVANCED_EVENT_ROW_HEIGHT + "px"' in script
+    assert b'locate.style.backgroundColor = "#00000000"' in script
+    assert b'locate.style.border = "0px solid #00000000"' in script
+    assert b"const groupSurface = roundNumber % 2 === 0" in script
+    assert b"group.style.backgroundColor = groupSurface" in script
+    assert b'group.style.border = "1px solid " + ADVANCED_EVENT_GROUP_BORDER' in script
+    assert b'group.style.borderRadius = "6px"' in script
+    assert b'group.style.marginBottom = visibleIndex < visible.length' in script
+    assert b'roundRail.style.backgroundColor = ADVANCED_EVENT_ROUND_ACCENT' in script
+    assert b"ADVANCED_EVENT_ROUND_ACCENT," in script
+    assert b'row.style.height = ADVANCED_EVENT_ROW_HEIGHT + "px"' in script
+    assert b'row.style.borderBottom = groupIndex < groupedEvents.length - 1' in script
+    assert b'preroll.style.backgroundColor = "#00000000"' in script
+    assert b'preroll.style.borderLeft = "1px solid #505050"' in script
+    assert b'advancedEventListPanel.style.paddingTop = "4px"' in script
+    assert b'advancedEventListPanel.style.paddingBottom = "4px"' in script
+    assert b'"#e0a13d"' not in script
+    assert 'advancedMenuPinned ? "标题条开" : "标题条关"'.encode() in script
+    assert b'advancedMenuPinned ? "TITLE ON" : "TITLE OFF"' in script
+    assert b'advancedChinese() ? "108px" : "148px"' in script
+    assert b'advancedMenu.style.padding = advancedMenuCollapsed ? "3px 6px" : "12px"' in script
+    assert b'advancedMenuTitleLabel.style.transform = advancedMenuCollapsed' in script
+    assert b'"translateY(1px)"' in script
+    assert b'titleRow.style.height = "32px"' in script
+    assert b'"INSIGHT AGENT\\n' in script
+    assert b'advancedMenuTitleLabel.style.height = "30px"' in script
+    assert b'advancedMenuTitleLabel.style.whiteSpace = "normal"' in script
+    assert b'advancedMenuTitleLabel.style.lineHeight = "14px"' in script
+    assert 'advancedCopy("鼠标移至屏幕右侧展开", "Move cursor to right edge")'.encode() in script
+    assert b'revealHelp.style.textOverflow = "shrink"' in script
+    assert b'advancedToggleMenuPinned,' in script
+    assert b'advancedEdgeTrigger.hittest = false' in script
+    assert b'advancedRenderMenu();' in script
+    assert b'advancedScheduleHideMenu();' in script
+    assert b'"72px",' in script
+    assert b'advancedPinButton.style.marginRight = "4px"' in script
+    assert b'const close = advancedCreateButton(' in script
+    assert b'advancedCloseMenu,' in script
+    assert b'close.style.paddingLeft = "0px"' in script
+    assert b'close.style.flowChildren = "none"' in script
+    assert b'closeLabel.visible = false' in script
+    assert b'closeIcon.style.width = "12px"' in script
+    assert b'closeIcon.style.height = "12px"' in script
+    assert b'stroke.style.width = "12px"' in script
+    assert b'stroke.style.height = "2px"' in script
+    assert b'stroke.style.transform = "rotateZ(" + rotation + ")"' in script
+    assert b"advancedQuickOptions.grenadeView" not in script
+    assert b'"sv_grenade_trajectory_prac_pipreview "' not in script
+    assert b'"cl_demo_predict "' not in script
+    assert 'advancedCopy("投掷物视角", "GRENADE VIEW ")'.encode() not in script
+    assert b'let advancedHudHidden = false' in script
+    assert 'advancedCopy("隐藏 HUD", "HIDE HUD")'.encode() in script
+    assert b'advancedApplyPlaybackProfile("hidden")' in script
+    assert b'"cl_draw_only_deathnotices true"' in script
+    assert b"const trackedRestriction = advancedRestrictedTeamCounterPanels.indexOf(panel) >= 0" in script
+    assert b"if (advancedPlayback && !trackedRestriction)" in script
+    assert b"Do not claim ownership of that state" in script
+    assert b'panel.style.height = "4px"' in script
+    assert b'panel.style.opacity = restricted ? "0" : null' in script
+    assert b"Collapsing the panel removes its flow height" in script
+    assert b'FindChildrenWithClassTraverse("healthbar__health-number")' in script
+    assert b'healthNumbers[numberIndex].style.opacity = "0"' in script
+    assert b'healthNumbers[numberIndex].style.opacity = null' in script
+    assert b'clipped fragments of "100"' in script
+    assert b"DEMO HUD owns SHOW-EQUIPINFO" in script
+    assert b"panel.style.height = null" in script
+    assert b"never force visibility" in script
+    assert b'"AvatarL_BG",' in script
+    assert b"expands this" in script
+    assert b"teammate-color panel to 120px" in script
+    assert b'"equipinfo__bg-container",' in script
+    assert b'if (className === "equipinfo__bg-container"' in script
+    assert b'&& panelHasAncestorId(panels[index], "ScoreAndTimeAndBomb"))' in script
+    assert b"function panelHasAncestorId(panel, wantedId)" in script
+    assert b"panel.style.opacity = null" in script
+    assert b"panel.style.visibility = null" in script
+    assert b"forcing 1/visible expands every" in script
+    assert b'advancedSetPanelRuntimeVisible(findTeamCounterRoot(), false)' in script
+    assert b'advancedSetPanelRuntimeVisible(findNativeRadar(), false)' in script
+    assert b'!advancedHudHidden && advancedQuickOptions.radar' in script
+    assert b'advancedEdgeTrigger.style.backgroundColor = "#00000000"' in script
+    assert b'advancedEdgeTrigger.style.border = "0px solid #00000000"' in script
+    assert b'advancedEdgeTrigger.style.boxShadow = "none"' in script
+    assert b"#e07f0a02" not in script
+    assert b"let advancedPreviousRoundButton = null" in script
+    assert b"let advancedNextRoundButton = null" in script
+    assert b"function advancedRoundIndexAtTick(tick)" in script
+    assert b"function advancedSeekRelativeRound(delta)" in script
+    assert b"advancedSetRoundStepEnabled(advancedPreviousRoundButton, currentIndex > 0)" in script
+    assert b"currentIndex >= 0 && currentIndex < advancedRoundIntervals.length - 1" in script
+    assert b'function () { return advancedSeekRelativeRound(-1); }' in script
+    assert b'function () { return advancedSeekRelativeRound(1); }' in script
+    assert 'advancedCopy("上一局", "Prev")'.encode() in script
+    assert 'advancedCopy("下一局", "Next")'.encode() in script
+    assert b'advancedRoundButton = advancedCreateButton(roundRow, "", advancedToggleRoundPicker, "96px")' in script
+    assert b'advancedPreviousRoundButton.style.borderRadius = "6px"' in script
+    assert b'advancedNextRoundButton.style.borderRadius = "6px"' in script
+    assert b'advancedPreviousRoundButton.style.marginRight = "3px"' in script
+    assert b'advancedNextRoundButton.style.marginRight = "3px"' in script
+    assert b'marker.style.height = "14px"' in script
+    assert b'marker.style.verticalAlign = "center"' in script
+    assert b'advancedRoundHintLabel = advancedCreateLabel(roundRow, "", 11, "#aaa8a2")' in script
+    assert b'advancedRoundHintLabel.style.width = "72px"' in script
+    assert b'advancedRoundHintLabel.style.height = "16px"' in script
+    assert b'const playerHelpRow = advancedCreatePanel("Panel", advancedMenuBody, "")' in script
+    assert b'playerHelpRow.style.paddingLeft = "40px"' in script
+    assert b'playerHelpRow.style.height = "20px"' in script
+    assert b'playerHelp.style.height = "16px"' in script
+    assert b'playersRow.style.marginTop = "2px"' in script
 
 
 def test_recording_build_keeps_pov_only_compiled_styles():

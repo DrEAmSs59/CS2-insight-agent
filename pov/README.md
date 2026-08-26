@@ -52,9 +52,9 @@ fallback for stripped GOTV demos.
 The baked Panorama script also drives the rest of the POV HUD:
 
 - Top teamcounter: ally HP / C4 / defuser visible; enemy detail strip hidden.
-  Advanced playback carries the same teamcounter and equipment styles as POV
-  recording, so its POV profile has the same dark score/avatar background and
-  compact top strip; DEMO HUD restores equipment rows at runtime
+  Advanced playback leaves the installed game's teamcounter and equipment
+  styles native and applies POV-only visibility at runtime. Switching to DEMO
+  HUD therefore restores the current CS2 layout without a stale VPK override
 - Bottom health bar: neither checked-in POV VPK contains
   `hudhealthammocenter.vcss_c`, and the injected script performs no fill/wash or
   player-color writes. Recording POV and Advanced's POV profile both hide the

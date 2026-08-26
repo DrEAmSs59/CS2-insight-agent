@@ -3242,8 +3242,9 @@ def _advanced_round_starts(parser: Any) -> list[tuple[int, int]]:
 
     Panorama's live ``RoundIntervals`` field is absent on several CS2 demo
     controller builds. Resolve the timeline while the demo is already open in
-    demoparser instead. ``round_start`` is preferred because it includes the
-    freeze phase; ``round_freeze_end`` is a precise action-start fallback.
+    demoparser instead. ``round_freeze_end`` is preferred so event grouping,
+    elapsed time, and round navigation all begin when live play starts.
+    ``round_start`` remains the fallback when its table is more complete.
     """
 
     match_start_tick: int | None = None
@@ -3261,7 +3262,7 @@ def _advanced_round_starts(parser: Any) -> list[tuple[int, int]]:
         match_start_tick = valid_announce_ticks[0]
 
     candidates_by_source: list[list[int]] = []
-    for event_name in ("round_start", "round_freeze_end"):
+    for event_name in ("round_freeze_end", "round_start"):
         try:
             rows = parser.parse_event(event_name)
         except Exception:  # noqa: BLE001 - either source may be omitted by a demo
@@ -3280,8 +3281,9 @@ def _advanced_round_starts(parser: Any) -> list[tuple[int, int]]:
                 candidates = filtered
         candidates_by_source.append(candidates)
 
-    # Prefer the source with the complete match. A partially retained
-    # round_start table must not beat a full freeze-end table.
+    # Prefer the source with the complete match. Ties deliberately select the
+    # first source, making freeze-end authoritative while retaining round-start
+    # as the completeness fallback for damaged or partially retained demos.
     starts = max(candidates_by_source, key=len, default=[])
     return [(index + 1, tick) for index, tick in enumerate(starts)]
 

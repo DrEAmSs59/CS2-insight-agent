@@ -166,6 +166,8 @@ def test_pov_playback_installs_cfg_and_restores_after_exit(monkeypatch, tmp_path
     assert session is not None and session.copied_cfg is not None
     cfg_text = session.copied_cfg.read_text(encoding="ascii")
     assert "demoui false" not in cfg_text
+    assert "sv_cheats 1" in cfg_text
+    assert cfg_text.index("sv_cheats 1") < cfg_text.index("playdemo ")
     assert cfg_text.rstrip().endswith(f'playdemo "{session.copied_demo.stem}.dem"\ndemoui true')
     assert "demo_ui_mode" not in cfg_text
     assert "cl_draw_only_deathnotices false" in cfg_text
