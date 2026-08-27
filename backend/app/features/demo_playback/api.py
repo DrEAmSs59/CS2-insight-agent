@@ -22,6 +22,8 @@ from ...demo_playback_service import (
 )
 from ...env_utils import ensure_cs2_path, load_config
 from ...pov_hud_manager import PovHudError
+from ...skybox_resources import list_skybox_resources
+from ...skybox_vpk import SkyboxVpkError, normalize_skybox_id
 from ...runtime_session import runtime_session_dependency
 
 logger = logging.getLogger(__name__)
@@ -32,6 +34,7 @@ class DemoPlaybackPovBody(BaseModel):
     enabled: bool = False
     radar_mode: Literal[-1, 0] = 0
     teamcounter_numeric: bool = False
+    skybox_id: str = Field(default="default", max_length=64)
 
 
 class DemoPlaybackOptionsBody(BaseModel):
@@ -70,6 +73,7 @@ def launch_cs2_play_demo(
     body = options or DemoPlaybackOptionsBody()
     pov = body.pov_hud
     try:
+        skybox_id = normalize_skybox_id(pov.skybox_id) if pov.enabled else "default"
         return demo_playback_service.launch(
             demo_path,
             cfg,
@@ -77,8 +81,11 @@ def launch_cs2_play_demo(
                 enabled=bool(pov.enabled),
                 radar_mode=int(pov.radar_mode),
                 teamcounter_numeric=bool(pov.teamcounter_numeric),
+                skybox_id=skybox_id,
             ),
         )
+    except SkyboxVpkError as exc:
+        raise HTTPException(422, str(exc)) from exc
     except DemoPlaybackCs2RunningError as exc:
         raise HTTPException(409, error_detail("DEMO_PLAYBACK_CS2_RUNNING")) from exc
     except DemoPlaybackBusyError as exc:
@@ -103,7 +110,12 @@ def launch_cs2_play_demo(
 @router.get("/api/demo/playback/preflight")
 async def demo_playback_preflight():
     cfg = ensure_cs2_path(load_config())
-    return await asyncio.to_thread(demo_playback_service.preflight, cfg)
+    result = await asyncio.to_thread(demo_playback_service.preflight, cfg)
+    return {
+        **result,
+        "recording_skybox": str(getattr(cfg, "recording_skybox", "default") or "default"),
+        "skyboxes": await asyncio.to_thread(list_skybox_resources),
+    }
 
 
 @router.get("/api/demo/playback/status")

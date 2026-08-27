@@ -1,0 +1,131 @@
+from __future__ import annotations
+
+from pathlib import Path
+
+import pytest
+
+from app.demo_voice_hud import read_inline_vpk
+from app.skybox_resources import (
+    SkyboxResourceConflict,
+    SkyboxResourceError,
+    create_custom_skybox,
+    delete_custom_skybox,
+    list_skybox_resources,
+    load_custom_skybox,
+    rename_custom_skybox,
+    validate_skybox_files,
+)
+from app.skybox_vpk import (
+    MAP_SKY_MATERIAL_PATHS,
+    SKYBOX_ASSETS,
+    SkyboxVpkError,
+    compose_recording_skybox_vpk,
+    normalize_skybox_id,
+)
+
+
+@pytest.fixture()
+def bundled_entries() -> dict[str, bytes]:
+    asset_path = Path(__file__).resolve().parents[2] / "pov" / "skybox_assets.vpk"
+    return read_inline_vpk(asset_path.read_bytes())
+
+
+@pytest.fixture()
+def isolated_skybox_data(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
+    from app import skybox_resources
+
+    monkeypatch.setattr(skybox_resources, "get_data_dir", lambda: tmp_path)
+    return tmp_path
+
+
+def _create_cartoon_custom(entries: dict[str, bytes]) -> dict:
+    material_path, texture_path = SKYBOX_ASSETS["cartoon3"]
+    return create_custom_skybox(
+        display_name="我的卡通天空",
+        material_filename=Path(material_path).name,
+        material_bytes=entries[material_path],
+        texture_filename=Path(texture_path).name,
+        texture_bytes=entries[texture_path],
+    )
+
+
+@pytest.mark.parametrize("skybox_id", SKYBOX_ASSETS)
+def test_bundled_skyboxes_pass_upload_validation(
+    bundled_entries: dict[str, bytes],
+    skybox_id: str,
+) -> None:
+    material_path, texture_path = SKYBOX_ASSETS[skybox_id]
+    assert validate_skybox_files(
+        material_filename=Path(material_path).name,
+        material_bytes=bundled_entries[material_path],
+        texture_filename=Path(texture_path).name,
+        texture_bytes=bundled_entries[texture_path],
+    ) == texture_path
+
+
+def test_upload_rejects_texture_that_does_not_match_vmat(
+    bundled_entries: dict[str, bytes],
+) -> None:
+    material_path, _ = SKYBOX_ASSETS["cartoon3"]
+    _, wrong_texture_path = SKYBOX_ASSETS["xuejing"]
+    with pytest.raises(SkyboxResourceError, match="需要纹理"):
+        validate_skybox_files(
+            material_filename=Path(material_path).name,
+            material_bytes=bundled_entries[material_path],
+            texture_filename=Path(wrong_texture_path).name,
+            texture_bytes=bundled_entries[wrong_texture_path],
+        )
+
+
+def test_custom_skybox_crud_and_dynamic_normalization(
+    bundled_entries: dict[str, bytes],
+    isolated_skybox_data: Path,
+) -> None:
+    created = _create_cartoon_custom(bundled_entries)
+    assert created["id"].startswith("custom:")
+    assert created["display_name"] == "我的卡通天空"
+    assert normalize_skybox_id(created["id"]) == created["id"]
+
+    listed = list_skybox_resources()
+    assert [item["id"] for item in listed[:3]] == list(SKYBOX_ASSETS)
+    assert listed[-1]["display_name"] == "我的卡通天空"
+
+    renamed = rename_custom_skybox(created["id"], "新的名称")
+    assert renamed["display_name"] == "新的名称"
+    assert load_custom_skybox(created["id"]).texture_path.endswith(".vtex_c")
+
+    assert delete_custom_skybox(created["id"]) is True
+    with pytest.raises(SkyboxVpkError, match="unsupported"):
+        normalize_skybox_id(created["id"])
+
+
+def test_duplicate_custom_files_are_rejected(
+    bundled_entries: dict[str, bytes],
+    isolated_skybox_data: Path,
+) -> None:
+    _create_cartoon_custom(bundled_entries)
+    with pytest.raises(SkyboxResourceConflict, match="已作为"):
+        create_custom_skybox(
+            display_name="相同文件另一名称",
+            material_filename="cartoon3.vmat_c",
+            material_bytes=bundled_entries[SKYBOX_ASSETS["cartoon3"][0]],
+            texture_filename=Path(SKYBOX_ASSETS["cartoon3"][1]).name,
+            texture_bytes=bundled_entries[SKYBOX_ASSETS["cartoon3"][1]],
+        )
+
+
+def test_custom_skybox_is_composed_into_map_targets(
+    bundled_entries: dict[str, bytes],
+    isolated_skybox_data: Path,
+) -> None:
+    created = _create_cartoon_custom(bundled_entries)
+    resource = load_custom_skybox(created["id"])
+    packed = compose_recording_skybox_vpk(
+        asset_vpk_bytes=None,
+        skybox_id=created["id"],
+        map_name="de_mirage",
+    )
+    entries = read_inline_vpk(packed)
+    assert entries[resource.texture_path] == resource.texture_bytes
+    assert entries[resource.material_path] == resource.material_bytes
+    assert entries[MAP_SKY_MATERIAL_PATHS["de_mirage"][0]] == resource.material_bytes

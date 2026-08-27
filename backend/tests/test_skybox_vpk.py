@@ -4,7 +4,7 @@ from types import SimpleNamespace
 import pytest
 
 from app import pov_hud_manager
-from app.demo_voice_hud import read_inline_vpk, write_inline_vpk
+from app.demo_voice_hud import DemoVoiceHudBuild, read_inline_vpk, write_inline_vpk
 from app.pov_hud_manager import PovHudManager
 from app.skybox_vpk import (
     MAP_SKY_MATERIAL_PATHS,
@@ -130,3 +130,59 @@ def test_normal_recording_install_is_sky_only_without_pov_panorama(
     manifest = manager._read_manifest()
     assert manifest["feature"] == "recording_skybox"
     assert manifest["recording_skybox_id"] == "cartoon3"
+
+
+def test_advanced_playback_uses_overpass_map_detected_from_demo(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(pov_hud_manager.sys, "platform", "win32")
+    monkeypatch.setattr(pov_hud_manager, "is_cs2_running", lambda: False)
+    game_root = tmp_path / "game"
+    cs2 = game_root / "bin" / "win64" / "cs2.exe"
+    csgo = game_root / "csgo"
+    cs2.parent.mkdir(parents=True)
+    csgo.mkdir(parents=True)
+    cs2.write_bytes(b"exe")
+    (csgo / "gameinfo.gi").write_text(
+        "FileSystem\n{\n  SearchPaths\n  {\n    Game    csgo\n  }\n}\n",
+        encoding="utf-8",
+    )
+    demo = tmp_path / "overpass.dem"
+    demo.write_bytes(b"demo")
+    pov_dir = tmp_path / "pov"
+    pov_dir.mkdir()
+    (pov_dir / "pov_default.vpk").write_bytes(write_inline_vpk({"panorama/static.txt": b"static"}))
+    (pov_dir / "pov_advanced_playback_template.vpk").write_bytes(b"template")
+    (pov_dir / "skybox_assets.vpk").write_bytes(_asset_vpk())
+
+    built = DemoVoiceHudBuild(
+        vpk_bytes=write_inline_vpk({"panorama/advanced.txt": b"hud"}),
+        voice_packets=0,
+        speakers=0,
+        intervals=0,
+        location_changes=0,
+        payload_bytes=0,
+        location_parse_failed=0,
+        radar_map="de_overpass",
+        advanced_playback_enabled=1,
+    )
+    monkeypatch.setattr(
+        pov_hud_manager,
+        "build_demo_voice_hud_vpk",
+        lambda *_args, **_kwargs: built,
+    )
+    manager = PovHudManager(SimpleNamespace(cs2_path=str(cs2)))
+    monkeypatch.setattr(manager, "get_project_pov_dir", lambda: pov_dir)
+
+    manager.install(
+        demo_path=demo,
+        advanced_playback_enabled=True,
+        skybox_id="cartoon3",
+    )
+
+    installed = read_inline_vpk((csgo / "pov.vpk").read_bytes())
+    assert installed["panorama/advanced.txt"] == b"hud"
+    assert installed[MAP_SKY_MATERIAL_PATHS["de_overpass"][0]] == b"material:cartoon3"
+    manifest = manager._read_manifest()
+    assert manifest["demo_map_name_used"] == "de_overpass"

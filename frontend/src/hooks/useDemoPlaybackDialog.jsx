@@ -6,6 +6,7 @@ import { useT } from "../i18n/useT.js";
 import { getDemoPlaybackPreflight, getDemoPlaybackStatus, playDemoErrorLabel, playDemoInCs2 } from "../utils/playDemoInCs2.js";
 import { parseApiDetail } from "../utils/apiErrorMessages.js";
 import { usePlayDemoToast } from "./usePlayDemoToast.jsx";
+import { DEFAULT_RECORDING_SKYBOX, normalizeRecordingSkyboxId } from "../utils/recordingSkybox.js";
 
 function blockedReasonFromPreflight(data) {
   if (!data?.cs2_path_configured) return "path";
@@ -31,6 +32,8 @@ export function useDemoPlaybackDialog() {
   const [blockedReason, setBlockedReason] = useState("");
   const [launchingMode, setLaunchingMode] = useState("");
   const [error, setError] = useState("");
+  const [recordingSkybox, setRecordingSkybox] = useState(DEFAULT_RECORDING_SKYBOX);
+  const [skyboxResources, setSkyboxResources] = useState([]);
   const [restoreMonitor, setRestoreMonitor] = useState(null);
   const [restorePollError, setRestorePollError] = useState("");
 
@@ -71,6 +74,8 @@ export function useDemoPlaybackDialog() {
     try {
       const data = await getDemoPlaybackPreflight();
       setBlockedReason(blockedReasonFromPreflight(data));
+      setRecordingSkybox(normalizeRecordingSkyboxId(data?.recording_skybox));
+      setSkyboxResources(Array.isArray(data?.skyboxes) ? data.skyboxes : []);
     } catch (preflightError) {
       // The launch endpoint remains authoritative; keep the choices available if preflight itself fails.
       setError(playDemoErrorLabel(preflightError, t));
@@ -83,6 +88,8 @@ export function useDemoPlaybackDialog() {
     setTarget({ id, path, label });
     setOpen(true);
     setLaunchingMode("");
+    setRecordingSkybox(DEFAULT_RECORDING_SKYBOX);
+    setSkyboxResources([]);
     await runPreflight();
   }, [runPreflight]);
 
@@ -106,6 +113,7 @@ export function useDemoPlaybackDialog() {
           enabled: true,
           radar_mode: 0,
           teamcounter_numeric: false,
+          skybox_id: recordingSkybox,
         },
       });
       setOpen(false);
@@ -135,7 +143,7 @@ export function useDemoPlaybackDialog() {
     } finally {
       setLaunchingMode("");
     }
-  }, [launchingMode, showPlayToast, t, target]);
+  }, [launchingMode, recordingSkybox, showPlayToast, t, target]);
 
   const retryRestoreStatus = useCallback(async () => {
     const sessionId = restoreMonitor?.sessionId;
@@ -161,9 +169,12 @@ export function useDemoPlaybackDialog() {
         blockedReason={blockedReason}
         error={error}
         launchingMode={launchingMode}
+        recordingSkybox={recordingSkybox}
+        skyboxResources={skyboxResources}
         onClose={close}
         onRetry={runPreflight}
         onPlayAdvanced={() => void launch()}
+        onRecordingSkyboxChange={setRecordingSkybox}
       />
       <PlayDemoToast />
       <DemoPlaybackRestoreModal
@@ -177,7 +188,7 @@ export function useDemoPlaybackDialog() {
         }}
       />
     </>
-  ), [PlayDemoToast, blockedReason, checking, close, error, launch, launchingMode, open, restoreMonitor, restorePollError, retryRestoreStatus, runPreflight, target?.label]);
+  ), [PlayDemoToast, blockedReason, checking, close, error, launch, launchingMode, open, recordingSkybox, restoreMonitor, restorePollError, retryRestoreStatus, runPreflight, skyboxResources, target?.label]);
 
   return { requestPlayDemo, DemoPlaybackUi };
 }

@@ -18,7 +18,10 @@ import {
 } from "./utils/freezeToDeathRoundFilter";
 import { progressToastShowsBusy } from "./utils/progressToast";
 import { playerIdentityKey } from "./utils/playerIdentity.js";
-import { normalizeRecordingSkyboxId } from "./utils/recordingSkybox.js";
+import {
+  normalizeRecordingSkyboxId,
+  RECORDING_SKYBOX_RESET_EVENT,
+} from "./utils/recordingSkybox.js";
 import { useDemoAnalysisWorkflows } from "./features/demo-analysis/useDemoAnalysisWorkflows";
 import { useDemoLibraryController } from "./features/demo-library/useDemoLibraryController";
 import { useClipQueueActions } from "./features/recording-queue/useClipQueueActions";
@@ -139,6 +142,11 @@ export default function App() {
   const [commonParamsOpen, setCommonParamsOpen] = useState(false);
   const [experimentalPovEnabled, setExperimentalPovEnabled] = useState(false);
   const [recordingSkybox, setRecordingSkybox] = useState("default");
+  useEffect(() => {
+    const resetRecordingSkybox = () => setRecordingSkybox("default");
+    window.addEventListener(RECORDING_SKYBOX_RESET_EVENT, resetRecordingSkybox);
+    return () => window.removeEventListener(RECORDING_SKYBOX_RESET_EVENT, resetRecordingSkybox);
+  }, []);
   const [obsTransitionEnabled, setObsTransitionEnabled] = useState(false);
   const [obsTransitionName, setObsTransitionName] = useState("Fade");
   const [obsTransitionDurationMs, setObsTransitionDurationMs] = useState(100);

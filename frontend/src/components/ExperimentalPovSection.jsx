@@ -1,8 +1,10 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import API from "../api/api";
+import { useSkyboxResources } from "../api/skyboxResources";
 import { useT } from "../i18n/useT.js";
 import {
   normalizeRecordingSkyboxId,
+  isCustomRecordingSkyboxId,
   RECORDING_SKYBOX_OPTIONS,
 } from "../utils/recordingSkybox.js";
 import { normalizePovVoiceMode, POV_VOICE_MODES } from "../utils/povVoiceMode.js";
@@ -33,6 +35,18 @@ export default function ExperimentalPovSection({
   const [povStatusError, setPovStatusError] = useState("");
   const [povRestoreBusy, setPovRestoreBusy] = useState(false);
   const [povRestoreResult, setPovRestoreResult] = useState(null);
+  const {
+    items: skyboxResources,
+    error: skyboxResourcesError,
+  } = useSkyboxResources(Boolean(visible && onRecordingSkyboxChange));
+  const customSkyboxOptions = useMemo(
+    () => skyboxResources.filter((item) => item.source === "custom" && item.available),
+    [skyboxResources],
+  );
+  const selectedSkyboxId = normalizeRecordingSkyboxId(recordingSkybox);
+  const selectedCustomSkyboxAvailable = customSkyboxOptions.some(
+    (item) => item.id === selectedSkyboxId,
+  );
 
   const loadPovStatus = useCallback(async () => {
     setPovStatusLoading(true);
@@ -236,7 +250,7 @@ export default function ExperimentalPovSection({
             </span>
             <select
               aria-label={t("record.skyboxSelectLabel")}
-              value={normalizeRecordingSkyboxId(recordingSkybox)}
+              value={selectedSkyboxId}
               disabled={checkboxDisabled}
               onChange={(event) => onRecordingSkyboxChange(event.target.value)}
               className="mt-2 w-full rounded border border-cs2-border bg-cs2-bg-input px-2 py-1.5 text-xs text-cs2-text-primary outline-none focus:border-cs2-accent/50 disabled:opacity-40"
@@ -244,12 +258,25 @@ export default function ExperimentalPovSection({
               {RECORDING_SKYBOX_OPTIONS.map(({ value, labelKey }) => (
                 <option key={value} value={value}>{t(labelKey)}</option>
               ))}
+              {customSkyboxOptions.map((item) => (
+                <option key={item.id} value={item.id}>{item.display_name}</option>
+              ))}
+              {isCustomRecordingSkyboxId(selectedSkyboxId) && !selectedCustomSkyboxAvailable ? (
+                <option value={selectedSkyboxId} disabled>
+                  {t("record.skyboxMissingCustom")}
+                </option>
+              ) : null}
             </select>
           </label>
+          {skyboxResourcesError ? (
+            <p className="mt-2 text-[10px] leading-relaxed text-amber-300">
+              {t("record.skyboxCatalogUnavailable")}
+            </p>
+          ) : null}
           <p className="mt-2 text-[10px] leading-relaxed text-cs2-text-muted">
             {t("record.skyboxSupportedMaps")}
           </p>
-          {normalizeRecordingSkyboxId(recordingSkybox) !== "default" ? (
+          {selectedSkyboxId !== "default" ? (
             <p className="mt-2 text-[10px] leading-relaxed text-cs2-amber-on-surface">
               {t("record.skyboxOutcome")}
             </p>

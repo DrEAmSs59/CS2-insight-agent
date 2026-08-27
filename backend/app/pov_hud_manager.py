@@ -21,6 +21,7 @@ from .demo_voice_hud import DemoVoiceHudBuild, DemoVoiceHudError, build_demo_voi
 from .pov_constants import DEFAULT_POV_VOICE_MODE, normalize_pov_voice_mode
 from .skybox_vpk import (
     DEFAULT_SKYBOX_ID,
+    SKYBOX_ASSETS,
     SkyboxVpkError,
     compose_recording_skybox_vpk,
     normalize_skybox_id,
@@ -519,9 +520,19 @@ class PovHudManager:
                 )
 
         package_bytes: Optional[bytes] = voice_build.vpk_bytes if voice_build is not None else None
+        effective_map_name = str(map_name or "").strip()
+        if not effective_map_name and voice_build is not None:
+            # Advanced playback already parses the demo header while building
+            # its HUD package. Reuse that detected map for skybox composition
+            # when the caller did not have a separate map name.
+            effective_map_name = str(voice_build.radar_map or "").strip()
         if selected_skybox != DEFAULT_SKYBOX_ID:
-            skybox_assets = self.get_skybox_assets_path()
-            if not skybox_assets.is_file():
+            skybox_assets = (
+                self.get_skybox_assets_path()
+                if selected_skybox in SKYBOX_ASSETS
+                else None
+            )
+            if skybox_assets is not None and not skybox_assets.is_file():
                 raise PovHudError(f"未找到天空盒资源包：{skybox_assets}")
             try:
                 # Normal recording deliberately starts with an empty package,
@@ -534,10 +545,14 @@ class PovHudManager:
                         raise PovHudError("未找到 POV HUD 资源文件，请确认 pov 目录下资源完整。")
                     skybox_base = pov_src.read_bytes()
                 package_bytes = compose_recording_skybox_vpk(
-                    asset_vpk_bytes=skybox_assets.read_bytes(),
+                    asset_vpk_bytes=(
+                        skybox_assets.read_bytes()
+                        if skybox_assets is not None
+                        else None
+                    ),
                     base_vpk_bytes=skybox_base,
                     skybox_id=selected_skybox,
-                    map_name=map_name,
+                    map_name=effective_map_name,
                 )
             except (OSError, SkyboxVpkError) as exc:
                 raise PovHudError(f"天空盒 VPK 生成失败：{exc}") from exc
@@ -572,7 +587,11 @@ class PovHudManager:
         if voice_build is not None:
             source_basename = voice_template.name
         elif selected_skybox != DEFAULT_SKYBOX_ID and demo_path is None:
-            source_basename = self.get_skybox_assets_path().name
+            source_basename = (
+                self.get_skybox_assets_path().name
+                if selected_skybox in SKYBOX_ASSETS
+                else selected_skybox
+            )
         else:
             source_basename = pov_src.name if pov_src is not None else ""
 
@@ -635,7 +654,7 @@ class PovHudManager:
                 if voice_build is not None
                 else None
             ),
-            "demo_map_name_used": (map_name or "").strip(),
+            "demo_map_name_used": effective_map_name,
             "recording_skybox_id": selected_skybox,
             "original_gameinfo_sha256": original_sha,
         }

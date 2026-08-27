@@ -10,6 +10,7 @@ import RecordingParamsPage from "./RecordingParamsPage";
 import SponsorModal from "../components/SponsorModal";
 import ObsAiSettingsPanel from "../components/ObsAiSettingsPanel";
 import ObsHostField from "../components/settings/ObsHostField.jsx";
+import GameResourcesSettings from "../components/settings/GameResourcesSettings.jsx";
 import { formatFileSize } from "../utils/demoLibraryDisplay.js";
 import { formatObsEncoderLabel, obsEncoderIsConfigured, obsEncoderIsHardware } from "../utils/obsEncoderDisplay.js";
 import {
@@ -40,6 +41,7 @@ import {
   RotateCcw,
   ShieldAlert,
   Gamepad2,
+  PackageOpen,
   Download,
   // 新增图标
   Github,
@@ -122,6 +124,7 @@ const ENCODER_OPTIONS = [
 const TABS = [
   { key: "general", icon: SettingsIcon, labelKey: "settings.tabGeneral" },
   { key: "paths", icon: FolderOpen, labelKey: "settings.tabPaths" },
+  { key: "game-resources", icon: PackageOpen, labelKey: "settings.tabGameResources" },
   { key: "video", icon: Monitor, labelKey: "settings.tabVideo" },
   { key: "parse", icon: Brain, labelKey: "settings.tabParse" },
   { key: "recording", icon: SlidersHorizontal, labelKey: "settings.tabRecording" },
@@ -705,7 +708,7 @@ export default function SettingsPage() {
           />
         </div>
         {/* Tabs */}
-        <div className="mt-3 flex gap-1">
+        <div className="mt-3 flex flex-wrap gap-1">
           {TABS.map((tab) => {
             const Icon = tab.icon;
             const active = activeTab === tab.key;
@@ -1472,6 +1475,11 @@ export default function SettingsPage() {
             </div>
           )}
 
+          {/* ======================== 游戏资源 ======================== */}
+          {activeTab === "game-resources" && (
+            <GameResourcesSettings search={search} />
+          )}
+
           {/* ======================== 录制预设 ======================== */}
           {activeTab === "recording" && (
             <RecordingParamsPage
@@ -1485,7 +1493,7 @@ export default function SettingsPage() {
       </div>
 
 {/* Footer save bar */}
-{
+{activeTab !== "game-resources" ? (
   <div className="shrink-0 px-4 pb-3 pt-2">
     <div
       data-testid="settings-save-footer-card"
@@ -1528,8 +1536,8 @@ export default function SettingsPage() {
               </button>
             )}
           </div>
-        </div>
-      }
+  </div>
+) : null}
       {!restartAlertDismissed && (calibrateResult?.restart_obs_required || checkResult?.restart_obs_required) && (
         <div
           role="alert"

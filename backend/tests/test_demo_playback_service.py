@@ -18,6 +18,7 @@ class _FakePovManager:
         self.installed = 0
         self.installed_demo_paths = []
         self.advanced_playback_flags = []
+        self.skybox_ids = []
         self.restored = 0
         self.needs_restore = False
         self.__class__.instances.append(self)
@@ -29,10 +30,11 @@ class _FakePovManager:
             "original_gameinfo_sha256": "a" * 64 if self.needs_restore else None,
         }
 
-    def install(self, *, demo_path=None, advanced_playback_enabled=False):
+    def install(self, *, demo_path=None, advanced_playback_enabled=False, skybox_id="default"):
         self.installed += 1
         self.installed_demo_paths.append(demo_path)
         self.advanced_playback_flags.append(bool(advanced_playback_enabled))
+        self.skybox_ids.append(skybox_id)
         self.needs_restore = True
 
     def restore(self):
@@ -154,7 +156,12 @@ def test_pov_playback_installs_cfg_and_restores_after_exit(monkeypatch, tmp_path
     result = service.launch(
         demo,
         cfg,
-        playback.DemoPlaybackPovOptions(enabled=True, radar_mode=-1, teamcounter_numeric=True),
+        playback.DemoPlaybackPovOptions(
+            enabled=True,
+            radar_mode=-1,
+            teamcounter_numeric=True,
+            skybox_id="xuejing",
+        ),
     )
 
     session = service._active
@@ -163,6 +170,8 @@ def test_pov_playback_installs_cfg_and_restores_after_exit(monkeypatch, tmp_path
     assert manager.installed == 1
     assert manager.installed_demo_paths == [demo]
     assert manager.advanced_playback_flags == [True]
+    assert manager.skybox_ids == ["xuejing"]
+    assert result["recording_skybox_id"] == "xuejing"
     assert session is not None and session.copied_cfg is not None
     cfg_text = session.copied_cfg.read_text(encoding="ascii")
     assert "demoui false" not in cfg_text

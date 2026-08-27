@@ -62,6 +62,13 @@ describe("recording preset share JSON", () => {
     expect(() => parseRecordingPresetFile(file, RECORD_WARMUP_DEFAULT_OPTIONS)).toThrow();
   });
 
+  test("preserves a custom skybox reference", () => {
+    const customId = "custom:0123456789abcdef0123456789abcdef";
+    const file = buildRecordingPresetFile({ ...preset, recording_skybox: customId });
+    expect(parseRecordingPresetFile(file, RECORD_WARMUP_DEFAULT_OPTIONS).recording_skybox)
+      .toBe(customId);
+  });
+
   test("round trips the POV voice audience", () => {
     const next = {
       ...preset,

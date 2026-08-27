@@ -64,7 +64,9 @@ class SkyboxVpkError(RuntimeError):
 
 def normalize_skybox_id(value: object) -> str:
     skybox_id = str(value or DEFAULT_SKYBOX_ID).strip().lower()
-    if skybox_id not in SKYBOX_IDS:
+    from .skybox_resources import skybox_resource_exists
+
+    if not skybox_resource_exists(skybox_id):
         raise SkyboxVpkError(f"unsupported recording skybox: {skybox_id}")
     return skybox_id
 
@@ -80,9 +82,25 @@ def normalize_skybox_map_name(value: object) -> str:
 
 
 def _selected_sky_entries(
-    asset_vpk_bytes: bytes,
+    asset_vpk_bytes: bytes | None,
     skybox_id: str,
 ) -> tuple[dict[str, bytes], bytes]:
+    if skybox_id not in SKYBOX_ASSETS:
+        from .skybox_resources import SkyboxResourceError, load_custom_skybox
+
+        try:
+            resource = load_custom_skybox(skybox_id)
+        except SkyboxResourceError as exc:
+            raise SkyboxVpkError(str(exc)) from exc
+        return (
+            {
+                resource.material_path: resource.material_bytes,
+                resource.texture_path: resource.texture_bytes,
+            },
+            resource.material_bytes,
+        )
+    if asset_vpk_bytes is None:
+        raise SkyboxVpkError("the built-in skybox asset VPK is missing")
     asset_entries = read_inline_vpk(asset_vpk_bytes)
     material_path, texture_path = SKYBOX_ASSETS[skybox_id]
     missing = [path for path in (material_path, texture_path) if path not in asset_entries]
@@ -101,7 +119,7 @@ def _selected_sky_entries(
 
 def compose_recording_skybox_vpk(
     *,
-    asset_vpk_bytes: bytes,
+    asset_vpk_bytes: bytes | None,
     skybox_id: object,
     map_name: object,
     base_vpk_bytes: bytes | None = None,

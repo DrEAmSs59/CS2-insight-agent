@@ -393,6 +393,8 @@ export default {
   "record.skyboxCartoon3": "Cartoon 3",
   "record.skyboxXuejing": "雪景",
   "record.skyboxYinhezhanjian": "银河战舰",
+  "record.skyboxMissingCustom": "自定义天空盒不可用，请前往“设置 → 游戏资源”重新导入",
+  "record.skyboxCatalogUnavailable": "暂时无法加载自定义天空盒列表，仅显示 Insight 内置资源。",
   "record.skyboxSupportedMaps": "支持 Dust II、Inferno、Mirage、Nuke、Overpass、Anubis、Cache 和 Ancient。资源会在 CS2 载入 Demo 前写入对应录制 VPK。",
   "record.skyboxOutcome": "已启用天空替换：普通模式生成天空专用 VPK；POV 模式会把同一天空合并进 POV 动态 VPK。",
   "record.commonSecObs": "OBS 转场",

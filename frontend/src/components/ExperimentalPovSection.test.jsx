@@ -86,6 +86,36 @@ describe("ExperimentalPovSection POV recovery", () => {
     expect(onSkyboxChange).toHaveBeenCalledWith("yinhezhanjian");
   });
 
+  it("loads an available custom skybox into the recording selector", async () => {
+    const customId = "custom:0123456789abcdef0123456789abcdef";
+    API.get.mockImplementation((path) => Promise.resolve({
+      data: path === "game-resources/skyboxes"
+        ? {
+            items: [{
+              id: customId,
+              display_name: "紫色星空",
+              source: "custom",
+              available: true,
+            }],
+          }
+        : { state: "clean", needs_restore: false },
+    }));
+
+    render(
+      <ExperimentalPovSection
+        visible
+        experimentalPovEnabled={false}
+        onExperimentalPovChange={() => {}}
+        recordingSkybox={customId}
+        onRecordingSkyboxChange={() => {}}
+      />,
+    );
+
+    const option = await screen.findByRole("option", { name: "紫色星空" });
+    expect(option.value).toBe(customId);
+    expect(screen.getByRole("combobox", { name: "录制天空盒" }).value).toBe(customId);
+  });
+
   it("does not add a second experimental background when embedded in the preset", () => {
     API.get.mockReturnValue(new Promise(() => {}));
     render(

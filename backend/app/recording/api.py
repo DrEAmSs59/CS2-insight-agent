@@ -572,7 +572,7 @@ class QueueRecordingRequest(BaseModel):
     warmup: Optional[dict] = None
     obs: Optional[dict] = None
     pov_hud: Optional[dict] = None  # {enabled, radar_mode, teamcounter_numeric, voice_mode}
-    skybox: Optional[dict] = None  # {id: default|cartoon3|xuejing|yinhezhanjian}
+    skybox: Optional[dict] = None  # {id: default|built-in id|custom:<uuid hex>}
     # 仅本次录制队列生效，不写入 cs2-insight.config.json
     cs2_extra_launch_args: Optional[str] = None
     record_inject_console_lines: Optional[str] = None

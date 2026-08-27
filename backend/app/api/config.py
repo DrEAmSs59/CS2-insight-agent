@@ -29,7 +29,7 @@ from ..env_utils import (
     save_config,
 )
 from ..update_info import build_update_payload, resolve_local_version_info
-from ..skybox_vpk import SKYBOX_IDS
+from ..skybox_vpk import SkyboxVpkError, normalize_skybox_id
 
 router = APIRouter(tags=["config"])
 
@@ -407,9 +407,10 @@ async def update_config(payload: ConfigPayload):
             else {}
         )
     if payload.recording_skybox is not None:
-        skybox_id = str(payload.recording_skybox).strip().lower()
-        if skybox_id not in SKYBOX_IDS:
-            raise HTTPException(422, f"Unsupported recording skybox: {skybox_id}")
+        try:
+            skybox_id = normalize_skybox_id(payload.recording_skybox)
+        except SkyboxVpkError as exc:
+            raise HTTPException(422, str(exc)) from exc
         cfg.recording_skybox = skybox_id
     if payload.cs2_extra_launch_args is not None:
         next_launch_args = str(payload.cs2_extra_launch_args)

@@ -42,6 +42,7 @@ class DemoPlaybackPovOptions:
     enabled: bool = False
     radar_mode: int = 0
     teamcounter_numeric: bool = False
+    skybox_id: str = "default"
 
 
 @dataclass
@@ -342,6 +343,7 @@ class DemoPlaybackService:
                     pov_manager.install(
                         demo_path=dem_path,
                         advanced_playback_enabled=True,
+                        skybox_id=options.skybox_id,
                     )
                     installed_status = pov_manager.status()
                     expected_gameinfo_sha256 = str(
@@ -403,6 +405,7 @@ class DemoPlaybackService:
                     session_id,
                     state="running",
                     pov_hud_enabled=bool(options.enabled),
+                    recording_skybox_id=options.skybox_id,
                     restore=None,
                     player_config_restore=None,
                 )
@@ -419,6 +422,7 @@ class DemoPlaybackService:
                     "ok": True,
                     "session_id": session_id,
                     "pov_hud_enabled": bool(options.enabled),
+                    "recording_skybox_id": options.skybox_id,
                 }
             except Exception:
                 if session is not None:

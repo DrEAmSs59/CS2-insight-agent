@@ -137,7 +137,7 @@ export function parseRecordingPresetFile(value, warmupDefaults) {
       : (Object.hasOwn(p, "kill_fx_tick_offset") ? storedKillFxOffset : 6),
     experimental_pov_enabled: requireBoolean(p.experimental_pov_enabled, "experimental_pov_enabled"),
     recording_skybox: Object.hasOwn(p, "recording_skybox")
-      ? requireString(p.recording_skybox, "recording_skybox", 32)
+      ? requireString(p.recording_skybox, "recording_skybox", 64)
       : "default",
   };
   if (!["bottom_center", "minimap_below", "weapon_right"].includes(result.kb_overlay_position)) {

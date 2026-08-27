@@ -393,6 +393,8 @@ export default {
   "record.skyboxCartoon3": "Cartoon 3",
   "record.skyboxXuejing": "Snow scene",
   "record.skyboxYinhezhanjian": "Galactic warship",
+  "record.skyboxMissingCustom": "Custom skybox unavailable — re-import it in Settings → Game Resources",
+  "record.skyboxCatalogUnavailable": "Custom skyboxes could not be loaded; only bundled resources are shown.",
   "record.skyboxSupportedMaps": "Supports Dust II, Inferno, Mirage, Nuke, Overpass, Anubis, Cache, and Ancient. Resources are written to the matching recording VPK before CS2 loads the demo.",
   "record.skyboxOutcome": "Sky replacement enabled: normal mode builds a sky-only VPK; POV mode merges the same sky into the dynamic POV VPK.",
   "record.commonSecObs": "OBS Transition",
