@@ -45,6 +45,24 @@ describe("DemoPlayOptionsModal", () => {
     expect(screen.getAllByTestId("advanced-preview-player-row")).toHaveLength(10);
     const skyboxSelect = screen.getByRole("combobox", { name: "高级播放天空盒" });
     expect(skyboxSelect.value).toBe("xuejing");
+    expect(Array.from(skyboxSelect.options)
+      .map(({ value }) => value)
+      .filter((value) => value.startsWith("cartoon")))
+      .toEqual([
+        "cartoon",
+        "cartoon1",
+        "cartoon2",
+        "cartoon3",
+        "cartoon4",
+        "cartoon5",
+        "cartoon6",
+        "cartoon7",
+        "cartoon8",
+        "cartoon9",
+        "cartoon10",
+      ]);
+    expect(screen.getByTestId("demo-play-skybox-preview").getAttribute("src"))
+      .toBe("/skyboxes/xuejing.webp");
     fireEvent.change(skyboxSelect, { target: { value: customSkyboxId } });
     expect(onRecordingSkyboxChange).toHaveBeenCalledWith(customSkyboxId);
 

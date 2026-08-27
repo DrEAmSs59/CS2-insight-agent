@@ -298,12 +298,12 @@ $DestWeb = Join-Path $OutDir "web"
 robocopy $DistWeb $DestWeb /E /NFL /NDL /NJH /NJS /nc /ns /np | Out-Null
 if ($LASTEXITCODE -ge 8) { throw "robocopy web failed (exit $LASTEXITCODE)" }
 
-# --- Recording VPK assets: independent skybox carrier and experimental POV HUD ---
+# --- Recording assets: compiled skybox pairs and experimental POV HUD ---
 $PovSrc = Join-Path $Root "pov"
 $PovHasAssets = (
     (Test-Path (Join-Path $PovSrc "pov.vpk")) -or
     (Test-Path (Join-Path $PovSrc "pov_default.vpk")) -or
-    (Test-Path (Join-Path $PovSrc "skybox_assets.vpk"))
+    (Test-Path (Join-Path $PovSrc "skyboxes"))
 )
 $DestPov = Join-Path $OutDir "pov"
 if ($PovHasAssets) {
@@ -312,7 +312,7 @@ if ($PovHasAssets) {
     if ($LASTEXITCODE -ge 8) { throw "robocopy pov failed (exit $LASTEXITCODE)" }
 }
 else {
-    Write-Host "跳过 pov/：未找到 POV HUD 或天空盒 VPK 资源，便携包内将无法安装录制 VPK。" -ForegroundColor Yellow
+    Write-Host "跳过 pov/：未找到 POV HUD 或天空盒资源目录，便携包内将无法安装录制 VPK。" -ForegroundColor Yellow
 }
 
 # --- data/（示例配置、OBS basic.ini 等；排除本机 SQLite、用户配置、备份与日志）---

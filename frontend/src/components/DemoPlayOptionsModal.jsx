@@ -5,7 +5,10 @@ import {
   DEFAULT_RECORDING_SKYBOX,
   isCustomRecordingSkyboxId,
   normalizeRecordingSkyboxId,
+  recordingSkyboxDisplayName,
+  recordingSkyboxPreviewUrl,
   RECORDING_SKYBOX_OPTIONS,
+  sortBuiltinRecordingSkyboxes,
 } from "../utils/recordingSkybox.js";
 import Modal from "./ui/Modal.jsx";
 
@@ -26,10 +29,19 @@ export default function DemoPlayOptionsModal({
   const t = useT();
   const launching = !!launchingMode;
   const selectedSkybox = normalizeRecordingSkyboxId(recordingSkybox);
+  const catalogBuiltinSkyboxes = sortBuiltinRecordingSkyboxes(
+    Array.isArray(skyboxResources)
+      ? skyboxResources.filter((item) => item?.source === "builtin" && item?.available)
+      : [],
+  );
+  const builtinSkyboxes = catalogBuiltinSkyboxes.length
+    ? catalogBuiltinSkyboxes
+    : RECORDING_SKYBOX_OPTIONS.slice(1).map((option) => ({ id: option.value }));
   const customSkyboxes = Array.isArray(skyboxResources)
     ? skyboxResources.filter((item) => item?.source === "custom" && item?.available)
     : [];
   const selectedCustomAvailable = customSkyboxes.some((item) => item.id === selectedSkybox);
+  const selectedSkyboxPreview = recordingSkyboxPreviewUrl(selectedSkybox, skyboxResources);
   const blockedMessage = blockedReason === "path"
     ? t("playDemo.cs2PathMissing")
     : blockedReason === "busy"
@@ -199,9 +211,26 @@ export default function DemoPlayOptionsModal({
               data-testid="demo-play-skybox-option"
               className="flex items-center gap-3 rounded-lg border border-cs2-border bg-cs2-bg-input/45 px-3 py-2.5"
             >
-              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-cs2-accent/10 text-cs2-accent">
-                <Cloud className="h-4 w-4" />
-              </div>
+              {selectedSkyboxPreview ? (
+                <img
+                  data-testid="demo-play-skybox-preview"
+                  src={selectedSkyboxPreview}
+                  alt={t("settings.skyboxPreviewAlt", {
+                    name: recordingSkyboxDisplayName(
+                      selectedSkybox,
+                      (Array.isArray(skyboxResources)
+                        ? skyboxResources.find((item) => item?.id === selectedSkybox)?.display_name
+                        : ""),
+                      t,
+                    ),
+                  })}
+                  className="aspect-[2/1] w-24 shrink-0 rounded-md border border-cs2-border object-cover"
+                />
+              ) : (
+                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-cs2-accent/10 text-cs2-accent">
+                  <Cloud className="h-4 w-4" />
+                </div>
+              )}
               <div className="min-w-0 flex-1">
                 <p className="text-[12px] font-bold text-cs2-text-primary">{t("playDemo.skyboxTitle")}</p>
                 <p className="mt-0.5 text-[10px] leading-relaxed text-cs2-text-muted">{t("playDemo.skyboxHint")}</p>
@@ -213,12 +242,21 @@ export default function DemoPlayOptionsModal({
                 onChange={(event) => onRecordingSkyboxChange?.(event.target.value)}
                 className="min-w-44 max-w-[48%] rounded-md border border-cs2-border bg-cs2-bg-input px-2.5 py-2 text-xs font-semibold text-cs2-text-primary outline-none focus:border-cs2-accent/60 disabled:opacity-50"
               >
-                {RECORDING_SKYBOX_OPTIONS.map((option) => (
-                  <option key={option.value} value={option.value}>{t(option.labelKey)}</option>
-                ))}
-                {customSkyboxes.map((item) => (
-                  <option key={item.id} value={item.id}>{item.display_name}</option>
-                ))}
+                <option value={DEFAULT_RECORDING_SKYBOX}>{t("record.skyboxDefault")}</option>
+                <optgroup label={t("record.skyboxBuiltinOptions")}>
+                  {builtinSkyboxes.map((item) => (
+                    <option key={item.id} value={item.id}>
+                      {recordingSkyboxDisplayName(item.id, item.display_name, t)}
+                    </option>
+                  ))}
+                </optgroup>
+                {customSkyboxes.length ? (
+                  <optgroup label={t("record.skyboxCustomOptions")}>
+                    {customSkyboxes.map((item) => (
+                      <option key={item.id} value={item.id}>{item.display_name}</option>
+                    ))}
+                  </optgroup>
+                ) : null}
                 {isCustomRecordingSkyboxId(selectedSkybox) && !selectedCustomAvailable ? (
                   <option value={selectedSkybox} disabled>{t("record.skyboxMissingCustom")}</option>
                 ) : null}

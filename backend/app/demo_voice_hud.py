@@ -122,8 +122,17 @@ def _read_cstring(data: bytes, cursor: int, limit: int) -> tuple[str, int]:
     return value, end + 1
 
 
-def read_inline_vpk(vpk_bytes: bytes) -> dict[str, bytes]:
+def read_inline_vpk(
+    vpk_bytes: bytes,
+    *,
+    include_paths: Iterable[str] | None = None,
+) -> dict[str, bytes]:
     """Read the inline entries used by the bundled, single-file VPK."""
+    selected_paths = (
+        {str(path).replace("\\", "/").strip("/") for path in include_paths}
+        if include_paths is not None
+        else None
+    )
     if len(vpk_bytes) < _VPK_HEADER.size:
         raise DemoVoiceHudError("VPK is shorter than its header")
     (
@@ -184,15 +193,15 @@ def read_inline_vpk(vpk_bytes: bytes) -> dict[str, bytes]:
                 entry_end = entry_start + entry_length
                 if entry_start < data_start or entry_end > data_end:
                     raise DemoVoiceHudError("VPK entry exceeds its inline data section")
-                body = preload + vpk_bytes[entry_start:entry_end]
-                if zlib.crc32(body) & 0xFFFFFFFF != expected_crc:
-                    raise DemoVoiceHudError("VPK entry CRC does not match its payload")
-
                 directory_part = "" if directory == " " else directory.strip("/")
                 extension_part = "" if extension == " " else f".{extension}"
                 leaf = f"{stem}{extension_part}"
                 full_path = f"{directory_part}/{leaf}" if directory_part else leaf
-                entries[full_path] = body
+                if selected_paths is None or full_path in selected_paths:
+                    body = preload + vpk_bytes[entry_start:entry_end]
+                    if zlib.crc32(body) & 0xFFFFFFFF != expected_crc:
+                        raise DemoVoiceHudError("VPK entry CRC does not match its payload")
+                    entries[full_path] = body
 
     if cursor != tree_end:
         raise DemoVoiceHudError("VPK directory tree has trailing or missing bytes")

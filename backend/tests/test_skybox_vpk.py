@@ -15,12 +15,13 @@ from app.skybox_vpk import (
 )
 
 
-def _asset_vpk() -> bytes:
-    entries: dict[str, bytes] = {}
-    for skybox_id, (material_path, texture_path) in SKYBOX_ASSETS.items():
-        entries[material_path] = f"material:{skybox_id}".encode()
-        entries[texture_path] = f"texture:{skybox_id}".encode()
-    return write_inline_vpk(entries)
+def _write_asset_pair(root: Path, skybox_id: str) -> Path:
+    material_path, texture_path = SKYBOX_ASSETS[skybox_id]
+    source_dir = root / skybox_id
+    source_dir.mkdir(parents=True, exist_ok=True)
+    (source_dir / Path(material_path).name).write_bytes(f"material:{skybox_id}".encode())
+    (source_dir / Path(texture_path).name).write_bytes(f"texture:{skybox_id}".encode())
+    return root
 
 
 @pytest.mark.parametrize(
@@ -40,9 +41,10 @@ def test_normalize_skybox_map_name(raw: str, expected: str) -> None:
 def test_sky_only_package_overrides_every_material_for_supported_map(
     map_name: str,
     skybox_id: str,
+    tmp_path: Path,
 ) -> None:
     packed = compose_recording_skybox_vpk(
-        asset_vpk_bytes=_asset_vpk(),
+        builtin_assets_dir=_write_asset_pair(tmp_path / "skyboxes", skybox_id),
         skybox_id=skybox_id,
         map_name=map_name,
     )
@@ -55,10 +57,10 @@ def test_sky_only_package_overrides_every_material_for_supported_map(
     assert not any(path.startswith("panorama/") for path in entries)
 
 
-def test_pov_package_keeps_base_entries_and_adds_selected_sky_only() -> None:
+def test_pov_package_keeps_base_entries_and_adds_selected_sky_only(tmp_path: Path) -> None:
     base = write_inline_vpk({"panorama/example.txt": b"hud"})
     packed = compose_recording_skybox_vpk(
-        asset_vpk_bytes=_asset_vpk(),
+        builtin_assets_dir=_write_asset_pair(tmp_path / "skyboxes", "yinhezhanjian"),
         base_vpk_bytes=base,
         skybox_id="yinhezhanjian",
         map_name="de_ancient",
@@ -74,7 +76,7 @@ def test_pov_package_keeps_base_entries_and_adds_selected_sky_only() -> None:
 def test_default_returns_the_original_pov_package() -> None:
     base = write_inline_vpk({"panorama/example.txt": b"hud"})
     assert compose_recording_skybox_vpk(
-        asset_vpk_bytes=_asset_vpk(),
+        builtin_assets_dir=None,
         base_vpk_bytes=base,
         skybox_id="default",
         map_name="de_dust2",
@@ -84,20 +86,25 @@ def test_default_returns_the_original_pov_package() -> None:
 def test_unsupported_map_is_rejected() -> None:
     with pytest.raises(SkyboxVpkError, match="does not support map"):
         compose_recording_skybox_vpk(
-            asset_vpk_bytes=_asset_vpk(),
+            builtin_assets_dir=None,
             skybox_id="cartoon3",
             map_name="de_train",
         )
 
 
-def test_bundled_asset_vpk_contains_all_three_compiled_skies() -> None:
-    asset_path = Path(__file__).resolve().parents[2] / "pov" / "skybox_assets.vpk"
-    entries = read_inline_vpk(asset_path.read_bytes())
+def test_bundled_asset_directory_contains_every_catalog_skybox() -> None:
+    project_root = Path(__file__).resolve().parents[2]
+    asset_dir = project_root / "pov" / "skyboxes"
     expected_paths = {path for pair in SKYBOX_ASSETS.values() for path in pair}
-    assert set(entries) == expected_paths
-    for material_path, texture_path in SKYBOX_ASSETS.values():
-        assert entries[material_path]
-        assert len(entries[texture_path]) > 8_000_000
+    discovered_paths: set[str] = set()
+    for skybox_id, (material_path, texture_path) in SKYBOX_ASSETS.items():
+        material_source = asset_dir / skybox_id / Path(material_path).name
+        texture_source = asset_dir / skybox_id / Path(texture_path).name
+        assert material_source.stat().st_size > 0
+        assert texture_source.stat().st_size > 2_000_000
+        discovered_paths.update((material_path, texture_path))
+    assert discovered_paths == expected_paths
+    assert not (project_root / "pov" / "skybox_assets.vpk").exists()
 
 
 def test_normal_recording_install_is_sky_only_without_pov_panorama(
@@ -118,7 +125,7 @@ def test_normal_recording_install_is_sky_only_without_pov_panorama(
     )
     pov_dir = tmp_path / "pov"
     pov_dir.mkdir()
-    (pov_dir / "skybox_assets.vpk").write_bytes(_asset_vpk())
+    _write_asset_pair(pov_dir / "skyboxes", "cartoon3")
 
     manager = PovHudManager(SimpleNamespace(cs2_path=str(cs2)))
     monkeypatch.setattr(manager, "get_project_pov_dir", lambda: pov_dir)
@@ -154,7 +161,7 @@ def test_advanced_playback_uses_overpass_map_detected_from_demo(
     pov_dir.mkdir()
     (pov_dir / "pov_default.vpk").write_bytes(write_inline_vpk({"panorama/static.txt": b"static"}))
     (pov_dir / "pov_advanced_playback_template.vpk").write_bytes(b"template")
-    (pov_dir / "skybox_assets.vpk").write_bytes(_asset_vpk())
+    _write_asset_pair(pov_dir / "skyboxes", "cartoon3")
 
     built = DemoVoiceHudBuild(
         vpk_bytes=write_inline_vpk({"panorama/advanced.txt": b"hud"}),

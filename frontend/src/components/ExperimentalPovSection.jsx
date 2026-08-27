@@ -5,7 +5,10 @@ import { useT } from "../i18n/useT.js";
 import {
   normalizeRecordingSkyboxId,
   isCustomRecordingSkyboxId,
+  recordingSkyboxDisplayName,
+  recordingSkyboxPreviewUrl,
   RECORDING_SKYBOX_OPTIONS,
+  sortBuiltinRecordingSkyboxes,
 } from "../utils/recordingSkybox.js";
 import { normalizePovVoiceMode, POV_VOICE_MODES } from "../utils/povVoiceMode.js";
 
@@ -39,6 +42,15 @@ export default function ExperimentalPovSection({
     items: skyboxResources,
     error: skyboxResourcesError,
   } = useSkyboxResources(Boolean(visible && onRecordingSkyboxChange));
+  const catalogBuiltinSkyboxOptions = useMemo(
+    () => sortBuiltinRecordingSkyboxes(
+      skyboxResources.filter((item) => item.source === "builtin" && item.available),
+    ),
+    [skyboxResources],
+  );
+  const builtinSkyboxOptions = catalogBuiltinSkyboxOptions.length
+    ? catalogBuiltinSkyboxOptions
+    : RECORDING_SKYBOX_OPTIONS.slice(1).map((option) => ({ id: option.value }));
   const customSkyboxOptions = useMemo(
     () => skyboxResources.filter((item) => item.source === "custom" && item.available),
     [skyboxResources],
@@ -47,6 +59,7 @@ export default function ExperimentalPovSection({
   const selectedCustomSkyboxAvailable = customSkyboxOptions.some(
     (item) => item.id === selectedSkyboxId,
   );
+  const selectedSkyboxPreview = recordingSkyboxPreviewUrl(selectedSkyboxId, skyboxResources);
 
   const loadPovStatus = useCallback(async () => {
     setPovStatusLoading(true);
@@ -255,18 +268,41 @@ export default function ExperimentalPovSection({
               onChange={(event) => onRecordingSkyboxChange(event.target.value)}
               className="mt-2 w-full rounded border border-cs2-border bg-cs2-bg-input px-2 py-1.5 text-xs text-cs2-text-primary outline-none focus:border-cs2-accent/50 disabled:opacity-40"
             >
-              {RECORDING_SKYBOX_OPTIONS.map(({ value, labelKey }) => (
-                <option key={value} value={value}>{t(labelKey)}</option>
-              ))}
-              {customSkyboxOptions.map((item) => (
-                <option key={item.id} value={item.id}>{item.display_name}</option>
-              ))}
+              <option value="default">{t("record.skyboxDefault")}</option>
+              <optgroup label={t("record.skyboxBuiltinOptions")}>
+                {builtinSkyboxOptions.map((item) => (
+                  <option key={item.id} value={item.id}>
+                    {recordingSkyboxDisplayName(item.id, item.display_name, t)}
+                  </option>
+                ))}
+              </optgroup>
+              {customSkyboxOptions.length ? (
+                <optgroup label={t("record.skyboxCustomOptions")}>
+                  {customSkyboxOptions.map((item) => (
+                    <option key={item.id} value={item.id}>{item.display_name}</option>
+                  ))}
+                </optgroup>
+              ) : null}
               {isCustomRecordingSkyboxId(selectedSkyboxId) && !selectedCustomSkyboxAvailable ? (
                 <option value={selectedSkyboxId} disabled>
                   {t("record.skyboxMissingCustom")}
                 </option>
               ) : null}
             </select>
+            {selectedSkyboxPreview ? (
+              <img
+                data-testid="recording-skybox-preview"
+                src={selectedSkyboxPreview}
+                alt={t("settings.skyboxPreviewAlt", {
+                  name: recordingSkyboxDisplayName(
+                    selectedSkyboxId,
+                    skyboxResources.find((item) => item.id === selectedSkyboxId)?.display_name,
+                    t,
+                  ),
+                })}
+                className="mt-2 aspect-[2/1] w-full rounded-md border border-cs2-border object-cover"
+              />
+            ) : null}
           </label>
           {skyboxResourcesError ? (
             <p className="mt-2 text-[10px] leading-relaxed text-amber-300">

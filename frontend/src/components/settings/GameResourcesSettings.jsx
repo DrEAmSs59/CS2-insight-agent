@@ -2,8 +2,9 @@ import { useMemo, useRef, useState } from "react";
 import {
   AlertTriangle,
   CheckCircle2,
+  ChevronDown,
   Loader2,
-  Lock,
+  Maximize2,
   Pencil,
   Plus,
   Trash2,
@@ -14,19 +15,31 @@ import API from "../../api/api";
 import { useSkyboxResources } from "../../api/skyboxResources";
 import { useT } from "../../i18n/useT.js";
 import { formatFileSize } from "../../utils/demoLibraryDisplay.js";
-import { RECORDING_SKYBOX_RESET_EVENT } from "../../utils/recordingSkybox.js";
+import {
+  recordingSkyboxDisplayName,
+  RECORDING_SKYBOX_RESET_EVENT,
+  sortBuiltinRecordingSkyboxes,
+} from "../../utils/recordingSkybox.js";
 import { SectionCard } from "../../pages/settings/SettingsControls.jsx";
+import Modal from "../ui/Modal.jsx";
 
 
 function defaultNameFromFile(file) {
   return String(file?.name || "").replace(/\.vmat_c$/i, "");
 }
 
-const BUILTIN_LABEL_KEYS = {
-  cartoon3: "record.skyboxCartoon3",
-  xuejing: "record.skyboxXuejing",
-  yinhezhanjian: "record.skyboxYinhezhanjian",
-};
+const BUILTIN_GROUPS = [
+  { id: "featured", labelKey: "settings.skyboxGroupFeatured" },
+  { id: "cartoon", labelKey: "settings.skyboxGroupCartoon" },
+  { id: "egg", labelKey: "settings.skyboxGroupEgg" },
+];
+
+
+function builtinGroupId(skyboxId) {
+  if (String(skyboxId).startsWith("cartoon")) return "cartoon";
+  if (String(skyboxId).startsWith("egg")) return "egg";
+  return "featured";
+}
 
 
 export default function GameResourcesSettings({ search = "" }) {
@@ -39,13 +52,20 @@ export default function GameResourcesSettings({ search = "" }) {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState(null);
   const [inputVersion, setInputVersion] = useState(0);
+  const [previewItem, setPreviewItem] = useState(null);
   const formRef = useRef(null);
 
   const builtins = useMemo(() => items.filter((item) => item.source === "builtin"), [items]);
   const custom = useMemo(() => items.filter((item) => item.source === "custom"), [items]);
+  const groupedBuiltins = useMemo(() => BUILTIN_GROUPS.map((group) => ({
+    ...group,
+    items: sortBuiltinRecordingSkyboxes(
+      builtins.filter((item) => builtinGroupId(item.id) === group.id),
+    ),
+  })), [builtins]);
   const itemDisplayName = (item) => (
-    item.source === "builtin" && BUILTIN_LABEL_KEYS[item.id]
-      ? t(BUILTIN_LABEL_KEYS[item.id])
+    item.source === "builtin"
+      ? recordingSkyboxDisplayName(item.id, item.display_name, t)
       : item.display_name
   );
   const searchText = `${t("settings.gameResourcesTitle")} ${t("settings.skyboxResourcesTitle")} ${items.map(itemDisplayName).join(" ")}`.toLowerCase();
@@ -133,14 +153,12 @@ export default function GameResourcesSettings({ search = "" }) {
     }
   };
 
-  const renderResource = (item) => (
+  const renderCustomResource = (item) => (
     <div
       key={item.id}
+      data-testid="custom-skybox-resource"
       className="flex items-center gap-3 rounded-lg border border-cs2-border bg-cs2-bg-input/35 px-3 py-2.5"
     >
-      <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-md ${item.available ? "bg-emerald-500/10 text-emerald-300" : "bg-amber-500/10 text-amber-300"}`}>
-        {item.available ? <CheckCircle2 className="h-4 w-4" /> : <AlertTriangle className="h-4 w-4" />}
-      </div>
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-2">
           <p className="truncate text-xs font-semibold text-cs2-text-primary">{itemDisplayName(item)}</p>
@@ -156,38 +174,36 @@ export default function GameResourcesSettings({ search = "" }) {
           {item.size_bytes ? ` · ${formatFileSize(item.size_bytes)}` : ""}
         </p>
       </div>
-      {item.readonly ? (
-        <span className="inline-flex shrink-0 items-center gap-1 text-[10px] text-cs2-text-muted">
-          <Lock className="h-3 w-3" /> {t("settings.skyboxReadonly")}
-        </span>
-      ) : (
-        <div className="flex shrink-0 items-center gap-1">
-          <button
-            type="button"
-            disabled={busy}
-            onClick={() => void renameSkybox(item)}
-            aria-label={t("settings.skyboxRename")}
-            className="rounded-md border border-cs2-border p-1.5 text-cs2-text-muted hover:border-cs2-accent/50 hover:text-cs2-accent disabled:opacity-40"
-          >
-            <Pencil className="h-3.5 w-3.5" />
-          </button>
-          <button
-            type="button"
-            disabled={busy}
-            onClick={() => void removeSkybox(item)}
-            aria-label={t("settings.skyboxDelete")}
-            className="rounded-md border border-cs2-border p-1.5 text-cs2-text-muted hover:border-rose-400/50 hover:text-rose-300 disabled:opacity-40"
-          >
-            <Trash2 className="h-3.5 w-3.5" />
-          </button>
-        </div>
-      )}
+      <div className="flex shrink-0 items-center gap-1">
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => void renameSkybox(item)}
+          aria-label={t("settings.skyboxRename")}
+          className="rounded-md border border-cs2-border p-1.5 text-cs2-text-muted hover:border-cs2-accent/50 hover:text-cs2-accent disabled:opacity-40"
+        >
+          <Pencil className="h-3.5 w-3.5" />
+        </button>
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => void removeSkybox(item)}
+          aria-label={t("settings.skyboxDelete")}
+          className="rounded-md border border-cs2-border p-1.5 text-cs2-text-muted hover:border-rose-400/50 hover:text-rose-300 disabled:opacity-40"
+        >
+          <Trash2 className="h-3.5 w-3.5" />
+        </button>
+      </div>
     </div>
   );
 
   return (
     <div className="space-y-4">
-      <SectionCard title={t("settings.skyboxResourcesTitle")} hint={t("settings.skyboxResourcesHint")}>
+      <SectionCard
+        title={t("settings.skyboxResourcesTitle")}
+        hint={t("settings.skyboxResourcesHint")}
+        contentClassName=""
+      >
         <div className="flex items-center justify-between gap-3 pb-3">
           <div>
             <p className="text-xs font-semibold text-cs2-text-primary">{t("settings.skyboxResourceCount", { count: items.length })}</p>
@@ -283,13 +299,68 @@ export default function GameResourcesSettings({ search = "" }) {
         ) : (
           <div className="space-y-4">
             <div>
-              <h3 className="mb-2 text-[10px] font-bold uppercase tracking-wider text-cs2-text-muted">{t("settings.skyboxBuiltins")}</h3>
-              <div className="space-y-2">{builtins.map(renderResource)}</div>
+              <div className="mb-2 flex items-center justify-between gap-3">
+                <h3 className="text-[10px] font-bold uppercase tracking-wider text-cs2-text-muted">{t("settings.skyboxBuiltins")}</h3>
+                <span className="rounded border border-cs2-border px-2 py-0.5 text-[9px] font-semibold text-cs2-text-muted">
+                  {t("settings.skyboxBuiltinsSummary", { count: builtins.length })}
+                </span>
+              </div>
+              <div className="space-y-2">
+                {groupedBuiltins.map((group) => (
+                  <details
+                    key={group.id}
+                    open={group.id === "featured"}
+                    className="group rounded-lg border border-cs2-border bg-cs2-bg-input/20"
+                  >
+                    <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-2.5 text-xs font-semibold text-cs2-text-primary">
+                      <span>{t(group.labelKey)}</span>
+                      <span className="flex items-center gap-2 text-[10px] font-normal text-cs2-text-muted">
+                        {t("settings.skyboxGroupCount", { count: group.items.length })}
+                        <ChevronDown className="h-3.5 w-3.5 transition-transform group-open:rotate-180" />
+                      </span>
+                    </summary>
+                    <div className="grid gap-2 border-t border-cs2-border p-2 sm:grid-cols-2 xl:grid-cols-3">
+                      {group.items.map((item) => (
+                        <button
+                          key={item.id}
+                          type="button"
+                          aria-label={t("settings.skyboxPreviewOpen", { name: itemDisplayName(item) })}
+                          onClick={() => setPreviewItem(item)}
+                          className="group/preview min-w-0 overflow-hidden rounded-md border border-cs2-border/80 bg-cs2-bg-card text-left transition hover:border-cs2-accent/55 hover:bg-cs2-bg-hover"
+                        >
+                          <div className="relative aspect-[2/1] overflow-hidden bg-black/25">
+                            <img
+                              src={item.preview_url}
+                              alt={t("settings.skyboxPreviewAlt", { name: itemDisplayName(item) })}
+                              loading="lazy"
+                              className="h-full w-full object-cover transition duration-200 group-hover/preview:scale-[1.02]"
+                            />
+                            <span className="absolute right-1.5 top-1.5 rounded bg-black/55 p-1 text-white/85 opacity-0 transition group-hover/preview:opacity-100">
+                              <Maximize2 className="h-3 w-3" />
+                            </span>
+                          </div>
+                          <div className="px-2.5 py-2">
+                            <div className="flex items-center gap-2">
+                              {item.available ? (
+                                <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-emerald-300" />
+                              ) : (
+                                <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-amber-300" />
+                              )}
+                              <p className="truncate text-[11px] font-semibold text-cs2-text-primary">{itemDisplayName(item)}</p>
+                            </div>
+                            <p className="mt-1 truncate font-mono text-[9px] text-cs2-text-muted">{item.id}</p>
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  </details>
+                ))}
+              </div>
             </div>
             <div>
               <h3 className="mb-2 text-[10px] font-bold uppercase tracking-wider text-cs2-text-muted">{t("settings.skyboxMine")}</h3>
               {custom.length ? (
-                <div className="space-y-2">{custom.map(renderResource)}</div>
+                <div className="space-y-2">{custom.map(renderCustomResource)}</div>
               ) : (
                 <div className="rounded-lg border border-dashed border-cs2-border px-3 py-6 text-center text-xs text-cs2-text-muted">
                   {t("settings.skyboxEmpty")}
@@ -299,6 +370,29 @@ export default function GameResourcesSettings({ search = "" }) {
           </div>
         )}
       </SectionCard>
+      <Modal
+        open={Boolean(previewItem)}
+        onClose={() => setPreviewItem(null)}
+        title={previewItem ? itemDisplayName(previewItem) : ""}
+        subtitle={previewItem?.id}
+        maxWidth="max-w-5xl"
+        maxHeight="max-h-[90vh]"
+        fillHeight={false}
+        contentClassName="overflow-hidden"
+      >
+        {previewItem ? (
+          <div className="bg-black p-2">
+            <img
+              src={previewItem.preview_url}
+              alt={t("settings.skyboxPreviewAlt", { name: itemDisplayName(previewItem) })}
+              className="aspect-[2/1] w-full rounded-md object-contain"
+            />
+            <p className="px-2 pb-1 pt-2 text-center text-[10px] text-white/55">
+              {t("settings.skyboxPreviewPanoramaHint")}
+            </p>
+          </div>
+        ) : null}
+      </Modal>
     </div>
   );
 }

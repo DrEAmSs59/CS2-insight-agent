@@ -140,20 +140,20 @@ def _atomic_write_json(path: Path, payload: Mapping[str, Any]) -> None:
     _atomic_write_text(path, json.dumps(dict(payload), ensure_ascii=False, indent=2))
 
 
-def _pov_dir_has_any_vpk(pov_dir: Path) -> bool:
+def _pov_dir_has_recording_assets(pov_dir: Path) -> bool:
     return (
         (pov_dir / "pov.vpk").is_file()
         or (pov_dir / "pov_default.vpk").is_file()
-        or (pov_dir / "skybox_assets.vpk").is_file()
+        or (pov_dir / "skyboxes").is_dir()
     )
 
 
 def find_project_root() -> Path:
     current = Path(__file__).resolve()
     for parent in [current.parent, *current.parents]:
-        if _pov_dir_has_any_vpk(parent / "pov"):
+        if _pov_dir_has_recording_assets(parent / "pov"):
             return parent
-    raise PovHudError("未找到项目根目录下的录制 VPK 资源（POV HUD 或天空盒资源包）。")
+    raise PovHudError("未找到项目根目录下的录制资源（POV HUD 或天空盒目录）。")
 
 
 def resolve_pov_vpk_source_in_project_pov_dir(pov_dir: Path, map_name: Optional[str]) -> Path:
@@ -299,8 +299,8 @@ class PovHudManager:
         )
         return self.get_project_pov_dir() / filename
 
-    def get_skybox_assets_path(self) -> Path:
-        return self.get_project_pov_dir() / "skybox_assets.vpk"
+    def get_skybox_assets_dir(self) -> Path:
+        return self.get_project_pov_dir() / "skyboxes"
 
     def get_reference_default_gameinfo_path(self) -> Path:
         return self.get_project_pov_dir() / "gameinfo.gi.default"
@@ -527,13 +527,13 @@ class PovHudManager:
             # when the caller did not have a separate map name.
             effective_map_name = str(voice_build.radar_map or "").strip()
         if selected_skybox != DEFAULT_SKYBOX_ID:
-            skybox_assets = (
-                self.get_skybox_assets_path()
+            skybox_assets_dir = (
+                self.get_skybox_assets_dir()
                 if selected_skybox in SKYBOX_ASSETS
                 else None
             )
-            if skybox_assets is not None and not skybox_assets.is_file():
-                raise PovHudError(f"未找到天空盒资源包：{skybox_assets}")
+            if skybox_assets_dir is not None and not skybox_assets_dir.is_dir():
+                raise PovHudError(f"未找到内置天空盒资源目录：{skybox_assets_dir}")
             try:
                 # Normal recording deliberately starts with an empty package,
                 # so enabling a skybox never brings the POV Panorama overrides
@@ -545,11 +545,7 @@ class PovHudManager:
                         raise PovHudError("未找到 POV HUD 资源文件，请确认 pov 目录下资源完整。")
                     skybox_base = pov_src.read_bytes()
                 package_bytes = compose_recording_skybox_vpk(
-                    asset_vpk_bytes=(
-                        skybox_assets.read_bytes()
-                        if skybox_assets is not None
-                        else None
-                    ),
+                    builtin_assets_dir=skybox_assets_dir,
                     base_vpk_bytes=skybox_base,
                     skybox_id=selected_skybox,
                     map_name=effective_map_name,
@@ -588,7 +584,7 @@ class PovHudManager:
             source_basename = voice_template.name
         elif selected_skybox != DEFAULT_SKYBOX_ID and demo_path is None:
             source_basename = (
-                self.get_skybox_assets_path().name
+                Path(SKYBOX_ASSETS[selected_skybox][0]).name
                 if selected_skybox in SKYBOX_ASSETS
                 else selected_skybox
             )

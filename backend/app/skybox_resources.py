@@ -26,10 +26,24 @@ MATERIAL_FILENAME = "material.vmat_c"
 TEXTURE_FILENAME = "texture.vtex_c"
 
 BUILTIN_SKYBOX_NAMES = {
-    "cartoon3": "Cartoon 3",
     "xuejing": "雪景",
     "yinhezhanjian": "银河战舰",
+    "huoshaoyun": "火烧云",
+    "xiyang": "夕阳",
+    "chengchetiankong": "乘车天空",
 }
+
+
+def builtin_skybox_display_name(skybox_id: str) -> str:
+    if skybox_id in BUILTIN_SKYBOX_NAMES:
+        return BUILTIN_SKYBOX_NAMES[skybox_id]
+    cartoon = re.fullmatch(r"cartoon(\d*)", skybox_id)
+    if cartoon:
+        return f"Cartoon {cartoon.group(1)}".rstrip()
+    egg = re.fullmatch(r"egg(\d+)", skybox_id)
+    if egg:
+        return f"Egg {egg.group(1)}"
+    return skybox_id
 
 
 class SkyboxResourceError(ValueError):
@@ -245,6 +259,7 @@ def _custom_manifest_snapshot(path: Path) -> dict[str, Any]:
         "texture_original_name": str(manifest.get("texture_original_name") or ""),
         "size_bytes": int(manifest.get("size_bytes") or 0),
         "created_at": str(manifest.get("created_at") or ""),
+        "preview_url": None,
     }
 
 
@@ -254,7 +269,7 @@ def list_skybox_resources() -> list[dict[str, Any]]:
     items = [
         {
             "id": skybox_id,
-            "display_name": BUILTIN_SKYBOX_NAMES.get(skybox_id, skybox_id),
+            "display_name": builtin_skybox_display_name(skybox_id),
             "source": "builtin",
             "readonly": True,
             "available": True,
@@ -263,6 +278,7 @@ def list_skybox_resources() -> list[dict[str, Any]]:
             "texture_original_name": PurePosixPath(paths[1]).name,
             "size_bytes": 0,
             "created_at": "",
+            "preview_url": f"/skyboxes/{skybox_id}.webp",
         }
         for skybox_id, paths in SKYBOX_ASSETS.items()
     ]
@@ -288,6 +304,7 @@ def list_skybox_resources() -> list[dict[str, Any]]:
                     "texture_original_name": "",
                     "size_bytes": 0,
                     "created_at": "",
+                    "preview_url": None,
                 }
             )
     return items

@@ -1,15 +1,80 @@
 export const DEFAULT_RECORDING_SKYBOX = "default";
 export const RECORDING_SKYBOX_RESET_EVENT = "cs2-insight:recording-skybox-reset";
 
+export const BUILTIN_RECORDING_SKYBOX_IDS = Object.freeze([
+  "xuejing",
+  "yinhezhanjian",
+  "huoshaoyun",
+  "xiyang",
+  "chengchetiankong",
+  "cartoon",
+  "cartoon1",
+  "cartoon2",
+  "cartoon3",
+  "cartoon4",
+  "cartoon5",
+  "cartoon6",
+  "cartoon7",
+  "cartoon8",
+  "cartoon9",
+  "cartoon10",
+  "egg1",
+  "egg2",
+  "egg3",
+  "egg4",
+  "egg5",
+  "egg6",
+  "egg7",
+  "egg8",
+  "egg9",
+  "egg10",
+  "egg11",
+  "egg12",
+  "egg13",
+  "egg14",
+  "egg15",
+  "egg23",
+  "egg24",
+  "egg25",
+  "egg26",
+  "egg27",
+]);
+
+const BUILTIN_LABEL_KEYS = Object.freeze({
+  cartoon3: "record.skyboxCartoon3",
+  xuejing: "record.skyboxXuejing",
+  yinhezhanjian: "record.skyboxYinhezhanjian",
+  huoshaoyun: "record.skyboxHuoshaoyun",
+  xiyang: "record.skyboxXiyang",
+  chengchetiankong: "record.skyboxChengchetiankong",
+});
+
 export const RECORDING_SKYBOX_OPTIONS = Object.freeze([
   { value: DEFAULT_RECORDING_SKYBOX, labelKey: "record.skyboxDefault" },
-  { value: "cartoon3", labelKey: "record.skyboxCartoon3" },
-  { value: "xuejing", labelKey: "record.skyboxXuejing" },
-  { value: "yinhezhanjian", labelKey: "record.skyboxYinhezhanjian" },
+  ...BUILTIN_RECORDING_SKYBOX_IDS.map((value) => ({
+    value,
+    labelKey: BUILTIN_LABEL_KEYS[value] || null,
+  })),
 ]);
 
 const RECORDING_SKYBOX_IDS = new Set(RECORDING_SKYBOX_OPTIONS.map(({ value }) => value));
+const BUILTIN_RECORDING_SKYBOX_ORDER = new Map(
+  BUILTIN_RECORDING_SKYBOX_IDS.map((value, index) => [value, index]),
+);
 const CUSTOM_RECORDING_SKYBOX_ID = /^custom:[0-9a-f]{32}$/;
+
+export function sortBuiltinRecordingSkyboxes(resources) {
+  if (!Array.isArray(resources)) return [];
+  return [...resources].sort((left, right) => {
+    const leftOrder = BUILTIN_RECORDING_SKYBOX_ORDER.get(left?.id) ?? Number.MAX_SAFE_INTEGER;
+    const rightOrder = BUILTIN_RECORDING_SKYBOX_ORDER.get(right?.id) ?? Number.MAX_SAFE_INTEGER;
+    if (leftOrder !== rightOrder) return leftOrder - rightOrder;
+    return String(left?.id || "").localeCompare(String(right?.id || ""), undefined, {
+      numeric: true,
+      sensitivity: "base",
+    });
+  });
+}
 
 export function isCustomRecordingSkyboxId(value) {
   return typeof value === "string" && CUSTOM_RECORDING_SKYBOX_ID.test(value);
@@ -22,4 +87,29 @@ export function isRecordingSkyboxId(value) {
 
 export function normalizeRecordingSkyboxId(value) {
   return isRecordingSkyboxId(value) ? value : DEFAULT_RECORDING_SKYBOX;
+}
+
+export function recordingSkyboxPreviewUrl(value, resources = []) {
+  const skyboxId = normalizeRecordingSkyboxId(value);
+  const resource = Array.isArray(resources)
+    ? resources.find((item) => item?.id === skyboxId)
+    : null;
+  if (typeof resource?.preview_url === "string" && resource.preview_url.trim()) {
+    return resource.preview_url.trim();
+  }
+  return RECORDING_SKYBOX_IDS.has(skyboxId) && skyboxId !== DEFAULT_RECORDING_SKYBOX
+    ? `/skyboxes/${skyboxId}.webp`
+    : "";
+}
+
+export function recordingSkyboxDisplayName(value, fallback, t) {
+  const skyboxId = String(value || "").trim();
+  const labelKey = BUILTIN_LABEL_KEYS[skyboxId];
+  if (labelKey && typeof t === "function") return t(labelKey);
+  if (String(fallback || "").trim()) return String(fallback).trim();
+  const cartoon = /^cartoon(\d*)$/.exec(skyboxId);
+  if (cartoon) return `Cartoon ${cartoon[1]}`.trim();
+  const egg = /^egg(\d+)$/.exec(skyboxId);
+  if (egg) return `Egg ${egg[1]}`;
+  return skyboxId;
 }

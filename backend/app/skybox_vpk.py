@@ -3,24 +3,56 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from pathlib import Path
 
 from .demo_voice_hud import read_inline_vpk, write_inline_vpk
 
 
 DEFAULT_SKYBOX_ID = "default"
+_SKYBOX_TEXTURE_FILENAMES: Mapping[str, str] = {
+    "xuejing": "xuejing_exr_a06856b0.vtex_c",
+    "yinhezhanjian": "yinhezhanjian_exr_6b37921e.vtex_c",
+    "huoshaoyun": "huoshaoyun_exr_9697eee5.vtex_c",
+    "xiyang": "xiyang_exr_a3d1decb.vtex_c",
+    "chengchetiankong": "chengchetiankong_exr_4da9fd94.vtex_c",
+    "cartoon": "cartoon_exr_b1862b2d.vtex_c",
+    "cartoon1": "cartoon1_exr_7d8a29ad.vtex_c",
+    "cartoon2": "cartoon2_exr_900b0049.vtex_c",
+    "cartoon3": "cartoon3_exr_d7864907.vtex_c",
+    "cartoon4": "cartoon4_exr_310cb01d.vtex_c",
+    "cartoon5": "cartoon5_exr_dc4f746d.vtex_c",
+    "cartoon6": "cartoon6_exr_6c5d0ab0.vtex_c",
+    "cartoon7": "cartoon7_exr_127a8f56.vtex_c",
+    "cartoon8": "cartoon8_exr_50138bfa.vtex_c",
+    "cartoon9": "cartoon9_exr_26f96cc6.vtex_c",
+    "cartoon10": "cartoon10_exr_5a30d013.vtex_c",
+    "egg1": "egg1_exr_b2d5caae.vtex_c",
+    "egg2": "egg2_exr_6b4a6531.vtex_c",
+    "egg3": "egg3_exr_3272d786.vtex_c",
+    "egg4": "egg4_exr_2fead6d0.vtex_c",
+    "egg5": "egg5_exr_55352033.vtex_c",
+    "egg6": "egg6_exr_6304d47.vtex_c",
+    "egg7": "egg7_exr_65a968f2.vtex_c",
+    "egg8": "egg8_exr_dfffa129.vtex_c",
+    "egg9": "egg9_exr_869f03c2.vtex_c",
+    "egg10": "egg10_exr_f9ccf909.vtex_c",
+    "egg11": "egg11_exr_a4bc1532.vtex_c",
+    "egg12": "egg12_exr_def0e241.vtex_c",
+    "egg13": "egg13_exr_94defea9.vtex_c",
+    "egg14": "egg14_exr_9f622266.vtex_c",
+    "egg15": "egg15_exr_db252db5.vtex_c",
+    "egg23": "egg23_exr_948853fc.vtex_c",
+    "egg24": "egg24_exr_dd44bdc4.vtex_c",
+    "egg25": "egg25_exr_9bcbaa2f.vtex_c",
+    "egg26": "egg26_exr_3dd4223d.vtex_c",
+    "egg27": "egg27_exr_76cffe37.vtex_c",
+}
 SKYBOX_ASSETS: Mapping[str, tuple[str, str]] = {
-    "cartoon3": (
-        "materials/cartoon3.vmat_c",
-        "materials/cartoon3_exr_d7864907.vtex_c",
-    ),
-    "xuejing": (
-        "materials/xuejing.vmat_c",
-        "materials/xuejing_exr_a06856b0.vtex_c",
-    ),
-    "yinhezhanjian": (
-        "materials/yinhezhanjian.vmat_c",
-        "materials/yinhezhanjian_exr_6b37921e.vtex_c",
-    ),
+    skybox_id: (
+        f"materials/{skybox_id}.vmat_c",
+        f"materials/{texture_filename}",
+    )
+    for skybox_id, texture_filename in _SKYBOX_TEXTURE_FILENAMES.items()
 }
 SKYBOX_IDS = (DEFAULT_SKYBOX_ID, *SKYBOX_ASSETS)
 
@@ -82,7 +114,7 @@ def normalize_skybox_map_name(value: object) -> str:
 
 
 def _selected_sky_entries(
-    asset_vpk_bytes: bytes | None,
+    builtin_assets_dir: Path | None,
     skybox_id: str,
 ) -> tuple[dict[str, bytes], bytes]:
     if skybox_id not in SKYBOX_ASSETS:
@@ -99,27 +131,31 @@ def _selected_sky_entries(
             },
             resource.material_bytes,
         )
-    if asset_vpk_bytes is None:
-        raise SkyboxVpkError("the built-in skybox asset VPK is missing")
-    asset_entries = read_inline_vpk(asset_vpk_bytes)
+    if builtin_assets_dir is None:
+        raise SkyboxVpkError("the built-in skybox asset directory is missing")
     material_path, texture_path = SKYBOX_ASSETS[skybox_id]
-    missing = [path for path in (material_path, texture_path) if path not in asset_entries]
+    source_dir = Path(builtin_assets_dir) / skybox_id
+    material_source = source_dir / Path(material_path).name
+    texture_source = source_dir / Path(texture_path).name
+    missing = [str(path) for path in (material_source, texture_source) if not path.is_file()]
     if missing:
         raise SkyboxVpkError(
-            "skybox asset VPK is missing: " + ", ".join(missing)
+            "built-in skybox file is missing: " + ", ".join(missing)
         )
+    material_bytes = material_source.read_bytes()
+    texture_bytes = texture_source.read_bytes()
     return (
         {
-            material_path: asset_entries[material_path],
-            texture_path: asset_entries[texture_path],
+            material_path: material_bytes,
+            texture_path: texture_bytes,
         },
-        asset_entries[material_path],
+        material_bytes,
     )
 
 
 def compose_recording_skybox_vpk(
     *,
-    asset_vpk_bytes: bytes | None,
+    builtin_assets_dir: Path | None,
     skybox_id: object,
     map_name: object,
     base_vpk_bytes: bytes | None = None,
@@ -142,7 +178,7 @@ def compose_recording_skybox_vpk(
         )
 
     entries = read_inline_vpk(base_vpk_bytes) if base_vpk_bytes is not None else {}
-    selected_entries, material = _selected_sky_entries(asset_vpk_bytes, selected)
+    selected_entries, material = _selected_sky_entries(builtin_assets_dir, selected)
     entries.update(selected_entries)
     for target_path in target_paths:
         entries[target_path] = material

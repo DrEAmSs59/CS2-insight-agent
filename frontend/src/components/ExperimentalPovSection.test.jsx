@@ -76,6 +76,8 @@ describe("ExperimentalPovSection POV recovery", () => {
     const povCard = screen.getByTestId("experimental-pov-card");
     const skyboxCard = screen.getByTestId("experimental-skybox-card");
     expect(selector.value).toBe("xuejing");
+    expect(screen.getByTestId("recording-skybox-preview").getAttribute("src"))
+      .toBe("/skyboxes/xuejing.webp");
     expect(povCard.contains(selector)).toBe(false);
     expect(skyboxCard.contains(selector)).toBe(true);
     expect(featureCard.contains(povCard)).toBe(true);

@@ -15,11 +15,19 @@ payload and rebuilds its VPK entry CRCs before CS2 starts:
 
 ## Recording skybox layer
 
-`skybox_assets.vpk` is an independent asset carrier for `cartoon3`, `xuejing`,
-and `yinhezhanjian`. The recording preset presents `recording_skybox` alongside
-POV HUD in the experimental-features group while keeping the two selections
-independent. Before each demo starts, the backend composes one of two runtime
-packages:
+`skyboxes/<id>/` stores each maintained skybox as its original compiled
+`.vmat_c` / `.vtex_c` pair. Refresh the catalog with
+`python tools/sync_skybox_assets.py <compiled-skybox-directory>`. At runtime
+the backend reads only the selected pair and writes it directly into the
+map-specific temporary recording VPK; there is no aggregate asset VPK. The
+matching settings-page panoramas live in `frontend/public/skyboxes`. Rebuild
+them with `python tools/rebuild_skybox_previews.py <compiled-skybox-directory>
+--cli <Source2Viewer-CLI.exe>`; this developer-only export step uses
+[ValveResourceFormat](https://github.com/ValveResourceFormat/ValveResourceFormat)
+and Python's OpenEXR, NumPy, and Pillow packages. The
+recording preset presents `recording_skybox` alongside POV HUD in the
+experimental-features group while keeping the two selections independent.
+Before each demo starts, the backend composes one of two runtime packages:
 
 - ordinary recording: selected material/texture plus the current map aliases,
   with no Panorama entries;
