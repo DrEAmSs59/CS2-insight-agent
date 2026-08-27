@@ -603,6 +603,18 @@
     let radioEpochTick = -1;
     let advancedMenu = null;
     let advancedEdgeTrigger = null;
+    let advancedMenuDismissLayer = null;
+    const ADVANCED_MENU_OWNER_ATTRIBUTE = "cs2_insight_advanced_owner";
+    const ADVANCED_MENU_PANEL_IDS = [
+        "CS2InsightAdvancedMenu",
+        "CS2InsightAdvancedEdge",
+        "CS2InsightAdvancedDismissLayer",
+    ];
+    const advancedMenuInstanceToken = String((new Date()).getTime())
+        + ":" + String(Math.random());
+    let advancedMenuClaimedRoot = null;
+    let advancedMenuRootClaimed = false;
+    let advancedMenuOwnershipSupported = true;
     let advancedMenuVisible = false;
     let advancedMenuHoverGeneration = 0;
     let advancedSelectedXuid = "";
@@ -6222,6 +6234,37 @@
             advancedRenderRoundPicker();
         }
         advancedApplyMenuCollapsedState();
+        advancedSetMenuDismissLayerActive(!advancedMenuCollapsed);
+    }
+
+    function advancedSetMenuDismissLayerActive(active) {
+        if (!advancedMenuDismissLayer || !advancedMenuDismissLayer.IsValid()) {
+            return;
+        }
+        const enabled = Boolean(
+            active
+            && advancedMenuVisible
+            && advancedMenu
+            && advancedMenu.IsValid()
+            && advancedMenu.visible,
+        );
+        advancedMenuDismissLayer.visible = enabled;
+        advancedMenuDismissLayer.hittest = enabled;
+    }
+
+    function advancedDismissExpandedMenu() {
+        if (!advancedMenuVisible || !advancedMenu || !advancedMenu.IsValid()) {
+            advancedSetMenuDismissLayerActive(false);
+            return;
+        }
+        advancedMenuHoverGeneration += 1;
+        advancedSetMenuDismissLayerActive(false);
+        if (advancedMenuPinned) {
+            advancedSetMenuCollapsed(true);
+        } else {
+            advancedMenuVisible = false;
+            advancedMenu.visible = false;
+        }
     }
 
     function advancedScheduleHideMenu() {
@@ -6239,12 +6282,7 @@
                     return;
                 }
             } catch (errHoverState) {}
-            if (advancedMenuPinned) {
-                advancedSetMenuCollapsed(true);
-            } else {
-                advancedMenuVisible = false;
-                advancedMenu.visible = false;
-            }
+            advancedDismissExpandedMenu();
         });
     }
 
@@ -6257,16 +6295,28 @@
         advancedMenu.visible = true;
         advancedMenuCollapsed = false;
         advancedRenderMenu();
+        advancedSetMenuDismissLayerActive(true);
     }
 
     function advancedToggleMenuPinned() {
+        // Cancel a pending initial onmouseout before changing the mode. It can
+        // otherwise collapse the menu just before the first activation and
+        // leave TITLE OFF displaying the stale title-only layout.
+        advancedMenuHoverGeneration += 1;
         advancedMenuPinned = !advancedMenuPinned;
         if (advancedMenuPinned) {
             advancedShowMenu();
         } else {
+            // TITLE OFF only disables the persistent title bar. Keep the
+            // expanded menu open under the pointer; the dismiss layer hides it
+            // when the pointer actually leaves, including after later reveals.
+            advancedMenuVisible = true;
+            advancedMenu.visible = true;
+            advancedSetMenuCollapsed(false);
             advancedRenderMenu();
-            advancedScheduleHideMenu();
+            advancedSetMenuDismissLayerActive(true);
         }
+        return true;
     }
 
     function advancedCloseMenu() {
@@ -6274,6 +6324,7 @@
         advancedMenuPinned = false;
         advancedMenuVisible = false;
         advancedEdgeRevealArmed = false;
+        advancedSetMenuDismissLayerActive(false);
         if (advancedEdgeTrigger && advancedEdgeTrigger.IsValid()) {
             advancedEdgeTrigger.hittest = false;
         }
@@ -6291,6 +6342,73 @@
         return true;
     }
 
+    function advancedMenuRootOwner(root) {
+        if (!advancedMenuOwnershipSupported || !root || !root.IsValid()) {
+            return advancedMenuInstanceToken;
+        }
+        try {
+            return String(root.GetAttributeString(ADVANCED_MENU_OWNER_ATTRIBUTE, "") || "");
+        } catch (errAdvancedMenuOwnerRead) {
+            advancedMenuOwnershipSupported = false;
+            return advancedMenuInstanceToken;
+        }
+    }
+
+    function advancedMenuOwnsRoot(root) {
+        return advancedMenuRootOwner(root) === advancedMenuInstanceToken;
+    }
+
+    function advancedRemoveStaleMenuPanels(root) {
+        if (!root || !root.IsValid() || !root.Children) {
+            return false;
+        }
+        let removed = false;
+        const children = root.Children();
+        for (let i = 0; i < children.length; i += 1) {
+            const child = children[i];
+            if (!child || !child.IsValid()
+                    || ADVANCED_MENU_PANEL_IDS.indexOf(String(child.id || "")) < 0) {
+                continue;
+            }
+            removed = true;
+            child.visible = false;
+            child.hittest = false;
+            child.hittestchildren = false;
+            try {
+                child.DeleteAsync(0.0);
+            } catch (errDeleteStaleAdvancedMenu) {}
+        }
+        return removed;
+    }
+
+    function advancedClaimMenuRoot(root) {
+        if (!root || !root.IsValid()) {
+            return false;
+        }
+        if (advancedMenuClaimedRoot && advancedMenuClaimedRoot !== root) {
+            advancedMenuClaimedRoot = null;
+            advancedMenuRootClaimed = false;
+            advancedMenu = null;
+            advancedEdgeTrigger = null;
+            advancedMenuDismissLayer = null;
+        }
+        if (advancedMenuRootClaimed) {
+            return advancedMenuOwnsRoot(root);
+        }
+        try {
+            root.SetAttributeString(ADVANCED_MENU_OWNER_ATTRIBUTE, advancedMenuInstanceToken);
+        } catch (errAdvancedMenuOwnerWrite) {
+            advancedMenuOwnershipSupported = false;
+        }
+        advancedMenuClaimedRoot = root;
+        advancedMenuRootClaimed = true;
+        // A reconstructed huddemocontroller can leave its old JS timers and
+        // same-ID panels alive. Hide every direct stale instance before this
+        // owner builds a fresh menu; the previous owner's next tick will see
+        // the changed root token and terminate without scheduling again.
+        return !advancedRemoveStaleMenuPanels(root);
+    }
+
     function advancedEnsureMenu() {
         if (!advancedPlayback) {
             return null;
@@ -6299,7 +6417,30 @@
         if (!root || !root.IsValid()) {
             return null;
         }
+        if (!advancedClaimMenuRoot(root)) {
+            return null;
+        }
         root.hittestchildren = true;
+        if (!advancedMenuDismissLayer || !advancedMenuDismissLayer.IsValid()) {
+            advancedMenuDismissLayer = advancedCreatePanel(
+                "Panel",
+                root,
+                "CS2InsightAdvancedDismissLayer",
+            );
+            advancedMenuDismissLayer.style.width = "100%";
+            advancedMenuDismissLayer.style.height = "100%";
+            advancedMenuDismissLayer.style.horizontalAlign = "center";
+            advancedMenuDismissLayer.style.verticalAlign = "center";
+            advancedMenuDismissLayer.style.backgroundColor = "#00000000";
+            advancedMenuDismissLayer.style.zIndex = "31999";
+            advancedMenuDismissLayer.hittestchildren = false;
+            advancedMenuDismissLayer.visible = false;
+            advancedMenuDismissLayer.hittest = false;
+            advancedMenuDismissLayer.SetPanelEvent("onmouseover", function () {
+                advancedDismissExpandedMenu();
+                return true;
+            });
+        }
         if (!advancedEdgeTrigger || !advancedEdgeTrigger.IsValid()) {
             advancedEdgeTrigger = advancedCreatePanel("Panel", root, "CS2InsightAdvancedEdge");
             advancedEdgeTrigger.style.width = "18px";
@@ -6346,6 +6487,8 @@
             advancedMenuHoverGeneration += 1;
             if (advancedMenuCollapsed) {
                 advancedSetMenuCollapsed(false);
+            } else {
+                advancedSetMenuDismissLayerActive(true);
             }
         });
         advancedMenu.SetPanelEvent("onmouseout", advancedScheduleHideMenu);
@@ -6637,6 +6780,7 @@
 
         advancedApplyQuickOptions();
         advancedRenderMenu();
+        advancedSetMenuDismissLayerActive(!advancedMenuCollapsed);
         return advancedMenu;
     }
 
@@ -6644,7 +6788,15 @@
         if (!advancedPlayback) {
             return;
         }
-        advancedEnsureMenu();
+        const root = hudRootPanel();
+        if (advancedMenuRootClaimed && advancedMenuClaimedRoot === root
+                && !advancedMenuOwnsRoot(root)) {
+            return;
+        }
+        if (!advancedEnsureMenu()) {
+            $.Schedule(0.1, advancedMenuTick);
+            return;
+        }
         if (advancedMenuPinned && advancedMenu && advancedMenu.IsValid() && !advancedMenuVisible) {
             advancedShowMenu();
         }

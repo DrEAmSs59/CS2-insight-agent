@@ -153,11 +153,11 @@ def test_advanced_playback_payload_indexes_players_kills_deaths_and_utility():
     kill_fields = advanced[4].split(",")[0].split(".")
     assert int(kill_fields[5], 36) == 63
     assert advanced[5] == 6400
-    assert advanced[6] == [[1, 50, 229], [2, 230, 6400]]
+    assert advanced[6] == [[1, 20, 199], [2, 200, 6400]]
 
 
-def test_advanced_playback_round_starts_fall_back_when_freeze_end_is_incomplete():
-    class _IncompleteFreezeParser:
+def test_advanced_playback_round_starts_use_freeze_start_when_sources_are_complete():
+    class _CompleteRoundSourcesParser:
         @staticmethod
         def parse_event(name, **_kwargs):
             if name == "round_announce_match_start":
@@ -165,10 +165,43 @@ def test_advanced_playback_round_starts_fall_back_when_freeze_end_is_incomplete(
             if name == "round_start":
                 return {"tick": [20, 200]}
             if name == "round_freeze_end":
-                return {"tick": [50]}
+                return {"tick": [50, 230]}
             return {"tick": []}
 
-    assert _advanced_round_starts(_IncompleteFreezeParser()) == [(1, 20), (2, 200)]
+    assert _advanced_round_starts(_CompleteRoundSourcesParser()) == [(1, 20), (2, 200)]
+
+
+def test_advanced_playback_round_starts_fall_back_when_freeze_start_is_incomplete():
+    class _IncompleteFreezeStartParser:
+        @staticmethod
+        def parse_event(name, **_kwargs):
+            if name == "round_announce_match_start":
+                return {"tick": [10]}
+            if name == "round_start":
+                return {"tick": [20]}
+            if name == "round_freeze_end":
+                return {"tick": [50, 230]}
+            return {"tick": []}
+
+    assert _advanced_round_starts(_IncompleteFreezeStartParser()) == [(1, 20), (2, 230)]
+
+
+def test_advanced_playback_keeps_first_freeze_start_before_match_announce():
+    class _FirstFreezeStartedBeforeAnnounceParser:
+        @staticmethod
+        def parse_event(name, **_kwargs):
+            if name == "round_announce_match_start":
+                return {"tick": [30]}
+            if name == "round_start":
+                return {"tick": [5, 20, 200]}
+            if name == "round_freeze_end":
+                return {"tick": [50, 230]}
+            return {"tick": []}
+
+    assert _advanced_round_starts(_FirstFreezeStartedBeforeAnnounceParser()) == [
+        (1, 20),
+        (2, 200),
+    ]
 
 
 def test_voice_payload_reuses_tick_roster_when_player_info_is_empty():
@@ -877,7 +910,35 @@ def test_advanced_playback_template_uses_native_hot_switchable_hud_styles():
     assert b'advancedToggleMenuPinned,' in script
     assert b'advancedEdgeTrigger.hittest = false' in script
     assert b'advancedRenderMenu();' in script
-    assert b'advancedScheduleHideMenu();' in script
+    assert b'advancedMenu.SetPanelEvent("onmouseout", advancedScheduleHideMenu)' in script
+    assert b"TITLE OFF only disables the persistent title bar" in script
+    assert b"Cancel a pending initial onmouseout before changing the mode" in script
+    assert b"leave TITLE OFF displaying the stale title-only layout" in script
+    assert b"advancedMenuVisible = true;" in script
+    assert b"advancedMenu.visible = true;" in script
+    assert b"advancedSetMenuCollapsed(false);" in script
+    assert b"advancedRenderMenu();" in script
+    assert b"advancedSetMenuDismissLayerActive(true);" in script
+    assert b"function advancedMenuHasHover()" not in script
+    assert b"function waitForPointerLeave()" not in script
+    assert b"function advancedRearmMenuHoverTracking()" not in script
+    assert b"let advancedMenuDismissLayer = null" in script
+    assert b"function advancedSetMenuDismissLayerActive(active)" in script
+    assert b"function advancedDismissExpandedMenu()" in script
+    assert b'"CS2InsightAdvancedDismissLayer"' in script
+    assert b'advancedMenuDismissLayer.style.zIndex = "31999"' in script
+    assert b'advancedMenuDismissLayer.SetPanelEvent("onmouseover"' in script
+    assert b"advancedDismissExpandedMenu();" in script
+    assert b'const ADVANCED_MENU_OWNER_ATTRIBUTE = "cs2_insight_advanced_owner"' in script
+    assert b'"CS2InsightAdvancedMenu"' in script
+    assert b'"CS2InsightAdvancedEdge"' in script
+    assert b'"CS2InsightAdvancedDismissLayer"' in script
+    assert b"function advancedClaimMenuRoot(root)" in script
+    assert b"function advancedRemoveStaleMenuPanels(root)" in script
+    assert b"root.SetAttributeString(ADVANCED_MENU_OWNER_ATTRIBUTE, advancedMenuInstanceToken)" in script
+    assert b"child.DeleteAsync(0.0)" in script
+    assert b"!advancedMenuOwnsRoot(root)" in script
+    assert b"the changed root token and terminate without scheduling again" in script
     assert b'"72px",' in script
     assert b'advancedPinButton.style.marginRight = "4px"' in script
     assert b'const close = advancedCreateButton(' in script

@@ -3242,9 +3242,10 @@ def _advanced_round_starts(parser: Any) -> list[tuple[int, int]]:
 
     Panorama's live ``RoundIntervals`` field is absent on several CS2 demo
     controller builds. Resolve the timeline while the demo is already open in
-    demoparser instead. ``round_freeze_end`` is preferred so event grouping,
-    elapsed time, and round navigation all begin when live play starts.
-    ``round_start`` remains the fallback when its table is more complete.
+    demoparser instead. ``round_start`` is preferred because it is the round's
+    ``startFreezeTick`` anchor: event grouping, elapsed time, and navigation
+    must include the freeze phase. ``round_freeze_end`` remains a fallback for
+    demos whose round-start table is missing or incomplete.
     """
 
     match_start_tick: int | None = None
@@ -3259,10 +3260,12 @@ def _advanced_round_starts(parser: Any) -> list[tuple[int, int]]:
         if tick is not None and tick >= 0
     )
     if valid_announce_ticks:
-        match_start_tick = valid_announce_ticks[0]
+        # A demo can contain several announces after warmup/knife restarts.
+        # The last one is the beginning of the retained competitive match.
+        match_start_tick = valid_announce_ticks[-1]
 
-    candidates_by_source: list[list[int]] = []
-    for event_name in ("round_freeze_end", "round_start"):
+    candidates_by_source: dict[str, list[int]] = {}
+    for event_name in ("round_start", "round_freeze_end"):
         try:
             rows = parser.parse_event(event_name)
         except Exception:  # noqa: BLE001 - either source may be omitted by a demo
@@ -3275,16 +3278,54 @@ def _advanced_round_starts(parser: Any) -> list[tuple[int, int]]:
                 if tick is not None and tick >= 0
             }
         )
-        if match_start_tick is not None and candidates:
-            filtered = [tick for tick in candidates if tick >= match_start_tick]
-            if filtered:
-                candidates = filtered
-        candidates_by_source.append(candidates)
+        candidates_by_source[event_name] = candidates
 
-    # Prefer the source with the complete match. Ties deliberately select the
-    # first source, making freeze-end authoritative while retaining round-start
-    # as the completeness fallback for damaged or partially retained demos.
-    starts = max(candidates_by_source, key=len, default=[])
+    freeze_ends = candidates_by_source.get("round_freeze_end", [])
+    if match_start_tick is not None and freeze_ends:
+        filtered_freeze_ends = [tick for tick in freeze_ends if tick >= match_start_tick]
+        if filtered_freeze_ends:
+            freeze_ends = filtered_freeze_ends
+
+    raw_freeze_starts = candidates_by_source.get("round_start", [])
+    freeze_starts = raw_freeze_starts
+    if match_start_tick is not None and raw_freeze_starts:
+        freeze_starts = [tick for tick in raw_freeze_starts if tick >= match_start_tick]
+
+        # round_announce_match_start can be emitted *inside* round one's freeze
+        # phase. In that case a strict >= filter drops the real startFreezeTick
+        # and makes the entire timeline fall back to round_freeze_end. Preserve
+        # the closest preceding round_start only when no post-announce start
+        # already exists before the first retained freeze end.
+        first_freeze_end = freeze_ends[0] if freeze_ends else None
+        has_post_announce_first_start = bool(
+            first_freeze_end is not None
+            and any(
+                match_start_tick <= tick < first_freeze_end
+                for tick in raw_freeze_starts
+            )
+        )
+        preceding = [tick for tick in raw_freeze_starts if tick < match_start_tick]
+        if first_freeze_end is not None and preceding and not has_post_announce_first_start:
+            freeze_starts.insert(0, preceding[-1])
+
+    if len(freeze_starts) >= len(freeze_ends):
+        starts = freeze_starts
+    else:
+        # Keep every known startFreezeTick even when the round_start table is
+        # partially retained. Fall back to freeze end only for the individual
+        # round whose freeze-start event is missing.
+        starts = []
+        previous_freeze_end: int | None = None
+        for freeze_end in freeze_ends:
+            matching_starts = [
+                tick
+                for tick in freeze_starts
+                if (previous_freeze_end is None or tick > previous_freeze_end)
+                and tick < freeze_end
+            ]
+            starts.append(matching_starts[-1] if matching_starts else freeze_end)
+            previous_freeze_end = freeze_end
+
     return [(index + 1, tick) for index, tick in enumerate(starts)]
 
 
