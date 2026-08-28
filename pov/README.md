@@ -218,12 +218,13 @@ Every POV kill plays the stock body/headshot attacker-feedback event and the
 stock `UI.KillCard.1` confirmation layer (`kill_doof_01.vsnd`) together. The
 confirmation sound is additive; it does not replace the armor/headshot variant.
 
-Flash-blind opacity now scales continuously toward a full-face reference of
-about 4.5 seconds at the usual 64 tick rate, then decays across the complete
-demo-authored `player_blind` interval. There is no three-second mode switch or
-fixed two-second tail, so similar flash durations no longer produce an abrupt
-change in how long the white wash appears to last. The curve never changes the
-demo-authored start/end ticks or extends the effect.
+Flash-blind opacity reproduces only CS2's white overlay: it builds for
+`(255 / 45) / 60` seconds, remains fully white while more than 3.43 seconds
+remain, and then follows `(remaining_seconds / 3.43)^4` through the complete
+demo-authored `player_blind` interval. The separate captured-frame afterimage
+stays native; converting its linear screenshot alpha into additional Panorama
+white makes POV flashes too bright and visually opaque for too long. The curve
+never changes the demo-authored start/end ticks or extends the effect.
 While a flash wash is active, only its Panorama render cadence rises from 20Hz
 to about 60Hz; idle polling remains 20Hz.
 

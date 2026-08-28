@@ -60,11 +60,13 @@
     const FLASH_TINNITUS_SHORT = "Flashbang.Ring.Short";
     const FLASH_TINNITUS_MEDIUM = "Flashbang.Ring.Medium";
     const FLASH_TINNITUS_LONG = "Flashbang.Ring.Long";
-    // CS flash client state: ~94 ms build-up, then a full-white / squared fade
-    // based on the *remaining* time and a three-second certainty threshold.
+    // CS flash client state: ~94 ms build-up, then a full-white / calibrated fade
+    // based on the *remaining* time. Two rounds of 240 FPS POV/native Demo HUD
+    // captures set the certainty window and quartic tail below.
     // The demo duration is already the server-merged overlap state.
     const FLASH_BUILD_UP_SECONDS = (255 / 45) / 60;
-    const FLASH_CERTAIN_BLIND_SECONDS = 3;
+    const FLASH_CERTAIN_BLIND_SECONDS = 3.43;
+    const FLASH_FADE_EXPONENT = 4;
     const FLASH_PAYLOAD_VERSION = 2;
     const FLASH_STATE_CLEAR = 1;
     // Rendering cadence only: flash timing and strength remain demo-tick based.
@@ -1916,40 +1918,23 @@
         }
         const tickRate = flashBlindTrack ? flashBlindTrack.tickRate : 64;
         const alpha = Math.max(0, Math.min(1, Number(blind.maxAlpha) / 255));
-        const durationSeconds = Math.max(1 / tickRate, blind.durationTicks / tickRate);
-        const strength = alpha * Math.min(
-            1,
-            Math.pow(durationSeconds / FLASH_CERTAIN_BLIND_SECONDS, 2),
-        );
         const elapsedSeconds = Math.max(0, (Number(tick) - blind.startTick) / tickRate);
 
-        let white;
-        let screenshot;
         if (blind.buildUp && elapsedSeconds < FLASH_BUILD_UP_SECONDS) {
             const phase = Math.max(0, Math.min(1, elapsedSeconds / FLASH_BUILD_UP_SECONDS));
-            white = alpha * phase;
-            screenshot = phase;
-        } else {
-            const remainingSeconds = Math.max(0, (blind.endTick - Number(tick)) / tickRate);
-            white = alpha * Math.min(
-                1,
-                Math.pow(remainingSeconds / FLASH_CERTAIN_BLIND_SECONDS, 2),
-            );
-            screenshot = Math.max(0, Math.min(1, remainingSeconds / durationSeconds));
+            return alpha * phase;
         }
 
-        // CS draws the captured flash frame four times. The demo does not retain
-        // that client-only texture, so convert its linear alpha into an equivalent
-        // HUD occlusion, scaled by the authored flash strength. Native world flash
-        // remains below this topmost Panorama compensation layer.
-        const afterimage = strength * (1 - Math.pow(1 - screenshot, 4));
-        let cover = 1 - (1 - white) * (1 - afterimage);
-        if (cover >= 0.995) {
-            cover = 1;
-        } else if (cover <= 0.002) {
-            cover = 0;
-        }
-        return Math.max(0, Math.min(1, cover));
+        // This topmost Panorama panel represents only CS2's white overlay. The
+        // captured-frame afterimage is a separate native world effect; turning
+        // its linear screenshot alpha into more white makes POV flashes too
+        // bright and keeps them visually opaque for too long.
+        const remainingSeconds = Math.max(0, (blind.endTick - Number(tick)) / tickRate);
+        const white = alpha * Math.min(
+            1,
+            Math.pow(remainingSeconds / FLASH_CERTAIN_BLIND_SECONDS, FLASH_FADE_EXPONENT),
+        );
+        return Math.max(0, Math.min(1, white));
     }
 
     function ensureFlashWash(root) {

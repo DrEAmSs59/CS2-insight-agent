@@ -419,7 +419,8 @@ def test_checked_in_voice_template_contains_only_an_empty_payload():
         in script
     )
     assert b"FLASH_BUILD_UP_SECONDS = (255 / 45) / 60" in script
-    assert b"FLASH_CERTAIN_BLIND_SECONDS = 3" in script
+    assert b"FLASH_CERTAIN_BLIND_SECONDS = 3.43" in script
+    assert b"FLASH_FADE_EXPONENT = 4" in script
     assert b"FLASH_PAYLOAD_VERSION = 2" in script
     assert b"FLASH_FULL_DURATION_TICKS" not in script
     assert b"FLASH_ACTIVE_REFRESH_SECONDS = 0.016" in script
@@ -427,9 +428,11 @@ def test_checked_in_voice_template_contains_only_an_empty_payload():
     assert b"blind ? FLASH_ACTIVE_REFRESH_SECONDS : FLASH_IDLE_REFRESH_SECONDS" in script
     assert b"const wasActive = Boolean(state && event.tick < state.endTick)" in script
     assert b"endTick: event.tick + event.durationTicks" in script
-    assert b"Math.pow(remainingSeconds / FLASH_CERTAIN_BLIND_SECONDS, 2)" in script
-    assert b"const afterimage = strength * (1 - Math.pow(1 - screenshot, 4))" in script
-    assert b"let cover = 1 - (1 - white) * (1 - afterimage)" in script
+    assert b"Math.pow(remainingSeconds / FLASH_CERTAIN_BLIND_SECONDS, FLASH_FADE_EXPONENT)" in script
+    assert b"return Math.max(0, Math.min(1, white))" in script
+    assert b"const afterimage" not in script
+    assert b"const screenshot" not in script
+    assert b"1 - (1 - white)" not in script
     assert b"Math.min(1, flashWashOpacity(blind, tick))" in script
     assert b"if (opacity <= 0.01)" not in script
     assert b'findHudTraverse("ChatHistoryText")' in script
@@ -817,6 +820,10 @@ def test_advanced_playback_template_uses_native_hot_switchable_hud_styles():
     end = script.index(VOICE_DATA_END)
 
     assert script[start:end].rstrip() == b"[[], [], [], []]"
+    assert b"Math.pow(remainingSeconds / FLASH_CERTAIN_BLIND_SECONDS, FLASH_FADE_EXPONENT)" in script
+    assert b"return Math.max(0, Math.min(1, white))" in script
+    assert b"const afterimage" not in script
+    assert b"const screenshot" not in script
     assert "panorama/layout/hud/hudalerts.vxml_c" in entries
     assert "panorama/styles/hud/hudhealthammocenter.vcss_c" not in entries
     assert "panorama/styles/hud/hudradar.vcss_c" not in entries
