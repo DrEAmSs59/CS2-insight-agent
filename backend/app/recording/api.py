@@ -28,6 +28,11 @@ from ..demo_paths import resolve_working_demo_path
 from ..databases import demo_db
 from ..runtime_session import runtime_session_dependency
 from ..skybox_vpk import DEFAULT_SKYBOX_ID, SkyboxVpkError, normalize_skybox_id
+from ..map_material_vpk import (
+    DEFAULT_MAP_MATERIAL_ID,
+    MapMaterialVpkError,
+    normalize_map_material_id,
+)
 from ..pov_constants import normalize_pov_voice_mode
 
 logger = logging.getLogger(__name__)
@@ -573,6 +578,7 @@ class QueueRecordingRequest(BaseModel):
     obs: Optional[dict] = None
     pov_hud: Optional[dict] = None  # {enabled, radar_mode, teamcounter_numeric, voice_mode}
     skybox: Optional[dict] = None  # {id: default|built-in id|custom:<uuid hex>}
+    map_material: Optional[dict] = None  # {id: default|waxed_reflection}
     # 仅本次录制队列生效，不写入 cs2-insight.config.json
     cs2_extra_launch_args: Optional[str] = None
     record_inject_console_lines: Optional[str] = None
@@ -824,6 +830,29 @@ async def execute_recording_queue(
             skybox_id=recording_skybox_id,
         )
         logger.info("[RecordingV3] skybox enabled: %s", recording_skybox_id)
+
+    saved_map_material_id = getattr(
+        cfg, "recording_map_material", DEFAULT_MAP_MATERIAL_ID
+    )
+    raw_map_material_id = (
+        req.map_material.get("id", saved_map_material_id)
+        if isinstance(req.map_material, dict)
+        else saved_map_material_id
+    )
+    try:
+        recording_map_material_id = normalize_map_material_id(raw_map_material_id)
+    except MapMaterialVpkError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    if recording_map_material_id != DEFAULT_MAP_MATERIAL_ID:
+        if warmup_extras is None:
+            warmup_extras = RecordingWarmupExtras()
+        warmup_extras = dataclasses.replace(
+            warmup_extras,
+            map_material_id=recording_map_material_id,
+        )
+        logger.info(
+            "[RecordingV3] map material enabled: %s", recording_map_material_id
+        )
 
     global _queue_abort_event
     if _queue_abort_event is not None:

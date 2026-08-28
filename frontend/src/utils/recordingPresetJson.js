@@ -1,8 +1,12 @@
 import { isRecordingSkyboxId } from "./recordingSkybox.js";
+import {
+  isRecordingMapMaterialId,
+  normalizeRecordingMapMaterialId,
+} from "./recordingMapMaterial.js";
 import { isPovVoiceMode, normalizePovVoiceMode } from "./povVoiceMode.js";
 
 export const RECORDING_PRESET_FORMAT = "cs2-insight-recording-preset";
-export const RECORDING_PRESET_VERSION = 3;
+export const RECORDING_PRESET_VERSION = 4;
 export const RECORDING_PRESET_MAX_BYTES = 256 * 1024;
 
 const isObject = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
@@ -108,7 +112,7 @@ export function buildRecordingPresetFile(preset, exportedAt = new Date().toISOSt
 export function parseRecordingPresetFile(value, warmupDefaults) {
   if (!isObject(value)) invalid("root", "type");
   if (value.format !== RECORDING_PRESET_FORMAT) invalid("format", "format");
-  if (![1, 2, RECORDING_PRESET_VERSION].includes(value.version)) invalid("version", "version");
+  if (![1, 2, 3, RECORDING_PRESET_VERSION].includes(value.version)) invalid("version", "version");
   if (!isObject(value.preset)) invalid("preset", "type");
 
   const p = value.preset;
@@ -139,6 +143,9 @@ export function parseRecordingPresetFile(value, warmupDefaults) {
     recording_skybox: Object.hasOwn(p, "recording_skybox")
       ? requireString(p.recording_skybox, "recording_skybox", 64)
       : "default",
+    recording_map_material: Object.hasOwn(p, "recording_map_material")
+      ? requireString(p.recording_map_material, "recording_map_material", 64)
+      : "default",
   };
   if (!["bottom_center", "minimap_below", "weapon_right"].includes(result.kb_overlay_position)) {
     invalid("kb_overlay_position", "range");
@@ -146,5 +153,11 @@ export function parseRecordingPresetFile(value, warmupDefaults) {
   if (!isRecordingSkyboxId(result.recording_skybox)) {
     invalid("recording_skybox", "range");
   }
+  if (!isRecordingMapMaterialId(result.recording_map_material)) {
+    invalid("recording_map_material", "range");
+  }
+  result.recording_map_material = normalizeRecordingMapMaterialId(
+    result.recording_map_material,
+  );
   return result;
 }

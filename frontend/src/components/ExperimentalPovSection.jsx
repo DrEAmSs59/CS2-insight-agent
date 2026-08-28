@@ -11,6 +11,11 @@ import {
   sortBuiltinRecordingSkyboxes,
 } from "../utils/recordingSkybox.js";
 import { normalizePovVoiceMode, POV_VOICE_MODES } from "../utils/povVoiceMode.js";
+import {
+  DEFAULT_RECORDING_MAP_MATERIAL,
+  normalizeRecordingMapMaterialId,
+  WAXED_REFLECTION_MAP_MATERIAL,
+} from "../utils/recordingMapMaterial.js";
 
 /**
  * 实验性 POV：与常用参数 / 录制前观战弹窗共用；勾选写入 experimental.pov_enabled。
@@ -27,6 +32,8 @@ export default function ExperimentalPovSection({
   onPovVoiceModeChange,
   recordingSkybox = "default",
   onRecordingSkyboxChange,
+  recordingMapMaterial = DEFAULT_RECORDING_MAP_MATERIAL,
+  onRecordingMapMaterialChange,
   omitEyebrow = false,
   omitDisclaimer = false,
   embedded = false,
@@ -60,6 +67,7 @@ export default function ExperimentalPovSection({
     (item) => item.id === selectedSkyboxId,
   );
   const selectedSkyboxPreview = recordingSkyboxPreviewUrl(selectedSkyboxId, skyboxResources);
+  const selectedMapMaterial = normalizeRecordingMapMaterialId(recordingMapMaterial);
 
   const loadPovStatus = useCallback(async () => {
     setPovStatusLoading(true);
@@ -248,6 +256,44 @@ export default function ExperimentalPovSection({
         </div>
       ) : null}
       </div>
+
+      {onRecordingMapMaterialChange ? (
+        <div
+          className="mt-4 border-t border-amber-500/20 pt-4"
+          data-testid="experimental-map-material-card"
+        >
+          <label className="block text-[11px] text-cs2-text-secondary">
+            <span className="block font-semibold text-cs2-text-primary">
+              {t("record.mapMaterialTitle")}
+            </span>
+            <span className="mt-1 block text-[10px] leading-relaxed text-cs2-text-muted">
+              {t("record.mapMaterialSubtitle")}
+            </span>
+            <select
+              aria-label={t("record.mapMaterialSelectLabel")}
+              value={selectedMapMaterial}
+              disabled={checkboxDisabled}
+              onChange={(event) => onRecordingMapMaterialChange(event.target.value)}
+              className="mt-2 w-full rounded border border-cs2-border bg-cs2-bg-input px-2 py-1.5 text-xs text-cs2-text-primary outline-none focus:border-cs2-accent/50 disabled:opacity-40"
+            >
+              <option value={DEFAULT_RECORDING_MAP_MATERIAL}>
+                {t("record.mapMaterialDefault")}
+              </option>
+              <option value={WAXED_REFLECTION_MAP_MATERIAL}>
+                {t("record.mapMaterialWaxedReflection")}
+              </option>
+            </select>
+          </label>
+          <p className="mt-2 text-[10px] leading-relaxed text-cs2-text-muted">
+            {t("record.mapMaterialSupportedMaps")}
+          </p>
+          {selectedMapMaterial !== DEFAULT_RECORDING_MAP_MATERIAL ? (
+            <p className="mt-2 text-[10px] leading-relaxed text-cs2-amber-on-surface">
+              {t("record.mapMaterialOutcome")}
+            </p>
+          ) : null}
+        </div>
+      ) : null}
 
       {onRecordingSkyboxChange ? (
         <div

@@ -21,6 +21,7 @@ from ...demo_playback_service import (
     demo_playback_service,
 )
 from ...env_utils import ensure_cs2_path, load_config
+from ...map_material_vpk import MapMaterialVpkError, normalize_map_material_id
 from ...pov_hud_manager import PovHudError
 from ...skybox_resources import list_skybox_resources
 from ...skybox_vpk import SkyboxVpkError, normalize_skybox_id
@@ -37,8 +38,15 @@ class DemoPlaybackPovBody(BaseModel):
     skybox_id: str = Field(default="default", max_length=64)
 
 
+class DemoPlaybackMapMaterialBody(BaseModel):
+    id: str = Field(default="default", max_length=64)
+
+
 class DemoPlaybackOptionsBody(BaseModel):
     pov_hud: DemoPlaybackPovBody = Field(default_factory=DemoPlaybackPovBody)
+    map_material: DemoPlaybackMapMaterialBody = Field(
+        default_factory=DemoPlaybackMapMaterialBody
+    )
 
 
 class DemoPlayByPathBody(DemoPlaybackOptionsBody):
@@ -74,6 +82,11 @@ def launch_cs2_play_demo(
     pov = body.pov_hud
     try:
         skybox_id = normalize_skybox_id(pov.skybox_id) if pov.enabled else "default"
+        map_material_id = (
+            normalize_map_material_id(body.map_material.id)
+            if pov.enabled
+            else "default"
+        )
         return demo_playback_service.launch(
             demo_path,
             cfg,
@@ -82,9 +95,12 @@ def launch_cs2_play_demo(
                 radar_mode=int(pov.radar_mode),
                 teamcounter_numeric=bool(pov.teamcounter_numeric),
                 skybox_id=skybox_id,
+                map_material_id=map_material_id,
             ),
         )
     except SkyboxVpkError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    except MapMaterialVpkError as exc:
         raise HTTPException(422, str(exc)) from exc
     except DemoPlaybackCs2RunningError as exc:
         raise HTTPException(409, error_detail("DEMO_PLAYBACK_CS2_RUNNING")) from exc
@@ -114,6 +130,9 @@ async def demo_playback_preflight():
     return {
         **result,
         "recording_skybox": str(getattr(cfg, "recording_skybox", "default") or "default"),
+        "recording_map_material": str(
+            getattr(cfg, "recording_map_material", "default") or "default"
+        ),
         "skyboxes": await asyncio.to_thread(list_skybox_resources),
     }
 

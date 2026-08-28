@@ -27,22 +27,30 @@ describe("RecordWarmupModal skybox override", () => {
         onClose={() => {}}
         onConfirm={onConfirm}
         recordingSkybox="xuejing"
+        recordingMapMaterial="waxed_reflection"
       />,
     );
 
     const selector = screen.getByRole("combobox", { name: "录制天空盒" });
+    const materialSelector = screen.getByRole("combobox", { name: "录制地图材质" });
     expect(screen.queryByText(/以下命令在首次跳转 tick 前/)).toBeNull();
     expect(screen.queryByTestId("experimental-pov-disclaimer")).toBeNull();
     expect(screen.queryByText(/默认已预填 5 条性能\/预测 cvar/)).toBeNull();
     expect(screen.queryByText(/首片段预热/)).toBeNull();
     expect(screen.getByText(/此处修改仅作用于本次录制/)).toBeTruthy();
     expect(selector.value).toBe("xuejing");
+    expect(materialSelector.value).toBe("waxed_reflection");
     expect(screen.getByTestId("experimental-feature-card").contains(selector)).toBe(true);
     fireEvent.change(selector, { target: { value: "cartoon3" } });
+    fireEvent.change(materialSelector, { target: { value: "default" } });
     fireEvent.click(screen.getByRole("button", { name: "开始录制" }));
 
     expect(onConfirm).toHaveBeenCalledWith(
-      expect.objectContaining({ recording_skybox: "cartoon3", pov_voice_mode: "team" }),
+      expect.objectContaining({
+        recording_skybox: "cartoon3",
+        recording_map_material: "default",
+        pov_voice_mode: "team",
+      }),
     );
   });
 

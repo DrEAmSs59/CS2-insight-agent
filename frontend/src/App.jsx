@@ -22,6 +22,10 @@ import {
   normalizeRecordingSkyboxId,
   RECORDING_SKYBOX_RESET_EVENT,
 } from "./utils/recordingSkybox.js";
+import {
+  DEFAULT_RECORDING_MAP_MATERIAL,
+  normalizeRecordingMapMaterialId,
+} from "./utils/recordingMapMaterial.js";
 import { useDemoAnalysisWorkflows } from "./features/demo-analysis/useDemoAnalysisWorkflows";
 import { useDemoLibraryController } from "./features/demo-library/useDemoLibraryController";
 import { useClipQueueActions } from "./features/recording-queue/useClipQueueActions";
@@ -142,6 +146,9 @@ export default function App() {
   const [commonParamsOpen, setCommonParamsOpen] = useState(false);
   const [experimentalPovEnabled, setExperimentalPovEnabled] = useState(false);
   const [recordingSkybox, setRecordingSkybox] = useState("default");
+  const [recordingMapMaterial, setRecordingMapMaterial] = useState(
+    DEFAULT_RECORDING_MAP_MATERIAL,
+  );
   useEffect(() => {
     const resetRecordingSkybox = () => setRecordingSkybox("default");
     window.addEventListener(RECORDING_SKYBOX_RESET_EVENT, resetRecordingSkybox);
@@ -504,6 +511,9 @@ export default function App() {
     if (typeof data.recording_skybox === "string") {
       setRecordingSkybox(normalizeRecordingSkyboxId(data.recording_skybox));
     }
+    if (typeof data.recording_map_material === "string") {
+      setRecordingMapMaterial(normalizeRecordingMapMaterialId(data.recording_map_material));
+    }
     const savedPacing =
       data.recording_global_pacing &&
       typeof data.recording_global_pacing === "object" &&
@@ -613,6 +623,7 @@ export default function App() {
       kill_fx_enabled: !!payload?.kill_fx_enabled,
       kill_fx_tick_offset: Number.isInteger(payload?.kill_fx_tick_offset) ? payload.kill_fx_tick_offset : 6,
       recording_skybox: normalizeRecordingSkyboxId(payload?.recording_skybox),
+      recording_map_material: normalizeRecordingMapMaterialId(payload?.recording_map_material),
       experimental: { pov_enabled: !!payload?.experimental_pov_enabled },
     };
     try {
@@ -1303,6 +1314,7 @@ export default function App() {
     recordInjectConsoleLines,
     experimentalPovEnabled,
     recordingSkybox,
+    recordingMapMaterial,
     hasDemos,
     parsing,
     handleUpload,
@@ -1545,6 +1557,7 @@ export default function App() {
           defaultOverrides={savedRecordWarmupDefaults ?? undefined}
           experimentalPovEnabled={experimentalPovEnabled}
           recordingSkybox={recordingSkybox}
+          recordingMapMaterial={recordingMapMaterial}
           cs2ExtraLaunchArgs={cs2ExtraLaunchArgs}
           recordInjectConsoleLines={recordInjectConsoleLines}
           initObsTransEnabled={obsTransitionEnabled}

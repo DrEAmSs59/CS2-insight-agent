@@ -12,12 +12,14 @@ describe("DemoPlayOptionsModal", () => {
   it("previews the in-game layout and offers advanced playback after preflight", () => {
     const onPlayAdvanced = vi.fn();
     const onRecordingSkyboxChange = vi.fn();
+    const onRecordingMapMaterialChange = vi.fn();
     const customSkyboxId = `custom:${"a".repeat(32)}`;
     render(
       <DemoPlayOptionsModal
         open
         demoLabel="match.dem"
         recordingSkybox="xuejing"
+        recordingMapMaterial="waxed_reflection"
         skyboxResources={[{
           id: customSkyboxId,
           display_name: "我的黄昏",
@@ -25,6 +27,7 @@ describe("DemoPlayOptionsModal", () => {
           available: true,
         }]}
         onRecordingSkyboxChange={onRecordingSkyboxChange}
+        onRecordingMapMaterialChange={onRecordingMapMaterialChange}
         onPlayAdvanced={onPlayAdvanced}
         onClose={() => {}}
       />,
@@ -65,11 +68,17 @@ describe("DemoPlayOptionsModal", () => {
       .toBe("/skyboxes/xuejing.webp");
     fireEvent.change(skyboxSelect, { target: { value: customSkyboxId } });
     expect(onRecordingSkyboxChange).toHaveBeenCalledWith(customSkyboxId);
+    const materialSelect = screen.getByRole("combobox", { name: "高级播放地图材质" });
+    expect(materialSelect.value).toBe("waxed_reflection");
+    fireEvent.change(materialSelect, { target: { value: "default" } });
+    expect(onRecordingMapMaterialChange).toHaveBeenCalledWith("default");
 
     const preview = screen.getByTestId("demo-play-preview");
+    const materialOption = screen.getByTestId("demo-play-map-material-option");
     const skyboxOption = screen.getByTestId("demo-play-skybox-option");
     const warning = screen.getByTestId("demo-play-gameinfo-warning");
-    expect(preview.compareDocumentPosition(skyboxOption) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(preview.compareDocumentPosition(materialOption) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(materialOption.compareDocumentPosition(skyboxOption) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(skyboxOption.compareDocumentPosition(warning) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(screen.getByText("将临时修改 CS2 文件")).toBeTruthy();
     expect(screen.queryByRole("button", { name: /普通播放/ })).toBeNull();

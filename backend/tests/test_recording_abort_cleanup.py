@@ -301,7 +301,15 @@ def test_pov_recording_uses_shared_exit_restore_and_reports_evidence(
         def __init__(self, config):
             calls.append(("manager", config))
 
-        def install(self, *, demo_path=None, voice_mode="team"):
+        def install(
+            self,
+            *,
+            map_name=None,
+            demo_path=None,
+            voice_mode="team",
+            skybox_id="default",
+            map_material_id="default",
+        ):
             calls.append(("install", demo_path, voice_mode))
 
         def status(self):

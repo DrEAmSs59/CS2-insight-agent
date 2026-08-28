@@ -180,6 +180,7 @@ export function useRecordingSessionController({
         cs2_extra_launch_args: session.cs2_extra_launch_args,
         record_inject_console_lines: session.record_inject_console_lines,
         skybox: { id: session.recording_skybox },
+        map_material: { id: session.recording_map_material },
         ...(povHud ? { pov_hud: povHud } : {}),
       };
       if (!recordingAbortRequestedRef.current) {

@@ -10,6 +10,11 @@ import {
   RECORDING_SKYBOX_OPTIONS,
   sortBuiltinRecordingSkyboxes,
 } from "../utils/recordingSkybox.js";
+import {
+  DEFAULT_RECORDING_MAP_MATERIAL,
+  normalizeRecordingMapMaterialId,
+  WAXED_REFLECTION_MAP_MATERIAL,
+} from "../utils/recordingMapMaterial.js";
 import Modal from "./ui/Modal.jsx";
 
 export default function DemoPlayOptionsModal({
@@ -20,15 +25,18 @@ export default function DemoPlayOptionsModal({
   error = "",
   launchingMode = "",
   recordingSkybox = DEFAULT_RECORDING_SKYBOX,
+  recordingMapMaterial = DEFAULT_RECORDING_MAP_MATERIAL,
   skyboxResources = [],
   onClose,
   onRetry,
   onPlayAdvanced,
   onRecordingSkyboxChange,
+  onRecordingMapMaterialChange,
 }) {
   const t = useT();
   const launching = !!launchingMode;
   const selectedSkybox = normalizeRecordingSkyboxId(recordingSkybox);
+  const selectedMapMaterial = normalizeRecordingMapMaterialId(recordingMapMaterial);
   const catalogBuiltinSkyboxes = sortBuiltinRecordingSkyboxes(
     Array.isArray(skyboxResources)
       ? skyboxResources.filter((item) => item?.source === "builtin" && item?.available)
@@ -205,6 +213,29 @@ export default function DemoPlayOptionsModal({
                   <span className="text-[13px]">⚙</span>
                 </div>
               </div>
+            </div>
+
+            <div
+              data-testid="demo-play-map-material-option"
+              className="flex items-center gap-3 rounded-lg border border-cs2-border bg-cs2-bg-input/45 px-3 py-2.5"
+            >
+              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-cs2-accent/10 text-cs2-accent">
+                <Package className="h-4 w-4" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="text-[12px] font-bold text-cs2-text-primary">{t("playDemo.mapMaterialTitle")}</p>
+                <p className="mt-0.5 text-[10px] leading-relaxed text-cs2-text-muted">{t("playDemo.mapMaterialHint")}</p>
+              </div>
+              <select
+                aria-label={t("playDemo.mapMaterialSelectLabel")}
+                value={selectedMapMaterial}
+                disabled={launching || !onRecordingMapMaterialChange}
+                onChange={(event) => onRecordingMapMaterialChange?.(event.target.value)}
+                className="min-w-44 max-w-[48%] rounded-md border border-cs2-border bg-cs2-bg-input px-2.5 py-2 text-xs font-semibold text-cs2-text-primary outline-none focus:border-cs2-accent/60 disabled:opacity-50"
+              >
+                <option value={DEFAULT_RECORDING_MAP_MATERIAL}>{t("record.mapMaterialDefault")}</option>
+                <option value={WAXED_REFLECTION_MAP_MATERIAL}>{t("record.mapMaterialWaxedReflection")}</option>
+              </select>
             </div>
 
             <div

@@ -415,6 +415,8 @@ class AppConfig(BaseModel):
     default_record_warmup: dict[str, Any] = Field(default_factory=dict)
     # 实验性录制天空盒预设；与 POV HUD 并列展示，但两者可独立启用。
     recording_skybox: str = "default"
+    # 录制/高级播放地图材质预设；default 保持原地图，waxed_reflection 临时覆盖。
+    recording_map_material: str = "default"
     # 录制启动 cs2.exe 时附加的命令行参数（shlex 分词后追加在内置参数与 +exec 之前）
     cs2_extra_launch_args: str = _DEFAULT_CS2_EXTRA_LAUNCH_ARGS
     # False 表示仍沿用程序默认启动项；True 表示用户已手动编辑过该字段，

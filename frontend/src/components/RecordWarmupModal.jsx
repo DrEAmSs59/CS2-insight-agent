@@ -13,6 +13,10 @@ import Cs2LaunchConsoleFields from "./Cs2LaunchConsoleFields";
 import { POV_CONFLICT_HUD, RecordingHudCard } from "./RecordingHudCard";
 import { useT } from "../i18n/useT.js";
 import { normalizeRecordingSkyboxId } from "../utils/recordingSkybox.js";
+import {
+  DEFAULT_RECORDING_MAP_MATERIAL,
+  normalizeRecordingMapMaterialId,
+} from "../utils/recordingMapMaterial.js";
 import { DEFAULT_POV_VOICE_MODE, normalizePovVoiceMode } from "../utils/povVoiceMode.js";
 
 /** 拼装随观战选项变化的 cvar（顺序与后端一致）；固定 cvar 见 record_inject_console_lines 配置 */
@@ -150,6 +154,7 @@ export default function RecordWarmupModal({
   defaultOverrides,
   experimentalPovEnabled = false,
   recordingSkybox = "default",
+  recordingMapMaterial = DEFAULT_RECORDING_MAP_MATERIAL,
   cs2ExtraLaunchArgs = "",
   recordInjectConsoleLines = "",
   initObsTransEnabled = false,
@@ -174,6 +179,7 @@ export default function RecordWarmupModal({
   const [killFxTickOffset, setKillFxTickOffset] = useState(6);
   const [sessionPovEnabled, setSessionPovEnabled] = useState(false);
   const [sessionSkybox, setSessionSkybox] = useState("default");
+  const [sessionMapMaterial, setSessionMapMaterial] = useState(DEFAULT_RECORDING_MAP_MATERIAL);
   const [sessionCs2ExtraLaunchArgs, setSessionCs2ExtraLaunchArgs] = useState("");
   const [sessionRecordInjectConsoleLines, setSessionRecordInjectConsoleLines] = useState("");
 
@@ -213,6 +219,7 @@ export default function RecordWarmupModal({
     setKillFxTickOffset(Number(initKillFxTickOffset) || 0);
     setSessionPovEnabled(!!experimentalPovEnabled);
     setSessionSkybox(normalizeRecordingSkyboxId(recordingSkybox));
+    setSessionMapMaterial(normalizeRecordingMapMaterialId(recordingMapMaterial));
     setSessionCs2ExtraLaunchArgs(cs2ExtraLaunchArgs);
     setSessionRecordInjectConsoleLines(recordInjectConsoleLines);
   }, [
@@ -223,6 +230,7 @@ export default function RecordWarmupModal({
     initObsTransDurationMs,
     experimentalPovEnabled,
     recordingSkybox,
+    recordingMapMaterial,
     initKbOverlayEnabled,
     initKbOverlayTickOffset,
     initKbOverlayPosition,
@@ -299,6 +307,7 @@ export default function RecordWarmupModal({
         kill_fx_tick_offset: Number(killFxTickOffset) || 0,
         experimental_pov_enabled: sessionPovEnabled,
         recording_skybox: normalizeRecordingSkyboxId(sessionSkybox),
+        recording_map_material: normalizeRecordingMapMaterialId(sessionMapMaterial),
         session_cs2_extra_launch_args: sessionCs2ExtraLaunchArgs,
         session_record_inject_console_lines: sessionRecordInjectConsoleLines,
       });
@@ -711,6 +720,8 @@ export default function RecordWarmupModal({
             onPovVoiceModeChange={(v) => set({ pov_voice_mode: v })}
             recordingSkybox={sessionSkybox}
             onRecordingSkyboxChange={setSessionSkybox}
+            recordingMapMaterial={sessionMapMaterial}
+            onRecordingMapMaterialChange={setSessionMapMaterial}
             omitDisclaimer
           />
 

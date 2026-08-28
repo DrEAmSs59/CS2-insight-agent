@@ -21,6 +21,7 @@ describe("playDemoInCs2", () => {
     await playDemoInCs2({ id: 42, path: "C:/tmp/a.dem" });
     expect(API.post).toHaveBeenCalledWith("/demos/42/play", {
       pov_hud: { enabled: false, radar_mode: 0, teamcounter_numeric: false, skybox_id: "default" },
+      map_material: { id: "default" },
     });
   });
 
@@ -30,6 +31,7 @@ describe("playDemoInCs2", () => {
     expect(API.post).toHaveBeenCalledWith("/demo/play", {
       path: "C:/tmp/a.dem",
       pov_hud: { enabled: false, radar_mode: 0, teamcounter_numeric: false, skybox_id: "default" },
+      map_material: { id: "default" },
     });
   });
 
@@ -37,10 +39,17 @@ describe("playDemoInCs2", () => {
     API.post.mockResolvedValue({ data: { ok: true } });
     await playDemoInCs2({
       id: 7,
-      advancedPlayback: { enabled: true, radar_mode: -1, teamcounter_numeric: true, skybox_id: "xuejing" },
+      advancedPlayback: {
+        enabled: true,
+        radar_mode: -1,
+        teamcounter_numeric: true,
+        skybox_id: "xuejing",
+        map_material_id: "waxed_reflection",
+      },
     });
     expect(API.post).toHaveBeenCalledWith("/demos/7/play", {
       pov_hud: { enabled: true, radar_mode: -1, teamcounter_numeric: true, skybox_id: "xuejing" },
+      map_material: { id: "waxed_reflection" },
     });
   });
 

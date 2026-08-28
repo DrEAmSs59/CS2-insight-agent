@@ -15,6 +15,7 @@ import {
 } from "../utils/warmupDefaults";
 import { useT } from "../i18n/useT.js";
 import { normalizeRecordingSkyboxId } from "../utils/recordingSkybox.js";
+import { normalizeRecordingMapMaterialId } from "../utils/recordingMapMaterial.js";
 import { normalizePovVoiceMode } from "../utils/povVoiceMode.js";
 import {
   buildRecordingPresetFile,
@@ -181,6 +182,7 @@ export default function CommonParamsModal({
   onSaveAllCommonParams,
   experimentalPovEnabled = false,
   recordingSkybox = "default",
+  recordingMapMaterial = "default",
   cs2ExtraLaunchArgs = "",
   recordInjectConsoleLines = "",
   obsTransitionEnabled: initObsTransitionEnabled = false,
@@ -235,6 +237,9 @@ export default function CommonParamsModal({
   const [killFxTickOffset, setKillFxTickOffset] = useState(() => Number(initKillFxTickOffset) || 0);
   const [povEnabled, setPovEnabled] = useState(() => !!experimentalPovEnabled);
   const [skyboxId, setSkyboxId] = useState(() => normalizeRecordingSkyboxId(recordingSkybox));
+  const [mapMaterialId, setMapMaterialId] = useState(
+    () => normalizeRecordingMapMaterialId(recordingMapMaterial),
+  );
   const [localCs2ExtraLaunchArgs, setLocalCs2ExtraLaunchArgs] = useState(cs2ExtraLaunchArgs);
   const [localRecordInjectLines, setLocalRecordInjectLines] = useState(recordInjectConsoleLines);
   const [saveState, setSaveState] = useState("idle");
@@ -282,6 +287,7 @@ export default function CommonParamsModal({
     setKillFxTickOffset(Number(initKillFxTickOffset) || 0);
     setPovEnabled(!!experimentalPovEnabled);
     setSkyboxId(normalizeRecordingSkyboxId(recordingSkybox));
+    setMapMaterialId(normalizeRecordingMapMaterialId(recordingMapMaterial));
     setLocalCs2ExtraLaunchArgs(cs2ExtraLaunchArgs);
     setLocalRecordInjectLines(recordInjectConsoleLines);
     setWarmupResolutionError("");
@@ -298,6 +304,7 @@ export default function CommonParamsModal({
     initObsTransitionDurationMs,
     experimentalPovEnabled,
     recordingSkybox,
+    recordingMapMaterial,
     initKbOverlayEnabled,
     initKbOverlayTickOffset,
     initKbOverlayPosition,
@@ -338,6 +345,7 @@ export default function CommonParamsModal({
       kill_fx_tick_offset: Number(killFxTickOffset) || 0,
       experimental_pov_enabled: povEnabled,
       recording_skybox: skyboxId,
+      recording_map_material: mapMaterialId,
     });
     setSaveState(result?.ok ? "saved" : "error");
     if (!result?.ok && result?.error) setSaveError(String(result.error));
@@ -362,6 +370,7 @@ export default function CommonParamsModal({
     killFxTickOffset,
     povEnabled,
     skyboxId,
+    mapMaterialId,
   ]);
 
   const saveDisabled = !configReady || saveState === "saving" || batchRecording;
@@ -381,6 +390,7 @@ export default function CommonParamsModal({
     kill_fx_tick_offset: Number(killFxTickOffset) || 0,
     experimental_pov_enabled: povEnabled,
     recording_skybox: skyboxId,
+    recording_map_material: mapMaterialId,
   }), [
     presetPacing,
     warmupOpts,
@@ -396,6 +406,7 @@ export default function CommonParamsModal({
     killFxTickOffset,
     povEnabled,
     skyboxId,
+    mapMaterialId,
   ]);
 
   const handleExportPreset = useCallback(() => {
@@ -452,6 +463,7 @@ export default function CommonParamsModal({
       setKillFxTickOffset(parsed.kill_fx_tick_offset);
       setPovEnabled(parsed.experimental_pov_enabled);
       setSkyboxId(parsed.recording_skybox);
+      setMapMaterialId(parsed.recording_map_material);
       setWarmupResolutionError("");
       setSaveError("");
       setSaveState("idle");
@@ -839,6 +851,8 @@ export default function CommonParamsModal({
                 onPovVoiceModeChange={(v) => patchWarmup({ pov_voice_mode: v })}
                 recordingSkybox={skyboxId}
                 onRecordingSkyboxChange={setSkyboxId}
+                recordingMapMaterial={mapMaterialId}
+                onRecordingMapMaterialChange={setMapMaterialId}
                 omitEyebrow
                 embedded
               />

@@ -17,6 +17,7 @@ const preset = {
   kill_fx_tick_offset: 6,
   experimental_pov_enabled: false,
   recording_skybox: "xuejing",
+  recording_map_material: "waxed_reflection",
 };
 
 describe("recording preset share JSON", () => {
@@ -55,6 +56,18 @@ describe("recording preset share JSON", () => {
     const { recording_skybox: _removed, ...legacyPreset } = preset;
     const file = { ...buildRecordingPresetFile(legacyPreset), version: 2 };
     expect(parseRecordingPresetFile(file, RECORD_WARMUP_DEFAULT_OPTIONS).recording_skybox).toBe("default");
+  });
+
+  test("defaults legacy presets to the original map material", () => {
+    const { recording_map_material: _removed, ...legacyPreset } = preset;
+    const file = { ...buildRecordingPresetFile(legacyPreset), version: 3 };
+    expect(parseRecordingPresetFile(file, RECORD_WARMUP_DEFAULT_OPTIONS).recording_map_material)
+      .toBe("default");
+  });
+
+  test("rejects an unknown map material", () => {
+    const file = buildRecordingPresetFile({ ...preset, recording_map_material: "chrome" });
+    expect(() => parseRecordingPresetFile(file, RECORD_WARMUP_DEFAULT_OPTIONS)).toThrow();
   });
 
   test("rejects an unknown skybox", () => {

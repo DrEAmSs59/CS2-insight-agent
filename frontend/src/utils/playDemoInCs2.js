@@ -1,6 +1,7 @@
 import API from "../api/api.js";
 import { messageFromApiCode, parseApiDetail } from "./apiErrorMessages.js";
 import { normalizeRecordingSkyboxId } from "./recordingSkybox.js";
+import { normalizeRecordingMapMaterialId } from "./recordingMapMaterial.js";
 
 export async function getDemoPlaybackPreflight() {
   const { data } = await API.get("/demo/playback/preflight");
@@ -24,6 +25,9 @@ export async function playDemoInCs2({ id = null, path = null, advancedPlayback =
       radar_mode: Number(playback?.radar_mode) === -1 ? -1 : 0,
       teamcounter_numeric: !!playback?.teamcounter_numeric,
       skybox_id: normalizeRecordingSkyboxId(playback?.skybox_id),
+    },
+    map_material: {
+      id: normalizeRecordingMapMaterialId(playback?.map_material_id),
     },
   };
   const demoId = id != null && String(id).trim() !== "" ? Number(id) : null;

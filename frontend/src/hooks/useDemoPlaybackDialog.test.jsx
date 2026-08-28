@@ -44,6 +44,7 @@ describe("useDemoPlaybackDialog restoration monitor", () => {
       cs2_running: false,
       playback_active: false,
       recording_skybox: "xuejing",
+      recording_map_material: "waxed_reflection",
       skyboxes: [{
         id: customSkyboxId,
         display_name: "测试星空",
@@ -71,14 +72,20 @@ describe("useDemoPlaybackDialog restoration monitor", () => {
     fireEvent.click(screen.getByRole("button", { name: "open" }));
     await screen.findByRole("button", { name: /启动高级播放 Demo/ });
     const skyboxSelect = screen.getByRole("combobox", { name: "高级播放天空盒" });
+    const materialSelect = screen.getByRole("combobox", { name: "高级播放地图材质" });
     expect(skyboxSelect.value).toBe("xuejing");
+    expect(materialSelect.value).toBe("waxed_reflection");
     fireEvent.change(skyboxSelect, { target: { value: customSkyboxId } });
     fireEvent.click(screen.getByRole("button", { name: /启动高级播放 Demo/ }));
 
     await screen.findByText("POV 文件已按备份完整恢复");
     expect(playDemoInCs2).toHaveBeenCalledWith(expect.objectContaining({
       id: 7,
-      advancedPlayback: expect.objectContaining({ enabled: true, skybox_id: customSkyboxId }),
+      advancedPlayback: expect.objectContaining({
+        enabled: true,
+        skybox_id: customSkyboxId,
+        map_material_id: "waxed_reflection",
+      }),
     }));
     await waitFor(() => expect(getDemoPlaybackStatus).toHaveBeenCalledWith("session-7"));
   });

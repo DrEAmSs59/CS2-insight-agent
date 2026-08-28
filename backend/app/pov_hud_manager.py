@@ -18,6 +18,12 @@ from typing import Any, Callable, Mapping, Optional
 
 from .cs2_config_backup import is_cs2_running
 from .demo_voice_hud import DemoVoiceHudBuild, DemoVoiceHudError, build_demo_voice_hud_vpk
+from .map_material_vpk import (
+    DEFAULT_MAP_MATERIAL_ID,
+    MapMaterialVpkError,
+    compose_recording_map_material_vpk,
+    normalize_map_material_id,
+)
 from .pov_constants import DEFAULT_POV_VOICE_MODE, normalize_pov_voice_mode
 from .skybox_vpk import (
     DEFAULT_SKYBOX_ID,
@@ -302,6 +308,9 @@ class PovHudManager:
     def get_skybox_assets_dir(self) -> Path:
         return self.get_project_pov_dir() / "skyboxes"
 
+    def get_map_material_assets_dir(self) -> Path:
+        return self.get_project_pov_dir() / "map_materials"
+
     def get_reference_default_gameinfo_path(self) -> Path:
         return self.get_project_pov_dir() / "gameinfo.gi.default"
 
@@ -445,6 +454,7 @@ class PovHudManager:
         voice_mode: str = DEFAULT_POV_VOICE_MODE,
         advanced_playback_enabled: bool = False,
         skybox_id: str = DEFAULT_SKYBOX_ID,
+        map_material_id: str = DEFAULT_MAP_MATERIAL_ID,
     ) -> Optional[DemoVoiceHudBuild]:
         if sys.platform != "win32":
             raise PovHudError("POV HUD 仅支持 Windows。")
@@ -459,8 +469,15 @@ class PovHudManager:
             selected_skybox = normalize_skybox_id(skybox_id)
         except SkyboxVpkError as exc:
             raise PovHudError(str(exc)) from exc
+        try:
+            selected_map_material = normalize_map_material_id(map_material_id)
+        except MapMaterialVpkError as exc:
+            raise PovHudError(str(exc)) from exc
 
-        needs_pov_source = demo_path is not None or selected_skybox == DEFAULT_SKYBOX_ID
+        needs_pov_source = demo_path is not None or (
+            selected_skybox == DEFAULT_SKYBOX_ID
+            and selected_map_material == DEFAULT_MAP_MATERIAL_ID
+        )
         pov_src: Optional[Path] = None
         if needs_pov_source:
             pov_src = self.get_pov_vpk_source_path(map_name)
@@ -526,6 +543,27 @@ class PovHudManager:
             # its HUD package. Reuse that detected map for skybox composition
             # when the caller did not have a separate map name.
             effective_map_name = str(voice_build.radar_map or "").strip()
+        visual_layer_enabled = (
+            selected_map_material != DEFAULT_MAP_MATERIAL_ID
+            or selected_skybox != DEFAULT_SKYBOX_ID
+        )
+        if demo_path is not None and package_bytes is None and visual_layer_enabled:
+            if pov_src is None:
+                raise PovHudError("未找到 POV HUD 资源文件，请确认 pov 目录下资源完整。")
+            package_bytes = pov_src.read_bytes()
+        if selected_map_material != DEFAULT_MAP_MATERIAL_ID:
+            map_material_assets_dir = self.get_map_material_assets_dir()
+            if not map_material_assets_dir.is_dir():
+                raise PovHudError(f"未找到地图材质资源目录：{map_material_assets_dir}")
+            try:
+                package_bytes = compose_recording_map_material_vpk(
+                    assets_dir=map_material_assets_dir,
+                    base_vpk_bytes=package_bytes,
+                    material_id=selected_map_material,
+                    map_name=effective_map_name,
+                )
+            except (OSError, MapMaterialVpkError) as exc:
+                raise PovHudError(f"地图材质 VPK 生成失败：{exc}") from exc
         if selected_skybox != DEFAULT_SKYBOX_ID:
             skybox_assets_dir = (
                 self.get_skybox_assets_dir()
@@ -539,14 +577,9 @@ class PovHudManager:
                 # so enabling a skybox never brings the POV Panorama overrides
                 # into the ordinary HUD. POV recording composes onto its
                 # demo-specific package (or its static fallback).
-                skybox_base = package_bytes
-                if demo_path is not None and skybox_base is None:
-                    if pov_src is None:
-                        raise PovHudError("未找到 POV HUD 资源文件，请确认 pov 目录下资源完整。")
-                    skybox_base = pov_src.read_bytes()
                 package_bytes = compose_recording_skybox_vpk(
                     builtin_assets_dir=skybox_assets_dir,
-                    base_vpk_bytes=skybox_base,
+                    base_vpk_bytes=package_bytes,
                     skybox_id=selected_skybox,
                     map_name=effective_map_name,
                 )
@@ -582,6 +615,8 @@ class PovHudManager:
 
         if voice_build is not None:
             source_basename = voice_template.name
+        elif selected_map_material != DEFAULT_MAP_MATERIAL_ID and demo_path is None:
+            source_basename = f"map_material:{selected_map_material}"
         elif selected_skybox != DEFAULT_SKYBOX_ID and demo_path is None:
             source_basename = (
                 Path(SKYBOX_ASSETS[selected_skybox][0]).name
@@ -591,16 +626,28 @@ class PovHudManager:
         else:
             source_basename = pov_src.name if pov_src is not None else ""
 
-        manifest = {
-            "state": "prepared",
-            "enabled_by": "CS2 Insight Agent",
-            "feature": (
+        if selected_map_material != DEFAULT_MAP_MATERIAL_ID:
+            if demo_path is not None and selected_skybox != DEFAULT_SKYBOX_ID:
+                feature = "experimental_pov_with_map_material_and_skybox"
+            elif demo_path is not None:
+                feature = "experimental_pov_with_map_material"
+            elif selected_skybox != DEFAULT_SKYBOX_ID:
+                feature = "recording_map_material_with_skybox"
+            else:
+                feature = "recording_map_material"
+        else:
+            feature = (
                 "experimental_pov_with_skybox"
                 if demo_path is not None and selected_skybox != DEFAULT_SKYBOX_ID
                 else "recording_skybox"
                 if selected_skybox != DEFAULT_SKYBOX_ID
                 else "experimental_pov"
-            ),
+            )
+
+        manifest = {
+            "state": "prepared",
+            "enabled_by": "CS2 Insight Agent",
+            "feature": feature,
             "installed_at": datetime.now(timezone.utc).isoformat(),
             "gameinfo_path": str(gi_path),
             "backup_gameinfo_path": str(bak_path),
@@ -652,6 +699,7 @@ class PovHudManager:
             ),
             "demo_map_name_used": effective_map_name,
             "recording_skybox_id": selected_skybox,
+            "recording_map_material_id": selected_map_material,
             "original_gameinfo_sha256": original_sha,
         }
         try:

@@ -37,6 +37,26 @@ The supported maps are Dust II, Inferno, Mirage, Nuke, Overpass, Anubis,
 Cache, and Ancient. `default` installs no recording VPK in ordinary mode and
 adds no sky aliases in POV mode, preserving the map's original sky.
 
+## Recording map-material layer
+
+`map_materials/waxed_reflection/catalog.vpk` is a product asset catalog, not a
+mountable map preset. Its manifest maps the exact validated compiled material
+bytes for Dust II, Ancient, Mirage, Nuke, Anubis, Inferno, Overpass, and Cache
+to their real target paths. At recording or Advanced-playback launch time the
+backend reads only the selected map entries and composes them into the same
+temporary `pov.vpk` used by POV HUD and skybox replacement. The catalog itself
+is never added to `gameinfo.gi`, and no per-map VPK is shipped or permanently
+mounted.
+
+The `waxed_reflection` profile preserves the accepted original map brightness,
+uses the validated waxed wall/floor/crate materials, disables sun and direct
+lighting, and keeps indirect lighting enabled. It can run by itself or merge
+with POV HUD and a selected skybox. `default` adds neither material entries nor
+lighting commands. Rebuild the catalog from the locally verified research
+artifacts with `python tools/build_waxed_map_material_catalog.py`; the builder
+checks source hashes, rejects post-process or sky modifications, and verifies
+the complete generated VPK before writing it.
+
 The same dynamic package also embeds an 8Hz XUID-bound radar track (payload
 index 8). At runtime Panorama hides the stock team-colored radar, draws the
 stock map backdrop, and interpolates teammate markers at frame rate with real

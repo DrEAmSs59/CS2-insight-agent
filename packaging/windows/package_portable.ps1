@@ -303,7 +303,8 @@ $PovSrc = Join-Path $Root "pov"
 $PovHasAssets = (
     (Test-Path (Join-Path $PovSrc "pov.vpk")) -or
     (Test-Path (Join-Path $PovSrc "pov_default.vpk")) -or
-    (Test-Path (Join-Path $PovSrc "skyboxes"))
+    (Test-Path (Join-Path $PovSrc "skyboxes")) -or
+    (Test-Path (Join-Path $PovSrc "map_materials"))
 )
 $DestPov = Join-Path $OutDir "pov"
 if ($PovHasAssets) {
@@ -312,7 +313,7 @@ if ($PovHasAssets) {
     if ($LASTEXITCODE -ge 8) { throw "robocopy pov failed (exit $LASTEXITCODE)" }
 }
 else {
-    Write-Host "跳过 pov/：未找到 POV HUD 或天空盒资源目录，便携包内将无法安装录制 VPK。" -ForegroundColor Yellow
+    Write-Host "跳过 pov/：未找到 POV HUD、地图材质或天空盒资源目录，便携包内将无法安装录制 VPK。" -ForegroundColor Yellow
 }
 
 # --- data/（示例配置、OBS basic.ini 等；排除本机 SQLite、用户配置、备份与日志）---
