@@ -1,7 +1,7 @@
 import { cs2BaseItemForModel, resolveCs2WeaponModel } from "../../../../../utils/cs2ItemCatalog.js";
 
 /**
- * 将解析器武器 id / 展示名映射为 hud.hlae.site（One Studio CSGO HUD Generator）打包的 SVG 文件名。
+ * 将解析器武器 id / 展示名映射为项目内置的击杀公告 SVG 文件名。
  * 资源在 `public/hud-death-notice/`。
  *
  * 5E 等 demo 常见 `weapon_key` 如 `5e_xxxx_ak47`，不能整串相等判断；在归一化后的字符串里
