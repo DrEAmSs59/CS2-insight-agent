@@ -7,7 +7,8 @@
 // SteamID/slot/team roster, reserved slots, radar track at index 8,
 // kill/HS attacker-feedback cues at index 9, flash-blind intervals at index 10,
 // reconstructed team radio at index 11, advanced-playback menu data at index 12,
-// fixed recording voice audience at index 13].
+// fixed recording voice audience at index 13, trusted post-load session console
+// commands at index 14].
 ;(function CS2InsightDemoVoiceHud() {
     "use strict";
 
@@ -22,6 +23,10 @@
     const encodedRadio = packed[11] || null;
     const encodedAdvancedPlayback = packed[12] || null;
     const encodedRecordingVoiceMode = String(packed[13] || "team");
+    const encodedSessionConsoleCommands = Array.isArray(packed[14]) ? packed[14] : [];
+    const sessionConsoleCommands = encodedSessionConsoleCommands.map(function (command) {
+        return String(command || "").trim();
+    }).filter(Boolean);
     const recordingVoiceMode = ["all", "team", "enemy", "mute"].indexOf(encodedRecordingVoiceMode) >= 0
         ? encodedRecordingVoiceMode
         : "team";
@@ -72,6 +77,8 @@
     // Keep transient Insight overlays hidden briefly after the pre-record pause
     // is released while CS2 completes its deferred HUD rebuild.
     const TRANSIENT_HUD_RESUME_GRACE_TICKS = 32;
+    const SESSION_CONSOLE_COMMAND_PASSES = 3;
+    const SESSION_CONSOLE_COMMAND_REAPPLY_SECONDS = 1;
     // A paused demo_gototick does not reliably emit PanoramaGameTimeJumpEvent.
     // Recording then runs spec_player shortly after demo_resume, which can
     // republish the seek-stale match alert. Keep the alert suppressed through
@@ -133,6 +140,7 @@
         };
     });
     const controller = $.GetContextPanel();
+    let sessionConsoleCommandPasses = 0;
     const inputTracksByXuid = {};
     encodedInputTracks.forEach(function (encoded) {
         let previousTick = 0;
@@ -4923,6 +4931,28 @@
         }
     }
 
+    function applySessionConsoleCommandsAfterDemoLoad() {
+        if (!sessionConsoleCommands.length
+                || sessionConsoleCommandPasses >= SESSION_CONSOLE_COMMAND_PASSES) {
+            return;
+        }
+        const state = controller.GetDemoControllerState();
+        if (!state) {
+            $.Schedule(0.1, applySessionConsoleCommandsAfterDemoLoad);
+            return;
+        }
+        sessionConsoleCommands.forEach(function (command) {
+            try { GameInterfaceAPI.ConsoleCommand(command); } catch (errCommand) {}
+        });
+        sessionConsoleCommandPasses += 1;
+        if (sessionConsoleCommandPasses < SESSION_CONSOLE_COMMAND_PASSES) {
+            $.Schedule(
+                SESSION_CONSOLE_COMMAND_REAPPLY_SECONDS,
+                applySessionConsoleCommandsAfterDemoLoad,
+            );
+        }
+    }
+
     function advancedLocalizedUtilityName(raw) {
         const text = String(raw || "").trim();
         let key = text.toLowerCase();
@@ -6845,6 +6875,9 @@
         $.Schedule(0, updateRadioHud);
     }
     $.Schedule(0, guardSpectatorHudProfile);
+    if (sessionConsoleCommands.length) {
+        $.Schedule(0, applySessionConsoleCommandsAfterDemoLoad);
+    }
     if (advancedPlayback) {
         $.Schedule(0, advancedMenuTick);
     }

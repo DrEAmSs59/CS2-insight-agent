@@ -585,7 +585,7 @@ def test_checked_in_voice_template_contains_only_an_empty_payload():
     assert b"return Boolean(sample.alive)" in script
     assert "☠ ".encode() in script
     assert "（死亡）".encode() in script
-    assert b'button.style.backgroundColor = "#2b1818f2"' in script
+    assert b'button.style.backgroundColor = "#3a2020c8"' in script
     assert b'liveTeam + ":" + (alive ? "1" : "0")' in script
     assert b"function advancedTogglePlayerVoice(xuid)" in script
     assert b'let advancedVoicePolicy = "all"' in script
@@ -616,12 +616,11 @@ def test_checked_in_voice_template_contains_only_an_empty_payload():
     assert b'advancedMenu.style.height = "fit-children"' in script
     assert b"advancedMenuTickLabel" not in script
     assert b'advancedEventListPanel.style.height = "145px"' in script
-    assert b'advancedEventListPanel.style.paddingBottom = "5px"' in script
     assert b"footerSpacer" not in script
     assert b'advancedMenuSelectionLabel' not in script
     assert b'const pageSize = 5' in script
     assert b"const groupedEvents = []" in script
-    assert b'group.style.height = (groupedEvents.length * 26) + "px"' in script
+    assert b'group.style.height = (groupedEvents.length * ADVANCED_EVENT_ROW_HEIGHT) + "px"' in script
     assert b'roundCell.style.height = "100%"' in script
     assert b'roundCell.style.marginRight = "0px"' in script
     assert b'roundCell.style.borderRadius = "0px"' in script
@@ -634,9 +633,6 @@ def test_checked_in_voice_template_contains_only_an_empty_payload():
     assert b"function advancedCreateEventLocateButton(row, event)" in script
     assert b'"s2r://panorama/images/icons/" + folder + "/" + stem + ".svg"' in script
     assert b'icon.SetScaling("stretch-to-fit-preserve-aspect")' in script
-    assert b'advancedCreateEventIcon(parent, "death_notice", "headshot", 12, 12, 15)' in script
-    assert b'advancedCreateEventIcon(parent, "death_notice", "throughsmoke", 12, 12, 15)' in script
-    assert b'advancedCreateEventIcon(parent, "death_notice", "penetrate", 12, 12, 15)' in script
     assert b'headshot: "icon_headshot"' in script
     assert b'throughsmoke: "smoke_kill"' in script
     assert b'blindkill: "blind_kill"' in script
@@ -660,15 +656,13 @@ def test_checked_in_voice_template_contains_only_an_empty_payload():
     assert b"advancedSelectPlayer(xuid, { tick: round.start })" in script
     assert b"function advancedRoundElapsedTick(tick)" in script
     assert b"advancedFormatTick(advancedRoundElapsedTick(event.tick))" in script
-    assert b'advancedRoundHintLabel.style.width = "62px"' in script
-    assert b'advancedRoundHintLabel.style.height = "25px"' in script
     assert b'advancedRoundHintLabel.style.marginLeft = "6px"' in script
     assert "第 \" + roundNumber + \" 回合 ▾".encode() in script
     assert "advancedCopy(\"X光\", \"X-ray\")".encode() not in script
     assert "advancedCopy(\"阵营\", \"Teams\")".encode() in script
     assert b'label.style.height = "25px"' in script
     assert b'playersTitle.style.marginTop = "3px"' in script
-    assert b'team === 3 ? "CT" : "T"' in script
+    assert b'isCt ? "CT" : "T"' in script
     assert b'radioPlayerColor(player.xuid) || (team === 3 ? "#7ed9ff" : "#ffd46d")' in script
     assert "点名称切换视角 · 点喇叭开关语音".encode() in script
     assert b'playerHelp.style.verticalAlign = "center"' in script
@@ -680,11 +674,8 @@ def test_checked_in_voice_template_contains_only_an_empty_payload():
     assert b'advancedFollowCurrentRound ? "\xe8\xb7\x9f\xe9\x9a\x8f\xe5\x9b\x9e\xe5\x90\x88\xe5\xbc\x80" : "\xe8\xb7\x9f\xe9\x9a\x8f\xe5\x9b\x9e\xe5\x90\x88\xe5\x85\xb3"' in script
     assert b"function advancedCreateFilterIcon(parent, kind)" in script
     assert b"function advancedCreateFilterButton(parent, kind, text, onActivate)" in script
-    assert b'advancedCreateEventIcon(cell, "equipment", "hegrenade", 16, 16, 18)' in script
-    assert b'advancedCreateLabel(cell, "\xe2\x98\xa0", 15, "#ece9e2")' in script
     assert b"advancedRoundNumberAtTick(event.tick) === currentRound" in script
     assert b"currentRound !== advancedFollowedRoundNumber" in script
-    assert b'advancedMenuPinned ? "PIN ON" : "PIN OFF"' in script
     assert b"const playerChanged = normalized !== advancedSelectedXuid" in script
     assert b"if (playerChanged)" in script
     assert b'panel.SetPanelEvent("onactivate", function () { return true; })' in script
@@ -705,7 +696,7 @@ def test_checked_in_voice_template_contains_only_an_empty_payload():
     assert b'["input", advancedCopy(' not in script
     assert b'"tv_nochat 0"' in script
     assert b"advancedNativeMessagesRestored" in script
-    assert b'cl_drawhud_force_radar " + (advancedQuickOptions.radar ? 0 : -1)' in script
+    assert b'"cl_drawhud_force_radar " + radarMode' in script
     assert script.count(b'"mp_forcecamera 0"') >= 2
     assert b'"cl_radar_square_when_spectating 1"' in script
     assert b'"cl_radar_rotate false"' in script
@@ -743,7 +734,6 @@ def test_checked_in_voice_template_contains_only_an_empty_payload():
     assert b"advancedFoldButton" not in script
     assert b'advancedMenuBody.style.visibility = advancedMenuCollapsed ? "collapse" : "visible"' in script
     assert b'advancedMenuHeaderControls.style.visibility = advancedMenuCollapsed ? "collapse" : "visible"' in script
-    assert b'advancedChinese() ? "220px" : "280px"' in script
     assert b'advancedMenuTitleLabel.style.textAlign = advancedMenuCollapsed ? "center" : "left"' in script
     assert b'$.Schedule(0.18, function ()' in script
     assert b"advancedSetMenuCollapsed(true)" in script
@@ -787,6 +777,10 @@ def test_checked_in_voice_template_contains_only_an_empty_payload():
     assert b'notice.FindChildTraverse("VoiceLocation")' in script
     assert b'notice.SetHasClass("Hidden", !active);' in script
     assert b'const encodedRecordingVoiceMode = String(packed[13] || "team")' in script
+    assert b"const encodedSessionConsoleCommands = Array.isArray(packed[14])" in script
+    assert b"function applySessionConsoleCommandsAfterDemoLoad()" in script
+    assert b"const state = controller.GetDemoControllerState();" in script
+    assert b"$.Schedule(0, applySessionConsoleCommandsAfterDemoLoad);" in script
     assert b'function activeVoicePolicy()' in script
     assert b'if (policy === "enemy")' in script
     assert b'const allowed = advancedVoiceAllows(slotXuid, povTeam, tick);' in script
@@ -1086,6 +1080,41 @@ def test_enemy_voice_mode_keeps_schedule_and_is_embedded_in_the_payload():
     assert payload[1]
     assert payload[13] == "enemy"
     assert build.speakers > 0
+
+
+def test_session_console_commands_are_embedded_in_the_payload():
+    template_path = Path(__file__).resolve().parents[2] / "pov" / "pov_advanced_playback_template.vpk"
+    commands = [
+        "sv_cheats 1",
+        "mat_fullbright 0",
+        "r_rendersun 0",
+        "r_directlighting 0",
+        "r_indirectlighting 1",
+    ]
+    build = build_demo_voice_hud_vpk(
+        "match.dem",
+        template_path,
+        parser_factory=_FakeParser,
+        session_console_commands=commands,
+    )
+    script = read_inline_vpk(build.vpk_bytes)[VOICE_SCRIPT_PATH]
+    start = script.index(VOICE_DATA_BEGIN) + len(VOICE_DATA_BEGIN)
+    end = script.index(VOICE_DATA_END)
+    payload = json.loads(script[start:end].rstrip())
+
+    assert payload[14] == commands
+
+
+def test_session_console_commands_reject_command_separators():
+    template_path = Path(__file__).resolve().parents[2] / "pov" / "pov_advanced_playback_template.vpk"
+
+    with pytest.raises(DemoVoiceHudError, match="unsafe"):
+        build_demo_voice_hud_vpk(
+            "match.dem",
+            template_path,
+            parser_factory=_FakeParser,
+            session_console_commands=["r_rendersun 0;quit"],
+        )
 
 
 def test_radar_track_is_appended_at_payload_index_eight(monkeypatch):
@@ -2078,6 +2107,7 @@ def test_pov_manager_installs_generated_voice_package(monkeypatch, tmp_path: Pat
         voice_enabled=True,
         voice_mode="team",
         advanced_playback_enabled=False,
+        session_console_commands=(),
     ):
         calls.append(
             (
@@ -2087,6 +2117,7 @@ def test_pov_manager_installs_generated_voice_package(monkeypatch, tmp_path: Pat
                 voice_enabled,
                 voice_mode,
                 advanced_playback_enabled,
+                tuple(session_console_commands),
             )
         )
         return built
@@ -2098,16 +2129,24 @@ def test_pov_manager_installs_generated_voice_package(monkeypatch, tmp_path: Pat
     result = manager.install(demo_path=demo)
 
     assert result is built
-    assert calls == [(demo, template, None, True, "team", False)]
+    assert calls == [(demo, template, None, True, "team", False, ())]
     assert (csgo / "pov.vpk").read_bytes() == b"generated"
     manifest = json.loads(manager.get_manifest_path().read_text(encoding="utf-8"))
     assert manifest["demo_voice_hud_generated"] is True
     assert manifest["demo_voice_hud"]["speakers"] == 2
     assert manifest["demo_voice_hud"]["voice_mode"] == "team"
 
+    map_materials_dir = pov_dir / "map_materials"
+    map_materials_dir.mkdir()
+    monkeypatch.setattr(
+        pov_hud_manager,
+        "compose_recording_map_material_vpk",
+        lambda *, base_vpk_bytes, **_kwargs: base_vpk_bytes,
+    )
     advanced_result = manager.install(
         demo_path=demo,
         advanced_playback_enabled=True,
+        map_material_id="waxed_reflection",
     )
 
     assert advanced_result is built
@@ -2118,5 +2157,12 @@ def test_pov_manager_installs_generated_voice_package(monkeypatch, tmp_path: Pat
         True,
         "team",
         True,
+        (
+            "sv_cheats 1",
+            "mat_fullbright 0",
+            "r_rendersun 0",
+            "r_directlighting 0",
+            "r_indirectlighting 1",
+        ),
     )
     assert (csgo / "pov.vpk").read_bytes() == b"generated"

@@ -149,7 +149,10 @@ The menu payload is generated only for direct Advanced playback. Highlight
 recording continues to use the same POV assets and tracks but leaves index 12
 empty, so recording automation never receives an interactive edge menu. Its
 fixed `all` / `team` / `enemy` / `mute` voice audience is stored at payload
-index 13. Unlike
+index 13. Trusted session console commands are stored at payload index 14 and
+are applied only after Panorama can read the loaded demo-controller state; the
+short bounded reapply window prevents map initialization from restoring the
+pre-demo rendering values. Unlike
 ordinary POV generation, Advanced playback fails the launch preparation if its
 event index cannot be built instead of silently falling back to the static VPK.
 

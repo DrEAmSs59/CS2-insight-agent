@@ -22,6 +22,7 @@ from .map_material_vpk import (
     DEFAULT_MAP_MATERIAL_ID,
     MapMaterialVpkError,
     compose_recording_map_material_vpk,
+    map_material_console_commands,
     normalize_map_material_id,
 )
 from .pov_constants import DEFAULT_POV_VOICE_MODE, normalize_pov_voice_mode
@@ -507,6 +508,11 @@ class PovHudManager:
                     voice_enabled=voice_enabled,
                     voice_mode=resolved_voice_mode,
                     advanced_playback_enabled=advanced_playback_enabled,
+                    session_console_commands=(
+                        map_material_console_commands(selected_map_material)
+                        if advanced_playback_enabled
+                        else ()
+                    ),
                 )
                 logger.info(
                     "Built demo voice HUD: packets=%d speakers=%d intervals=%d "

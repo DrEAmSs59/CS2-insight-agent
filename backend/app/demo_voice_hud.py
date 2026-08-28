@@ -46,13 +46,16 @@ class DemoVoiceHudError(RuntimeError):
 # index 10 is POV flash-blind intervals (HUD wash + tinnitus cues); index 11
 # is the fully reconstructed lower-left feed (radio, chat, server notices);
 # index 12 is the interactive advanced-playback roster/event index; index 13
-# stores the fixed recording voice audience (advanced playback has live controls).
+# stores the fixed recording voice audience (advanced playback has live controls);
+# index 14 stores trusted session console commands that Panorama reapplies only
+# after the demo controller reports a loaded map.
 RADAR_PAYLOAD_INDEX = 8
 KILL_FEEDBACK_PAYLOAD_INDEX = 9
 FLASH_BLIND_PAYLOAD_INDEX = 10
 RADIO_PAYLOAD_INDEX = 11
 ADVANCED_PLAYBACK_PAYLOAD_INDEX = 12
 VOICE_MODE_PAYLOAD_INDEX = 13
+SESSION_CONSOLE_COMMANDS_PAYLOAD_INDEX = 14
 RADAR_SAMPLE_HZ = 8
 _GROUND_ENTITY_FIELD = "CCSPlayerPawn.m_hGroundEntity"
 _LAST_JUMP_TICK_FIELD = (
@@ -362,7 +365,7 @@ def _normalize_map_name(raw: Any) -> str:
 
 def _pad_payload_slots(
     packed: list[Any],
-    length: int = VOICE_MODE_PAYLOAD_INDEX + 1,
+    length: int = SESSION_CONSOLE_COMMANDS_PAYLOAD_INDEX + 1,
 ) -> list[Any]:
     if not isinstance(packed, list):
         raise DemoVoiceHudError("voice HUD payload has an unsupported shape")
@@ -371,6 +374,22 @@ def _pad_payload_slots(
     while len(packed) < length:
         packed.append([])
     return packed
+
+
+def _normalize_session_console_commands(
+    commands: Iterable[object] | None,
+) -> list[str]:
+    normalized: list[str] = []
+    for raw in commands or ():
+        command = str(raw or "").strip()
+        if not command:
+            continue
+        if len(command) > 256 or any(char in command for char in "\r\n;"):
+            raise DemoVoiceHudError("session console command is unsafe")
+        normalized.append(command)
+        if len(normalized) > 32:
+            raise DemoVoiceHudError("too many session console commands")
+    return normalized
 
 
 def _encode_kill_feedback_events(
@@ -3589,6 +3608,7 @@ def build_demo_voice_hud_vpk(
     voice_enabled: bool = True,
     voice_mode: str = DEFAULT_POV_VOICE_MODE,
     advanced_playback_enabled: bool = False,
+    session_console_commands: Iterable[object] | None = None,
 ) -> DemoVoiceHudBuild:
     payload, stats = build_voice_payload(demo_path, parser_factory=parser_factory)
     input_stats = {
@@ -3731,6 +3751,9 @@ def build_demo_voice_hud_vpk(
     )
     packed = _pad_payload_slots(json.loads(payload.decode("ascii")))
     packed[VOICE_MODE_PAYLOAD_INDEX] = resolved_voice_mode
+    packed[SESSION_CONSOLE_COMMANDS_PAYLOAD_INDEX] = (
+        _normalize_session_console_commands(session_console_commands)
+    )
     payload = json.dumps(
         packed,
         ensure_ascii=True,
