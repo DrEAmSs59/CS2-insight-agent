@@ -392,7 +392,7 @@ export default {
   "record.mapMaterialDefault": "原始地图材质（不替换）",
   "record.mapMaterialWaxedReflection": "打蜡反光倒影",
   "record.mapMaterialSupportedMaps": "支持 Dust II、Ancient、Mirage、Nuke、Anubis、Inferno、Overpass 和 Cache。仅在 CS2 载入对应 Demo 前临时生成本局使用的 pov.vpk。",
-  "record.mapMaterialOutcome": "已启用打蜡反光倒影：保持地图原有亮度，关闭太阳光与直接光照，保留间接光和高强度环境反射。",
+  "record.mapMaterialOutcome": "已启用打蜡反光倒影：保持地图原有亮度，关闭太阳光与直接光照，保留间接光和高强度环境反射。为获得最佳效果，请在游戏中将「视频设置 → 高级视频设置 → 光影细节」设为「高」。",
   "record.skyboxTitle": "天空盒替换",
   "record.skyboxSubtitle": "与 POV HUD 同属实验性功能，但可独立选择；普通录制和 POV 录制都会使用这里选择的天空。",
   "record.skyboxSelectLabel": "录制天空盒",

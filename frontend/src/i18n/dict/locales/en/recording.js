@@ -392,7 +392,7 @@ export default {
   "record.mapMaterialDefault": "Original map material (no replacement)",
   "record.mapMaterialWaxedReflection": "Waxed reflective finish",
   "record.mapMaterialSupportedMaps": "Supports Dust II, Ancient, Mirage, Nuke, Anubis, Inferno, Overpass, and Cache. A session-only pov.vpk is generated before CS2 loads the matching demo.",
-  "record.mapMaterialOutcome": "Waxed reflections enabled: original map brightness is preserved, sun and direct lighting are disabled, and indirect lighting plus strong environment reflections remain.",
+  "record.mapMaterialOutcome": "Waxed reflections enabled: original map brightness is preserved, sun and direct lighting are disabled, and indirect lighting plus strong environment reflections remain. For the best results, set Video Settings → Advanced Video → Shader Detail to High in CS2.",
   "record.skyboxTitle": "Skybox replacement",
   "record.skyboxSubtitle": "Experimental alongside POV HUD, but selected independently. It applies to both normal and POV recording.",
   "record.skyboxSelectLabel": "Recording skybox",
