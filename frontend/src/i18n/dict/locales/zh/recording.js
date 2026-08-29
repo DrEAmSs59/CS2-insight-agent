@@ -397,6 +397,8 @@ export default {
   "record.skyboxSubtitle": "与 POV HUD 同属实验性功能，但可独立选择；普通录制和 POV 录制都会使用这里选择的天空。",
   "record.skyboxSelectLabel": "录制天空盒",
   "record.skyboxDefault": "原地图天空（不替换）",
+  "record.skyboxChromaGreen": "纯绿幕（AE / PR 抠像）",
+  "record.skyboxChromaBlue": "纯蓝幕（AE / PR 抠像）",
   "record.skyboxCartoon3": "Cartoon 3",
   "record.skyboxXuejing": "雪景",
   "record.skyboxYinhezhanjian": "银河战舰",

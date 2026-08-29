@@ -101,7 +101,8 @@ def test_bundled_asset_directory_contains_every_catalog_skybox() -> None:
         material_source = asset_dir / skybox_id / Path(material_path).name
         texture_source = asset_dir / skybox_id / Path(texture_path).name
         assert material_source.stat().st_size > 0
-        assert texture_source.stat().st_size > 2_000_000
+        minimum_texture_size = 30_000 if skybox_id.startswith("chroma_") else 2_000_000
+        assert texture_source.stat().st_size > minimum_texture_size
         discovered_paths.update((material_path, texture_path))
     assert discovered_paths == expected_paths
     assert not (project_root / "pov" / "skybox_assets.vpk").exists()

@@ -26,7 +26,16 @@ describe("custom recording skybox ids", () => {
   });
 
   it("accepts every newly bundled skybox family", () => {
-    for (const skyboxId of ["cartoon", "cartoon10", "egg1", "egg27", "huoshaoyun", "xiyang"]) {
+    for (const skyboxId of [
+      "chroma_green",
+      "chroma_blue",
+      "cartoon",
+      "cartoon10",
+      "egg1",
+      "egg27",
+      "huoshaoyun",
+      "xiyang",
+    ]) {
       expect(isRecordingSkyboxId(skyboxId)).toBe(true);
       expect(normalizeRecordingSkyboxId(skyboxId)).toBe(skyboxId);
     }
@@ -57,6 +66,8 @@ describe("custom recording skybox ids", () => {
   });
 
   it("resolves bundled preview paths and leaves custom resources without one", () => {
+    expect(recordingSkyboxPreviewUrl("chroma_green")).toBe("/skyboxes/chroma_green.webp");
+    expect(recordingSkyboxPreviewUrl("chroma_blue")).toBe("/skyboxes/chroma_blue.webp");
     expect(recordingSkyboxPreviewUrl("xuejing")).toBe("/skyboxes/xuejing.webp");
     expect(recordingSkyboxPreviewUrl("default")).toBe("");
     expect(recordingSkyboxPreviewUrl(`custom:${"a".repeat(32)}`)).toBe("");

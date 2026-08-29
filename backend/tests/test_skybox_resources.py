@@ -93,6 +93,13 @@ def test_bundled_cartoon_catalog_uses_natural_numeric_order() -> None:
     ]
 
 
+def test_chroma_key_skyboxes_are_first_and_have_postproduction_names() -> None:
+    resources = list_skybox_resources()
+    assert [item["id"] for item in resources[:2]] == ["chroma_green", "chroma_blue"]
+    assert resources[0]["display_name"] == "纯绿幕（AE / PR 抠像）"
+    assert resources[1]["display_name"] == "纯蓝幕（AE / PR 抠像）"
+
+
 def test_upload_rejects_texture_that_does_not_match_vmat(
     bundled_entries: dict[str, bytes],
 ) -> None:

@@ -10,6 +10,8 @@ from .demo_voice_hud import read_inline_vpk, write_inline_vpk
 
 DEFAULT_SKYBOX_ID = "default"
 _SKYBOX_TEXTURE_FILENAMES: Mapping[str, str] = {
+    "chroma_green": "chroma_green.vtex_c",
+    "chroma_blue": "chroma_blue.vtex_c",
     "xuejing": "xuejing_exr_a06856b0.vtex_c",
     "yinhezhanjian": "yinhezhanjian_exr_6b37921e.vtex_c",
     "huoshaoyun": "huoshaoyun_exr_9697eee5.vtex_c",

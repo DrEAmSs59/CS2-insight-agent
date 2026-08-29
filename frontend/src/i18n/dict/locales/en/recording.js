@@ -397,6 +397,8 @@ export default {
   "record.skyboxSubtitle": "Experimental alongside POV HUD, but selected independently. It applies to both normal and POV recording.",
   "record.skyboxSelectLabel": "Recording skybox",
   "record.skyboxDefault": "Original map sky (no replacement)",
+  "record.skyboxChromaGreen": "Solid green (AE / Premiere keying)",
+  "record.skyboxChromaBlue": "Solid blue (AE / Premiere keying)",
   "record.skyboxCartoon3": "Cartoon 3",
   "record.skyboxXuejing": "Snow scene",
   "record.skyboxYinhezhanjian": "Galactic warship",

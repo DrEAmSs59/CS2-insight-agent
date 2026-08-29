@@ -26,6 +26,8 @@ MATERIAL_FILENAME = "material.vmat_c"
 TEXTURE_FILENAME = "texture.vtex_c"
 
 BUILTIN_SKYBOX_NAMES = {
+    "chroma_green": "纯绿幕（AE / PR 抠像）",
+    "chroma_blue": "纯蓝幕（AE / PR 抠像）",
     "xuejing": "雪景",
     "yinhezhanjian": "银河战舰",
     "huoshaoyun": "火烧云",

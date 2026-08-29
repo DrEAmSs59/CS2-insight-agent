@@ -2,6 +2,8 @@ export const DEFAULT_RECORDING_SKYBOX = "default";
 export const RECORDING_SKYBOX_RESET_EVENT = "cs2-insight:recording-skybox-reset";
 
 export const BUILTIN_RECORDING_SKYBOX_IDS = Object.freeze([
+  "chroma_green",
+  "chroma_blue",
   "xuejing",
   "yinhezhanjian",
   "huoshaoyun",
@@ -41,6 +43,8 @@ export const BUILTIN_RECORDING_SKYBOX_IDS = Object.freeze([
 ]);
 
 const BUILTIN_LABEL_KEYS = Object.freeze({
+  chroma_green: "record.skyboxChromaGreen",
+  chroma_blue: "record.skyboxChromaBlue",
   cartoon3: "record.skyboxCartoon3",
   xuejing: "record.skyboxXuejing",
   yinhezhanjian: "record.skyboxYinhezhanjian",

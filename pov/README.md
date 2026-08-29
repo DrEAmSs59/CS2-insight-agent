@@ -37,6 +37,13 @@ The supported maps are Dust II, Inferno, Mirage, Nuke, Overpass, Anubis,
 Cache, and Ancient. `default` installs no recording VPK in ordinary mode and
 adds no sky aliases in POV mode, preserving the map's original sky.
 
+The first two maintained choices, `chroma_green` and `chroma_blue`, are solid
+linear `(0, 1, 0)` and `(0, 0, 1)` cubemaps for chroma keying in After Effects
+or Premiere Pro. Their sky materials use zero brightness/render-only exposure
+bias, and the texture catalog keeps the complete cube mip chain. Because every
+face is constant, LZ4 compresses each compiled texture far below the size of a
+photographic skybox without dropping any cube face or mip level.
+
 ## Recording map-material layer
 
 `map_materials/waxed_reflection/catalog.vpk` is a product asset catalog, not a
