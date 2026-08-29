@@ -15,14 +15,13 @@ describe("RecordingProgressModal", () => {
     render(
       <RecordingProgressModal
         open
-        statusText="正在准备录制…"
         queueLength={3}
         onAbort={onAbort}
       />,
     );
 
     expect(screen.getByRole("dialog")).toBeTruthy();
-    expect(screen.getByText("正在准备录制…")).toBeTruthy();
+    expect(screen.getByText("正在准备所需的地图资源，稍后将自动进入CS2。")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "中止录制" }));
     expect(onAbort).toHaveBeenCalledTimes(1);
   });

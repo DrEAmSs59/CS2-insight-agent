@@ -25,19 +25,14 @@ describe("custom recording skybox ids", () => {
     expect(normalizeRecordingSkyboxId("custom:nope")).toBe("default");
   });
 
-  it("accepts every newly bundled skybox family", () => {
-    for (const skyboxId of [
-      "chroma_green",
-      "chroma_blue",
-      "cartoon",
-      "cartoon10",
-      "egg1",
-      "egg27",
-      "huoshaoyun",
-      "xiyang",
-    ]) {
+  it("accepts only the bundled Cartoon family", () => {
+    for (const skyboxId of ["cartoon", "cartoon3", "cartoon10"]) {
       expect(isRecordingSkyboxId(skyboxId)).toBe(true);
       expect(normalizeRecordingSkyboxId(skyboxId)).toBe(skyboxId);
+    }
+    for (const skyboxId of ["chroma_green", "xuejing", "egg1"]) {
+      expect(isRecordingSkyboxId(skyboxId)).toBe(false);
+      expect(normalizeRecordingSkyboxId(skyboxId)).toBe("default");
     }
   });
 
@@ -65,10 +60,10 @@ describe("custom recording skybox ids", () => {
     ]).map(({ id }) => id)).toEqual(["cartoon", "cartoon1", "cartoon3", "cartoon10"]);
   });
 
-  it("resolves bundled preview paths and leaves custom resources without one", () => {
-    expect(recordingSkyboxPreviewUrl("chroma_green")).toBe("/skyboxes/chroma_green.webp");
-    expect(recordingSkyboxPreviewUrl("chroma_blue")).toBe("/skyboxes/chroma_blue.webp");
-    expect(recordingSkyboxPreviewUrl("xuejing")).toBe("/skyboxes/xuejing.webp");
+  it("resolves Cartoon preview paths and leaves removed or custom resources without one", () => {
+    expect(recordingSkyboxPreviewUrl("cartoon")).toBe("/skyboxes/cartoon.webp");
+    expect(recordingSkyboxPreviewUrl("cartoon10")).toBe("/skyboxes/cartoon10.webp");
+    expect(recordingSkyboxPreviewUrl("xuejing")).toBe("");
     expect(recordingSkyboxPreviewUrl("default")).toBe("");
     expect(recordingSkyboxPreviewUrl(`custom:${"a".repeat(32)}`)).toBe("");
     expect(recordingSkyboxPreviewUrl(`custom:${"a".repeat(32)}`, [{

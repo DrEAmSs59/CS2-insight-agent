@@ -5,13 +5,13 @@ import { splitRecordWarmupConfirmPayload } from "./warmupDefaults.js";
 describe("recording dialog skybox override", () => {
   it("keeps the skybox in session settings instead of warmup commands", () => {
     const result = splitRecordWarmupConfirmPayload({
-      recording_skybox: "yinhezhanjian",
+      recording_skybox: "cartoon3",
       recording_map_material: "waxed_reflection",
       tv_nochat: true,
     });
 
     expect(result.warmupForApi).toEqual({ tv_nochat: true });
-    expect(result.session.recording_skybox).toBe("yinhezhanjian");
+    expect(result.session.recording_skybox).toBe("cartoon3");
     expect(result.session.recording_map_material).toBe("waxed_reflection");
   });
 

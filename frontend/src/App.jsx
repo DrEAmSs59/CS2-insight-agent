@@ -1427,7 +1427,7 @@ export default function App() {
     (anyDemoParsing && !parsingShownInline)
   );
   const globalNoticeText = progressText
-    || (batchRecording ? t("app.batchRecording") : "")
+    || (batchRecording ? t("common.preparingMapResources") : "")
     || (analysisInlineProgress?.active === true ? analysisInlineProgress.text : "")
     || (anyDemoParsing ? t("analysis.parsing") : "");
   const isStandalonePreview = [

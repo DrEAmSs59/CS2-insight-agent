@@ -2,13 +2,6 @@ export const DEFAULT_RECORDING_SKYBOX = "default";
 export const RECORDING_SKYBOX_RESET_EVENT = "cs2-insight:recording-skybox-reset";
 
 export const BUILTIN_RECORDING_SKYBOX_IDS = Object.freeze([
-  "chroma_green",
-  "chroma_blue",
-  "xuejing",
-  "yinhezhanjian",
-  "huoshaoyun",
-  "xiyang",
-  "chengchetiankong",
   "cartoon",
   "cartoon1",
   "cartoon2",
@@ -20,37 +13,10 @@ export const BUILTIN_RECORDING_SKYBOX_IDS = Object.freeze([
   "cartoon8",
   "cartoon9",
   "cartoon10",
-  "egg1",
-  "egg2",
-  "egg3",
-  "egg4",
-  "egg5",
-  "egg6",
-  "egg7",
-  "egg8",
-  "egg9",
-  "egg10",
-  "egg11",
-  "egg12",
-  "egg13",
-  "egg14",
-  "egg15",
-  "egg23",
-  "egg24",
-  "egg25",
-  "egg26",
-  "egg27",
 ]);
 
 const BUILTIN_LABEL_KEYS = Object.freeze({
-  chroma_green: "record.skyboxChromaGreen",
-  chroma_blue: "record.skyboxChromaBlue",
   cartoon3: "record.skyboxCartoon3",
-  xuejing: "record.skyboxXuejing",
-  yinhezhanjian: "record.skyboxYinhezhanjian",
-  huoshaoyun: "record.skyboxHuoshaoyun",
-  xiyang: "record.skyboxXiyang",
-  chengchetiankong: "record.skyboxChengchetiankong",
 });
 
 export const RECORDING_SKYBOX_OPTIONS = Object.freeze([
@@ -113,7 +79,5 @@ export function recordingSkyboxDisplayName(value, fallback, t) {
   if (String(fallback || "").trim()) return String(fallback).trim();
   const cartoon = /^cartoon(\d*)$/.exec(skyboxId);
   if (cartoon) return `Cartoon ${cartoon[1]}`.trim();
-  const egg = /^egg(\d+)$/.exec(skyboxId);
-  if (egg) return `Egg ${egg[1]}`;
   return skyboxId;
 }

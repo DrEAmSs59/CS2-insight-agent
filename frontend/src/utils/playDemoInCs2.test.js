@@ -43,12 +43,12 @@ describe("playDemoInCs2", () => {
         enabled: true,
         radar_mode: -1,
         teamcounter_numeric: true,
-        skybox_id: "xuejing",
+        skybox_id: "cartoon3",
         map_material_id: "waxed_reflection",
       },
     });
     expect(API.post).toHaveBeenCalledWith("/demos/7/play", {
-      pov_hud: { enabled: true, radar_mode: -1, teamcounter_numeric: true, skybox_id: "xuejing" },
+      pov_hud: { enabled: true, radar_mode: -1, teamcounter_numeric: true, skybox_id: "cartoon3" },
       map_material: { id: "waxed_reflection" },
     });
   });

@@ -40,7 +40,7 @@ def _read_bundled_entries(asset_dir: Path, *skybox_ids: str) -> dict[str, bytes]
 
 @pytest.fixture()
 def bundled_entries(bundled_asset_dir: Path) -> dict[str, bytes]:
-    return _read_bundled_entries(bundled_asset_dir, "cartoon3", "xuejing")
+    return _read_bundled_entries(bundled_asset_dir, "cartoon3", "cartoon4")
 
 
 @pytest.fixture()
@@ -93,18 +93,18 @@ def test_bundled_cartoon_catalog_uses_natural_numeric_order() -> None:
     ]
 
 
-def test_chroma_key_skyboxes_are_first_and_have_postproduction_names() -> None:
+def test_builtin_catalog_contains_only_cartoon_skyboxes() -> None:
     resources = list_skybox_resources()
-    assert [item["id"] for item in resources[:2]] == ["chroma_green", "chroma_blue"]
-    assert resources[0]["display_name"] == "纯绿幕（AE / PR 抠像）"
-    assert resources[1]["display_name"] == "纯蓝幕（AE / PR 抠像）"
+    builtin_ids = [item["id"] for item in resources if item["source"] == "builtin"]
+    assert builtin_ids == list(SKYBOX_ASSETS)
+    assert all(skybox_id.startswith("cartoon") for skybox_id in builtin_ids)
 
 
 def test_upload_rejects_texture_that_does_not_match_vmat(
     bundled_entries: dict[str, bytes],
 ) -> None:
     material_path, _ = SKYBOX_ASSETS["cartoon3"]
-    _, wrong_texture_path = SKYBOX_ASSETS["xuejing"]
+    _, wrong_texture_path = SKYBOX_ASSETS["cartoon4"]
     with pytest.raises(SkyboxResourceError, match="需要纹理"):
         validate_skybox_files(
             material_filename=Path(material_path).name,

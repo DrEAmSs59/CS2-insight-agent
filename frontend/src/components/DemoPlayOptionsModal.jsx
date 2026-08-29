@@ -62,10 +62,11 @@ export default function DemoPlayOptionsModal({
       onClose={() => {
         if (!launching) onClose?.();
       }}
+      closable={!launching}
       title={t("playDemo.title")}
       subtitle={demoLabel || t("playDemo.demoFallback")}
       icon={<Eye className="h-4 w-4 text-cs2-accent" />}
-      maxWidth="max-w-4xl"
+      maxWidth={launching ? "max-w-lg" : "max-w-4xl"}
       maxHeight="max-h-[90vh]"
       className="!h-auto"
       contentClassName="overflow-y-auto"
@@ -76,6 +77,18 @@ export default function DemoPlayOptionsModal({
           <div className="flex min-h-36 flex-col items-center justify-center gap-3 text-cs2-text-muted">
             <Loader2 className="h-6 w-6 animate-spin text-cs2-accent" />
             <p className="text-sm">{t("playDemo.checking")}</p>
+          </div>
+        ) : launching ? (
+          <div
+            className="flex min-h-28 flex-col items-center justify-center gap-3 rounded-lg border border-cs2-border bg-cs2-bg-input/35 px-4 py-5 text-center"
+            role="status"
+            aria-live="polite"
+            data-testid="demo-play-preparing"
+          >
+            <Loader2 className="h-8 w-8 animate-spin text-cs2-accent" aria-hidden />
+            <p className="text-sm font-semibold text-cs2-text-primary">
+              {t("common.preparingMapResources")}
+            </p>
           </div>
         ) : blockedReason ? (
           <div className="space-y-4">

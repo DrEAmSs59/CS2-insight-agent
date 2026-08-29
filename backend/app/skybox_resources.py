@@ -25,26 +25,10 @@ MANIFEST_FILENAME = "manifest.json"
 MATERIAL_FILENAME = "material.vmat_c"
 TEXTURE_FILENAME = "texture.vtex_c"
 
-BUILTIN_SKYBOX_NAMES = {
-    "chroma_green": "纯绿幕（AE / PR 抠像）",
-    "chroma_blue": "纯蓝幕（AE / PR 抠像）",
-    "xuejing": "雪景",
-    "yinhezhanjian": "银河战舰",
-    "huoshaoyun": "火烧云",
-    "xiyang": "夕阳",
-    "chengchetiankong": "乘车天空",
-}
-
-
 def builtin_skybox_display_name(skybox_id: str) -> str:
-    if skybox_id in BUILTIN_SKYBOX_NAMES:
-        return BUILTIN_SKYBOX_NAMES[skybox_id]
     cartoon = re.fullmatch(r"cartoon(\d*)", skybox_id)
     if cartoon:
         return f"Cartoon {cartoon.group(1)}".rstrip()
-    egg = re.fullmatch(r"egg(\d+)", skybox_id)
-    if egg:
-        return f"Egg {egg.group(1)}"
     return skybox_id
 
 

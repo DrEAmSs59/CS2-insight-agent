@@ -26,7 +26,7 @@ describe("RecordWarmupModal skybox override", () => {
         open
         onClose={() => {}}
         onConfirm={onConfirm}
-        recordingSkybox="xuejing"
+        recordingSkybox="cartoon3"
         recordingMapMaterial="waxed_reflection"
       />,
     );
@@ -38,7 +38,7 @@ describe("RecordWarmupModal skybox override", () => {
     expect(screen.queryByText(/默认已预填 5 条性能\/预测 cvar/)).toBeNull();
     expect(screen.queryByText(/首片段预热/)).toBeNull();
     expect(screen.getByText(/此处修改仅作用于本次录制/)).toBeTruthy();
-    expect(selector.value).toBe("xuejing");
+    expect(selector.value).toBe("cartoon3");
     expect(materialSelector.value).toBe("waxed_reflection");
     expect(screen.getByTestId("experimental-feature-card").contains(selector)).toBe(true);
     fireEvent.change(selector, { target: { value: "cartoon3" } });

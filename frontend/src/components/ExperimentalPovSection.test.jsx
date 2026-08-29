@@ -66,7 +66,7 @@ describe("ExperimentalPovSection POV recovery", () => {
         visible
         experimentalPovEnabled={false}
         onExperimentalPovChange={() => {}}
-        recordingSkybox="xuejing"
+        recordingSkybox="cartoon3"
         onRecordingSkyboxChange={onSkyboxChange}
       />,
     );
@@ -75,17 +75,17 @@ describe("ExperimentalPovSection POV recovery", () => {
     const featureCard = screen.getByTestId("experimental-feature-card");
     const povCard = screen.getByTestId("experimental-pov-card");
     const skyboxCard = screen.getByTestId("experimental-skybox-card");
-    expect(selector.value).toBe("xuejing");
+    expect(selector.value).toBe("cartoon3");
     expect(screen.getByTestId("recording-skybox-preview").getAttribute("src"))
-      .toBe("/skyboxes/xuejing.webp");
+      .toBe("/skyboxes/cartoon3.webp");
     expect(povCard.contains(selector)).toBe(false);
     expect(skyboxCard.contains(selector)).toBe(true);
     expect(featureCard.contains(povCard)).toBe(true);
     expect(featureCard.contains(skyboxCard)).toBe(true);
     expect(povCard.className).not.toContain("bg-");
     expect(skyboxCard.className).not.toContain("bg-");
-    fireEvent.change(selector, { target: { value: "yinhezhanjian" } });
-    expect(onSkyboxChange).toHaveBeenCalledWith("yinhezhanjian");
+    fireEvent.change(selector, { target: { value: "cartoon4" } });
+    expect(onSkyboxChange).toHaveBeenCalledWith("cartoon4");
   });
 
   it("loads an available custom skybox into the recording selector", async () => {

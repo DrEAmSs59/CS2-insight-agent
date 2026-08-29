@@ -18,7 +18,7 @@ describe("DemoPlayOptionsModal", () => {
       <DemoPlayOptionsModal
         open
         demoLabel="match.dem"
-        recordingSkybox="xuejing"
+        recordingSkybox="cartoon3"
         recordingMapMaterial="waxed_reflection"
         skyboxResources={[{
           id: customSkyboxId,
@@ -47,7 +47,7 @@ describe("DemoPlayOptionsModal", () => {
     expect(screen.getByText("原生 DemoUI · 进度与播放控制")).toBeTruthy();
     expect(screen.getAllByTestId("advanced-preview-player-row")).toHaveLength(10);
     const skyboxSelect = screen.getByRole("combobox", { name: "高级播放天空盒" });
-    expect(skyboxSelect.value).toBe("xuejing");
+    expect(skyboxSelect.value).toBe("cartoon3");
     expect(Array.from(skyboxSelect.options)
       .map(({ value }) => value)
       .filter((value) => value.startsWith("cartoon")))
@@ -65,7 +65,7 @@ describe("DemoPlayOptionsModal", () => {
         "cartoon10",
       ]);
     expect(screen.getByTestId("demo-play-skybox-preview").getAttribute("src"))
-      .toBe("/skyboxes/xuejing.webp");
+      .toBe("/skyboxes/cartoon3.webp");
     fireEvent.change(skyboxSelect, { target: { value: customSkyboxId } });
     expect(onRecordingSkyboxChange).toHaveBeenCalledWith(customSkyboxId);
     const materialSelect = screen.getByRole("combobox", { name: "高级播放地图材质" });
@@ -102,5 +102,24 @@ describe("DemoPlayOptionsModal", () => {
     expect(screen.queryByRole("button", { name: /启动高级播放 Demo/ })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: /重新检测/ }));
     expect(onRetry).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows the shared map-resource preparation state while launching", () => {
+    render(
+      <DemoPlayOptionsModal
+        open
+        demoLabel="match.dem"
+        launchingMode="advanced"
+        onClose={() => {}}
+      />,
+    );
+
+    expect(screen.getByRole("status").textContent).toContain(
+      "正在准备所需的地图资源，稍后将自动进入CS2。",
+    );
+    expect(screen.getByRole("dialog").firstElementChild.className).toContain("max-w-lg");
+    expect(screen.getByTestId("demo-play-preparing").className).toContain("min-h-28");
+    expect(screen.queryByTestId("demo-play-preview")).toBeNull();
+    expect(screen.queryByRole("button", { name: /启动高级播放 Demo/ })).toBeNull();
   });
 });

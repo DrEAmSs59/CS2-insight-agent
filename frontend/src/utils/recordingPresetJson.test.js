@@ -16,7 +16,7 @@ const preset = {
   kill_fx_enabled: true,
   kill_fx_tick_offset: 6,
   experimental_pov_enabled: false,
-  recording_skybox: "xuejing",
+  recording_skybox: "cartoon3",
   recording_map_material: "waxed_reflection",
 };
 

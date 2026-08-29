@@ -15,8 +15,8 @@ payload and rebuilds its VPK entry CRCs before CS2 starts:
 
 ## Recording skybox layer
 
-`skyboxes/<id>/` stores each maintained skybox as its original compiled
-`.vmat_c` / `.vtex_c` pair. Refresh the catalog with
+`skyboxes/<id>/` stores the eleven bundled Cartoon skyboxes as their original
+compiled `.vmat_c` / `.vtex_c` pairs. Refresh the bundled catalog with
 `python tools/sync_skybox_assets.py <compiled-skybox-directory>`. At runtime
 the backend reads only the selected pair and writes it directly into the
 map-specific temporary recording VPK; there is no aggregate asset VPK. The
@@ -37,12 +37,12 @@ The supported maps are Dust II, Inferno, Mirage, Nuke, Overpass, Anubis,
 Cache, and Ancient. `default` installs no recording VPK in ordinary mode and
 adds no sky aliases in POV mode, preserving the map's original sky.
 
-The first two maintained choices, `chroma_green` and `chroma_blue`, are solid
-linear `(0, 1, 0)` and `(0, 0, 1)` cubemaps for chroma keying in After Effects
-or Premiere Pro. Their sky materials use zero brightness/render-only exposure
-bias, and the texture catalog keeps the complete cube mip chain. Because every
-face is constant, LZ4 compresses each compiled texture far below the size of a
-photographic skybox without dropping any cube face or mip level.
+Larger non-Cartoon resources live outside the application payload under
+`optional-resources/skybox-pack/skyboxes`. Run
+`packaging/windows/package_optional_skyboxes.ps1` to create the separately
+downloadable `dist/CS2-Insight-Agent-Optional-Skyboxes.zip`. Users can import
+only the pairs they need through **Settings → Skybox resources → Add skybox**;
+imported custom resources are stored in writable app data and survive updates.
 
 ## Recording map-material layer
 

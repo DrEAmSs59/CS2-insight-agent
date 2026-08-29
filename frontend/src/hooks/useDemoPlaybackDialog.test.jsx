@@ -43,7 +43,7 @@ describe("useDemoPlaybackDialog restoration monitor", () => {
       cs2_path_configured: true,
       cs2_running: false,
       playback_active: false,
-      recording_skybox: "xuejing",
+      recording_skybox: "cartoon3",
       recording_map_material: "waxed_reflection",
       skyboxes: [{
         id: customSkyboxId,
@@ -73,7 +73,7 @@ describe("useDemoPlaybackDialog restoration monitor", () => {
     await screen.findByRole("button", { name: /启动高级播放 Demo/ });
     const skyboxSelect = screen.getByRole("combobox", { name: "高级播放天空盒" });
     const materialSelect = screen.getByRole("combobox", { name: "高级播放地图材质" });
-    expect(skyboxSelect.value).toBe("xuejing");
+    expect(skyboxSelect.value).toBe("cartoon3");
     expect(materialSelect.value).toBe("waxed_reflection");
     fireEvent.change(skyboxSelect, { target: { value: customSkyboxId } });
     fireEvent.click(screen.getByRole("button", { name: /启动高级播放 Demo/ }));

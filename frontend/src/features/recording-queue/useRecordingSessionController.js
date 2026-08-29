@@ -126,7 +126,7 @@ export function useRecordingSessionController({
     setRecordingResults(null);
     setRecordingResultModalOpen(false);
     setBatchRecording(true);
-    setProgressText(t("app.preparingRecording"), { loading: true });
+    setProgressText(t("common.preparingMapResources"), { loading: true });
 
     const overlayPrebuildEnabled = session.kb_overlay_enabled || session.kill_fx_enabled;
     let overlayPollTimer = null;
@@ -184,7 +184,7 @@ export function useRecordingSessionController({
         ...(povHud ? { pov_hud: povHud } : {}),
       };
       if (!recordingAbortRequestedRef.current) {
-        setProgressText(t("app.batchRecording"), { loading: true });
+        setProgressText(t("common.preparingMapResources"), { loading: true });
       }
       const { data } = await API.post("recording/queue", body);
       const results = Array.isArray(data) ? data : [];

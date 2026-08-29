@@ -60,14 +60,14 @@ def test_sky_only_package_overrides_every_material_for_supported_map(
 def test_pov_package_keeps_base_entries_and_adds_selected_sky_only(tmp_path: Path) -> None:
     base = write_inline_vpk({"panorama/example.txt": b"hud"})
     packed = compose_recording_skybox_vpk(
-        builtin_assets_dir=_write_asset_pair(tmp_path / "skyboxes", "yinhezhanjian"),
+        builtin_assets_dir=_write_asset_pair(tmp_path / "skyboxes", "cartoon4"),
         base_vpk_bytes=base,
-        skybox_id="yinhezhanjian",
+        skybox_id="cartoon4",
         map_name="de_ancient",
     )
     entries = read_inline_vpk(packed)
     assert entries["panorama/example.txt"] == b"hud"
-    assert SKYBOX_ASSETS["yinhezhanjian"][0] in entries
+    assert SKYBOX_ASSETS["cartoon4"][0] in entries
     assert SKYBOX_ASSETS["cartoon3"][0] not in entries
     for target_path in MAP_SKY_MATERIAL_PATHS["de_ancient"]:
         assert target_path in entries

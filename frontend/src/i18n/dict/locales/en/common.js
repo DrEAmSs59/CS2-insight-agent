@@ -4,6 +4,7 @@ export default {
   "common.confirm": "Confirm",
   "common.save": "Save",
   "common.close": "Close",
+  "common.preparingMapResources": "Preparing the required map resources. CS2 will open automatically shortly.",
   "frameMeld.enableDialog.title": "Enable Frame Blending (Motion Blur)",
   "frameMeld.enableDialog.item1": "Frame blending performs interpolation, duplicate removal, and motion blur, with a fixed 60 FPS output.",
   "frameMeld.enableDialog.item2Prefix": "Frame interpolation depends heavily on a high-performance GPU, so ",

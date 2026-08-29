@@ -91,9 +91,9 @@ def test_recording_skybox_is_independent_and_defaults_to_original():
 
 
 def test_recording_skybox_survives_the_round_trip(monkeypatch):
-    payload = config_api.ConfigPayload(recording_skybox="xuejing")
+    payload = config_api.ConfigPayload(recording_skybox="cartoon3")
 
-    assert _round_trip(monkeypatch, payload).recording_skybox == "xuejing"
+    assert _round_trip(monkeypatch, payload).recording_skybox == "cartoon3"
 
 
 def test_unknown_recording_skybox_is_rejected(monkeypatch):

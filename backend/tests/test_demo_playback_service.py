@@ -169,7 +169,7 @@ def test_pov_playback_installs_cfg_and_restores_after_exit(monkeypatch, tmp_path
             enabled=True,
             radar_mode=-1,
             teamcounter_numeric=True,
-            skybox_id="xuejing",
+            skybox_id="cartoon3",
             map_material_id="waxed_reflection",
         ),
     )
@@ -180,9 +180,9 @@ def test_pov_playback_installs_cfg_and_restores_after_exit(monkeypatch, tmp_path
     assert manager.installed == 1
     assert manager.installed_demo_paths == [demo]
     assert manager.advanced_playback_flags == [True]
-    assert manager.skybox_ids == ["xuejing"]
+    assert manager.skybox_ids == ["cartoon3"]
     assert manager.map_material_ids == ["waxed_reflection"]
-    assert result["recording_skybox_id"] == "xuejing"
+    assert result["recording_skybox_id"] == "cartoon3"
     assert result["recording_map_material_id"] == "waxed_reflection"
     assert session is not None and session.copied_cfg is not None
     cfg_text = session.copied_cfg.read_text(encoding="ascii")

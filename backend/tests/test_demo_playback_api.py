@@ -55,7 +55,7 @@ def test_launch_forwards_pov_session_options(monkeypatch, tmp_path: Path):
             enabled=True,
             radar_mode=-1,
             teamcounter_numeric=True,
-            skybox_id="xuejing",
+            skybox_id="cartoon3",
         ),
         map_material=playback_api.DemoPlaybackMapMaterialBody(id="waxed_reflection"),
     )
@@ -69,7 +69,7 @@ def test_launch_forwards_pov_session_options(monkeypatch, tmp_path: Path):
         enabled=True,
         radar_mode=-1,
         teamcounter_numeric=True,
-        skybox_id="xuejing",
+        skybox_id="cartoon3",
         map_material_id="waxed_reflection",
     )
 

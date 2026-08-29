@@ -29,17 +29,8 @@ function defaultNameFromFile(file) {
 }
 
 const BUILTIN_GROUPS = [
-  { id: "featured", labelKey: "settings.skyboxGroupFeatured" },
   { id: "cartoon", labelKey: "settings.skyboxGroupCartoon" },
-  { id: "egg", labelKey: "settings.skyboxGroupEgg" },
 ];
-
-
-function builtinGroupId(skyboxId) {
-  if (String(skyboxId).startsWith("cartoon")) return "cartoon";
-  if (String(skyboxId).startsWith("egg")) return "egg";
-  return "featured";
-}
 
 
 export default function GameResourcesSettings({ search = "" }) {
@@ -60,7 +51,7 @@ export default function GameResourcesSettings({ search = "" }) {
   const groupedBuiltins = useMemo(() => BUILTIN_GROUPS.map((group) => ({
     ...group,
     items: sortBuiltinRecordingSkyboxes(
-      builtins.filter((item) => builtinGroupId(item.id) === group.id),
+      builtins.filter((item) => String(item.id).startsWith("cartoon")),
     ),
   })), [builtins]);
   const itemDisplayName = (item) => (
@@ -309,7 +300,7 @@ export default function GameResourcesSettings({ search = "" }) {
                 {groupedBuiltins.map((group) => (
                   <details
                     key={group.id}
-                    open={group.id === "featured"}
+                    open={group.id === "cartoon"}
                     className="group rounded-lg border border-cs2-border bg-cs2-bg-input/20"
                   >
                     <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-2.5 text-xs font-semibold text-cs2-text-primary">
