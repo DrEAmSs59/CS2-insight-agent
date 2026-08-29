@@ -37,12 +37,10 @@ The supported maps are Dust II, Inferno, Mirage, Nuke, Overpass, Anubis,
 Cache, and Ancient. `default` installs no recording VPK in ordinary mode and
 adds no sky aliases in POV mode, preserving the map's original sky.
 
-Larger non-Cartoon resources live outside the application payload under
-`optional-resources/skybox-pack/skyboxes`. Run
-`packaging/windows/package_optional_skyboxes.ps1` to create the separately
-downloadable `dist/CS2-Insight-Agent-Optional-Skyboxes.zip`. Users can import
-only the pairs they need through **Settings → Skybox resources → Add skybox**;
-imported custom resources are stored in writable app data and survive updates.
+Non-Cartoon resources are not stored in this repository. They are distributed
+separately as an optional resource pack. Users can import only the pairs they
+need through **Settings → Skybox resources → Add skybox**; imported custom
+resources are stored in writable app data and survive updates.
 
 ## Recording map-material layer
 

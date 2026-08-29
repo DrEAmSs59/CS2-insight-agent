@@ -75,10 +75,6 @@ jobs:
         working-directory: frontend
         run: pnpm test
 
-      - name: Package optional skyboxes
-        shell: pwsh
-        run: ./packaging/windows/package_optional_skyboxes.ps1
-
       - name: Check Rust formatting
         working-directory: frontend/src-tauri
         run: cargo fmt --check
@@ -179,9 +175,7 @@ jobs:
           $installedMiB = ($appExe.Length + $resourceBytes) / 1MB
           Write-Host ("Estimated installed size: {0:N2} MiB" -f $installedMiB)
           if ($installedMiB -gt 120) { throw ("Installed footprint exceeds 120 MiB budget: {0:N2} MiB" -f $installedMiB) }
-          $resourcePack = Get-Item "dist/CS2-Insight-Agent-Optional-Skyboxes.zip"
-          $checksumArtifacts = @($artifacts) + @($resourcePack)
-          $sums = $checksumArtifacts | Sort-Object Name | ForEach-Object {
+          $sums = $artifacts | Sort-Object Name | ForEach-Object {
             (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant() + "  " + $_.Name
           }
           [IO.File]::WriteAllLines((Join-Path (Get-Location) "SHA256SUMS"), $sums, [Text.UTF8Encoding]::new($false))
@@ -191,7 +185,6 @@ jobs:
         with:
           files: |
             frontend/src-tauri/target/release/bundle/nsis/*.exe
-            dist/CS2-Insight-Agent-Optional-Skyboxes.zip
             dist/runtime-size-report.json
             dist/wheels/demoparser2-*.whl
             dist/wheels/demoparser2-SHA256SUMS.txt

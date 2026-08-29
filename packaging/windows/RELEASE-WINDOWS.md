@@ -10,7 +10,7 @@ Python 后端、Pillow、pandas、NumPy 与 demoparser2 等既有运行时依赖
 
 1. 确保 `frontend/pnpm-lock.yaml` 与 `frontend/src-tauri/Cargo.lock` 已更新。
 2. 推送 semver tag：`git tag v1.2.3 && git push origin v1.2.3`（`V1.2.3` 也会触发）。
-3. `Release Windows` workflow 构建并上传 Tauri NSIS 安装包、独立的 `CS2-Insight-Agent-Optional-Skyboxes.zip`、`runtime-size-report.json` 与 `SHA256SUMS`。主安装包只包含 Cartoon 系列天空盒。
+3. `Release Windows` workflow 构建并上传 Tauri NSIS 安装包、`runtime-size-report.json` 与 `SHA256SUMS`。
 
 ## 在线更新（Tauri updater + Cloudflare R2）
 
@@ -70,14 +70,6 @@ try {
 ```text
 frontend/src-tauri/target/release/bundle/nsis/CS2 Insight Agent_<version>_x64-setup.exe
 ```
-
-非 Cartoon 天空盒不会进入主安装包。需要本地生成独立下载资源包时执行：
-
-```powershell
-./packaging/windows/package_optional_skyboxes.ps1
-```
-
-输出位于 `dist/CS2-Insight-Agent-Optional-Skyboxes.zip`，发布工作流会自动生成并附加到 GitHub Release。
 
 如果需要从锁定依赖重建正式精简 Python runtime，先构建 lean wheel，再强制刷新：
 
