@@ -351,6 +351,12 @@ def test_exact_input_tracks_are_mapped_from_usercmd_slots_to_xuids():
         "input_mouse_tracks": 0,
         "input_mouse_samples": 0,
         "input_mouse_updates": 0,
+        "input_hand_switch_tracks": 0,
+        "input_hand_switch_events": 0,
+        "input_left_hand_desired_updates": 0,
+        "input_audio_edge_tracks": 0,
+        "input_audio_edges": 0,
+        "input_audio_subtick_edges": 0,
     }
 
 
@@ -413,6 +419,100 @@ def test_exact_mouse_tracks_follow_userinfo_and_preserve_signed_axes():
     assert stats["input_mouse_tracks"] == 2
     assert stats["input_mouse_samples"] == 3
     assert stats["input_mouse_updates"] == 3
+
+
+def test_handedness_edges_drive_identity_bound_h_key_pulses():
+    voice_payload, _ = build_voice_payload("match.dem", parser_factory=_FakeParser)
+    payload, stats = add_input_tracks_to_payload(
+        voice_payload,
+        "match.dem",
+        {
+            "format_version": 9,
+            "commands": 3,
+            "button_updates": 1,
+            "subtick_steps": 0,
+            "left_hand_desired_updates": 3,
+            "player_identity_updates": [
+                {"demo_tick": 0, "player_slot": 0, "xuid": 111},
+                {"demo_tick": 20, "player_slot": 0, "xuid": 222},
+            ],
+            "tracks": [{"slot": 0, "changes": 1, "encoded": "0.1"}],
+            "handedness_changes": [
+                {"demo_tick": 10, "player_slot": 0, "left_hand_desired": True},
+                {"demo_tick": 12, "player_slot": 0, "left_hand_desired": False},
+                {"demo_tick": 30, "player_slot": 0, "left_hand_desired": True},
+            ],
+        },
+        parser_factory=_FakeParser,
+    )
+
+    assert json.loads(payload)[16] == [
+        ["111", "a.1,6.0"],
+        ["222", "u.1,4.0"],
+    ]
+    assert stats["input_hand_switch_tracks"] == 2
+    assert stats["input_hand_switch_events"] == 3
+    assert stats["input_left_hand_desired_updates"] == 3
+
+
+def test_button_edges_drive_identity_bound_input_audio_without_mask_inference():
+    voice_payload, _ = build_voice_payload("match.dem", parser_factory=_FakeParser)
+    payload, stats = add_input_tracks_to_payload(
+        voice_payload,
+        "match.dem",
+        {
+            "format_version": 10,
+            "commands": 4,
+            "button_updates": 2,
+            "subtick_steps": 2,
+            "player_identity_updates": [
+                {"demo_tick": 0, "player_slot": 0, "xuid": 111},
+                {"demo_tick": 20, "player_slot": 0, "xuid": 222},
+            ],
+            "tracks": [{"slot": 0, "changes": 1, "encoded": "0.1"}],
+            "button_edges": [
+                {
+                    "demo_tick": 10,
+                    "player_slot": 0,
+                    "command_index": 2,
+                    "edge_ordinal": 0,
+                    "bit": 3,
+                    "pressed": True,
+                    "when": 0.25,
+                    "source": "subtick",
+                },
+                {
+                    "demo_tick": 10,
+                    "player_slot": 0,
+                    "command_index": 2,
+                    "edge_ordinal": 1,
+                    "bit": 3,
+                    "pressed": False,
+                    "when": 0.75,
+                    "source": "subtick",
+                },
+                {
+                    "demo_tick": 30,
+                    "player_slot": 0,
+                    "command_index": 3,
+                    "edge_ordinal": 0,
+                    "bit": 0,
+                    "pressed": True,
+                    "when": None,
+                    "source": "button_state",
+                },
+            ],
+        },
+        parser_factory=_FakeParser,
+    )
+
+    assert json.loads(payload)[17] == [
+        ["111", [[10, 0, 1, 0.25], [10, 0, 0, 0.75]]],
+        ["222", [[30, 8, 1, None]]],
+    ]
+    assert stats["input_audio_edge_tracks"] == 2
+    assert stats["input_audio_edges"] == 3
+    assert stats["input_audio_subtick_edges"] == 2
 
 
 def test_weaponselect_entity_indexes_drive_exact_number_row_pulses():
@@ -555,6 +655,9 @@ def test_checked_in_voice_template_contains_only_an_empty_payload():
 
     assert script[start:end].rstrip() == b"[[], [], [], []]"
     assert "panorama/layout/hud/hudalerts.vxml_c" in entries
+    assert "soundevents/soundevents_addon.vsndevts_c" in entries
+    assert "sounds/cs2_insight/input/keyboard-normal-01.vsnd_c" in entries
+    assert "sounds/cs2_insight/input/mouse-down.vsnd_c" in entries
     assert "panorama/styles/hud/hudalerts.vcss_c" not in entries
     assert "panorama/styles/hud/hudhealthammocenter.vcss_c" not in entries
     assert "panorama/styles/hud/hudradar.vcss_c" in entries
@@ -657,20 +760,34 @@ def test_checked_in_voice_template_contains_only_an_empty_payload():
     assert b'fx.anchor.style.x = "0px"' not in script
     assert b'fx.anchor.style.y = "0px"' not in script
     assert b'ConsoleCommand("cl_drawhud_force_radar 0")' not in script
-    assert b'["1", 68, 0' in script
-    assert b'["5", 228, 0' in script
+    for slot, x in ((1, 68), (2, 108), (3, 148), (4, 188), (5, 228)):
+        spec = f'["{slot}", {x}, 0, 36, 32, 18, 4, -1, true, {slot}]'.encode()
+        assert spec in script
     assert b'["E", 148, 35' in script
     assert b'["TAB", 8, 35, 56, 32, 13, 7, 12' in script
     assert b'["SHIFT", 8, 70' in script
-    assert b'["F", 188, 70, 36, 32, 18, 4, 11' in script
+    assert b'["F", 188, 70, 36, 32, 18, 4, 11, true, 0]' in script
+    assert b'["H", 228, 70, 36, 32, 18, 4, -1, true, 0, "hand"]' in script
     assert b'["SPACE", 68, 105' in script
     assert b'["R", 188, 35' in script
-    assert b'["M1", 296, 35, 32, 32, 12, 6, 8' in script
-    assert b'["M2", 332, 35, 32, 32, 12, 6, 9' in script
+    assert b'["M1", 286, 23, 42, 44, 12, 14, 8' in script
+    assert b'["M2", 332, 23, 42, 44, 12, 14, 9' in script
+    assert b'key.style.borderRadius = "16px 3px 6px 11px"' in script
+    assert b'key.style.borderRadius = "3px 16px 11px 6px"' in script
+    assert b"CS2InsightMouseShell" not in script
+    assert b"CS2InsightMouseWheelWell" not in script
+    assert b'["W", 108, 35, 36, 32, 18, 4, 0, false, 0]' in script
+    assert b'["SHIFT", 8, 70, 56, 32, 12, 7, 6, false, 0]' in script
+    assert b'["CTRL", 8, 105, 56, 32, 13, 7, 5, false, 0]' in script
+    assert b'["SPACE", 68, 105, 156, 32, 12, 7, 4, false, 0]' in script
     assert b'pad.style.position = "276px 70px 0px"' in script
     assert b"const MOUSE_PAD_WIDTH = 108" in script
     assert b"const MOUSE_PAD_HEIGHT = 78" in script
     assert b"const encodedMouseTracks = packed[15] || []" in script
+    assert b"const encodedHandSwitchTracks = packed[16] || []" in script
+    assert b"const encodedInputAudioEdges = packed[17] || []" in script
+    assert b"const handSwitchTracksByXuid = {}" in script
+    assert b"const inputAudioEdgesByXuid = {}" in script
     assert b"const mouseTracksByXuid = {}" in script
     assert b"let inputMousePad = null" in script
     assert b"let inputMouseHeadDot = null" in script
@@ -682,6 +799,11 @@ def test_checked_in_voice_template_contains_only_an_empty_payload():
     assert b"function panMousePathAtEdge()" in script
     assert b"function smoothMousePath(points)" in script
     assert b"smoothMousePath(advanceMousePath(samples || [], xuid, tick))" in script
+    assert b"function mouseCssPx(value)" in script
+    assert b'return normalized.toFixed(3) + "px"' in script
+    assert b"segment.style.position = mouseCssPx(start.x)" in script
+    assert b"inputMouseHeadDot.style.position = mouseCssPx(head.x - 3)" in script
+    assert b'segment.style.position = start.x + "px "' not in script
     assert b'pad.style.backgroundColor = "#00000000"' in script
     assert b'pad.style.border = "0px solid #00000000"' in script
     assert b'head.style.boxShadow = "fill #57ead780 0px 0px 5px 0px"' in script
@@ -695,9 +817,25 @@ def test_checked_in_voice_template_contains_only_an_empty_payload():
     assert b"function updateMouseMotionPad(samples, xuid, tick)" in script
     assert b"updateMouseMotionPad(mouseSamples, xuid, tick)" in script
     assert b"const INPUT_HUD_REFRESH_SECONDS = 0.016" in script
+    assert b"function advanceInputAudio(edges, xuid, tick)" in script
+    assert b'$.DispatchEvent("CSGOPlaySoundEffect", soundEvent, "MOUSE")' in script
+    assert b"const INPUT_HUD_SCOREBOARD_BIT = 12" in script
     assert b"function currentInputPovXuid(state)" not in script
     assert b"const xuid = currentPovXuid(state)" in script
     assert b"inputHudRenderedXuid === xuid && inputHudRenderedTick === tick" in script
+    assert b"function setMirroredScoreboardActive(active)" in script
+    assert b'ConsoleCommand(desired ? "+showscores" : "-showscores")' in script
+    assert b"function releaseMirroredScoreboard()" in script
+    assert b"if (mirroredScoreboardActive)" in script
+    assert b"function updateMirroredScoreboard(mask)" in script
+    assert b"const mirrorEnabled = Boolean(advancedPlayback)" in script
+    assert b"&& advancedPovVisualsEnabled" in script
+    assert b"&& !advancedHudHidden" in script
+    assert b"mirrorEnabled && Boolean(mask & (1 << INPUT_HUD_SCOREBOARD_BIT))" in script
+    assert script.count(b"releaseMirroredScoreboard();") >= 2
+    assert script.index(b"        updateMirroredScoreboard(mask);") < script.index(
+        b"inputHudRenderedXuid === xuid && inputHudRenderedTick === tick"
+    )
     assert b"$.Schedule(INPUT_HUD_REFRESH_SECONDS, updateInputHud)" in script
     assert b"$.Schedule(0, updateInputHud)" not in script
     assert b'inputHud.style.width = "392px"' in script
@@ -722,6 +860,9 @@ def test_checked_in_voice_template_contains_only_an_empty_payload():
     input_update_end = script.index(b"function playerColorHex", input_update_start)
     assert b"advancedPovVisualsActive" not in script[input_update_start:input_update_end]
     assert b"onlyWhenActive" in script
+    assert b'panel.visible = !onlyWhenActive' in script
+    assert b'key.panel.visible = !key.onlyWhenActive || active' in script
+    assert b'key.semanticTrack === "hand"' in script
     assert b'findHudTraverse("VisiblePlayerIDs")' in script
     assert b'GameInterfaceAPI.ConsoleCommand(commands[index])' in script
     assert b'"cl_drawhud_force_teamid_overhead 1"' in script

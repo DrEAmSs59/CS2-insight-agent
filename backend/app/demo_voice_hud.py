@@ -50,7 +50,9 @@ class DemoVoiceHudError(RuntimeError):
 # stores the fixed recording voice audience (advanced playback has live controls);
 # index 14 stores trusted session console commands that Panorama reapplies only
 # after the demo controller reports a loaded map; index 15 carries exact
-# CBaseUserCmdPB mousedx/mousedy samples for the keyboard's mouse-motion pad.
+# CBaseUserCmdPB mousedx/mousedy samples for the keyboard's mouse-motion pad;
+# index 16 carries authoritative CSGOUserCmdPB.left_hand_desired edges; index
+# 17 carries exact button press/release edges for the input-audio SoundEvents.
 RADAR_PAYLOAD_INDEX = 8
 KILL_FEEDBACK_PAYLOAD_INDEX = 9
 FLASH_BLIND_PAYLOAD_INDEX = 10
@@ -59,9 +61,16 @@ ADVANCED_PLAYBACK_PAYLOAD_INDEX = 12
 VOICE_MODE_PAYLOAD_INDEX = 13
 SESSION_CONSOLE_COMMANDS_PAYLOAD_INDEX = 14
 MOUSE_INPUT_PAYLOAD_INDEX = 15
+HAND_SWITCH_PAYLOAD_INDEX = 16
+INPUT_AUDIO_EDGE_PAYLOAD_INDEX = 17
 WEAPON_SELECT_PAYLOAD_INDEX = 6
 WEAPON_SELECT_ENTITY_INDEX_MASK = 0x3FFF
 WEAPON_SELECT_MATCH_MAX_TICKS = 4
+HAND_SWITCH_PULSE_TICKS = 4
+_INPUT_RAW_TO_COMPACT_BIT = {
+    raw_bit: compact_bit
+    for compact_bit, raw_bit in enumerate((3, 9, 4, 10, 1, 2, 16, 13, 0, 11, 5, 35, 33))
+}
 RADAR_SAMPLE_HZ = 8
 _GROUND_ENTITY_FIELD = "CCSPlayerPawn.m_hGroundEntity"
 _LAST_JUMP_TICK_FIELD = (
@@ -99,6 +108,12 @@ class DemoVoiceHudBuild:
     input_mouse_tracks: int = 0
     input_mouse_samples: int = 0
     input_mouse_updates: int = 0
+    input_hand_switch_tracks: int = 0
+    input_hand_switch_events: int = 0
+    input_left_hand_desired_updates: int = 0
+    input_audio_edge_tracks: int = 0
+    input_audio_edges: int = 0
+    input_audio_subtick_edges: int = 0
     radar_players: int = 0
     radar_samples: int = 0
     radar_parse_failed: int = 0
@@ -383,7 +398,7 @@ def _normalize_map_name(raw: Any) -> str:
 
 def _pad_payload_slots(
     packed: list[Any],
-    length: int = MOUSE_INPUT_PAYLOAD_INDEX + 1,
+    length: int = INPUT_AUDIO_EDGE_PAYLOAD_INDEX + 1,
 ) -> list[Any]:
     if not isinstance(packed, list):
         raise DemoVoiceHudError("voice HUD payload has an unsupported shape")
@@ -3392,6 +3407,131 @@ def _identity_bound_mouse_tracks(
     return encoded_tracks
 
 
+def _identity_bound_hand_switch_tracks(
+    report: Mapping[str, Any],
+    slot_to_xuid: Mapping[int, int],
+) -> tuple[list[list[str]], int]:
+    raw_changes = report.get("handedness_changes")
+    if not isinstance(raw_changes, list):
+        return [], 0
+
+    roster_xuids = set(slot_to_xuid.values())
+    identity_by_slot = _identity_timeline_by_slot(report)
+    ticks_by_xuid: dict[int, set[int]] = defaultdict(set)
+    for raw_change in raw_changes:
+        if not isinstance(raw_change, Mapping):
+            continue
+        tick = _as_int(raw_change.get("demo_tick"))
+        slot = _as_int(raw_change.get("player_slot"))
+        if tick is None or tick < 0 or slot is None or slot < 0:
+            continue
+        identities = identity_by_slot.get(slot)
+        xuid = (
+            _identity_xuid_at(identities, tick)
+            if identities
+            else slot_to_xuid.get(slot, 0)
+        )
+        if xuid in roster_xuids:
+            ticks_by_xuid[xuid].add(tick)
+
+    encoded_tracks: list[list[str]] = []
+    event_count = 0
+    for xuid, ticks in ticks_by_xuid.items():
+        intervals: list[list[int]] = []
+        for tick in sorted(ticks):
+            event_count += 1
+            end_tick = tick + HAND_SWITCH_PULSE_TICKS
+            if intervals and tick <= intervals[-1][1]:
+                intervals[-1][1] = max(intervals[-1][1], end_tick)
+            else:
+                intervals.append([tick, end_tick])
+        changes = [
+            change
+            for start_tick, end_tick in intervals
+            for change in ((start_tick, 1), (end_tick, 0))
+        ]
+        encoded = _encode_input_changes(changes)
+        if encoded:
+            encoded_tracks.append([str(xuid), encoded])
+    return encoded_tracks, event_count
+
+
+def _identity_bound_input_audio_edges(
+    report: Mapping[str, Any],
+    slot_to_xuid: Mapping[int, int],
+) -> tuple[list[list[Any]], int, int]:
+    raw_edges = report.get("button_edges")
+    if not isinstance(raw_edges, list):
+        return [], 0, 0
+
+    roster_xuids = set(slot_to_xuid.values())
+    identity_by_slot = _identity_timeline_by_slot(report)
+    by_xuid: dict[int, list[tuple[int, int, int, int, list[Any], bool]]] = defaultdict(list)
+    for source_order, raw_edge in enumerate(raw_edges):
+        if not isinstance(raw_edge, Mapping):
+            continue
+        tick = _as_int(raw_edge.get("demo_tick"))
+        slot = _as_int(raw_edge.get("player_slot"))
+        command_index = _as_int(raw_edge.get("command_index"))
+        edge_ordinal = _as_int(raw_edge.get("edge_ordinal"))
+        raw_bit = _as_int(raw_edge.get("bit"))
+        pressed = raw_edge.get("pressed")
+        if (
+            tick is None
+            or tick < 0
+            or slot is None
+            or slot < 0
+            or command_index is None
+            or command_index < 0
+            or edge_ordinal is None
+            or edge_ordinal < 0
+            or raw_bit not in _INPUT_RAW_TO_COMPACT_BIT
+            or not isinstance(pressed, bool)
+        ):
+            continue
+        identities = identity_by_slot.get(slot)
+        xuid = (
+            _identity_xuid_at(identities, tick)
+            if identities
+            else slot_to_xuid.get(slot, 0)
+        )
+        if xuid not in roster_xuids:
+            continue
+        raw_when = raw_edge.get("when")
+        when: float | None = None
+        if isinstance(raw_when, (int, float)) and not isinstance(raw_when, bool):
+            candidate = float(raw_when)
+            if math.isfinite(candidate):
+                when = candidate
+        from_subtick = raw_edge.get("source") == "subtick"
+        by_xuid[xuid].append(
+            (
+                tick,
+                command_index,
+                edge_ordinal,
+                source_order,
+                [tick, _INPUT_RAW_TO_COMPACT_BIT[raw_bit], int(pressed), when],
+                from_subtick,
+            )
+        )
+
+    tracks: list[list[Any]] = []
+    edge_count = 0
+    subtick_count = 0
+    for xuid, rows in by_xuid.items():
+        # Rust appends edges in authoritative command-stream order. Command
+        # indexes can restart in a later svc_UserCmds message at the same demo
+        # tick, so preserve the report order instead of re-sorting by index.
+        rows.sort(key=lambda row: (row[0], row[3]))
+        events = [row[4] for row in rows]
+        if not events:
+            continue
+        edge_count += len(events)
+        subtick_count += sum(int(row[5]) for row in rows)
+        tracks.append([str(xuid), events])
+    return tracks, edge_count, subtick_count
+
+
 def add_input_tracks_to_payload(
     voice_payload: bytes,
     demo_path: str | Path,
@@ -3448,6 +3588,15 @@ def add_input_tracks_to_payload(
     packed[WEAPON_SELECT_PAYLOAD_INDEX] = weapon_select_tracks
     mouse_tracks = _identity_bound_mouse_tracks(input_track_report, slot_to_xuid)
     packed[MOUSE_INPUT_PAYLOAD_INDEX] = mouse_tracks
+    hand_switch_tracks, hand_switch_events = _identity_bound_hand_switch_tracks(
+        input_track_report,
+        slot_to_xuid,
+    )
+    packed[HAND_SWITCH_PAYLOAD_INDEX] = hand_switch_tracks
+    audio_edge_tracks, audio_edges, audio_subtick_edges = (
+        _identity_bound_input_audio_edges(input_track_report, slot_to_xuid)
+    )
+    packed[INPUT_AUDIO_EDGE_PAYLOAD_INDEX] = audio_edge_tracks
     mouse_samples = sum(encoded.count(",") + 1 for _, encoded in mouse_tracks)
     payload = json.dumps(packed, ensure_ascii=True, separators=(",", ":")).encode("ascii")
 
@@ -3466,6 +3615,12 @@ def add_input_tracks_to_payload(
         "input_mouse_tracks": len(mouse_tracks),
         "input_mouse_samples": mouse_samples,
         "input_mouse_updates": report_int("mouse_updates"),
+        "input_hand_switch_tracks": len(hand_switch_tracks),
+        "input_hand_switch_events": hand_switch_events,
+        "input_left_hand_desired_updates": report_int("left_hand_desired_updates"),
+        "input_audio_edge_tracks": len(audio_edge_tracks),
+        "input_audio_edges": audio_edges,
+        "input_audio_subtick_edges": audio_subtick_edges,
         **weapon_select_stats,
     }
 
@@ -4069,6 +4224,12 @@ def build_demo_voice_hud_vpk(
         "input_mouse_tracks": 0,
         "input_mouse_samples": 0,
         "input_mouse_updates": 0,
+        "input_hand_switch_tracks": 0,
+        "input_hand_switch_events": 0,
+        "input_left_hand_desired_updates": 0,
+        "input_audio_edge_tracks": 0,
+        "input_audio_edges": 0,
+        "input_audio_subtick_edges": 0,
     }
     if input_track_report is not None:
         payload, input_stats = add_input_tracks_to_payload(

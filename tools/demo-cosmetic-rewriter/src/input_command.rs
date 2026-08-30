@@ -234,6 +234,8 @@ struct SubtickMovePb {
 struct FullBaseUserCmdPb {
     #[prost(message, optional, tag = "3")]
     buttons_pb: Option<ButtonsPb>,
+    #[prost(int32, optional, tag = "8")]
+    impulse: Option<i32>,
     #[prost(int32, optional, tag = "9")]
     weaponselect: Option<i32>,
     #[prost(int32, optional, tag = "11")]
@@ -248,12 +250,16 @@ struct FullBaseUserCmdPb {
 struct FullCsgoUserCmdPb {
     #[prost(message, optional, tag = "1")]
     base: Option<FullBaseUserCmdPb>,
+    #[prost(bool, optional, tag = "9")]
+    left_hand_desired: Option<bool>,
 }
 
 #[derive(Clone, PartialEq, Message)]
 struct DeltaBaseUserCmdPb {
     #[prost(message, optional, tag = "3")]
     buttons_pb: Option<ButtonsPb>,
+    #[prost(int32, optional, tag = "8")]
+    impulse: Option<i32>,
     #[prost(int32, optional, tag = "9")]
     weaponselect: Option<i32>,
     #[prost(int32, optional, tag = "11")]
@@ -268,6 +274,8 @@ struct DeltaBaseUserCmdPb {
 struct DeltaCsgoUserCmdPb {
     #[prost(message, optional, tag = "1")]
     base: Option<DeltaBaseUserCmdPb>,
+    #[prost(bool, optional, tag = "9")]
+    left_hand_desired: Option<bool>,
 }
 
 #[derive(Clone, Copy)]
@@ -586,8 +594,12 @@ pub struct RawCommandEvidence {
     pub client_tick: Option<i32>,
     pub encoding: &'static str,
     pub raw_button_update: Option<RawButtonUpdateEvidence>,
+    pub raw_impulse_update: Option<i32>,
+    pub impulse: i32,
     pub raw_weaponselect_update: Option<i32>,
     pub weaponselect: i32,
+    pub raw_left_hand_desired_update: Option<bool>,
+    pub left_hand_desired: bool,
     pub raw_mousedx_update: Option<i32>,
     pub raw_mousedy_update: Option<i32>,
     pub mousedx: i32,
@@ -599,6 +611,18 @@ pub struct RawCommandEvidence {
     pub falling_mask_hex: String,
     pub raw_subtick_delta_payloads_hex: Vec<String>,
     pub subtick_updates: Vec<RawSubtickEvidence>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct ButtonEdge {
+    pub demo_tick: u32,
+    pub player_slot: i32,
+    pub command_index: usize,
+    pub edge_ordinal: u16,
+    pub bit: u32,
+    pub pressed: bool,
+    pub when: Option<f32>,
+    pub source: &'static str,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -618,6 +642,38 @@ pub struct WeaponSelectRequest {
 pub struct WeaponSelectValueStats {
     pub weaponselect: i32,
     pub requests: usize,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct ImpulseCommand {
+    pub demo_tick: u32,
+    pub player_slot: i32,
+    pub command_index: usize,
+    pub cmd_number: i32,
+    pub server_tick_executed: Option<i32>,
+    pub client_tick: Option<i32>,
+    pub encoding: &'static str,
+    /// Exact reconstructed `CBaseUserCmdPB.impulse` for this server-replayed command.
+    pub impulse: i32,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct ImpulseValueStats {
+    pub impulse: i32,
+    pub commands: usize,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct HandednessChange {
+    pub demo_tick: u32,
+    pub player_slot: i32,
+    pub command_index: usize,
+    pub cmd_number: i32,
+    pub server_tick_executed: Option<i32>,
+    pub client_tick: Option<i32>,
+    pub encoding: &'static str,
+    pub previous_left_hand_desired: bool,
+    pub left_hand_desired: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -659,7 +715,10 @@ struct SlotState {
     commands: usize,
     button_updates: usize,
     subticks: Vec<SubtickMovePb>,
+    impulse: i32,
     weaponselect: i32,
+    left_hand_desired: bool,
+    left_hand_seen: bool,
     mousedx: i32,
     mousedy: i32,
     mouse_seen: bool,
@@ -715,6 +774,32 @@ impl SlotState {
         }
     }
 
+    fn apply_impulse(&mut self, impulse: Option<i32>, full: bool) {
+        if full {
+            self.impulse = impulse.unwrap_or_default();
+        } else if let Some(value) = impulse {
+            self.impulse = value;
+        }
+    }
+
+    fn apply_left_hand_desired(
+        &mut self,
+        left_hand_desired: Option<bool>,
+        full: bool,
+    ) -> Option<(bool, bool)> {
+        let previous = self.left_hand_desired;
+        let previously_seen = self.left_hand_seen;
+        if full {
+            self.left_hand_desired = left_hand_desired.unwrap_or_default();
+            self.left_hand_seen = true;
+        } else if let Some(value) = left_hand_desired {
+            self.left_hand_desired = value;
+            self.left_hand_seen = true;
+        }
+        (previously_seen && previous != self.left_hand_desired)
+            .then_some((previous, self.left_hand_desired))
+    }
+
     fn apply_mouse(&mut self, mousedx: Option<i32>, mousedy: Option<i32>, full: bool) {
         if full {
             self.mousedx = mousedx.unwrap_or_default();
@@ -746,7 +831,10 @@ impl SlotState {
         self.tick_pressed = 0;
         self.tick_subtick_pressed = 0;
         self.subticks.clear();
+        self.impulse = 0;
         self.weaponselect = 0;
+        self.left_hand_desired = false;
+        self.left_hand_seen = false;
         self.mousedx = 0;
         self.mousedy = 0;
         self.mouse_seen = false;
@@ -768,8 +856,10 @@ impl SlotState {
         if self.mouse_seen && (self.tick_mousedx != 0 || self.tick_mousedy != 0) {
             self.mouse_samples.push((
                 tick,
-                self.tick_mousedx.clamp(i64::from(i32::MIN), i64::from(i32::MAX)) as i32,
-                self.tick_mousedy.clamp(i64::from(i32::MIN), i64::from(i32::MAX)) as i32,
+                self.tick_mousedx
+                    .clamp(i64::from(i32::MIN), i64::from(i32::MAX)) as i32,
+                self.tick_mousedy
+                    .clamp(i64::from(i32::MIN), i64::from(i32::MAX)) as i32,
             ));
         }
         self.tick_mousedx = 0;
@@ -784,10 +874,16 @@ pub struct InputCommandExtractor {
     slots: BTreeMap<i32, SlotState>,
     observed_bits: BTreeMap<u32, ObservedBitStats>,
     evidence: Vec<RawCommandEvidence>,
+    button_edges: Vec<ButtonEdge>,
     identity_updates: Vec<PlayerIdentityUpdate>,
     weaponselect_requests: Vec<WeaponSelectRequest>,
     weaponselect_values: BTreeMap<i32, usize>,
     weaponselect_updates: usize,
+    impulse_commands: Vec<ImpulseCommand>,
+    impulse_values: BTreeMap<i32, usize>,
+    impulse_updates: usize,
+    left_hand_desired_updates: usize,
+    handedness_changes: Vec<HandednessChange>,
     mouse_updates: usize,
     mouse_nonzero_commands: usize,
     last_identity_by_slot: BTreeMap<i32, (u64, u64, String)>,
@@ -962,6 +1058,73 @@ impl InputCommandExtractor {
         raw
     }
 
+    fn record_button_edges(
+        &mut self,
+        demo_tick: u32,
+        player_slot: i32,
+        command_index: usize,
+        planes: ButtonStatePlanes,
+        button_update: bool,
+        subtick_updates: &[SubtickMovePb],
+    ) {
+        let mut subtick_bits = 0_u64;
+        let mut edge_ordinal = 0_u16;
+        for movement in subtick_updates {
+            let (Some(buttons), Some(pressed)) = (movement.button, movement.pressed) else {
+                continue;
+            };
+            for bit in HUD_INPUT_BITS {
+                let mask = 1_u64 << bit;
+                if buttons & mask == 0 {
+                    continue;
+                }
+                subtick_bits |= mask;
+                self.button_edges.push(ButtonEdge {
+                    demo_tick,
+                    player_slot,
+                    command_index,
+                    edge_ordinal,
+                    bit,
+                    pressed,
+                    when: movement.when.filter(|when| when.is_finite()),
+                    source: "subtick",
+                });
+                edge_ordinal = edge_ordinal.saturating_add(1);
+            }
+        }
+
+        if !button_update {
+            return;
+        }
+        for bit in HUD_INPUT_BITS {
+            if subtick_bits & (1_u64 << bit) != 0 {
+                continue;
+            }
+            let transitions: &[bool] = match planes.state_code(bit) {
+                2 => &[false],
+                3 => &[true],
+                4 => &[true, false],
+                5 => &[false, true],
+                6 => &[false, true, false],
+                7 => &[true, false, true],
+                _ => &[],
+            };
+            for &pressed in transitions {
+                self.button_edges.push(ButtonEdge {
+                    demo_tick,
+                    player_slot,
+                    command_index,
+                    edge_ordinal,
+                    bit,
+                    pressed,
+                    when: None,
+                    source: "button_state",
+                });
+                edge_ordinal = edge_ordinal.saturating_add(1);
+            }
+        }
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn record_decoded_command(
         &mut self,
@@ -970,7 +1133,9 @@ impl InputCommandExtractor {
         command: &CMsgServerUserCmd,
         encoding: &'static str,
         buttons: Option<ButtonsPb>,
+        impulse: Option<i32>,
         weaponselect: Option<i32>,
+        left_hand_desired: Option<bool>,
         mousedx: Option<i32>,
         mousedy: Option<i32>,
         subtick_state: Vec<SubtickMovePb>,
@@ -984,7 +1149,7 @@ impl InputCommandExtractor {
             return;
         }
         let raw_button_update = buttons.map(RawButtonUpdateEvidence::from);
-        let button_update = {
+        let (button_update, handedness_change) = {
             let state = self.slots.entry(slot).or_default();
             let updated = if full {
                 state.apply_full_buttons(buttons)
@@ -994,11 +1159,13 @@ impl InputCommandExtractor {
             if updated {
                 state.button_updates += 1;
             }
+            state.apply_impulse(impulse, full);
             state.apply_weaponselect(weaponselect, full);
+            let handedness_change = state.apply_left_hand_desired(left_hand_desired, full);
             state.apply_mouse(mousedx, mousedy, full);
             state.observe_command();
             state.subticks = subtick_state;
-            updated
+            (updated, handedness_change)
         };
         if button_update {
             self.button_updates += 1;
@@ -1019,10 +1186,47 @@ impl InputCommandExtractor {
                 });
             }
         }
+        if impulse.is_some() {
+            self.impulse_updates += 1;
+        }
+        if left_hand_desired.is_some() {
+            self.left_hand_desired_updates += 1;
+        }
+        let reconstructed_impulse = self.slots[&slot].impulse;
+        if reconstructed_impulse != 0 {
+            *self
+                .impulse_values
+                .entry(reconstructed_impulse)
+                .or_default() += 1;
+            self.impulse_commands.push(ImpulseCommand {
+                demo_tick,
+                player_slot: slot,
+                command_index,
+                cmd_number: command.cmd_number.unwrap_or_default(),
+                server_tick_executed: command.server_tick_executed,
+                client_tick: command.client_tick,
+                encoding,
+                impulse: reconstructed_impulse,
+            });
+        }
+        if let Some((previous_left_hand_desired, left_hand_desired)) = handedness_change {
+            self.handedness_changes.push(HandednessChange {
+                demo_tick,
+                player_slot: slot,
+                command_index,
+                cmd_number: command.cmd_number.unwrap_or_default(),
+                server_tick_executed: command.server_tick_executed,
+                client_tick: command.client_tick,
+                encoding,
+                previous_left_hand_desired,
+                left_hand_desired,
+            });
+        }
         if mousedx.is_some() || mousedy.is_some() {
             self.mouse_updates += 1;
         }
         let planes = self.slots[&slot].planes;
+        let reconstructed_left_hand_desired = self.slots[&slot].left_hand_desired;
         let reconstructed_weaponselect = self.slots[&slot].weaponselect;
         let reconstructed_mousedx = self.slots[&slot].mousedx;
         let reconstructed_mousedy = self.slots[&slot].mousedy;
@@ -1031,10 +1235,20 @@ impl InputCommandExtractor {
         if self.slots[&slot].has_button_data {
             self.observe_planes(planes);
         }
+        self.record_button_edges(
+            demo_tick,
+            slot,
+            command_index,
+            planes,
+            button_update,
+            &subtick_updates,
+        );
         let raw_subticks = self.observe_subticks(slot, &subtick_updates);
         if self.include_evidence
             && (button_update
+                || impulse.is_some()
                 || weaponselect.is_some()
+                || left_hand_desired.is_some()
                 || mousedx.is_some()
                 || mousedy.is_some()
                 || !subtick_updates.is_empty()
@@ -1049,8 +1263,12 @@ impl InputCommandExtractor {
                 client_tick: command.client_tick,
                 encoding,
                 raw_button_update,
+                raw_impulse_update: impulse,
+                impulse: reconstructed_impulse,
                 raw_weaponselect_update: weaponselect,
                 weaponselect: reconstructed_weaponselect,
+                raw_left_hand_desired_update: left_hand_desired,
+                left_hand_desired: reconstructed_left_hand_desired,
                 raw_mousedx_update: mousedx,
                 raw_mousedy_update: mousedy,
                 mousedx: reconstructed_mousedx,
@@ -1074,11 +1292,13 @@ impl InputCommandExtractor {
                 self.full_decode_errors += 1;
                 return;
             };
-            let (buttons, weaponselect, mousedx, mousedy, subticks) = user_cmd
+            let left_hand_desired = user_cmd.left_hand_desired;
+            let (buttons, impulse, weaponselect, mousedx, mousedy, subticks) = user_cmd
                 .base
                 .map(|base| {
                     (
                         base.buttons_pb,
+                        base.impulse,
                         base.weaponselect,
                         base.mousedx,
                         base.mousedy,
@@ -1092,7 +1312,9 @@ impl InputCommandExtractor {
                 command,
                 "full",
                 buttons,
+                impulse,
                 weaponselect,
+                left_hand_desired,
                 mousedx,
                 mousedy,
                 subticks.clone(),
@@ -1116,6 +1338,7 @@ impl InputCommandExtractor {
                 self.delta_decode_errors += 1;
                 return;
             };
+            let left_hand_desired = user_cmd.left_hand_desired;
             let Some(base) = user_cmd.base else {
                 let subtick_state = self
                     .slots
@@ -1129,6 +1352,8 @@ impl InputCommandExtractor {
                     "delta",
                     None,
                     None,
+                    None,
+                    left_hand_desired,
                     None,
                     None,
                     subtick_state,
@@ -1176,7 +1401,9 @@ impl InputCommandExtractor {
                 command,
                 "delta",
                 base.buttons_pb,
+                base.impulse,
                 base.weaponselect,
+                left_hand_desired,
                 base.mousedx,
                 base.mousedy,
                 subticks.state,
@@ -1230,6 +1457,8 @@ impl InputCommandExtractor {
                 final_buttonstate1_hex: mask_hex(state.planes.buttonstate1),
                 final_buttonstate2_hex: mask_hex(state.planes.buttonstate2),
                 final_buttonstate3_hex: mask_hex(state.planes.buttonstate3),
+                final_impulse: state.impulse,
+                final_left_hand_desired: state.left_hand_desired,
             })
             .collect();
         let decode_errors = self.full_decode_errors
@@ -1237,11 +1466,11 @@ impl InputCommandExtractor {
             + self.delta_decode_errors
             + self.subtick_decode_errors;
         InputTrackReport {
-            format_version: 8,
+            format_version: 10,
             source_demo,
             source_bytes,
             elapsed_seconds,
-            carrier: "svc_UserCmds(76).commands[].data|delta_data -> CCSGOUserCmdPB.base.buttons_pb/subtick_moves/weaponselect/mousedx/mousedy",
+            carrier: "svc_UserCmds(76).commands[].data|delta_data -> CCSGOUserCmdPB.left_hand_desired + base.buttons_pb/subtick_moves/impulse/weaponselect/mousedx/mousedy",
             button_state_model: "three bit planes of EInButtonState; state1=final held, rising=state3|(state1&state2), falling=state3|(!state1&state2)",
             subtick_delta_model: "stateful codegen-delta list; wire-type 7 field number declares length, indexed elements are sparse, only updated elements are new subtick evidence",
             svc_usercmd_messages: self.svc_messages,
@@ -1282,9 +1511,19 @@ impl InputCommandExtractor {
                     requests,
                 })
                 .collect(),
+            impulse_updates: self.impulse_updates,
+            impulse_commands: self.impulse_commands,
+            impulse_values: self
+                .impulse_values
+                .into_iter()
+                .map(|(impulse, commands)| ImpulseValueStats { impulse, commands })
+                .collect(),
+            left_hand_desired_updates: self.left_hand_desired_updates,
+            handedness_changes: self.handedness_changes,
             mouse_updates: self.mouse_updates,
             mouse_nonzero_commands: self.mouse_nonzero_commands,
             mouse_tracks,
+            button_edges: self.button_edges,
             player_identity_updates: self.identity_updates,
             slot_stats,
             tracks,
@@ -1354,6 +1593,8 @@ pub struct SlotInputStats {
     pub final_buttonstate1_hex: String,
     pub final_buttonstate2_hex: String,
     pub final_buttonstate3_hex: String,
+    pub final_impulse: i32,
+    pub final_left_hand_desired: bool,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -1402,9 +1643,15 @@ pub struct InputTrackReport {
     pub weaponselect_updates: usize,
     pub weaponselect_requests: Vec<WeaponSelectRequest>,
     pub weaponselect_values: Vec<WeaponSelectValueStats>,
+    pub impulse_updates: usize,
+    pub impulse_commands: Vec<ImpulseCommand>,
+    pub impulse_values: Vec<ImpulseValueStats>,
+    pub left_hand_desired_updates: usize,
+    pub handedness_changes: Vec<HandednessChange>,
     pub mouse_updates: usize,
     pub mouse_nonzero_commands: usize,
     pub mouse_tracks: Vec<EncodedMouseTrack>,
+    pub button_edges: Vec<ButtonEdge>,
     pub player_identity_updates: Vec<PlayerIdentityUpdate>,
     pub slot_stats: Vec<SlotInputStats>,
     pub tracks: Vec<EncodedTrack>,
@@ -1580,6 +1827,73 @@ mod tests {
     }
 
     #[test]
+    fn button_audio_edges_preserve_plane_sequence_order() {
+        let mut extractor = InputCommandExtractor::default();
+        extractor.record_button_edges(
+            100,
+            2,
+            7,
+            ButtonStatePlanes {
+                buttonstate1: 1 << 1,
+                buttonstate2: 1 << 1,
+                buttonstate3: 1 << 1,
+            },
+            true,
+            &[],
+        );
+
+        assert_eq!(
+            extractor
+                .button_edges
+                .iter()
+                .map(|edge| edge.pressed)
+                .collect::<Vec<_>>(),
+            vec![true, false, true]
+        );
+        assert!(extractor
+            .button_edges
+            .iter()
+            .all(|edge| edge.source == "button_state" && edge.bit == 1));
+    }
+
+    #[test]
+    fn exact_subtick_edges_replace_aggregate_plane_edges_for_the_same_bit() {
+        let mut extractor = InputCommandExtractor::default();
+        extractor.record_button_edges(
+            100,
+            2,
+            7,
+            ButtonStatePlanes {
+                buttonstate3: 1 << 1,
+                ..ButtonStatePlanes::default()
+            },
+            true,
+            &[
+                SubtickMovePb {
+                    button: Some(1 << 1),
+                    pressed: Some(true),
+                    when: Some(0.25),
+                    ..SubtickMovePb::default()
+                },
+                SubtickMovePb {
+                    button: Some(1 << 1),
+                    pressed: Some(false),
+                    when: Some(0.75),
+                    ..SubtickMovePb::default()
+                },
+            ],
+        );
+
+        assert_eq!(extractor.button_edges.len(), 2);
+        assert_eq!(extractor.button_edges[0].when, Some(0.25));
+        assert_eq!(extractor.button_edges[1].when, Some(0.75));
+        assert!(extractor
+            .button_edges
+            .iter()
+            .all(|edge| edge.source == "subtick"));
+    }
+
+    #[test]
     fn compact_hud_uses_in_speed_not_joyautosprint() {
         assert_ne!(compact_hud_mask(1 << 16) & (1 << 6), 0);
         assert_eq!(compact_hud_mask(1 << 17) & (1 << 6), 0);
@@ -1595,6 +1909,7 @@ mod tests {
                 weaponselect: Some(321),
                 ..FullBaseUserCmdPb::default()
             }),
+            ..FullCsgoUserCmdPb::default()
         }
         .encode_to_vec();
 
@@ -1609,12 +1924,57 @@ mod tests {
                 weaponselect: Some(654),
                 ..DeltaBaseUserCmdPb::default()
             }),
+            ..DeltaCsgoUserCmdPb::default()
         }
         .encode_to_vec();
 
         let sanitized = sanitize_delta_message(&encoded, DeltaSchema::CsgoUserCmd).unwrap();
         let decoded = DeltaCsgoUserCmdPb::decode(sanitized.as_slice()).unwrap();
         assert_eq!(decoded.base.unwrap().weaponselect, Some(654));
+    }
+
+    #[test]
+    fn full_and_delta_usercmd_preserve_impulse_and_handedness_fields() {
+        let full = FullCsgoUserCmdPb {
+            base: Some(FullBaseUserCmdPb {
+                impulse: Some(100),
+                ..FullBaseUserCmdPb::default()
+            }),
+            left_hand_desired: Some(true),
+        }
+        .encode_to_vec();
+        let decoded_full = FullCsgoUserCmdPb::decode(full.as_slice()).unwrap();
+        assert_eq!(decoded_full.base.unwrap().impulse, Some(100));
+        assert_eq!(decoded_full.left_hand_desired, Some(true));
+
+        let delta = DeltaCsgoUserCmdPb {
+            base: Some(DeltaBaseUserCmdPb {
+                impulse: Some(201),
+                ..DeltaBaseUserCmdPb::default()
+            }),
+            left_hand_desired: Some(false),
+        }
+        .encode_to_vec();
+        let sanitized = sanitize_delta_message(&delta, DeltaSchema::CsgoUserCmd).unwrap();
+        let decoded_delta = DeltaCsgoUserCmdPb::decode(sanitized.as_slice()).unwrap();
+        assert_eq!(decoded_delta.base.unwrap().impulse, Some(201));
+        assert_eq!(decoded_delta.left_hand_desired, Some(false));
+    }
+
+    #[test]
+    fn handedness_baseline_is_not_an_action_but_later_edges_are() {
+        let mut state = SlotState::default();
+
+        assert_eq!(state.apply_left_hand_desired(Some(false), true), None);
+        assert_eq!(
+            state.apply_left_hand_desired(Some(true), false),
+            Some((false, true))
+        );
+        assert_eq!(state.apply_left_hand_desired(None, false), None);
+        assert_eq!(
+            state.apply_left_hand_desired(Some(false), false),
+            Some((true, false))
+        );
     }
 
     #[test]
@@ -1625,6 +1985,7 @@ mod tests {
                 mousedy: Some(19),
                 ..FullBaseUserCmdPb::default()
             }),
+            ..FullCsgoUserCmdPb::default()
         }
         .encode_to_vec();
         let decoded_full = FullCsgoUserCmdPb::decode(full.as_slice()).unwrap();
@@ -1638,6 +1999,7 @@ mod tests {
                 mousedy: Some(-10),
                 ..DeltaBaseUserCmdPb::default()
             }),
+            ..DeltaCsgoUserCmdPb::default()
         }
         .encode_to_vec();
         let sanitized = sanitize_delta_message(&delta, DeltaSchema::CsgoUserCmd).unwrap();
@@ -1661,7 +2023,7 @@ mod tests {
     }
 
     #[test]
-    fn identity_change_resets_slot_input_and_weaponselect() {
+    fn identity_change_resets_slot_input_and_semantic_fields() {
         let mut state = SlotState {
             planes: ButtonStatePlanes {
                 buttonstate1: 1 << 3,
@@ -1669,7 +2031,10 @@ mod tests {
             },
             has_button_data: true,
             seen: true,
+            impulse: 100,
             weaponselect: 321,
+            left_hand_desired: true,
+            left_hand_seen: true,
             ..SlotState::default()
         };
         state.flush(10);
@@ -1677,7 +2042,10 @@ mod tests {
 
         assert_eq!(state.changes, vec![(10, 1), (20, 0)]);
         assert_eq!(state.planes, ButtonStatePlanes::default());
+        assert_eq!(state.impulse, 0);
         assert_eq!(state.weaponselect, 0);
+        assert!(!state.left_hand_desired);
+        assert!(!state.left_hand_seen);
         assert!(!state.has_button_data);
     }
 

@@ -21,6 +21,7 @@ from typing import Any, Mapping
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _EXTRACTOR_NAME = "demo-input-hud-track.exe" if sys.platform == "win32" else "demo-input-hud-track"
+_INPUT_REPORT_MIN_FORMAT_VERSION = 10
 _REPORT_CACHE_MAX = 8
 _CACHE_LOCK = threading.Lock()
 _LOAD_LOCKS = tuple(threading.Lock() for _ in range(8))
@@ -83,14 +84,20 @@ def load_input_report(demo_path: str | Path) -> dict[str, Any]:
     key = _demo_key(demo_path)
     with _CACHE_LOCK:
         cached = _report_cache.get(key)
-    if cached is not None:
+    if (
+        cached is not None
+        and int(cached.get("format_version", 0)) >= _INPUT_REPORT_MIN_FORMAT_VERSION
+    ):
         return cached
 
     load_lock = _LOAD_LOCKS[hash(key) % len(_LOAD_LOCKS)]
     with load_lock:
         with _CACHE_LOCK:
             cached = _report_cache.get(key)
-        if cached is not None:
+        if (
+            cached is not None
+            and int(cached.get("format_version", 0)) >= _INPUT_REPORT_MIN_FORMAT_VERSION
+        ):
             return cached
 
         extractor = resolve_input_extractor()
@@ -128,8 +135,13 @@ def load_input_report(demo_path: str | Path) -> dict[str, Any]:
             except (OSError, ValueError, TypeError) as exc:
                 raise InputCommandError("input extractor returned invalid JSON") from exc
 
-        if not isinstance(report, dict) or int(report.get("format_version", 0)) < 3:
-            raise InputCommandError("input extractor report is missing the v3 truth-source contract")
+        if (
+            not isinstance(report, dict)
+            or int(report.get("format_version", 0)) < _INPUT_REPORT_MIN_FORMAT_VERSION
+        ):
+            raise InputCommandError(
+                "input extractor report is missing the v10 button-edge truth-source contract"
+            )
         if not isinstance(report.get("tracks"), list):
             raise InputCommandError("input extractor report contains no slot tracks")
         try:

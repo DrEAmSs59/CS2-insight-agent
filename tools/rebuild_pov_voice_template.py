@@ -26,6 +26,11 @@ HUD_ALERTS_RESOURCES = {
     "panorama/scripts/hud/hudalerts_insight.vjs_c": ROOT / "pov" / "hudalerts_insight.vjs_c",
     "panorama/styles/hud/hudalerts_insight.vcss_c": ROOT / "pov" / "hudalerts_insight.vcss_c",
 }
+INPUT_AUDIO_COMPILED_ROOT = ROOT / "pov" / "audio_compiled"
+INPUT_AUDIO_RESOURCES = {
+    source.relative_to(INPUT_AUDIO_COMPILED_ROOT).as_posix(): source
+    for source in sorted(INPUT_AUDIO_COMPILED_ROOT.rglob("*_c"))
+}
 HEALTHAMMO_STYLE_PATH = "panorama/styles/hud/hudhealthammocenter.vcss_c"
 POV_RECORDING_STYLE_PATHS = {
     "panorama/styles/hud/hudradar.vcss_c",
@@ -150,6 +155,10 @@ def main() -> None:
     entries.pop(STOCK_HUD_ALERTS_STYLE_PATH, None)
     for resource_path, source_path in HUD_ALERTS_RESOURCES.items():
         entries[resource_path] = source_path.read_bytes()
+    if not INPUT_AUDIO_RESOURCES:
+        raise RuntimeError("compiled input-audio resources are missing")
+    for resource_path, source_path in INPUT_AUDIO_RESOURCES.items():
+        entries[resource_path] = source_path.read_bytes()
     POV_TEMPLATE.write_bytes(write_inline_vpk(entries))
 
     # Advanced playback hot-switches back to CS2's native spectator HUD. Keep
@@ -164,11 +173,14 @@ def main() -> None:
     static_entries.pop(STOCK_HUD_ALERTS_STYLE_PATH, None)
     for resource_path, source_path in HUD_ALERTS_RESOURCES.items():
         static_entries[resource_path] = source_path.read_bytes()
+    for resource_path, source_path in INPUT_AUDIO_RESOURCES.items():
+        static_entries[resource_path] = source_path.read_bytes()
     STATIC_PACKAGE.write_bytes(write_inline_vpk(static_entries))
     print(f"pov_template={POV_TEMPLATE}")
     print(f"advanced_playback_template={ADVANCED_PLAYBACK_TEMPLATE}")
     print(f"static_package={STATIC_PACKAGE}")
     print("hudalerts_resources=" + ",".join(HUD_ALERTS_RESOURCES))
+    print("input_audio_resources=" + ",".join(INPUT_AUDIO_RESOURCES))
     print(f"native_healthammo_style={HEALTHAMMO_STYLE_PATH}")
     print("advanced_removed_styles=" + ",".join(sorted(ADVANCED_HOT_SWITCH_STYLE_PATHS)))
     print(f"payload_capacity={PAYLOAD_CAPACITY}")
