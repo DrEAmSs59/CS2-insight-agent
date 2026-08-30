@@ -15,8 +15,8 @@ function voiceCommands(overrides = {}) {
 
 
 describe("recording warmup voice ownership", () => {
-  it("keeps POV player voice enabled by default", () => {
-    expect(RECORD_WARMUP_DEFAULT_OPTIONS.pov_voice_disabled).toBe(false);
+  it("keeps the existing team-only POV audience by default", () => {
+    expect(RECORD_WARMUP_DEFAULT_OPTIONS.pov_voice_mode).toBe("team");
   });
 
   it.each(["off", "open", "team", "enemy", "mute", "all"])(

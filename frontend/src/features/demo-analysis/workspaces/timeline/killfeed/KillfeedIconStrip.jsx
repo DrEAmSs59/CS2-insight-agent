@@ -24,7 +24,7 @@ function HudChainImg({ chain, title = "", imgClass = "inline-block h-[18px] w-[1
   );
 }
 
-/** 固定槽位 + object-contain：HLAE 各枪 SVG 画布比例不一，统一以「约等于 AK 条里步枪占位」为基准。 */
+/** 固定槽位 + object-contain：内置各枪 SVG 画布比例不一，统一以「约等于 AK 条里步枪占位」为基准。 */
 function WeaponHudImg({ chain, title }) {
   const [i, setI] = useState(0);
   const stem = chain[Math.min(i, chain.length - 1)] || "ak47";

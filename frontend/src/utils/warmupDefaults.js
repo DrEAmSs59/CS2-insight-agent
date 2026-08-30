@@ -1,3 +1,7 @@
+import { normalizeRecordingSkyboxId } from "./recordingSkybox.js";
+import { normalizeRecordingMapMaterialId } from "./recordingMapMaterial.js";
+import { normalizePovVoiceMode } from "./povVoiceMode.js";
+
 function gcdInt(a, b) {
   let x = Math.abs(a);
   let y = Math.abs(b);
@@ -118,9 +122,9 @@ export function warmupUiOptsToPersisted(opts) {
     aspect_ratio: opts.aspect_ratio != null ? String(opts.aspect_ratio) : "",
     resolution_width: rw != null && rw !== "" ? String(rw) : "",
     resolution_height: rh != null && rh !== "" ? String(rh) : "",
-    pov_radar_mode: Number(opts.pov_radar_mode) === 0 ? 0 : -1,
+    pov_radar_mode: 0,
     pov_teamcounter_numeric: !!opts.pov_teamcounter_numeric,
-    pov_voice_disabled: !!opts.pov_voice_disabled,
+    pov_voice_mode: normalizePovVoiceMode(opts.pov_voice_mode, opts.pov_voice_disabled === true),
   };
 }
 
@@ -157,9 +161,12 @@ export function warmupApiPayloadToPersisted(warmup) {
     aspect_ratio: warmup.aspect_ratio != null ? String(warmup.aspect_ratio) : "",
     resolution_width: rw != null && rw !== "" ? String(rw) : "",
     resolution_height: rh != null && rh !== "" ? String(rh) : "",
-    pov_radar_mode: Number(warmup.pov_radar_mode) === 0 ? 0 : -1,
+    pov_radar_mode: 0,
     pov_teamcounter_numeric: !!warmup.pov_teamcounter_numeric,
-    pov_voice_disabled: !!warmup.pov_voice_disabled,
+    pov_voice_mode: normalizePovVoiceMode(
+      warmup.pov_voice_mode,
+      warmup.pov_voice_disabled === true,
+    ),
   };
 }
 
@@ -208,6 +215,8 @@ export function splitRecordWarmupConfirmPayload(payload) {
     session_cs2_extra_launch_args,
     session_record_inject_console_lines,
     experimental_pov_enabled,
+    recording_skybox,
+    recording_map_material,
     obs_transition_enabled,
     obs_transition_name,
     obs_transition_duration_ms,
@@ -230,6 +239,8 @@ export function splitRecordWarmupConfirmPayload(payload) {
           ? session_record_inject_console_lines
           : undefined,
       experimental_pov_enabled: !!experimental_pov_enabled,
+      recording_skybox: normalizeRecordingSkyboxId(recording_skybox),
+      recording_map_material: normalizeRecordingMapMaterialId(recording_map_material),
       obs_transition_enabled,
       obs_transition_name,
       obs_transition_duration_ms,

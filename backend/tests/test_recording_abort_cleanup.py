@@ -301,8 +301,16 @@ def test_pov_recording_uses_shared_exit_restore_and_reports_evidence(
         def __init__(self, config):
             calls.append(("manager", config))
 
-        def install(self, *, demo_path=None):
-            calls.append(("install", demo_path))
+        def install(
+            self,
+            *,
+            map_name=None,
+            demo_path=None,
+            voice_mode="team",
+            skybox_id="default",
+            map_material_id="default",
+        ):
+            calls.append(("install", demo_path, voice_mode))
 
         def status(self):
             return {"original_gameinfo_sha256": f"  {'A' * 64}  "}
@@ -374,6 +382,7 @@ def test_pov_recording_uses_shared_exit_restore_and_reports_evidence(
     call_names = [entry[0] for entry in calls]
     assert call_names[:2] == ["manager", "install"]
     assert calls[1][1] == tmp_path / "pov.dem"
+    assert calls[1][2] == "team"
     assert call_names.count("kill") >= 1
     assert call_names[-1] == "restore"
     restore_call = calls[-1]

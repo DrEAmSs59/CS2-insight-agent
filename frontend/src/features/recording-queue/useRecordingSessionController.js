@@ -16,6 +16,7 @@ import {
   buildRecordingQueueRequestsFromQueue,
 } from "../../utils/recordingBatch";
 import { splitRecordWarmupConfirmPayload } from "../../utils/warmupDefaults";
+import { normalizePovVoiceMode } from "../../utils/povVoiceMode.js";
 
 /** Owns one recording session from preflight through recovery and result reporting. */
 export function useRecordingSessionController({
@@ -125,7 +126,7 @@ export function useRecordingSessionController({
     setRecordingResults(null);
     setRecordingResultModalOpen(false);
     setBatchRecording(true);
-    setProgressText(t("app.preparingRecording"), { loading: true });
+    setProgressText(t("common.preparingMapResources"), { loading: true });
 
     const overlayPrebuildEnabled = session.kb_overlay_enabled || session.kill_fx_enabled;
     let overlayPollTimer = null;
@@ -167,9 +168,9 @@ export function useRecordingSessionController({
       const povHud = session.experimental_pov_enabled
         ? {
             enabled: true,
-            radar_mode: Number(warmupForApi?.pov_radar_mode ?? 0),
+            radar_mode: 0,
             teamcounter_numeric: Boolean(warmupForApi?.pov_teamcounter_numeric),
-            voice_disabled: Boolean(warmupForApi?.pov_voice_disabled),
+            voice_mode: normalizePovVoiceMode(warmupForApi?.pov_voice_mode),
           }
         : undefined;
       const body = {
@@ -178,10 +179,12 @@ export function useRecordingSessionController({
         obs: obsConfig,
         cs2_extra_launch_args: session.cs2_extra_launch_args,
         record_inject_console_lines: session.record_inject_console_lines,
+        skybox: { id: session.recording_skybox },
+        map_material: { id: session.recording_map_material },
         ...(povHud ? { pov_hud: povHud } : {}),
       };
       if (!recordingAbortRequestedRef.current) {
-        setProgressText(t("app.batchRecording"), { loading: true });
+        setProgressText(t("common.preparingMapResources"), { loading: true });
       }
       const { data } = await API.post("recording/queue", body);
       const results = Array.isArray(data) ? data : [];

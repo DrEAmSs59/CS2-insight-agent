@@ -21,6 +21,10 @@ from .cs2_config_backup import (
     write_persistent_backup_from_snap,
 )
 from .demo_compat_service import ensure_demo_compatible
+from .map_material_vpk import (
+    DEFAULT_MAP_MATERIAL_ID,
+    map_material_console_commands,
+)
 from .pov_constants import POV_CORE_FORCED_COMMANDS, pov_tail_commands
 from .pov_hud_manager import PovHudError, PovHudManager, restore_pov_after_cs2_exit
 
@@ -42,6 +46,8 @@ class DemoPlaybackPovOptions:
     enabled: bool = False
     radar_mode: int = 0
     teamcounter_numeric: bool = False
+    skybox_id: str = "default"
+    map_material_id: str = DEFAULT_MAP_MATERIAL_ID
 
 
 @dataclass
@@ -149,12 +155,19 @@ class DemoPlaybackService:
     def _write_pov_cfg(cfg_path: Path, demo_stem: str, options: DemoPlaybackPovOptions) -> None:
         commands = [
             "con_enable 1",
+            "sv_cheats 1",
+            *(
+                command
+                for command in map_material_console_commands(options.map_material_id)
+                if command != "sv_cheats 1"
+            ),
             *POV_CORE_FORCED_COMMANDS,
             *pov_tail_commands(
                 teamcounter_numeric=bool(options.teamcounter_numeric),
                 radar_mode=int(options.radar_mode),
             ),
             f'playdemo "{demo_stem}.dem"',
+            "demoui true",
         ]
         cfg_path.write_text("\n".join(commands) + "\n", encoding="ascii")
 
@@ -337,7 +350,12 @@ class DemoPlaybackService:
 
                 if options.enabled:
                     pov_install_attempted = True
-                    pov_manager.install(demo_path=dem_path)
+                    pov_manager.install(
+                        demo_path=dem_path,
+                        advanced_playback_enabled=True,
+                        skybox_id=options.skybox_id,
+                        map_material_id=options.map_material_id,
+                    )
                     installed_status = pov_manager.status()
                     expected_gameinfo_sha256 = str(
                         installed_status.get("original_gameinfo_sha256") or ""
@@ -398,6 +416,8 @@ class DemoPlaybackService:
                     session_id,
                     state="running",
                     pov_hud_enabled=bool(options.enabled),
+                    recording_skybox_id=options.skybox_id,
+                    recording_map_material_id=options.map_material_id,
                     restore=None,
                     player_config_restore=None,
                 )
@@ -414,6 +434,8 @@ class DemoPlaybackService:
                     "ok": True,
                     "session_id": session_id,
                     "pov_hud_enabled": bool(options.enabled),
+                    "recording_skybox_id": options.skybox_id,
+                    "recording_map_material_id": options.map_material_id,
                 }
             except Exception:
                 if session is not None:

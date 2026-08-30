@@ -1,11 +1,14 @@
 /*__CS2_INSIGHT_INJECTION_BEGIN__*/
 // Injected into the stock Panorama huddemocontroller script in
-// pov_voice_template.vpk. demo_voice_hud.py replaces only the bounded payload
+// the separate POV-recording and Advanced-playback templates.
+// demo_voice_hud.py replaces only the bounded payload
 // between the two marker comments before installing the package. The payload
 // contains [location tokens, voice speakers, exact svc_UserCmd input tracks,
 // SteamID/slot/team roster, reserved slots, radar track at index 8,
 // kill/HS attacker-feedback cues at index 9, flash-blind intervals at index 10,
-    // reconstructed team radio at index 11].
+// reconstructed team radio at index 11, advanced-playback menu data at index 12,
+// fixed recording voice audience at index 13, trusted post-load session console
+// commands at index 14].
 ;(function CS2InsightDemoVoiceHud() {
     "use strict";
 
@@ -18,6 +21,15 @@
     const encodedKillFeedback = packed[9] || null;
     const encodedFlashBlind = packed[10] || null;
     const encodedRadio = packed[11] || null;
+    const encodedAdvancedPlayback = packed[12] || null;
+    const encodedRecordingVoiceMode = String(packed[13] || "team");
+    const encodedSessionConsoleCommands = Array.isArray(packed[14]) ? packed[14] : [];
+    const sessionConsoleCommands = encodedSessionConsoleCommands.map(function (command) {
+        return String(command || "").trim();
+    }).filter(Boolean);
+    const recordingVoiceMode = ["all", "team", "enemy", "mute"].indexOf(encodedRecordingVoiceMode) >= 0
+        ? encodedRecordingVoiceMode
+        : "team";
     const PLAYER_COLOR_HEX = ["#88CEF5", "#009E80", "#F1E441", "#E6802A", "#BD2C96"];
     const RADAR_MAP_SIZE = 1024;
     const POV_RADAR_SCALE = 0.4;
@@ -48,11 +60,13 @@
     const FLASH_TINNITUS_SHORT = "Flashbang.Ring.Short";
     const FLASH_TINNITUS_MEDIUM = "Flashbang.Ring.Medium";
     const FLASH_TINNITUS_LONG = "Flashbang.Ring.Long";
-    // CS flash client state: ~94 ms build-up, then a full-white / squared fade
-    // based on the *remaining* time and a three-second certainty threshold.
+    // CS flash client state: ~94 ms build-up, then a full-white / calibrated fade
+    // based on the *remaining* time. Two rounds of 240 FPS POV/native Demo HUD
+    // captures set the certainty window and quartic tail below.
     // The demo duration is already the server-merged overlap state.
     const FLASH_BUILD_UP_SECONDS = (255 / 45) / 60;
-    const FLASH_CERTAIN_BLIND_SECONDS = 3;
+    const FLASH_CERTAIN_BLIND_SECONDS = 3.43;
+    const FLASH_FADE_EXPONENT = 4;
     const FLASH_PAYLOAD_VERSION = 2;
     const FLASH_STATE_CLEAR = 1;
     // Rendering cadence only: flash timing and strength remain demo-tick based.
@@ -65,6 +79,8 @@
     // Keep transient Insight overlays hidden briefly after the pre-record pause
     // is released while CS2 completes its deferred HUD rebuild.
     const TRANSIENT_HUD_RESUME_GRACE_TICKS = 32;
+    const SESSION_CONSOLE_COMMAND_PASSES = 3;
+    const SESSION_CONSOLE_COMMAND_REAPPLY_SECONDS = 1;
     // A paused demo_gototick does not reliably emit PanoramaGameTimeJumpEvent.
     // Recording then runs spec_player shortly after demo_resume, which can
     // republish the seek-stale match alert. Keep the alert suppressed through
@@ -126,6 +142,7 @@
         };
     });
     const controller = $.GetContextPanel();
+    let sessionConsoleCommandPasses = 0;
     const inputTracksByXuid = {};
     encodedInputTracks.forEach(function (encoded) {
         let previousTick = 0;
@@ -463,6 +480,104 @@
             return null;
         }
     })();
+
+    function decodeAdvancedPlayback(raw) {
+        if (!raw || !Array.isArray(raw) || Number(raw[0] || 0) !== 1) {
+            return null;
+        }
+        const tickRate = Math.max(1, Number(raw[1] || 64000) / 1000);
+        const encodedPlayers = Array.isArray(raw[2]) ? raw[2] : [];
+        const details = Array.isArray(raw[3]) ? raw[3] : [""];
+        const players = encodedPlayers.map(function (row, index) {
+            return {
+                xuid: normalizeXuid(row && row[0]),
+                name: String(row && row[1] || ""),
+                team: Number(row && row[2] || 0),
+                parserSlot: Number(row && row[3] || index),
+                index: index,
+            };
+        }).filter(function (player) {
+            return player.xuid && (player.team === 2 || player.team === 3);
+        });
+        if (!players.length) {
+            return null;
+        }
+        const byXuid = {};
+        const eventsByXuid = {};
+        let maximumEventTick = 0;
+        players.forEach(function (player) {
+            byXuid[player.xuid] = player;
+            eventsByXuid[player.xuid] = [];
+        });
+        let previousTick = 0;
+        String(raw[4] || "").split(",").filter(Boolean).forEach(function (token) {
+            const fields = token.split(".");
+            if (fields.length < 6) {
+                return;
+            }
+            previousTick += parseInt(fields[0], 36) || 0;
+            maximumEventTick = Math.max(maximumEventTick, previousTick);
+            const type = parseInt(fields[1], 36) || 0;
+            const actorIndex = (parseInt(fields[2], 36) || 0) - 1;
+            const targetIndex = (parseInt(fields[3], 36) || 0) - 1;
+            const detail = String(details[parseInt(fields[4], 36) || 0] || "");
+            const flags = parseInt(fields[5], 36) || 0;
+            const actor = actorIndex >= 0 ? players[actorIndex] : null;
+            const target = targetIndex >= 0 ? players[targetIndex] : null;
+            if (type === 0) {
+                if (actor && eventsByXuid[actor.xuid]) {
+                    eventsByXuid[actor.xuid].push({
+                        tick: previousTick,
+                        type: "kill",
+                        detail: detail,
+                        peerXuid: target ? target.xuid : "",
+                        flags: flags,
+                    });
+                }
+                if (target && eventsByXuid[target.xuid]) {
+                    eventsByXuid[target.xuid].push({
+                        tick: previousTick,
+                        type: "death",
+                        detail: detail,
+                        peerXuid: actor ? actor.xuid : "",
+                        flags: flags,
+                    });
+                }
+            } else if (type === 1 && actor && eventsByXuid[actor.xuid]) {
+                eventsByXuid[actor.xuid].push({
+                    tick: previousTick,
+                    type: "utility",
+                    detail: detail,
+                    peerXuid: "",
+                    flags: flags,
+                });
+            }
+        });
+        const rounds = (Array.isArray(raw[6]) ? raw[6] : []).map(function (row, index) {
+            const number = Math.max(1, Number(row && row[0] || (index + 1)));
+            const start = Math.max(0, Number(row && row[1] || 0));
+            const end = Math.max(start, Number(row && row[2] || start));
+            return { number: number, start: start, end: end };
+        }).filter(function (round) {
+            return isFinite(round.number) && isFinite(round.start) && isFinite(round.end);
+        });
+        return {
+            tickRate: tickRate,
+            totalTick: Math.max(1, Number(raw[5] || 0), maximumEventTick),
+            players: players,
+            byXuid: byXuid,
+            eventsByXuid: eventsByXuid,
+            rounds: rounds,
+        };
+    }
+
+    const advancedPlayback = (function safelyDecodeAdvancedPlayback() {
+        try {
+            return decodeAdvancedPlayback(encodedAdvancedPlayback);
+        } catch (errAdvancedDecode) {
+            return null;
+        }
+    })();
     let unmuteAttempts = 0;
     let audiencePovXuid = "";
     let audienceMaskSignature = "";
@@ -496,6 +611,83 @@
     let nativeChatHistoryText = null;
     let radioLastTick = -1;
     let radioEpochTick = -1;
+    let advancedMenu = null;
+    let advancedEdgeTrigger = null;
+    let advancedMenuDismissLayer = null;
+    const ADVANCED_MENU_OWNER_ATTRIBUTE = "cs2_insight_advanced_owner";
+    const ADVANCED_MENU_PANEL_IDS = [
+        "CS2InsightAdvancedMenu",
+        "CS2InsightAdvancedEdge",
+        "CS2InsightAdvancedDismissLayer",
+    ];
+    const advancedMenuInstanceToken = String((new Date()).getTime())
+        + ":" + String(Math.random());
+    let advancedMenuClaimedRoot = null;
+    let advancedMenuRootClaimed = false;
+    let advancedMenuOwnershipSupported = true;
+    let advancedMenuVisible = false;
+    let advancedMenuHoverGeneration = 0;
+    let advancedSelectedXuid = "";
+    let advancedEventFilter = "all";
+    let advancedEventPage = 0;
+    let advancedViewMode = 5;
+    let advancedPovVisualsEnabled = true;
+    let advancedHudHidden = false;
+    let advancedSpecOperation = null;
+    let advancedMenuBody = null;
+    let advancedMenuTitleLabel = null;
+    let advancedMenuHeaderControls = null;
+    let advancedMenuCollapsed = true;
+    let advancedPlayerListPanel = null;
+    let advancedEventListPanel = null;
+    let advancedEventPagerLabel = null;
+    let advancedFollowRoundButton = null;
+    let advancedFollowCurrentRound = true;
+    let advancedFollowedRoundNumber = -1;
+    let advancedPinButton = null;
+    let advancedPreviousRoundButton = null;
+    let advancedRoundButton = null;
+    let advancedNextRoundButton = null;
+    let advancedRoundHintLabel = null;
+    let advancedRoundPickerPanel = null;
+    let advancedRoundPickerOpen = false;
+    const advancedRoundButtons = [];
+    let advancedMenuPinned = true;
+    let advancedNativeMessagesRestored = false;
+    let advancedNativeRadarRestored = false;
+    let advancedNativeOverheadRestored = false;
+    let advancedEdgeRevealArmed = true;
+    let advancedRoundIntervals = advancedPlayback && advancedPlayback.rounds
+        ? advancedPlayback.rounds.slice()
+        : [];
+    const advancedProfileButtons = {};
+    const advancedVoiceButtons = {};
+    const advancedFilterButtons = {};
+    const advancedOptionButtons = {};
+    const advancedOptionLabels = {};
+    const ADVANCED_EVENT_ICON_HEIGHT = 16;
+    const ADVANCED_EVENT_ICON_TRACK_HEIGHT = 20;
+    const ADVANCED_FILTER_ICON_SIZE = 14;
+    const ADVANCED_FILTER_ICON_CELL = 18;
+    const ADVANCED_EVENT_ROW_HEIGHT = 24;
+    const ADVANCED_EVENT_GROUP_GAP = 4;
+    const ADVANCED_EVENT_GROUP_ODD_SURFACE = "#101010f7";
+    const ADVANCED_EVENT_GROUP_EVEN_SURFACE = "#232323f7";
+    const ADVANCED_EVENT_GROUP_BORDER = "#505050";
+    // Keep round navigation accents identical to the title and selected tabs.
+    const ADVANCED_EVENT_ROUND_ACCENT = "#e07f0a";
+    let advancedVoicePolicy = "all";
+    let advancedPlayerTeamSignature = "";
+    const advancedCustomVoiceXuids = {};
+    const advancedRestrictedTeamCounterPanels = [];
+    const advancedModifiedTeamSides = [];
+    const advancedPovFactionStrokes = [];
+    let advancedPovFactionLineOverlay = null;
+    const advancedQuickOptions = {
+        xray: false,
+        radar: true,
+        overhead: true,
+    };
     // Stock-ish radar intel timings (no public convar; matched to live feel).
     const RADAR_DEATH_ICON_SECONDS = 2.0;
     const RADAR_LAST_KNOWN_SECONDS = 1.5;
@@ -655,6 +847,51 @@
         }
     }
 
+    function advancedPovVisualsActive() {
+        return !advancedPlayback || advancedPovVisualsEnabled;
+    }
+
+    function runtimeSlotForXuid(xuid) {
+        const wanted = normalizeXuid(xuid);
+        if (!wanted) {
+            return -1;
+        }
+        for (let slot = 0; slot < 64; slot += 1) {
+            let slotXuid = "";
+            try {
+                slotXuid = normalizeXuid(GameStateAPI.GetPlayerXuidStringFromPlayerSlot(slot) || "");
+            } catch (errSlot) {}
+            if (sameXuid(slotXuid, wanted)) {
+                return slot;
+            }
+        }
+        return -1;
+    }
+
+    function activeVoicePolicy() {
+        return advancedPlayback ? advancedVoicePolicy : recordingVoiceMode;
+    }
+
+    function advancedVoiceAllows(xuid, povTeam, tick) {
+        const policy = activeVoicePolicy();
+        if (policy === "team") {
+            return povTeam !== 0 && resolvePovTeam(xuid, tick) === povTeam;
+        }
+        if (policy === "enemy") {
+            const speakerTeam = resolvePovTeam(xuid, tick);
+            return povTeam !== 0
+                && (speakerTeam === 2 || speakerTeam === 3)
+                && speakerTeam !== povTeam;
+        }
+        if (policy === "all") {
+            return true;
+        }
+        if (policy === "mute") {
+            return false;
+        }
+        return Boolean(advancedCustomVoiceXuids[normalizeXuid(xuid)]);
+    }
+
     function updateVoiceAudience(state) {
         const povXuid = currentPovXuid(state);
         const tick = state && typeof state.nTick === "number" ? state.nTick : 0;
@@ -667,9 +904,10 @@
 
         let low = 0;
         let high = 0;
-        if (povTeam === 2 || povTeam === 3) {
-            const swapped = rosterTeamSwappedAt(tick);
-            // Resolve runtime slots from XUIDs; map roster team through half-swap once.
+        const voicePolicy = activeVoicePolicy();
+        if ((povTeam === 2 || povTeam === 3) || voicePolicy === "all" || voicePolicy === "mute") {
+            // Resolve runtime slots from XUIDs; the shared policy resolver tracks
+            // live sides across half-time swaps for team/enemy audiences.
             for (let slot = 0; slot < 64; slot += 1) {
                 const slotXuid = normalizeXuid(
                     GameStateAPI.GetPlayerXuidStringFromPlayerSlot(slot) || "",
@@ -678,11 +916,8 @@
                 if (!slotPlayer) {
                     continue;
                 }
-                let slotTeam = slotPlayer.team;
-                if (swapped) {
-                    slotTeam = slotTeam === 2 ? 3 : 2;
-                }
-                if (slotTeam !== povTeam) {
+                const allowed = advancedVoiceAllows(slotXuid, povTeam, tick);
+                if (!allowed) {
                     continue;
                 }
                 if (slot < 32) {
@@ -695,7 +930,7 @@
 
         low |= 0;
         high |= 0;
-        const signature = low + ":" + high;
+        const signature = voicePolicy + ":" + low + ":" + high;
         if (targetChanged || signature !== audienceMaskSignature) {
             applyVoiceAudienceMask(low, high);
             audienceMaskSignature = signature;
@@ -778,10 +1013,70 @@
         if (!panel || !panel.IsValid()) {
             return;
         }
+        let advancedHealthbar = false;
+        try {
+            advancedHealthbar = Boolean(
+                advancedPlayback
+                && panel.BHasClass
+                && panel.BHasClass("healthbar-container")
+            );
+        } catch (errHealthbarClass) {}
+        if (advancedHealthbar) {
+            const trackedHealthbar = advancedRestrictedTeamCounterPanels.indexOf(panel) >= 0;
+            const healthNumbers = panel.FindChildrenWithClassTraverse
+                ? (panel.FindChildrenWithClassTraverse("healthbar__health-number") || [])
+                : [];
+            if (advancedPovVisualsActive()) {
+                if (!trackedHealthbar) {
+                    advancedRestrictedTeamCounterPanels.push(panel);
+                }
+                try {
+                    // Match the original POV stylesheet: every healthbar keeps
+                    // the same 4px layout slot, while enemy information is only
+                    // transparent. Collapsing the panel removes its flow height
+                    // and makes the following HTC__kills row jump vertically.
+                    panel.style.height = "4px";
+                    panel.style.opacity = restricted ? "0" : null;
+                } catch (errPovHealthbar) {}
+                for (let numberIndex = 0; numberIndex < healthNumbers.length; numberIndex += 1) {
+                    try {
+                        // SHOW-EQUIPINFO exposes a 14px numeric child. The old
+                        // POV stylesheet hid it; otherwise fixing the parent at
+                        // 4px leaves clipped fragments of "100" below avatars.
+                        healthNumbers[numberIndex].style.opacity = "0";
+                    } catch (errPovHealthNumber) {}
+                }
+                return;
+            }
+            if (!trackedHealthbar) {
+                return;
+            }
+            try {
+                // DEMO HUD owns SHOW-EQUIPINFO and dead/alive sizing. Clear only
+                // the two inline values written above; never force visibility.
+                panel.style.height = null;
+                panel.style.opacity = null;
+            } catch (errRestoreHealthbar) {}
+            for (let numberIndex = 0; numberIndex < healthNumbers.length; numberIndex += 1) {
+                try {
+                    // Do not force visibility: current CS2 decides whether DEMO
+                    // HUD health numbers are present through SHOW-EQUIPINFO.
+                    healthNumbers[numberIndex].style.opacity = null;
+                } catch (errRestoreHealthNumber) {}
+            }
+            return;
+        }
         // Never zero width/height — Panorama often cannot restore "" and bars stay gone.
         if (restricted) {
+            // A stock panel may already be collapsed for its own gameplay
+            // state. Do not claim ownership of that state: restoring it later
+            // would expand native health/equipment containers with the wrong
+            // dimensions after the Advanced template returns to stock CSS.
             if (teamCounterPanelIsRestricted(panel)) {
                 return;
+            }
+            if (advancedPlayback && advancedRestrictedTeamCounterPanels.indexOf(panel) < 0) {
+                advancedRestrictedTeamCounterPanels.push(panel);
             }
             panel.visible = false;
             try {
@@ -791,6 +1086,10 @@
             if (panel.AddClass) {
                 panel.AddClass("Invisible");
             }
+            return;
+        }
+        const trackedRestriction = advancedRestrictedTeamCounterPanels.indexOf(panel) >= 0;
+        if (advancedPlayback && !trackedRestriction) {
             return;
         }
         try {
@@ -809,12 +1108,37 @@
         }
         panel.visible = true;
         try {
-            panel.style.opacity = "1";
-            panel.style.visibility = "visible";
+            // Remove only the inline values written by INSIGHT. The current
+            // game's stylesheet must decide whether inactive equipment and
+            // health panels are visible; forcing 1/visible expands every
+            // previously observed player's 176px equipment background.
+            panel.style.opacity = null;
+            panel.style.visibility = null;
         } catch (err2) {}
         if (panel.RemoveClass) {
             panel.RemoveClass("Invisible");
         }
+    }
+
+    function restoreAdvancedTeamCounterPanels() {
+        for (let index = advancedRestrictedTeamCounterPanels.length - 1; index >= 0; index -= 1) {
+            const panel = advancedRestrictedTeamCounterPanels[index];
+            if (panel && panel.IsValid()) {
+                setTeamCounterPanelRestricted(panel, false);
+            }
+        }
+        advancedRestrictedTeamCounterPanels.length = 0;
+        for (let sideIndex = advancedModifiedTeamSides.length - 1; sideIndex >= 0; sideIndex -= 1) {
+            const side = advancedModifiedTeamSides[sideIndex];
+            if (!side || !side.IsValid()) {
+                continue;
+            }
+            try {
+                side.RemoveClass("CS2InsightPovEnemy");
+                side.RemoveClass("CS2InsightPovAlly");
+            } catch (errClass) {}
+        }
+        advancedModifiedTeamSides.length = 0;
     }
 
     function teamLargeSideOf(panel) {
@@ -1015,6 +1339,9 @@
         }
         // Class toggle drives CSS; only traverse a few known classes (no full tree walk).
         if (side.AddClass && side.RemoveClass) {
+            if (advancedPlayback && advancedModifiedTeamSides.indexOf(side) < 0) {
+                advancedModifiedTeamSides.push(side);
+            }
             if (hideDetails) {
                 side.AddClass("CS2InsightPovEnemy");
                 side.RemoveClass("CS2InsightPovAlly");
@@ -1037,6 +1364,49 @@
                 setTeamCounterPanelRestricted(kids[j], hideDetails);
             }
         }
+    }
+
+    function restrictPovTeamCounterEquipment() {
+        const root = hudRootPanel();
+        if (!root || !root.IsValid() || !root.FindChildrenWithClassTraverse) {
+            return;
+        }
+        // Spectator mode expands the selected player's equipment card below the
+        // top bar. POV HUD owns that information at the bottom, so remove every
+        // stock variant no matter where a HUD rebuild placed it.
+        [
+            // Native spectator-target highlight. Its stock rule expands this
+            // teammate-color panel to 120px below the selected avatar.
+            "AvatarL_BG",
+            "equipinfo-root",
+            "hudteamcounter-equipmentinfo",
+            "equipinfo__bg-container",
+        ].forEach(function (className) {
+            const panels = root.FindChildrenWithClassTraverse(className) || [];
+            for (let index = 0; index < panels.length; index += 1) {
+                // The current CS2 equipment stylesheet keeps its 176px
+                // background in a sibling panel. Hide every player background
+                // but preserve the score/time center, which shares the class.
+                if (className === "equipinfo__bg-container"
+                        && panelHasAncestorId(panels[index], "ScoreAndTimeAndBomb")) {
+                    continue;
+                }
+                setTeamCounterPanelRestricted(panels[index], true);
+            }
+        });
+    }
+
+    function panelHasAncestorId(panel, wantedId) {
+        let current = panel;
+        let guard = 0;
+        while (current && current.IsValid() && guard < 24) {
+            if (String(current.id || "") === wantedId) {
+                return true;
+            }
+            current = current.GetParent ? current.GetParent() : null;
+            guard += 1;
+        }
+        return false;
     }
 
     function teamContainerAncestor(panel) {
@@ -1092,72 +1462,9 @@
                 setTeamCounterPanelRestricted(equips[i], true);
             }
         }
-    }
-
-    function normalizeHudHex(hex) {
-        const text = String(hex || "").trim().toUpperCase();
-        if (!text) {
-            return "";
+        if (advancedPlayback) {
+            restrictPovTeamCounterEquipment();
         }
-        // #RGB / #RRGGBB / #RRGGBBAA / rgb(r,g,b)
-        if (text.charAt(0) === "#") {
-            let h = text.replace(/[^0-9A-F]/g, "");
-            if (h.length === 3) {
-                h = h[0] + h[0] + h[1] + h[1] + h[2] + h[2];
-            }
-            return h.slice(0, 6);
-        }
-        const rgb = text.match(/(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/);
-        if (rgb) {
-            return [rgb[1], rgb[2], rgb[3]].map(function (part) {
-                const n = Math.max(0, Math.min(255, Number(part) || 0));
-                const s = n.toString(16).toUpperCase();
-                return s.length < 2 ? ("0" + s) : s;
-            }).join("");
-        }
-        return text.replace(/[^0-9A-F]/g, "").slice(0, 6);
-    }
-
-    function nearestColorSlot(hex) {
-        const target = normalizeHudHex(hex);
-        if (!target || target.length < 6) {
-            return -1;
-        }
-        const tr = parseInt(target.slice(0, 2), 16);
-        const tg = parseInt(target.slice(2, 4), 16);
-        const tb = parseInt(target.slice(4, 6), 16);
-        // White/#defaultColor is nearer to light-blue than yellow — never map it.
-        if (tr > 230 && tg > 230 && tb > 230) {
-            return -1;
-        }
-        if (tr < 25 && tg < 25 && tb < 25) {
-            return -1;
-        }
-        // Damage-flash red on health UI.
-        if (tr > 200 && tg < 90 && tb < 90) {
-            return -1;
-        }
-        let best = -1;
-        let bestDist = 999999;
-        for (let i = 0; i < PLAYER_COLOR_HEX.length; i += 1) {
-            const cand = normalizeHudHex(PLAYER_COLOR_HEX[i]);
-            if (cand === target) {
-                return i;
-            }
-            const cr = parseInt(cand.slice(0, 2), 16);
-            const cg = parseInt(cand.slice(2, 4), 16);
-            const cb = parseInt(cand.slice(4, 6), 16);
-            const dist = (tr - cr) * (tr - cr) + (tg - cg) * (tg - cg) + (tb - cb) * (tb - cb);
-            if (dist < bestDist) {
-                bestDist = dist;
-                best = i;
-            }
-        }
-        // Reject weak matches (e.g. random greys).
-        if (bestDist > 14000) {
-            return -1;
-        }
-        return best;
     }
 
     function povColorSlot(povXuid) {
@@ -1187,311 +1494,29 @@
         return slot;
     }
 
-    function sampleHaTeammateSlot(host) {
-        if (!host || !host.IsValid() || !host.FindChildrenWithClassTraverse) {
-            return -1;
-        }
-        function slotFromPanel(panel, props) {
-            if (!panel || !panel.IsValid()) {
-                return -1;
-            }
-            for (let p = 0; p < props.length; p += 1) {
-                try {
-                    const slot = nearestColorSlot(panel.style[props[p]]);
-                    if (slot >= 0) {
-                        return slot;
-                    }
-                } catch (errRead) {}
-            }
-            return -1;
-        }
-        const iconClasses = [
-            "hud-HA-icon--helmet",
-            "hud-HA-icon--armor",
-            "hud-HA-icon",
-        ];
-        for (let c = 0; c < iconClasses.length; c += 1) {
-            const icons = host.FindChildrenWithClassTraverse(iconClasses[c]) || [];
-            for (let i = 0; i < icons.length; i += 1) {
-                const slot = slotFromPanel(icons[i], ["washColor", "color"]);
-                if (slot >= 0) {
-                    return slot;
-                }
-            }
-        }
-        const labels = host.FindChildrenWithClassTraverse("hud-HA-health_or_ammo-label") || [];
-        for (let j = 0; j < labels.length; j += 1) {
-            const slot = slotFromPanel(labels[j], ["color", "washColor"]);
-            if (slot >= 0) {
-                return slot;
-            }
-        }
-        return -1;
-    }
-
-    function applyHaSlotClass(panel, slot) {
-        if (!panel || !panel.IsValid() || !panel.AddClass || !panel.RemoveClass) {
-            return;
-        }
-        for (let i = 0; i < PLAYER_COLOR_HEX.length; i += 1) {
-            const name = "Ci" + i;
-            if (slot >= 0 && i === slot) {
-                panel.AddClass(name);
-            } else {
-                panel.RemoveClass(name);
-            }
-        }
-    }
-
-    function isAmmoProgressBar(bar) {
-        // Only treat the clip ProgressBar as ammo. Do NOT match ids that merely
-        // contain "Ammo" — HudHealthAmmoCenter would false-positive and skip HP.
-        let current = bar;
-        let guard = 0;
-        while (current && current.IsValid() && guard < 14) {
-            const id = String(current.id || "");
-            if (id === "HudHealthAmmoCenter" || id === "CSGOHudHealthAmmoCenter") {
-                return false;
-            }
-            if (id === "AmmoClipBar") {
-                return true;
-            }
-            try {
-                if (current.BHasClass) {
-                    if (current.BHasClass("hud-WPN-ammo")
-                        || current.BHasClass("hud-WPN-ammo-reserve")
-                        || current.BHasClass("hud-WPN-main")) {
-                        return true;
-                    }
-                }
-            } catch (errAmmo) {}
-            current = current.GetParent ? current.GetParent() : null;
-            guard += 1;
-        }
-        return false;
-    }
-
-    function isBottomHealthFill(bar) {
-        // Must sit under the bottom HA strip (.hud-HA-bar / .hud-HA-health), not
-        // teamcounter avatar bars, and not ammo.
-        if (!bar || !bar.IsValid() || isAmmoProgressBar(bar)) {
-            return false;
-        }
-        let current = bar;
-        let guard = 0;
-        while (current && current.IsValid() && guard < 16) {
-            try {
-                if (current.BHasClass) {
-                    if (current.BHasClass("hud-HA-bar")
-                        || current.BHasClass("hud-HA-health")
-                        || current.BHasClass("hud-HA-main")
-                        || current.BHasClass("hud-HA")) {
-                        return true;
-                    }
-                }
-            } catch (errHa) {}
-            const id = String(current.id || "");
-            if (id === "HudHealthAmmoCenter" || id === "CSGOHudHealthAmmoCenter") {
-                return true;
-            }
-            if (id === "AmmoClipBar") {
-                return false;
-            }
-            current = current.GetParent ? current.GetParent() : null;
-            guard += 1;
-        }
-        return false;
-    }
-
-    function paintHealthFillPanel(panel, color) {
-        if (!panel || !panel.IsValid() || !color) {
-            return;
-        }
-        const fill = color.length === 7 ? (color + "ff") : color;
-        try {
-            panel.style.washColor = "#ffffffff";
-        } catch (errWash) {
-            try {
-                panel.style.washColor = "none";
-            } catch (errNone) {}
-        }
-        try {
-            panel.style.backgroundColor = fill;
-        } catch (errBg) {
-            try {
-                panel.style.backgroundColor = color;
-            } catch (errBg2) {}
-        }
-    }
-
-    function collectHealthFillPanels(host) {
-        const out = [];
-        const seen = [];
-        function add(panel) {
-            if (!panel || !panel.IsValid() || !isBottomHealthFill(panel)) {
-                return;
-            }
-            for (let s = 0; s < seen.length; s += 1) {
-                if (seen[s] === panel) {
-                    return;
-                }
-            }
-            seen.push(panel);
-            out.push(panel);
-        }
-        if (!host || !host.FindChildrenWithClassTraverse) {
-            return out;
-        }
-        const lefts = host.FindChildrenWithClassTraverse("ProgressBarLeft") || [];
-        for (let i = 0; i < lefts.length; i += 1) {
-            add(lefts[i]);
-        }
-        const haBars = host.FindChildrenWithClassTraverse("hud-HA-bar") || [];
-        for (let h = 0; h < haBars.length; h += 1) {
-            const ha = haBars[h];
-            if (!ha || !ha.IsValid()) {
-                continue;
-            }
-            if (ha.FindChildrenWithClassTraverse) {
-                const kids = ha.FindChildrenWithClassTraverse("ProgressBarLeft") || [];
-                for (let k = 0; k < kids.length; k += 1) {
-                    add(kids[k]);
-                }
-            }
-            if (typeof ha.GetChildCount === "function" && typeof ha.GetChild === "function") {
-                const n = ha.GetChildCount();
-                for (let c = 0; c < n; c += 1) {
-                    const child = ha.GetChild(c);
-                    if (child && child.BHasClass && child.BHasClass("ProgressBarLeft")) {
-                        add(child);
-                    }
-                }
-            }
-        }
-        return out;
-    }
-
-    function resolvePovColorSlot(povXuid, state) {
-        function tryXuid(raw) {
-            const slot = povColorSlot(raw);
-            return slot;
-        }
-        let slot = tryXuid(povXuid);
-        if (slot >= 0) {
-            return slot;
-        }
-        try {
-            slot = tryXuid(GameStateAPI.GetHudPlayerXuid());
-            if (slot >= 0) {
-                return slot;
-            }
-        } catch (errHud) {}
-        if (state && state.nSpectatingPlayerId >= 0) {
-            const sid = Number(state.nSpectatingPlayerId);
-            for (let r = 0; r < roster.length; r += 1) {
-                if (Number(roster[r].slot) === sid) {
-                    slot = tryXuid(roster[r].xuid);
-                    if (slot >= 0) {
-                        return slot;
-                    }
-                }
-            }
-            try {
-                slot = tryXuid(
-                    GameStateAPI.GetPlayerXuidStringFromPlayerSlot(sid) || "",
-                );
-                if (slot >= 0) {
-                    return slot;
-                }
-            } catch (errSlot) {}
-        }
-        // Name match against radar xuids when SteamID formats disagree.
-        if (!radarTrack || !radarTrack.players) {
-            return -1;
-        }
-        const nameSeeds = [];
-        function pushName(xuid) {
-            const want = normalizeXuid(xuid);
-            if (!want) {
-                return;
-            }
-            try {
-                const name = String(GameStateAPI.GetPlayerName(want) || "").trim().toLowerCase();
-                if (name) {
-                    nameSeeds.push(name);
-                }
-            } catch (errName) {}
-        }
-        pushName(povXuid);
-        if (state && state.nSpectatingPlayerId >= 0) {
-            try {
-                pushName(GameStateAPI.GetPlayerXuidStringFromPlayerSlot(state.nSpectatingPlayerId));
-            } catch (errSlotName) {}
-        }
-        if (!nameSeeds.length) {
-            return -1;
-        }
-        for (let i = 0; i < radarTrack.players.length; i += 1) {
-            const player = radarTrack.players[i];
-            let name = "";
-            try {
-                name = String(GameStateAPI.GetPlayerName(player.xuid) || "").trim().toLowerCase();
-            } catch (errPlayerName) {}
-            if (!name) {
-                continue;
-            }
-            for (let n = 0; n < nameSeeds.length; n += 1) {
-                if (name === nameSeeds[n]) {
-                    const namedSlot = Number(player.colorSlot);
-                    if (isFinite(namedSlot) && namedSlot >= 0 && namedSlot < PLAYER_COLOR_HEX.length) {
-                        return namedSlot;
-                    }
-                }
-            }
-        }
-        return -1;
-    }
-
-    function fixPovHealthHudColor(povXuid, state) {
-        const root = hudRootPanel();
-        if (!root) {
-            return;
-        }
-        // Prefer HA host, but fall back to full HUD root — demo ids vary and CSS
-        // already proved .hud-HA-bar .ProgressBarLeft is the live fill.
-        let host = null;
-        if (root.FindChildTraverse) {
-            host = root.FindChildTraverse("HudHealthAmmoCenter")
-                || root.FindChildTraverse("CSGOHudHealthAmmoCenter");
-        }
-        if (!host || !host.IsValid()) {
-            host = root;
-        }
-        let slot = resolvePovColorSlot(povXuid, state);
-        if (slot < 0) {
-            slot = sampleHaTeammateSlot(host);
-        }
-        if (slot < 0) {
-            return;
-        }
-        const color = PLAYER_COLOR_HEX[slot];
-        const bars = collectHealthFillPanels(host);
-        for (let b = 0; b < bars.length; b += 1) {
-            applyHaSlotClass(bars[b], slot);
-            paintHealthFillPanel(bars[b], color);
-        }
-    }
-
     function tickTeamCounterHud() {
         const state = controller.GetDemoControllerState();
         if (!state) {
             $.Schedule(0.1, tickTeamCounterHud);
             return;
         }
-        const povXuid = currentPovXuid(state);
         const povTeam = updateVoiceAudience(state);
+        if (advancedPlayback && advancedHudHidden) {
+            advancedSetPanelRuntimeVisible(findTeamCounterRoot(), false);
+            $.Schedule(0.1, tickTeamCounterHud);
+            return;
+        }
+        if (!advancedPovVisualsActive()) {
+            restoreAdvancedTeamCounterPanels();
+            $.Schedule(0.1, tickTeamCounterHud);
+            return;
+        }
+        const povXuid = currentPovXuid(state);
         updateTeamCounterForPov(povTeam, povXuid, state.nTick);
-        fixPovHealthHudColor(povXuid, state);
+        // Leave the native health fill untouched in both recording POV and
+        // Advanced playback. Runtime wash/background writes override CS2's
+        // damage, low-health, and post-plant states and can preserve a color
+        // inherited from a VPK class after switching HUD profiles.
         // 10Hz is enough for top-bar HP; Schedule(0) was locking the client ~5 FPS.
         $.Schedule(0.1, tickTeamCounterHud);
     }
@@ -1627,6 +1652,13 @@
         if (!playerPanel || !playerPanel.FindChildrenWithClassTraverse) {
             return;
         }
+        if (playerPanel._insightOriginalMoneyClass === undefined) {
+            try {
+                playerPanel._insightOriginalMoneyClass = playerPanel.HasClass("money");
+                playerPanel._insightOriginalNormalHealthClass = playerPanel.HasClass("normal-health");
+                playerPanel._insightOriginalLowHealthClass = playerPanel.HasClass("low-health");
+            } catch (errOriginalClasses) {}
+        }
         const active = money !== null;
         const text = active ? ("$" + money) : "";
         try {
@@ -1652,6 +1684,14 @@
             if (!label || !label.IsValid()) {
                 continue;
             }
+            if (label._insightOriginalOverheadText === undefined) {
+                label._insightOriginalOverheadText = String(label.text || "");
+                label._insightOriginalOverheadVisible = Boolean(label.visible);
+                try {
+                    label._insightOriginalOverheadVisibility = label.style.visibility;
+                    label._insightOriginalOverheadColor = label.style.color;
+                } catch (errOriginalStyle) {}
+            }
             // Reuse the native extra-info label instead of creating a wide
             // custom panel. Its engine-owned layout stays centered on the
             // player's world-to-screen anchor at every distance.
@@ -1673,8 +1713,89 @@
         );
     }
 
+    function restoreNativePlayerEconomy(playerPanel) {
+        if (!playerPanel || !playerPanel.IsValid()) {
+            return;
+        }
+        try {
+            playerPanel.SetHasClass("money", Boolean(playerPanel._insightOriginalMoneyClass));
+            if (playerPanel._insightOriginalNormalHealthClass !== undefined) {
+                playerPanel.SetHasClass(
+                    "normal-health",
+                    Boolean(playerPanel._insightOriginalNormalHealthClass),
+                );
+            }
+            if (playerPanel._insightOriginalLowHealthClass !== undefined) {
+                playerPanel.SetHasClass(
+                    "low-health",
+                    Boolean(playerPanel._insightOriginalLowHealthClass),
+                );
+            }
+        } catch (errClass) {}
+        if (!playerPanel.FindChildrenWithClassTraverse) {
+            return;
+        }
+        const labels = playerPanel.FindChildrenWithClassTraverse("playerid__extrainfo") || [];
+        for (let index = 0; index < labels.length; index += 1) {
+            const label = labels[index];
+            if (!label || !label.IsValid()) {
+                continue;
+            }
+            if (label._insightOriginalOverheadText !== undefined) {
+                label.text = label._insightOriginalOverheadText;
+            }
+            if (label._insightOriginalOverheadVisible !== undefined) {
+                label.visible = Boolean(label._insightOriginalOverheadVisible);
+            }
+            try {
+                label.style.visibility = label._insightOriginalOverheadVisibility || null;
+                label.style.color = label._insightOriginalOverheadColor || null;
+            } catch (errStyle) {}
+        }
+    }
+
     function updateOverheadInfoHud() {
         const state = controller.GetDemoControllerState();
+        if (!advancedPovVisualsActive()) {
+            const nativeIds = findHudTraverse("VisiblePlayerIDs");
+            if (nativeIds && nativeIds.IsValid() && nativeIds.FindChildrenWithClassTraverse) {
+                const nativePanels = nativeIds.FindChildrenWithClassTraverse("playerid") || [];
+                nativePanels.forEach(function (panel) {
+                    if (panel && panel.IsValid()) {
+                        if (!advancedNativeOverheadRestored) {
+                            // Clear Insight's POV-only money label once, then
+                            // return the panel to CS2. Re-clearing this label at
+                            // 10 Hz prevented native DEMO HUD details from being
+                            // populated and left only the player name visible.
+                            restoreNativePlayerEconomy(panel);
+                            setPlayerOverheadContentVisible(panel, true);
+                        }
+                        if (!advancedQuickOptions.overhead) {
+                            setPlayerOverheadContentVisible(panel, false);
+                        }
+                    }
+                });
+                if (advancedQuickOptions.overhead) {
+                    advancedNativeOverheadRestored = true;
+                }
+            }
+            $.Schedule(0.1, updateOverheadInfoHud);
+            return;
+        }
+        advancedNativeOverheadRestored = false;
+        if (advancedPlayback && !advancedQuickOptions.overhead) {
+            const nativeIds = findHudTraverse("VisiblePlayerIDs");
+            if (nativeIds && nativeIds.IsValid() && nativeIds.FindChildrenWithClassTraverse) {
+                const nativePanels = nativeIds.FindChildrenWithClassTraverse("playerid") || [];
+                nativePanels.forEach(function (panel) {
+                    if (panel && panel.IsValid()) {
+                        setPlayerOverheadContentVisible(panel, false);
+                    }
+                });
+            }
+            $.Schedule(0.1, updateOverheadInfoHud);
+            return;
+        }
         // Reapply a few times after the demo state becomes live. This covers
         // launch cfg/user-config ordering without spamming the console forever.
         if (state && overheadNativeCvarApplyAttempts < 4) {
@@ -1797,40 +1918,23 @@
         }
         const tickRate = flashBlindTrack ? flashBlindTrack.tickRate : 64;
         const alpha = Math.max(0, Math.min(1, Number(blind.maxAlpha) / 255));
-        const durationSeconds = Math.max(1 / tickRate, blind.durationTicks / tickRate);
-        const strength = alpha * Math.min(
-            1,
-            Math.pow(durationSeconds / FLASH_CERTAIN_BLIND_SECONDS, 2),
-        );
         const elapsedSeconds = Math.max(0, (Number(tick) - blind.startTick) / tickRate);
 
-        let white;
-        let screenshot;
         if (blind.buildUp && elapsedSeconds < FLASH_BUILD_UP_SECONDS) {
             const phase = Math.max(0, Math.min(1, elapsedSeconds / FLASH_BUILD_UP_SECONDS));
-            white = alpha * phase;
-            screenshot = phase;
-        } else {
-            const remainingSeconds = Math.max(0, (blind.endTick - Number(tick)) / tickRate);
-            white = alpha * Math.min(
-                1,
-                Math.pow(remainingSeconds / FLASH_CERTAIN_BLIND_SECONDS, 2),
-            );
-            screenshot = Math.max(0, Math.min(1, remainingSeconds / durationSeconds));
+            return alpha * phase;
         }
 
-        // CS draws the captured flash frame four times. The demo does not retain
-        // that client-only texture, so convert its linear alpha into an equivalent
-        // HUD occlusion, scaled by the authored flash strength. Native world flash
-        // remains below this topmost Panorama compensation layer.
-        const afterimage = strength * (1 - Math.pow(1 - screenshot, 4));
-        let cover = 1 - (1 - white) * (1 - afterimage);
-        if (cover >= 0.995) {
-            cover = 1;
-        } else if (cover <= 0.002) {
-            cover = 0;
-        }
-        return Math.max(0, Math.min(1, cover));
+        // This topmost Panorama panel represents only CS2's white overlay. The
+        // captured-frame afterimage is a separate native world effect; turning
+        // its linear screenshot alpha into more white makes POV flashes too
+        // bright and keeps them visually opaque for too long.
+        const remainingSeconds = Math.max(0, (blind.endTick - Number(tick)) / tickRate);
+        const white = alpha * Math.min(
+            1,
+            Math.pow(remainingSeconds / FLASH_CERTAIN_BLIND_SECONDS, FLASH_FADE_EXPONENT),
+        );
+        return Math.max(0, Math.min(1, white));
     }
 
     function ensureFlashWash(root) {
@@ -1949,6 +2053,12 @@
 
     function tickFlashBlindHud() {
         const state = controller.GetDemoControllerState();
+        if (!advancedPovVisualsActive()) {
+            updateFlashWash(null, state && isFinite(Number(state.nTick)) ? Number(state.nTick) : 0);
+            flashTinnitusArmedTick = -1;
+            $.Schedule(FLASH_IDLE_REFRESH_SECONDS, tickFlashBlindHud);
+            return;
+        }
         if (!state) {
             $.Schedule(0.1, tickFlashBlindHud);
             return;
@@ -2193,6 +2303,13 @@
 
     function updateInputHud() {
         const state = controller.GetDemoControllerState();
+        if (!advancedPovVisualsActive()) {
+            if (inputHud && inputHud.IsValid()) {
+                inputHud.visible = false;
+            }
+            $.Schedule(0.1, updateInputHud);
+            return;
+        }
         if (!state) {
             if (inputHud && inputHud.IsValid()) {
                 inputHud.visible = false;
@@ -2365,6 +2482,7 @@
     }
 
     function hideNativeRadarPlayerIcons(nativeRadar) {
+        advancedNativeRadarRestored = false;
         // Only hide stock player icon packages. Never touch DirectionArrow (rim
         // facing pointer), native RI_PlayerSoundContainer, map transforms, bomb
         // zones, or the place-name label. Sound visibility is selected explicitly
@@ -2883,8 +3001,98 @@
         return radarHud;
     }
 
+    function restoreNativeRadarForAdvancedSpectator() {
+        if (advancedNativeRadarRestored) {
+            return;
+        }
+        const nativeRadar = findNativeRadar();
+        if (!nativeRadar || !nativeRadar.IsValid()) {
+            return;
+        }
+        if (nativeRadar.FindChildrenWithClassTraverse) {
+            const packs = nativeRadar.FindChildrenWithClassTraverse("PlayerIcons") || [];
+            packs.forEach(function (panel) {
+                if (panel && panel.IsValid() && String(panel.id || "").indexOf("CS2Insight") !== 0) {
+                    panel.visible = true;
+                }
+            });
+        }
+        ["RI_BombDefuserPackage", "RI_DefuserPackage"].forEach(function (id) {
+            const panel = nativeRadar.FindChildTraverse(id);
+            if (panel && panel.IsValid()) {
+                // Restore the stock package host. Its individual children are
+                // stateful and must not all be forced visible together.
+                panel.visible = true;
+                try {
+                    panel.style.opacity = null;
+                    panel.style.visibility = null;
+                } catch (errStyle) {}
+            }
+        });
+        [
+            "DroppedBomb",
+            "DefuserIconDropped",
+            "DefuserIconPackage",
+            "CreateBombPack",
+        ].forEach(function (id) {
+            const panel = nativeRadar.FindChildTraverse(id);
+            if (panel && panel.IsValid()) {
+                // POV mode collapsed these children. Clear those inline styles,
+                // keep the first restored frame hidden, and let CHudRadar show
+                // only the child matching the current bomb/defuser state. This
+                // prevents the giant blue defuser glyph seen after hot-switch.
+                panel.visible = false;
+                try {
+                    panel.style.opacity = null;
+                    panel.style.visibility = null;
+                } catch (errStyle) {}
+            }
+        });
+        setNativeSoundRingsVisible(nativeRadar, true);
+        advancedNativeRadarRestored = true;
+    }
+
     function updateRadarHud() {
         if (!radarTrack) {
+            return;
+        }
+        if (advancedPlayback && advancedHudHidden) {
+            if (radarHud && radarHud.IsValid()) {
+                radarHud.visible = false;
+            }
+            if (radarUnclipHud && radarUnclipHud.IsValid()) {
+                radarUnclipHud.visible = false;
+            }
+            advancedSetPanelRuntimeVisible(findNativeRadar(), false);
+            $.Schedule(0.1, updateRadarHud);
+            return;
+        }
+        const spectatorAllPlayers = Boolean(
+            advancedPlayback && !advancedPovVisualsEnabled,
+        );
+        if (advancedPlayback && !advancedQuickOptions.radar) {
+            if (radarHud && radarHud.IsValid()) {
+                radarHud.visible = false;
+            }
+            if (radarUnclipHud && radarUnclipHud.IsValid()) {
+                radarUnclipHud.visible = false;
+            }
+            restoreNativeRadarForAdvancedSpectator();
+            $.Schedule(0.1, updateRadarHud);
+            return;
+        }
+        if (spectatorAllPlayers) {
+            // DEMO HUD must use CS2's own spectator radar: it already supplies
+            // CT/T colors and the native 1-5 numbers when the demo profile
+            // applies the square, non-rotating observer radar convars.
+            if (radarHud && radarHud.IsValid()) {
+                radarHud.visible = false;
+            }
+            if (radarUnclipHud && radarUnclipHud.IsValid()) {
+                radarUnclipHud.visible = false;
+            }
+            restoreNativeRadarForAdvancedSpectator();
+            $.Schedule(0.1, updateRadarHud);
             return;
         }
         const state = controller.GetDemoControllerState();
@@ -2905,6 +3113,9 @@
         const povTeam = resolvePovTeam(povXuid, state.nTick);
         const tick = state.nTick;
         hud.visible = true;
+        if (radarUnclipHud && radarUnclipHud.IsValid()) {
+            radarUnclipHud.visible = true;
+        }
 
         let povSample = null;
         radarTrack.players.forEach(function (player) {
@@ -3905,34 +4116,67 @@
         return radioEventHtml(event);
     }
 
-    function nativeVoiceAlertPanel(index) {
-        const cached = nativeVoiceAlertPanels[index] || null;
-        if (cached && cached.IsValid()) {
-            return cached;
+    function nativeLowerLeftAlertPanels() {
+        const panels = [];
+        function add(panel) {
+            if (panel && panel.IsValid() && panels.indexOf(panel) < 0) {
+                panels.push(panel);
+            }
         }
-        const resolved = findHudTraverse("AlertPanel" + (index + 1));
-        nativeVoiceAlertPanels[index] = resolved && resolved.IsValid()
-            ? resolved
+        // CS2 recycles and, on some builds, replaces the alert pool while a
+        // demo is running. Resolve the live class every pass instead of
+        // trusting the first set of AlertPanel1..16 handles forever.
+        nativeVoiceAlertPanels.forEach(add);
+        const voicePanel = findVoicePanel();
+        const status = voicePanel && voicePanel.IsValid() && voicePanel.GetParent
+            ? voicePanel.GetParent()
             : null;
-        return nativeVoiceAlertPanels[index];
+        if (status && status.IsValid() && status.FindChildrenWithClassTraverse) {
+            const live = status.FindChildrenWithClassTraverse("AlertPanel") || [];
+            live.forEach(add);
+        }
+        for (let index = 0; index < NATIVE_VOICE_ALERT_PANEL_COUNT; index += 1) {
+            add(findHudTraverse("AlertPanel" + (index + 1)));
+        }
+        nativeVoiceAlertPanels = panels;
+        return panels;
     }
 
     function suppressNativeLowerLeft() {
-        for (let index = 0; index < NATIVE_VOICE_ALERT_PANEL_COUNT; index += 1) {
-            const panel = nativeVoiceAlertPanel(index);
-            if (!panel || !panel.IsValid()) {
-                continue;
+        if (!advancedPovVisualsActive()) {
+            // Undo Insight's inline overrides once, then leave the native
+            // alert/chat panels entirely to CS2. Reapplying opacity/visible on
+            // every refresh kept expired Console lines alive indefinitely.
+            if (!advancedNativeMessagesRestored) {
+                nativeLowerLeftAlertPanels().forEach(function (restorePanel) {
+                    try { restorePanel.style.opacity = null; } catch (errRestoreOpacity) {}
+                    try { restorePanel.style.visibility = null; } catch (errRestoreVisibility) {}
+                });
+                nativeChatHistoryText = findHudTraverse("ChatHistoryText");
+                if (nativeChatHistoryText && nativeChatHistoryText.IsValid()) {
+                    try { nativeChatHistoryText.style.opacity = null; } catch (errChatOpacity) {}
+                    try { nativeChatHistoryText.style.visibility = null; } catch (errChatVisibility) {}
+                    nativeChatHistoryText.visible = true;
+                }
+                advancedNativeMessagesRestored = true;
             }
-            // Do not change stock animation classes or layout. Opacity is
-            // reapplied because the engine recycles this fixed panel pool.
+            $.Schedule(RADIO_IDLE_REFRESH_SECONDS, suppressNativeLowerLeft);
+            return;
+        }
+        advancedNativeMessagesRestored = false;
+        nativeLowerLeftAlertPanels().forEach(function (panel) {
+            // The complete native AlertPanel stream (server, radio, chat and
+            // cash notices) is replaced by the Insight timeline in POV mode.
+            // Collapse the live instances as well as washing opacity so a
+            // newly recycled server row cannot briefly overlap our copy.
             panel.style.opacity = "0";
+            panel.style.visibility = "collapse";
             panel.hittest = false;
-        }
-        if (!nativeChatHistoryText || !nativeChatHistoryText.IsValid()) {
-            nativeChatHistoryText = findHudTraverse("ChatHistoryText");
-        }
+        });
+        nativeChatHistoryText = findHudTraverse("ChatHistoryText");
         if (nativeChatHistoryText && nativeChatHistoryText.IsValid()) {
             nativeChatHistoryText.style.opacity = "0";
+            nativeChatHistoryText.style.visibility = "collapse";
             nativeChatHistoryText.hittest = false;
             nativeChatHistoryText.visible = false;
         }
@@ -4082,6 +4326,11 @@
 
     function updateRadioHud() {
         if (!radioTrack && !killFeedbackTrack) {
+            return;
+        }
+        if (!advancedPovVisualsActive()) {
+            hideRadioHud();
+            $.Schedule(RADIO_IDLE_REFRESH_SECONDS, updateRadioHud);
             return;
         }
         const state = controller.GetDemoControllerState();
@@ -4277,6 +4526,11 @@
             $.Schedule(0.1, updateKillFeedback);
             return;
         }
+        if (!advancedPovVisualsActive()) {
+            killFeedbackLastTick = Number(state.nTick || 0);
+            $.Schedule(0.1, updateKillFeedback);
+            return;
+        }
         const tick = state.nTick;
         const prev = killFeedbackLastTick;
         if (prev >= 0 && tick > prev && (tick - prev) <= KILL_FEEDBACK_CATCHUP_TICKS) {
@@ -4313,6 +4567,7 @@
         }
 
         const povTeam = updateVoiceAudience(state);
+
         const voicePanel = findVoicePanel();
         if (!voicePanel || !voicePanel.IsValid()) {
             speakers.forEach(function (speaker) {
@@ -4328,9 +4583,9 @@
         let activeRowCount = 0;
         speakers.forEach(function (speaker, index) {
             const speakerPlayer = rosterByXuid[speaker.xuid];
-            const sameTeam = povTeam !== 0 && speakerPlayer
-                && resolvePovTeam(speaker.xuid, state.nTick) === povTeam;
-            if (sameTeam
+            const audible = Boolean(speakerPlayer)
+                && advancedVoiceAllows(speaker.xuid, povTeam, state.nTick);
+            if (audible
                 && isSpeaking(speaker.intervals, state.nTick)
                 && activeRowCount < MAX_VISIBLE_VOICE_NOTICES) {
                 activeRows[index] = activeRowCount;
@@ -4372,6 +4627,2221 @@
         $.Schedule(0.05, update);
     }
 
+    function advancedChinese() {
+        let language = "";
+        try { language = String($.Language() || "").toLowerCase(); } catch (errLanguage) {}
+        return language.indexOf("schinese") >= 0
+            || language.indexOf("tchinese") >= 0
+            || language.indexOf("chinese") >= 0;
+    }
+
+    function advancedCopy(zh, en) {
+        return advancedChinese() ? zh : en;
+    }
+
+    function advancedCreatePanel(type, parent, id) {
+        const panel = $.CreatePanel(type, parent, id || "");
+        panel.hittest = true;
+        panel.hittestchildren = true;
+        if (type === "Panel") {
+            // Empty Panorama panels otherwise let MOUSE1 reach CS2's spectator
+            // binding (next player). Every structural region consumes clicks.
+            try { panel.SetPanelEvent("onactivate", function () { return true; }); } catch (errActivate) {}
+            try { panel.SetPanelEvent("oncontextmenu", function () { return true; }); } catch (errContext) {}
+        }
+        return panel;
+    }
+
+    function advancedCreateLabel(parent, text, size, color) {
+        const label = advancedCreatePanel("Label", parent, "");
+        label.text = String(text || "");
+        label.style.fontFamily = "Stratum2, 'Arial Unicode MS'";
+        label.style.fontSize = String(size || 16) + "px";
+        label.style.color = color || "#eeeeec";
+        label.style.verticalAlign = "center";
+        label.style.textOverflow = "ellipsis";
+        label.hittest = false;
+        label.hittestchildren = false;
+        return label;
+    }
+
+    function advancedCreateSectionLabel(parent, text) {
+        const label = advancedCreateLabel(parent, text, 12, "#b5b3ad");
+        label.style.width = "40px";
+        label.style.height = "25px";
+        label.style.verticalAlign = "center";
+        return label;
+    }
+
+    function advancedCreateButton(parent, text, onActivate, width) {
+        const button = advancedCreatePanel("Button", parent, "");
+        button.style.height = "30px";
+        button.style.width = width || "fit-children";
+        button.style.verticalAlign = "center";
+        button.style.paddingLeft = "10px";
+        button.style.paddingRight = "10px";
+        button.style.marginRight = "5px";
+        button.style.backgroundColor = "#222221f2";
+        button.style.border = "1px solid #494844";
+        button.style.borderRadius = "6px";
+        const label = advancedCreateLabel(button, text, 12, "#eeeeec");
+        label.hittest = false;
+        label.style.horizontalAlign = "center";
+        if (onActivate) {
+            button.SetPanelEvent("onactivate", onActivate);
+        }
+        return button;
+    }
+
+    function advancedCreateFilterIcon(parent, kind) {
+        const cell = advancedCreatePanel("Panel", parent, "");
+        cell.hittest = false;
+        cell.hittestchildren = false;
+        cell.style.width = ADVANCED_FILTER_ICON_CELL + "px";
+        cell.style.height = ADVANCED_FILTER_ICON_CELL + "px";
+        cell.style.verticalAlign = "center";
+        cell.style.overflow = "noclip";
+
+        if (kind === "kill") {
+            const horizontal = advancedCreatePanel("Panel", cell, "");
+            horizontal.hittest = false;
+            horizontal.style.width = ADVANCED_FILTER_ICON_SIZE + "px";
+            horizontal.style.height = "1px";
+            horizontal.style.horizontalAlign = "center";
+            horizontal.style.verticalAlign = "center";
+            horizontal.style.backgroundColor = "#ece9e2";
+            const vertical = advancedCreatePanel("Panel", cell, "");
+            vertical.hittest = false;
+            vertical.style.width = "1px";
+            vertical.style.height = ADVANCED_FILTER_ICON_SIZE + "px";
+            vertical.style.horizontalAlign = "center";
+            vertical.style.verticalAlign = "center";
+            vertical.style.backgroundColor = "#ece9e2";
+            const ring = advancedCreatePanel("Panel", cell, "");
+            ring.hittest = false;
+            ring.style.width = "9px";
+            ring.style.height = "9px";
+            ring.style.horizontalAlign = "center";
+            ring.style.verticalAlign = "center";
+            ring.style.backgroundColor = "#222221";
+            ring.style.border = "1px solid #ece9e2";
+            ring.style.borderRadius = "50%";
+            const dot = advancedCreatePanel("Panel", cell, "");
+            dot.hittest = false;
+            dot.style.width = "2px";
+            dot.style.height = "2px";
+            dot.style.horizontalAlign = "center";
+            dot.style.verticalAlign = "center";
+            dot.style.backgroundColor = "#ece9e2";
+            dot.style.borderRadius = "50%";
+        } else if (kind === "death") {
+            const skull = advancedCreateLabel(cell, "☠", ADVANCED_FILTER_ICON_SIZE, "#ece9e2");
+            skull.style.width = ADVANCED_FILTER_ICON_CELL + "px";
+            skull.style.height = "16px";
+            skull.style.horizontalAlign = "center";
+            skull.style.verticalAlign = "center";
+            skull.style.textAlign = "center";
+            skull.style.textShadow = "0px 0px 1px 1 #00000080";
+            skull.style.transform = "translateY(-1px)";
+        } else if (kind === "utility") {
+            const utilityIcon = advancedCreateEventIcon(
+                cell,
+                "equipment",
+                "hegrenade",
+                ADVANCED_FILTER_ICON_SIZE,
+                ADVANCED_FILTER_ICON_SIZE,
+                ADVANCED_FILTER_ICON_SIZE,
+            );
+            utilityIcon.style.horizontalAlign = "center";
+            utilityIcon.style.verticalAlign = "center";
+            utilityIcon.style.transform = "translateY(-1px)";
+        }
+        return cell;
+    }
+
+    function advancedCreateFilterButton(parent, kind, text, onActivate) {
+        const button = advancedCreatePanel("Button", parent, "");
+        button.style.width = "58px";
+        button.style.height = "25px";
+        button.style.verticalAlign = "center";
+        button.style.paddingLeft = "4px";
+        button.style.paddingRight = "4px";
+        button.style.marginRight = "4px";
+        button.style.flowChildren = "right";
+        button.style.backgroundColor = "#222221f2";
+        button.style.border = "1px solid #494844";
+        button.style.borderRadius = "6px";
+        if (kind !== "all") {
+            advancedCreateFilterIcon(button, kind);
+        }
+        const label = advancedCreateLabel(
+            button,
+            text,
+            advancedChinese() ? 11 : 9,
+            "#eeeeec",
+        );
+        label.style.width = "fill-parent-flow(1.0)";
+        label.style.height = "16px";
+        label.style.textAlign = "center";
+        label.style.textOverflow = "shrink";
+        label.style.verticalAlign = "center";
+        if (onActivate) {
+            button.SetPanelEvent("onactivate", onActivate);
+        }
+        return button;
+    }
+
+    function advancedStyleButton(button, active, accent) {
+        if (!button || !button.IsValid()) {
+            return;
+        }
+        button.style.backgroundColor = active ? (accent || "#e07f0a") : "#222221f2";
+        button.style.border = active ? "1px solid #f2a54a" : "1px solid #494844";
+        button.style.brightness = active ? "1.08" : "1";
+    }
+
+    function advancedRefreshQuickOptionButtons() {
+        Object.keys(advancedOptionButtons).forEach(function (key) {
+            const enabled = Boolean(advancedQuickOptions[key]);
+            advancedSetButtonText(
+                advancedOptionButtons[key],
+                advancedOptionLabels[key]
+                    + advancedCopy(enabled ? "开" : "关", enabled ? " ON" : " OFF"),
+            );
+            advancedStyleButton(advancedOptionButtons[key], enabled);
+        });
+    }
+
+    function advancedApplyQuickOptions() {
+        const overheadMode = !advancedHudHidden && advancedQuickOptions.overhead
+            ? 1
+            : -1;
+        const radarMode = !advancedHudHidden && advancedQuickOptions.radar
+            ? 0
+            : -1;
+        const commands = [
+            "spec_show_xray " + (advancedQuickOptions.xray ? 1 : 0),
+            "cl_drawhud_force_radar " + radarMode,
+            "cl_drawhud_force_teamid_overhead " + overheadMode,
+            // Messages are profile-owned: reconstructed in POV HUD, native in
+            // DEMO HUD. Always leave CS2 chat enabled so the DEMO profile can
+            // resume its own lifetime/animation without another user switch.
+            "tv_nochat 0",
+        ];
+        for (let index = 0; index < commands.length; index += 1) {
+            try { GameInterfaceAPI.ConsoleCommand(commands[index]); } catch (errCommand) {}
+        }
+        advancedRefreshQuickOptionButtons();
+    }
+
+    function advancedToggleQuickOption(key) {
+        if (!Object.prototype.hasOwnProperty.call(advancedQuickOptions, key)) {
+            return;
+        }
+        advancedQuickOptions[key] = !advancedQuickOptions[key];
+        if (key === "overhead") {
+            advancedNativeOverheadRestored = false;
+        }
+        advancedApplyQuickOptions();
+    }
+
+    function advancedClearPanel(panel) {
+        if (!panel || !panel.IsValid()) {
+            return;
+        }
+        try {
+            panel.RemoveAndDeleteChildren();
+        } catch (errRemove) {
+            const count = panel.GetChildCount ? panel.GetChildCount() : 0;
+            for (let index = count - 1; index >= 0; index -= 1) {
+                try { panel.GetChild(index).DeleteAsync(0); } catch (errDelete) {}
+            }
+        }
+    }
+
+    function advancedPlayerName(xuid) {
+        const normalized = normalizeXuid(xuid);
+        const packedPlayer = advancedPlayback && advancedPlayback.byXuid[normalized];
+        let liveName = "";
+        try { liveName = String(GameStateAPI.GetPlayerName(normalized) || "").trim(); } catch (errName) {}
+        return liveName || (packedPlayer ? packedPlayer.name : "") || "Player";
+    }
+
+    function advancedFormatTick(tick) {
+        const seconds = Math.max(0, Number(tick) || 0) / Math.max(1, advancedPlayback.tickRate);
+        const minutes = Math.floor(seconds / 60);
+        const remain = Math.floor(seconds % 60);
+        return minutes + ":" + (remain < 10 ? "0" : "") + remain;
+    }
+
+    function advancedRefreshRoundIntervals(state) {
+        if (advancedPlayback && advancedPlayback.rounds && advancedPlayback.rounds.length) {
+            advancedRoundIntervals = advancedPlayback.rounds;
+        }
+        return advancedRoundIntervals;
+    }
+
+    function advancedRoundNumberAtTick(tick) {
+        const value = Math.max(0, Number(tick) || 0);
+        const rounds = advancedRoundIntervals;
+        if (!rounds.length || value < rounds[0].start) {
+            return 0;
+        }
+        for (let index = 1; index < rounds.length; index += 1) {
+            if (value < rounds[index].start) {
+                return rounds[index - 1].number;
+            }
+        }
+        return rounds[rounds.length - 1].number;
+    }
+
+    function advancedRoundElapsedTick(tick) {
+        const value = Math.max(0, Number(tick) || 0);
+        const rounds = advancedRoundIntervals;
+        for (let index = rounds.length - 1; index >= 0; index -= 1) {
+            if (value >= Number(rounds[index].start || 0)) {
+                return Math.max(0, value - Number(rounds[index].start || 0));
+            }
+        }
+        return value;
+    }
+
+    function advancedSetButtonText(button, value) {
+        if (!button || !button.IsValid() || !button.GetChildCount || button.GetChildCount() < 1) {
+            return;
+        }
+        const label = button.GetChild(0);
+        if (label && label.IsValid()) {
+            label.text = String(value || "");
+        }
+    }
+
+    function applySessionConsoleCommandsAfterDemoLoad() {
+        if (!sessionConsoleCommands.length
+                || sessionConsoleCommandPasses >= SESSION_CONSOLE_COMMAND_PASSES) {
+            return;
+        }
+        const state = controller.GetDemoControllerState();
+        if (!state) {
+            $.Schedule(0.1, applySessionConsoleCommandsAfterDemoLoad);
+            return;
+        }
+        sessionConsoleCommands.forEach(function (command) {
+            try { GameInterfaceAPI.ConsoleCommand(command); } catch (errCommand) {}
+        });
+        sessionConsoleCommandPasses += 1;
+        if (sessionConsoleCommandPasses < SESSION_CONSOLE_COMMAND_PASSES) {
+            $.Schedule(
+                SESSION_CONSOLE_COMMAND_REAPPLY_SECONDS,
+                applySessionConsoleCommandsAfterDemoLoad,
+            );
+        }
+    }
+
+    function advancedLocalizedUtilityName(raw) {
+        const text = String(raw || "").trim();
+        let key = text.toLowerCase();
+        if (key.indexOf("weapon_") === 0) {
+            key = key.slice(7);
+        }
+        key = key.replace(/[_\- ]/g, "");
+        const names = {
+            smoke: ["烟雾弹", "Smoke"],
+            smokegrenade: ["烟雾弹", "Smoke"],
+            flash: ["闪光弹", "Flashbang"],
+            flashbang: ["闪光弹", "Flashbang"],
+            he: ["高爆手雷", "HE grenade"],
+            hegrenade: ["高爆手雷", "HE grenade"],
+            molotov: ["燃烧瓶", "Molotov"],
+            incendiary: ["燃烧弹", "Incendiary"],
+            incgrenade: ["燃烧弹", "Incendiary"],
+            decoy: ["诱饵弹", "Decoy"],
+            utility: ["道具", "Utility"],
+        };
+        return names[key] ? advancedCopy(names[key][0], names[key][1]) : text;
+    }
+
+    function advancedEquipmentIconStem(raw) {
+        let key = String(raw || "").trim().toLowerCase();
+        const localized = {
+            "烟雾弹": "smokegrenade",
+            "闪光弹": "flashbang",
+            "高爆手雷": "hegrenade",
+            "燃烧瓶": "molotov",
+            "燃烧弹": "incgrenade",
+            "诱饵弹": "decoy",
+            "道具": "utility",
+        };
+        if (localized[key]) {
+            return localized[key];
+        }
+        key = key.replace(/^weapon_/, "").replace(/[\- ]/g, "_");
+        const compact = key.replace(/_/g, "");
+        const aliases = {
+            mac_10: "mac10",
+            m4a1_s: "m4a1_silencer",
+            usp_s: "usp_silencer",
+            incendiary: "incgrenade",
+            incendiarygrenade: "incgrenade",
+            smoke: "smokegrenade",
+            flash: "flashbang",
+            he: "hegrenade",
+            world: "suicide",
+        };
+        if (aliases[key]) {
+            return aliases[key];
+        }
+        const stems = [
+            "m4a1_silencer_off", "m4a1_silencer", "usp_silencer_off", "usp_silencer",
+            "knife_m9_bayonet", "knife_butterfly", "knife_falchion", "knife_karambit",
+            "knife_stiletto", "knife_tactical", "knife_widowmaker", "smokegrenade",
+            "flashbang", "hegrenade", "incgrenade", "fiveseven", "hkp2000", "sawedoff",
+            "galilar", "revolver", "cz75a", "g3sg1", "scar20", "sg556", "ssg08",
+            "xm1014", "molotov", "inferno", "deagle", "glock", "mac10", "ump45",
+            "mp5sd", "bizon", "negev", "mag7", "famas", "m4a1", "ak47", "awp",
+            "aug", "p90", "mp9", "mp7", "tec9", "p250", "nova", "m249", "elite",
+            "taser", "decoy", "bayonet", "knife", "c4", "suicide",
+        ];
+        for (let index = 0; index < stems.length; index += 1) {
+            if (compact.indexOf(stems[index].replace(/_/g, "")) >= 0) {
+                return stems[index];
+            }
+        }
+        return key || "suicide";
+    }
+
+    function advancedCreateEventIcon(parent, folder, stem, width, height, cellWidth) {
+        const cell = advancedCreatePanel("Panel", parent, "");
+        cell.hittest = false;
+        cell.hittestchildren = false;
+        cell.style.width = String(cellWidth || width || 14) + "px";
+        cell.style.height = "100%";
+        cell.style.overflow = "noclip";
+
+        const icon = advancedCreatePanel("Image", cell, "");
+        icon.hittest = false;
+        icon.hittestchildren = false;
+        icon.style.width = String(width || 12) + "px";
+        icon.style.height = String(height || width || 12) + "px";
+        icon.style.horizontalAlign = "center";
+        icon.style.verticalAlign = "center";
+        icon.style.washColor = "#ece9e2";
+        icon.style.imgShadow = "0px 0px 1px 1 #00000080";
+        try {
+            let resource = "s2r://panorama/images/icons/" + folder + "/" + stem + ".svg";
+            if (folder === "death_notice") {
+                const deathNoticeStems = {
+                    headshot: "icon_headshot",
+                    throughsmoke: "smoke_kill",
+                    blindkill: "blind_kill",
+                };
+                resource = "s2r://panorama/images/hud/deathnotice/"
+                    + (deathNoticeStems[stem] || stem) + ".vsvg";
+            } else if (folder === "equipment" && stem === "flashbang_assist") {
+                resource = "s2r://panorama/images/icons/equipment/flashbang_assist.vsvg";
+            }
+            icon.SetImage(resource);
+        } catch (errImage) {}
+        try {
+            icon.SetScaling("stretch-to-fit-preserve-aspect");
+        } catch (errScaling) {}
+        return cell;
+    }
+
+    function advancedEventPlayerColor(xuid, tick) {
+        const team = xuid ? resolvePovTeam(xuid, tick) : 0;
+        return team === 3 ? "#7ed9ff" : (team === 2 ? "#ffd46d" : "#b5b3ad");
+    }
+
+    function advancedCreateEventName(parent, xuid, fallback, tick, align) {
+        const label = advancedCreateLabel(
+            parent,
+            xuid ? advancedPlayerName(xuid) : fallback,
+            11,
+            advancedEventPlayerColor(xuid, tick),
+        );
+        label.style.width = "fill-parent-flow(1.0)";
+        label.style.height = "16px";
+        label.style.textAlign = align;
+        label.style.textOverflow = "shrink";
+        label.style.verticalAlign = "center";
+        return label;
+    }
+
+    function advancedAppendKillModifiers(parent, flags) {
+        if (flags & 1) {
+            advancedCreateEventIcon(parent, "death_notice", "headshot", ADVANCED_EVENT_ICON_HEIGHT, ADVANCED_EVENT_ICON_HEIGHT, ADVANCED_EVENT_ICON_TRACK_HEIGHT);
+        }
+        if (flags & 8) {
+            advancedCreateEventIcon(parent, "death_notice", "noscope", ADVANCED_EVENT_ICON_HEIGHT, ADVANCED_EVENT_ICON_HEIGHT, ADVANCED_EVENT_ICON_TRACK_HEIGHT);
+        }
+        if (flags & 2) {
+            advancedCreateEventIcon(parent, "death_notice", "throughsmoke", ADVANCED_EVENT_ICON_HEIGHT, ADVANCED_EVENT_ICON_HEIGHT, ADVANCED_EVENT_ICON_TRACK_HEIGHT);
+        }
+        if (flags & 4) {
+            advancedCreateEventIcon(parent, "death_notice", "penetrate", ADVANCED_EVENT_ICON_HEIGHT, ADVANCED_EVENT_ICON_HEIGHT, ADVANCED_EVENT_ICON_TRACK_HEIGHT);
+        }
+        if (flags & 32) {
+            advancedCreateEventIcon(parent, "equipment", "flashbang_assist", ADVANCED_EVENT_ICON_HEIGHT, ADVANCED_EVENT_ICON_HEIGHT, ADVANCED_EVENT_ICON_TRACK_HEIGHT);
+        }
+    }
+
+    function advancedCreateEventLocateButton(row, event) {
+        const locate = advancedCreatePanel("Button", row, "");
+        locate.style.width = "fill-parent-flow(1.0)";
+        locate.style.height = ADVANCED_EVENT_ROW_HEIGHT + "px";
+        locate.style.marginRight = "0px";
+        locate.style.paddingLeft = "4px";
+        locate.style.paddingRight = "4px";
+        locate.style.flowChildren = "right";
+        advancedStyleButton(locate, false);
+        // The round group owns the surface color. Transparent row buttons let
+        // the alternating grayscale remain visible across the complete table.
+        locate.style.backgroundColor = "#00000000";
+        locate.style.border = "0px solid #00000000";
+        locate.style.borderRadius = "0px";
+        locate.SetPanelEvent("onactivate", function () {
+            advancedSelectPlayer(advancedSelectedXuid, { tick: event.tick });
+            return true;
+        });
+
+        const time = advancedCreateLabel(
+            locate,
+            advancedFormatTick(advancedRoundElapsedTick(event.tick)),
+            9,
+            "#807f79",
+        );
+        time.style.width = "38px";
+        time.style.height = "14px";
+        time.style.textAlign = "left";
+        time.style.verticalAlign = "center";
+
+        const feed = advancedCreatePanel("Panel", locate, "");
+        feed.hittest = false;
+        feed.hittestchildren = false;
+        feed.style.width = "fill-parent-flow(1.0)";
+        feed.style.height = "100%";
+        feed.style.flowChildren = "right";
+        feed.style.verticalAlign = "center";
+
+        if (event.type === "utility") {
+            advancedCreateEventName(feed, advancedSelectedXuid, "", event.tick, "right");
+            const action = advancedCreatePanel("Panel", feed, "");
+            action.hittest = false;
+            action.hittestchildren = false;
+            action.style.width = advancedChinese() ? "53px" : "62px";
+            action.style.height = "100%";
+            action.style.flowChildren = "right";
+            action.style.verticalAlign = "center";
+            const verb = advancedCreateLabel(action, advancedCopy("投掷", "threw"), 10, "#aaa8a2");
+            verb.style.width = advancedChinese() ? "29px" : "38px";
+            verb.style.height = "16px";
+            verb.style.textAlign = "center";
+            verb.style.verticalAlign = "center";
+            const utilityStem = advancedEquipmentIconStem(event.detail);
+            advancedCreateEventIcon(action, "equipment", utilityStem, 20, 20, 24);
+            const utility = advancedCreateLabel(
+                feed,
+                advancedLocalizedUtilityName(event.detail),
+                10,
+                "#ece9e2",
+            );
+            utility.style.width = "fill-parent-flow(1.0)";
+            utility.style.height = "16px";
+            utility.style.textAlign = "left";
+            utility.style.textOverflow = "shrink";
+            utility.style.marginLeft = "4px";
+            utility.style.verticalAlign = "center";
+            return locate;
+        }
+
+        const actorXuid = event.type === "kill" ? advancedSelectedXuid : event.peerXuid;
+        const targetXuid = event.type === "kill" ? event.peerXuid : advancedSelectedXuid;
+        advancedCreateEventName(
+            feed,
+            actorXuid,
+            advancedCopy("世界", "World"),
+            event.tick,
+            "right",
+        );
+        const iconStrip = advancedCreatePanel("Panel", feed, "");
+        iconStrip.hittest = false;
+        iconStrip.hittestchildren = false;
+        // Keep the icon lane content-sized, but add symmetric breathing room
+        // so both player names do not touch wide rifle or modifier artwork.
+        iconStrip.style.width = "fit-children";
+        iconStrip.style.height = ADVANCED_EVENT_ICON_TRACK_HEIGHT + "px";
+        iconStrip.style.verticalAlign = "center";
+        iconStrip.style.marginLeft = "6px";
+        iconStrip.style.marginRight = "6px";
+        iconStrip.style.overflow = "noclip";
+        const iconContent = advancedCreatePanel("Panel", iconStrip, "");
+        iconContent.hittest = false;
+        iconContent.hittestchildren = false;
+        iconContent.style.width = "fit-children";
+        iconContent.style.height = ADVANCED_EVENT_ICON_TRACK_HEIGHT + "px";
+        iconContent.style.horizontalAlign = "center";
+        iconContent.style.verticalAlign = "center";
+        iconContent.style.flowChildren = "right";
+        iconContent.style.overflow = "noclip";
+        if (event.flags & 16) {
+            advancedCreateEventIcon(iconContent, "death_notice", "blindkill", ADVANCED_EVENT_ICON_HEIGHT, ADVANCED_EVENT_ICON_HEIGHT, ADVANCED_EVENT_ICON_TRACK_HEIGHT);
+        }
+        advancedCreateEventIcon(
+            iconContent,
+            "equipment",
+            advancedEquipmentIconStem(event.detail),
+            36,
+            ADVANCED_EVENT_ICON_HEIGHT,
+            40,
+        );
+        advancedAppendKillModifiers(iconContent, event.flags);
+        const target = advancedCreateEventName(
+            feed,
+            targetXuid,
+            advancedCopy("世界", "World"),
+            event.tick,
+            "left",
+        );
+        target.style.marginLeft = "4px";
+        return locate;
+    }
+
+    function advancedSpecTargetSlot(xuid) {
+        const runtimeSlot = runtimeSlotForXuid(xuid);
+        // GameStateAPI player slots are zero-based, while spec_player expects the
+        // one-based entity index. Trying both values visibly visits another POV.
+        return runtimeSlot >= 0 && runtimeSlot < 64 ? runtimeSlot + 1 : -1;
+    }
+
+    function advancedPlayerAliveAtTick(xuid, tick) {
+        const normalized = normalizeXuid(xuid);
+        const tracked = findRadarPlayerByXuid(normalized);
+        if (tracked && radarTrack) {
+            const sample = radarSampleAt(tracked, Number(tick) || 0, radarTrack.stride);
+            if (sample) {
+                return Boolean(sample.alive);
+            }
+        }
+
+        // Advanced playback normally includes the radar track. Keep a round-aware
+        // event fallback so a partially decoded demo still disables dead players.
+        let roundStart = 0;
+        for (let index = 0; index < advancedRoundIntervals.length; index += 1) {
+            const round = advancedRoundIntervals[index];
+            if (Number(round.start || 0) <= Number(tick || 0)) {
+                roundStart = Number(round.start || 0);
+            } else {
+                break;
+            }
+        }
+        const events = advancedPlayback.eventsByXuid[normalized] || [];
+        for (let index = 0; index < events.length; index += 1) {
+            const event = events[index];
+            if (event.type === "death"
+                    && Number(event.tick || 0) >= roundStart
+                    && Number(event.tick || 0) <= Number(tick || 0)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    function advancedFinishSpecOperation(success) {
+        const operation = advancedSpecOperation;
+        if (!operation) {
+            return;
+        }
+        advancedSpecOperation = null;
+        if (operation.seekTick >= 0) {
+            if (operation.playAfter) {
+                try {
+                    if (controller.SetPaused) {
+                        controller.SetPaused(false);
+                    } else {
+                        GameInterfaceAPI.ConsoleCommand("demo_resume");
+                    }
+                } catch (errResume) {}
+            } else {
+                try {
+                    if (controller.SetPaused) {
+                        controller.SetPaused(true);
+                    } else {
+                        GameInterfaceAPI.ConsoleCommand("demo_pause");
+                    }
+                    if (controller.GotoTick) {
+                        controller.GotoTick(Math.max(0, operation.seekTick | 0));
+                    } else {
+                        GameInterfaceAPI.ConsoleCommand("demo_gototick " + Math.max(0, operation.seekTick | 0));
+                    }
+                } catch (errExactSeek) {}
+                if (operation.resumeAfterSeek) {
+                    $.Schedule(0.05, function () {
+                        try {
+                            if (controller.SetPaused) {
+                                controller.SetPaused(false);
+                            } else {
+                                GameInterfaceAPI.ConsoleCommand("demo_resume");
+                            }
+                        } catch (errResumeExactSeek) {}
+                    });
+                }
+            }
+        } else if (operation.restorePause) {
+            try {
+                if (controller.SetPaused) {
+                    controller.SetPaused(true);
+                } else {
+                    GameInterfaceAPI.ConsoleCommand("demo_pause");
+                }
+            } catch (errPause) {}
+        }
+        if (!success) {
+            $.Msg("[CS2 Insight] advanced playback could not verify POV XUID " + operation.xuid);
+        }
+    }
+
+    function advancedAdvanceSpecOperation() {
+        const operation = advancedSpecOperation;
+        if (!operation) {
+            return;
+        }
+        const state = controller.GetDemoControllerState();
+        if (!state) {
+            $.Schedule(0.1, advancedAdvanceSpecOperation);
+            return;
+        }
+        if (operation.seekTick >= 0
+                && Math.abs(Number(state.nTick || 0) - operation.initialSeekTick) > 16
+                && operation.seekWaits < 40) {
+            operation.seekWaits += 1;
+            $.Schedule(0.05, advancedAdvanceSpecOperation);
+            return;
+        }
+        if (sameXuid(currentPovXuid(state), operation.xuid)) {
+            advancedFinishSpecOperation(true);
+            return;
+        }
+        if (operation.targetSlot < 1) {
+            advancedFinishSpecOperation(false);
+            return;
+        }
+        if (operation.attempts > 0 && !operation.resumedForSpec && state.bIsPaused) {
+            operation.resumedForSpec = true;
+            try { GameInterfaceAPI.ConsoleCommand("demo_resume"); } catch (errResume) {}
+            $.Schedule(0.12, advancedAdvanceSpecOperation);
+            return;
+        }
+        if (operation.attempts >= 4) {
+            advancedFinishSpecOperation(false);
+            return;
+        }
+        operation.attempts += 1;
+        try {
+            GameInterfaceAPI.ConsoleCommand("spec_mode " + operation.mode);
+            GameInterfaceAPI.ConsoleCommand("spec_player " + operation.targetSlot);
+        } catch (errSpec) {}
+        $.Schedule(0.16, advancedAdvanceSpecOperation);
+    }
+
+    function advancedSelectPlayer(xuid, options) {
+        const normalized = normalizeXuid(xuid);
+        if (!advancedPlayback.byXuid[normalized]) {
+            return;
+        }
+        const state = controller.GetDemoControllerState();
+        const opts = options || {};
+        const exactTick = isFinite(Number(opts.tick)) ? Math.max(0, Number(opts.tick) | 0) : -1;
+        if (exactTick < 0 && !advancedPlayerAliveAtTick(normalized, state ? Number(state.nTick || 0) : 0)) {
+            return;
+        }
+        const playAfter = Boolean(opts.playAfter);
+        const resumeAfterSeek = playAfter || Boolean(state && !state.bIsPaused);
+        const initialSeekTick = exactTick >= 0
+            ? Math.max(0, exactTick - (playAfter ? Math.round(advancedPlayback.tickRate * 3) : 0))
+            : -1;
+        const playerChanged = normalized !== advancedSelectedXuid;
+        advancedSelectedXuid = normalized;
+        if (playerChanged) {
+            advancedEventPage = 0;
+        }
+        if (initialSeekTick >= 0) {
+            try {
+                if (controller.SetPaused) {
+                    controller.SetPaused(true);
+                } else {
+                    GameInterfaceAPI.ConsoleCommand("demo_pause");
+                }
+                if (controller.GotoTick) {
+                    controller.GotoTick(initialSeekTick);
+                } else {
+                    GameInterfaceAPI.ConsoleCommand("demo_gototick " + initialSeekTick);
+                }
+            } catch (errSeek) {}
+        }
+        advancedSpecOperation = {
+            xuid: normalized,
+            mode: advancedViewMode === 1 ? 5 : advancedViewMode,
+            targetSlot: advancedSpecTargetSlot(normalized),
+            attempts: 0,
+            seekWaits: 0,
+            seekTick: exactTick,
+            initialSeekTick: initialSeekTick,
+            playAfter: playAfter,
+            resumeAfterSeek: resumeAfterSeek,
+            restorePause: Boolean(state && state.bIsPaused),
+            resumedForSpec: false,
+        };
+        try { GameInterfaceAPI.ConsoleCommand("spec_mode " + advancedSpecOperation.mode); } catch (errMode) {}
+        $.Schedule(initialSeekTick >= 0 ? 0.12 : 0, advancedAdvanceSpecOperation);
+        advancedRenderMenu();
+    }
+
+    function advancedSetPanelRuntimeVisible(panel, visible) {
+        if (!panel || !panel.IsValid()) {
+            return;
+        }
+        panel.visible = visible;
+        try {
+            panel.style.opacity = visible ? "1" : "0";
+            panel.style.visibility = visible ? "visible" : "collapse";
+        } catch (errStyle) {}
+    }
+
+    function advancedSpectatorInfoPanels() {
+        const root = hudRootPanel();
+        const panels = [];
+        function add(panel) {
+            if (panel && panel.IsValid() && panels.indexOf(panel) < 0) {
+                panels.push(panel);
+            }
+        }
+        [
+            "HudSpecplayer",
+            "HudSpecplayerRoot",
+            "HudSpecplayerParentContainer",
+            "HudSpecPlayer",
+        ].forEach(function (id) {
+            try { add(root.FindChildTraverse(id)); } catch (errId) {}
+        });
+        if (root.FindChildrenWithClassTraverse) {
+            [
+                "HudSpecplayerParentContainer",
+                "HudSpecplayerRoot--visible",
+                "HudSpecplayer__Bg",
+            ].forEach(function (className) {
+                const matches = root.FindChildrenWithClassTraverse(className) || [];
+                matches.forEach(function (panel) {
+                    add(panel);
+                    let parent = panel.GetParent ? panel.GetParent() : null;
+                    for (let depth = 0; parent && parent.IsValid() && depth < 2; depth += 1) {
+                        let belongsToSpecPlayer = String(parent.id || "")
+                            .toLowerCase().indexOf("specplayer") >= 0;
+                        try {
+                            belongsToSpecPlayer = belongsToSpecPlayer
+                                || parent.BHasClass("HudSpecplayerParentContainer")
+                                || parent.BHasClass("HudSpecplayerRoot--visible");
+                        } catch (errClass) {}
+                        if (!belongsToSpecPlayer) {
+                            break;
+                        }
+                        add(parent);
+                        parent = parent.GetParent ? parent.GetParent() : null;
+                    }
+                });
+            });
+        }
+        return panels;
+    }
+
+    function advancedEnsurePovFactionLineOverlay(healthAmmo, enabled) {
+        if (!healthAmmo || !healthAmmo.IsValid()) {
+            if (advancedPovFactionLineOverlay && advancedPovFactionLineOverlay.IsValid()) {
+                advancedPovFactionLineOverlay.visible = false;
+            }
+            return;
+        }
+        if (advancedPovFactionLineOverlay && advancedPovFactionLineOverlay.IsValid()
+                && advancedPovFactionLineOverlay.GetParent
+                && advancedPovFactionLineOverlay.GetParent() !== healthAmmo) {
+            try { advancedPovFactionLineOverlay.DeleteAsync(0); } catch (errDeleteLines) {}
+            advancedPovFactionLineOverlay = null;
+        }
+        if (!advancedPovFactionLineOverlay || !advancedPovFactionLineOverlay.IsValid()) {
+            let overlay = null;
+            try { overlay = healthAmmo.FindChildTraverse("CS2InsightPovFactionLines"); } catch (errFindLines) {}
+            if (!overlay || !overlay.IsValid()) {
+                overlay = $.CreatePanel("Panel", healthAmmo, "CS2InsightPovFactionLines");
+                overlay.hittest = false;
+                overlay.hittestchildren = false;
+                overlay.style.width = "480px";
+                overlay.style.height = "3px";
+                overlay.style.horizontalAlign = "center";
+                overlay.style.verticalAlign = "bottom";
+                overlay.style.marginBottom = "35px";
+                overlay.style.flowChildren = "right";
+                overlay.style.overflow = "noclip";
+                overlay.style.zIndex = "0";
+
+                const left = $.CreatePanel("Panel", overlay, "");
+                left.hittest = false;
+                left.style.width = "fill-parent-flow(1.0)";
+                left.style.height = "2px";
+                left.style.verticalAlign = "center";
+                left.style.backgroundColor = "gradient( linear, 0% 0%, 100% 0%, from( #eeeeee00 ), color-stop( 0.35, #eeeeee22 ), to( #eeeeeecc ) )";
+
+                const centerGap = $.CreatePanel("Panel", overlay, "");
+                centerGap.hittest = false;
+                centerGap.style.width = "86px";
+                centerGap.style.height = "1px";
+
+                const right = $.CreatePanel("Panel", overlay, "");
+                right.hittest = false;
+                right.style.width = "fill-parent-flow(1.0)";
+                right.style.height = "2px";
+                right.style.verticalAlign = "center";
+                right.style.backgroundColor = "gradient( linear, 0% 0%, 100% 0%, from( #eeeeeecc ), color-stop( 0.65, #eeeeee22 ), to( #eeeeee00 ) )";
+            }
+            advancedPovFactionLineOverlay = overlay;
+        }
+        advancedPovFactionLineOverlay.visible = enabled;
+        try {
+            advancedPovFactionLineOverlay.style.visibility = enabled ? "visible" : "collapse";
+        } catch (errOverlayVisibility) {}
+    }
+
+    function advancedApplyPovFactionStrokes(healthAmmo, enabled) {
+        function remember(panel) {
+            if (panel && panel.IsValid() && advancedPovFactionStrokes.indexOf(panel) < 0) {
+                advancedPovFactionStrokes.push(panel);
+            }
+        }
+        // HudHealthAmmoCenter may resolve to a nested panel in spectator mode,
+        // so search the HUD root as well. CS2's stock stylesheet collapses
+        // these exact two panels under `.HUD--spectating-target`.
+        [healthAmmo, hudRootPanel()].forEach(function (searchRoot) {
+            if (searchRoot && searchRoot.IsValid() && searchRoot.FindChildrenWithClassTraverse) {
+                const live = searchRoot.FindChildrenWithClassTraverse("hud-HA__stroke") || [];
+                live.forEach(remember);
+            }
+        });
+        advancedPovFactionStrokes.forEach(function (stroke) {
+            if (!stroke || !stroke.IsValid()) {
+                return;
+            }
+            // Stock CS2 ships the correct two-sided gradient beside the CT/T
+            // badge, but .HUD--spectating-target collapses it in demos. POV
+            // recording and Advanced POV intentionally present player HUD, so
+            // Override both runtime and inline visibility so the native player
+            // HUD gradients reliably return in POV mode, then collapse again
+            // when switching back to DEMO HUD.
+            try { stroke.visible = enabled; } catch (errVisible) {}
+            try { stroke.style.visibility = enabled ? "visible" : "collapse"; } catch (errStroke) {}
+        });
+        // Some spectator HUD variants remove the native stroke panels from the
+        // rendered tree entirely. Keep a matching two-sided gradient owned by
+        // INSIGHT so both recording POV and Advanced POV are deterministic.
+        advancedEnsurePovFactionLineOverlay(healthAmmo, enabled);
+    }
+
+    function advancedApplyNativeSpectatorHud(enabled) {
+        const healthAmmo = findHudTraverse("HudHealthAmmoCenter")
+            || findHudTraverse("CSGOHudHealthAmmoCenter");
+        advancedSetPanelRuntimeVisible(healthAmmo, !enabled);
+        advancedApplyPovFactionStrokes(healthAmmo, !enabled);
+
+        advancedSpectatorInfoPanels().forEach(function (panel) {
+            advancedSetPanelRuntimeVisible(panel, enabled);
+            try { panel.SetHasClass("HudSpecplayerRoot--visible", enabled); } catch (errClass) {}
+        });
+
+        if (enabled) {
+            restoreAdvancedTeamCounterPanels();
+        } else {
+            restrictPovTeamCounterEquipment();
+        }
+    }
+
+    function guardSpectatorHudProfile() {
+        // Recording POV and Advanced's POV profile share the same native
+        // container selection: show HudHealthAmmoCenter (with CS2's CT/T logo)
+        // and hide the demo-only Steam-avatar card. This changes only root
+        // visibility; health fill, wash, gradients, and colors remain native.
+        if (advancedPlayback && advancedHudHidden) {
+            const healthAmmo = findHudTraverse("HudHealthAmmoCenter")
+                || findHudTraverse("CSGOHudHealthAmmoCenter");
+            advancedSetPanelRuntimeVisible(healthAmmo, false);
+            advancedSpectatorInfoPanels().forEach(function (panel) {
+                advancedSetPanelRuntimeVisible(panel, false);
+            });
+            advancedSetPanelRuntimeVisible(findTeamCounterRoot(), false);
+            $.Schedule(0.25, guardSpectatorHudProfile);
+            return;
+        }
+        const demoSpectatorHudEnabled = Boolean(
+            advancedPlayback && !advancedPovVisualsEnabled
+        );
+        advancedApplyNativeSpectatorHud(demoSpectatorHudEnabled);
+        $.Schedule(0.25, guardSpectatorHudProfile);
+    }
+
+    function advancedApplyPlaybackProfile(profile) {
+        if (profile !== "pov" && profile !== "demo" && profile !== "hidden") {
+            return;
+        }
+        advancedHudHidden = profile === "hidden";
+        advancedPovVisualsEnabled = profile === "pov";
+        const commands = advancedHudHidden ? [
+            "cl_draw_only_deathnotices true",
+            "cl_drawhud_force_radar -1",
+            "cl_drawhud_force_teamid_overhead -1",
+        ] : advancedPovVisualsEnabled ? [
+            "cl_draw_only_deathnotices false",
+            "mp_forcecamera 0",
+            "cl_trueview_show_status 0",
+            "cl_spec_show_bindings 0",
+            "cl_spec_stats 0",
+            "r_spectator_flashbang_opacity 1",
+            "cl_radar_always_centered 1",
+            "cl_radar_square_always false",
+            "cl_radar_rotate true",
+            "cl_radar_square_when_spectating 0",
+            "cl_radar_scale 0.4",
+            "snd_disable_radar_visualize 0",
+            "cl_hud_color 12",
+            "cl_drawhud_force_teamid_overhead 1",
+            "cl_teamid_overhead_mode 3",
+            "cl_teamid_overhead_colors_show 1",
+            "cl_teamid_overhead_fade_near_crosshair 0",
+            "cl_teamid_overhead_maxdist 9999",
+            "cl_teamid_overhead_maxdist_spec 9999",
+        ] : [
+            "cl_draw_only_deathnotices false",
+            "mp_forcecamera 0",
+            "cl_trueview_show_status 1",
+            "cl_spec_show_bindings 1",
+            "cl_spec_stats 1",
+            "r_spectator_flashbang_opacity 1",
+            "cl_radar_always_centered 0",
+            "cl_radar_square_always true",
+            "cl_radar_rotate false",
+            "cl_radar_square_when_spectating 1",
+            "cl_radar_scale 0.7",
+            "snd_disable_radar_visualize 0",
+            "cl_hud_color 0",
+            "cl_drawhud_force_teamid_overhead 1",
+            "cl_teamid_overhead_mode 3",
+            "cl_teamid_overhead_colors_show 0",
+            "cl_teamid_overhead_fade_near_crosshair 0",
+            "cl_teamid_overhead_maxdist 9999",
+            "cl_teamid_overhead_maxdist_spec 9999",
+            "cl_teamcounter_playercount_instead_of_avatars false",
+            "cl_drawhud_force_radar 0",
+        ];
+        for (let index = 0; index < commands.length; index += 1) {
+            try { GameInterfaceAPI.ConsoleCommand(commands[index]); } catch (errCommand) {}
+        }
+        if (advancedHudHidden) {
+            advancedRefreshQuickOptionButtons();
+        } else {
+            advancedApplyQuickOptions();
+        }
+        advancedNativeOverheadRestored = false;
+        advancedSetPanelRuntimeVisible(findTeamCounterRoot(), !advancedHudHidden);
+        advancedSetPanelRuntimeVisible(
+            findNativeRadar(),
+            !advancedHudHidden && advancedQuickOptions.radar,
+        );
+        if (advancedHudHidden) {
+            const healthAmmo = findHudTraverse("HudHealthAmmoCenter")
+                || findHudTraverse("CSGOHudHealthAmmoCenter");
+            advancedSetPanelRuntimeVisible(healthAmmo, false);
+            advancedSpectatorInfoPanels().forEach(function (panel) {
+                advancedSetPanelRuntimeVisible(panel, false);
+            });
+        } else {
+            advancedApplyNativeSpectatorHud(!advancedPovVisualsEnabled);
+        }
+        if (!advancedPovVisualsEnabled) {
+            restoreAdvancedTeamCounterPanels();
+            if (inputHud && inputHud.IsValid()) {
+                inputHud.visible = false;
+            }
+            if (radarHud && radarHud.IsValid()) {
+                radarHud.visible = false;
+            }
+            if (radarUnclipHud && radarUnclipHud.IsValid()) {
+                radarUnclipHud.visible = false;
+            }
+            if (!advancedHudHidden) {
+                restoreNativeRadarForAdvancedSpectator();
+            }
+            hideRadioHud();
+            if (!advancedHudHidden) {
+                $.Schedule(0.05, function () {
+                    advancedApplyNativeSpectatorHud(true);
+                });
+            }
+        }
+        audienceRefreshFrames = 0;
+        advancedRenderMenu();
+    }
+
+    function advancedSetVoicePolicy(policy) {
+        if (["all", "team", "enemy", "mute", "custom"].indexOf(policy) < 0) {
+            return;
+        }
+        advancedVoicePolicy = policy;
+        audienceRefreshFrames = 0;
+        advancedRenderMenu();
+    }
+
+    function advancedTogglePlayerVoice(xuid) {
+        const normalized = normalizeXuid(xuid);
+        if (advancedVoicePolicy !== "custom") {
+            const state = controller.GetDemoControllerState();
+            const tick = state ? Number(state.nTick || 0) : 0;
+            const povTeam = state ? resolvePovTeam(currentPovXuid(state), tick) : 0;
+            Object.keys(advancedCustomVoiceXuids).forEach(function (key) {
+                delete advancedCustomVoiceXuids[key];
+            });
+            // Preserve the currently visible policy as the initial custom
+            // mask. Clicking one speaker under "All" therefore mutes only
+            // that speaker instead of clearing everybody else first.
+            advancedPlayback.players.forEach(function (player) {
+                const playerXuid = normalizeXuid(player.xuid);
+                advancedCustomVoiceXuids[playerXuid] = advancedVoiceAllows(
+                    playerXuid,
+                    povTeam,
+                    tick,
+                );
+            });
+            advancedVoicePolicy = "custom";
+        }
+        advancedCustomVoiceXuids[normalized] = !advancedCustomVoiceXuids[normalized];
+        audienceRefreshFrames = 0;
+        advancedRenderMenu();
+    }
+
+    function advancedPlayerVoiceEnabled(xuid) {
+        const state = controller.GetDemoControllerState();
+        const tick = state ? Number(state.nTick || 0) : 0;
+        const povTeam = state ? resolvePovTeam(currentPovXuid(state), tick) : 0;
+        return advancedVoiceAllows(xuid, povTeam, tick);
+    }
+
+    function advancedRoundButtonText(roundNumber) {
+        if (roundNumber <= 0) {
+            return advancedCopy("选择回合 ▾", "Select round ▾");
+        }
+        return advancedCopy("第 " + roundNumber + " 回合 ▾", "Round " + roundNumber + " ▾");
+    }
+
+    function advancedRoundIndexAtTick(tick) {
+        if (!advancedRoundIntervals.length) {
+            return -1;
+        }
+        const currentRound = advancedRoundNumberAtTick(tick);
+        for (let index = 0; index < advancedRoundIntervals.length; index += 1) {
+            if (Number(advancedRoundIntervals[index].number || 0) === currentRound) {
+                return index;
+            }
+        }
+        let closestIndex = -1;
+        for (let index = 0; index < advancedRoundIntervals.length; index += 1) {
+            if (Number(advancedRoundIntervals[index].start || 0) <= tick) {
+                closestIndex = index;
+            } else {
+                break;
+            }
+        }
+        return closestIndex;
+    }
+
+    function advancedSetRoundStepEnabled(button, enabled) {
+        if (!button || !button.IsValid()) {
+            return;
+        }
+        button.enabled = enabled;
+        button.hittest = enabled;
+        button.style.opacity = enabled ? "1" : "0.35";
+        button.style.brightness = enabled ? "1" : "0.7";
+    }
+
+    function advancedSeekRelativeRound(delta) {
+        const state = controller.GetDemoControllerState();
+        const tick = state ? Number(state.nTick || 0) : 0;
+        const currentIndex = advancedRoundIndexAtTick(tick);
+        const targetIndex = Math.max(
+            0,
+            Math.min(advancedRoundIntervals.length - 1, currentIndex + Number(delta || 0)),
+        );
+        if (currentIndex < 0 || targetIndex === currentIndex || !advancedRoundIntervals[targetIndex]) {
+            return true;
+        }
+        advancedRoundPickerOpen = false;
+        advancedRenderRoundPicker();
+        const xuid = advancedSelectedXuid || (state ? currentPovXuid(state) : "");
+        if (xuid && advancedPlayback.byXuid[normalizeXuid(xuid)]) {
+            advancedSelectPlayer(xuid, { tick: advancedRoundIntervals[targetIndex].start });
+        }
+        return true;
+    }
+
+    function advancedRefreshRoundSelector(state) {
+        const tick = state ? Number(state.nTick || 0) : 0;
+        const currentRound = advancedRoundNumberAtTick(tick);
+        const currentIndex = advancedRoundIndexAtTick(tick);
+        advancedSetRoundStepEnabled(advancedPreviousRoundButton, currentIndex > 0);
+        advancedSetRoundStepEnabled(
+            advancedNextRoundButton,
+            currentIndex >= 0 && currentIndex < advancedRoundIntervals.length - 1,
+        );
+        if (advancedRoundButton && advancedRoundButton.IsValid()) {
+            advancedSetButtonText(advancedRoundButton, advancedRoundButtonText(currentRound));
+            advancedStyleButton(advancedRoundButton, advancedRoundPickerOpen);
+        }
+        if (advancedRoundHintLabel && advancedRoundHintLabel.IsValid()) {
+            advancedRoundHintLabel.text = advancedCopy(
+                "共 " + advancedRoundIntervals.length + " 回合",
+                advancedRoundIntervals.length + " rounds",
+            );
+        }
+        advancedRoundButtons.forEach(function (button) {
+            if (!button || !button.IsValid()) {
+                return;
+            }
+            advancedStyleButton(button, Number(button._insightRoundNumber || 0) === currentRound);
+        });
+    }
+
+    function advancedRenderRoundPicker() {
+        if (!advancedRoundPickerPanel || !advancedRoundPickerPanel.IsValid()) {
+            return;
+        }
+        advancedClearPanel(advancedRoundPickerPanel);
+        advancedRoundButtons.length = 0;
+        const rounds = advancedRoundIntervals;
+        const rowCount = Math.max(1, Math.ceil(rounds.length / 8));
+        advancedRoundPickerPanel.visible = advancedRoundPickerOpen;
+        advancedRoundPickerPanel.style.visibility = advancedRoundPickerOpen ? "visible" : "collapse";
+        advancedRoundPickerPanel.style.height = advancedRoundPickerOpen
+            ? (rowCount * 28 + 8) + "px"
+            : "0px";
+        advancedRoundPickerPanel.style.marginBottom = advancedRoundPickerOpen ? "4px" : "0px";
+        if (!advancedRoundPickerOpen) {
+            return;
+        }
+        for (let rowIndex = 0; rowIndex < rowCount; rowIndex += 1) {
+            const pickerRow = advancedCreatePanel("Panel", advancedRoundPickerPanel, "");
+            pickerRow.style.width = "100%";
+            pickerRow.style.height = "28px";
+            pickerRow.style.flowChildren = "right";
+            rounds.slice(rowIndex * 8, (rowIndex + 1) * 8).forEach(function (round) {
+                const button = advancedCreateButton(
+                    pickerRow,
+                    String(round.number),
+                    function () {
+                        advancedRoundPickerOpen = false;
+                        advancedRenderRoundPicker();
+                        const state = controller.GetDemoControllerState();
+                        const xuid = advancedSelectedXuid || (state ? currentPovXuid(state) : "");
+                        if (xuid && advancedPlayback.byXuid[normalizeXuid(xuid)]) {
+                            advancedSelectPlayer(xuid, { tick: round.start });
+                        }
+                    },
+                    "48px",
+                );
+                button._insightRoundNumber = round.number;
+                button.style.height = "24px";
+                button.style.marginRight = "4px";
+                button.style.paddingLeft = "2px";
+                button.style.paddingRight = "2px";
+                advancedRoundButtons.push(button);
+            });
+        }
+        advancedRefreshRoundSelector(controller.GetDemoControllerState());
+    }
+
+    function advancedToggleRoundPicker() {
+        advancedRoundPickerOpen = !advancedRoundPickerOpen;
+        advancedRenderRoundPicker();
+        advancedRefreshRoundSelector(controller.GetDemoControllerState());
+    }
+
+    function advancedRenderPlayers() {
+        if (!advancedPlayerListPanel || !advancedPlayerListPanel.IsValid()) {
+            return;
+        }
+        advancedClearPanel(advancedPlayerListPanel);
+        const state = controller.GetDemoControllerState();
+        const tick = state ? Number(state.nTick || 0) : 0;
+        const grouped = { 2: [], 3: [] };
+        const teamSignature = [];
+        advancedPlayback.players.forEach(function (player) {
+            const liveTeam = resolvePovTeam(player.xuid, tick) || player.team;
+            const alive = advancedPlayerAliveAtTick(player.xuid, tick);
+            grouped[liveTeam === 3 ? 3 : 2].push(player);
+            player._insightAlive = alive;
+            teamSignature.push(player.xuid + ":" + liveTeam + ":" + (alive ? "1" : "0"));
+        });
+        advancedPlayerTeamSignature = teamSignature.join("|");
+
+        function renderTeam(team) {
+            const isCt = team === 3;
+            const teamAccent = isCt ? "#67c7ef" : "#e7bb4b";
+            const teamBorder = isCt ? "#315666" : "#65501f";
+            const teamSurface = isCt ? "#10242bcc" : "#2a2413cc";
+            const teamHeaderSurface = isCt ? "#173946f2" : "#4a3a12f2";
+            const rowSurface = isCt ? "#16252cba" : "#292517ba";
+            const rowBorder = isCt ? "#3a535db8" : "#5d4d28b8";
+            const column = advancedCreatePanel("Panel", advancedPlayerListPanel, "");
+            column.style.width = "fill-parent-flow(1.0)";
+            column.style.height = "100%";
+            column.style.flowChildren = "down";
+            column.style.backgroundColor = teamSurface;
+            column.style.border = "1px solid " + teamBorder;
+            column.style.borderRadius = "6px";
+            column.style.overflow = "clip";
+            if (isCt) {
+                column.style.marginRight = "3px";
+            } else {
+                column.style.marginLeft = "3px";
+            }
+
+            const teamHeader = advancedCreatePanel("Panel", column, "");
+            teamHeader.style.width = "100%";
+            teamHeader.style.height = "25px";
+            teamHeader.style.flowChildren = "right";
+            teamHeader.style.backgroundColor = teamHeaderSurface;
+            teamHeader.style.borderBottom = "1px solid " + teamBorder;
+            const teamLabel = advancedCreateLabel(
+                teamHeader,
+                isCt ? "CT" : "T",
+                11,
+                teamAccent,
+            );
+            teamLabel.style.width = "100%";
+            teamLabel.style.height = "16px";
+            teamLabel.style.paddingLeft = "9px";
+            teamLabel.style.textAlign = "left";
+            teamLabel.style.verticalAlign = "center";
+            teamLabel.style.fontWeight = "bold";
+            teamLabel.style.letterSpacing = "0.7px";
+
+            const playerRows = advancedCreatePanel("Panel", column, "");
+            playerRows.style.width = "100%";
+            playerRows.style.height = "fill-parent-flow(1.0)";
+            playerRows.style.flowChildren = "down";
+            playerRows.style.paddingTop = "4px";
+            playerRows.style.paddingLeft = "5px";
+            playerRows.style.paddingRight = "5px";
+            playerRows.style.paddingBottom = "2px";
+            grouped[team].forEach(function (player) {
+                const alive = player._insightAlive !== false;
+                const row = advancedCreatePanel("Panel", playerRows, "");
+                row.style.width = "100%";
+                row.style.height = "25px";
+                row.style.flowChildren = "right";
+                row.style.marginBottom = "1px";
+                const marker = advancedCreateLabel(
+                    row,
+                    "●",
+                    11,
+                    radioPlayerColor(player.xuid) || (team === 3 ? "#7ed9ff" : "#ffd46d"),
+                );
+                marker.style.width = "14px";
+                marker.style.height = "14px";
+                marker.style.textAlign = "center";
+                marker.style.verticalAlign = "center";
+                const button = advancedCreateButton(
+                    row,
+                    alive
+                        ? advancedPlayerName(player.xuid)
+                        : advancedCopy("☠ " + advancedPlayerName(player.xuid) + "（死亡）", "☠ " + advancedPlayerName(player.xuid) + " (dead)"),
+                    alive
+                        ? function () { advancedSelectPlayer(player.xuid, {}); }
+                        : function () { return true; },
+                    "fill-parent-flow(1.0)",
+                );
+                button.style.height = "23px";
+                button.style.marginRight = "3px";
+                advancedStyleButton(button, alive && sameXuid(player.xuid, advancedSelectedXuid));
+                if (alive && !sameXuid(player.xuid, advancedSelectedXuid)) {
+                    button.style.backgroundColor = rowSurface;
+                    button.style.border = "1px solid " + rowBorder;
+                }
+                if (!alive) {
+                    button.style.backgroundColor = "#3a2020c8";
+                    button.style.border = "1px solid #704040";
+                    button.style.brightness = "0.78";
+                    const deadLabel = button.GetChild(0);
+                    if (deadLabel && deadLabel.IsValid()) {
+                        deadLabel.style.color = "#d88e8e";
+                    }
+                }
+                const voiceEnabled = advancedPlayerVoiceEnabled(player.xuid);
+                const voice = advancedCreatePanel("Button", row, "");
+                voice.SetPanelEvent("onactivate", function () {
+                    advancedTogglePlayerVoice(player.xuid);
+                    return true;
+                });
+                voice.style.width = "27px";
+                voice.style.height = "23px";
+                voice.style.verticalAlign = "center";
+                voice.style.marginRight = "0px";
+                voice.style.backgroundColor = rowSurface;
+                voice.style.border = "1px solid " + rowBorder;
+                voice.style.borderRadius = "6px";
+                const voiceIcon = advancedCreatePanel("Image", voice, "");
+                voiceIcon.hittest = false;
+                voiceIcon.hittestchildren = false;
+                voiceIcon.style.width = "16px";
+                voiceIcon.style.height = "16px";
+                voiceIcon.style.horizontalAlign = "center";
+                voiceIcon.style.verticalAlign = "center";
+                voiceIcon.style.washColor = voiceEnabled ? "#ece9e2" : "#d88e8e";
+                try {
+                    voiceIcon.SetImage(
+                        "s2r://panorama/images/icons/ui/"
+                            + (voiceEnabled ? "unmuted" : "muted") + ".vsvg",
+                    );
+                } catch (errVoiceIcon) {}
+                try {
+                    voiceIcon.SetScaling("stretch-to-fit-preserve-aspect");
+                } catch (errVoiceScaling) {}
+            });
+        }
+
+        renderTeam(3);
+        renderTeam(2);
+    }
+
+    function advancedCurrentRoundNumber() {
+        const state = controller.GetDemoControllerState();
+        return advancedRoundNumberAtTick(state ? Number(state.nTick || 0) : 0);
+    }
+
+    function advancedToggleFollowCurrentRound() {
+        advancedFollowCurrentRound = !advancedFollowCurrentRound;
+        advancedEventPage = 0;
+        advancedRenderMenu();
+        return true;
+    }
+
+    function advancedFilteredEvents() {
+        let events = advancedPlayback.eventsByXuid[advancedSelectedXuid] || [];
+        if (advancedEventFilter !== "all") {
+            events = events.filter(function (event) { return event.type === advancedEventFilter; });
+        }
+        if (advancedFollowCurrentRound) {
+            const currentRound = advancedCurrentRoundNumber();
+            events = events.filter(function (event) {
+                return advancedRoundNumberAtTick(event.tick) === currentRound;
+            });
+        }
+        return events;
+    }
+
+    function advancedRenderEvents() {
+        if (!advancedEventListPanel || !advancedEventListPanel.IsValid()) {
+            return;
+        }
+        advancedClearPanel(advancedEventListPanel);
+        advancedFollowedRoundNumber = advancedFollowCurrentRound
+            ? advancedCurrentRoundNumber()
+            : -1;
+        const events = advancedFilteredEvents();
+        const pageSize = 5;
+        const pageCount = Math.max(1, Math.ceil(events.length / pageSize));
+        advancedEventPage = Math.max(0, Math.min(advancedEventPage, pageCount - 1));
+        const visible = events.slice(advancedEventPage * pageSize, (advancedEventPage + 1) * pageSize);
+        if (!visible.length) {
+            const empty = advancedCreateLabel(
+                advancedEventListPanel,
+                advancedCopy("当前筛选没有事件", "No events for this filter"),
+                12,
+                "#8ea1aa",
+            );
+            empty.style.width = "100%";
+            empty.style.height = "24px";
+            empty.style.textAlign = "center";
+        }
+        let visibleIndex = 0;
+        while (visibleIndex < visible.length) {
+            const roundNumber = advancedRoundNumberAtTick(visible[visibleIndex].tick);
+            const groupedEvents = [];
+            while (visibleIndex < visible.length
+                    && advancedRoundNumberAtTick(visible[visibleIndex].tick) === roundNumber) {
+                groupedEvents.push(visible[visibleIndex]);
+                visibleIndex += 1;
+            }
+            const group = advancedCreatePanel("Panel", advancedEventListPanel, "");
+            const groupSurface = roundNumber % 2 === 0
+                ? ADVANCED_EVENT_GROUP_EVEN_SURFACE
+                : ADVANCED_EVENT_GROUP_ODD_SURFACE;
+            group.style.width = "100%";
+            group.style.height = (groupedEvents.length * ADVANCED_EVENT_ROW_HEIGHT) + "px";
+            group.style.flowChildren = "right";
+            group.style.marginBottom = visibleIndex < visible.length
+                ? ADVANCED_EVENT_GROUP_GAP + "px"
+                : "0px";
+            group.style.backgroundColor = groupSurface;
+            group.style.border = "1px solid " + ADVANCED_EVENT_GROUP_BORDER;
+            group.style.borderRadius = "6px";
+            group.style.overflow = "clip";
+
+            const roundCell = advancedCreatePanel("Panel", group, "");
+            roundCell.style.width = "46px";
+            roundCell.style.height = "100%";
+            roundCell.style.marginRight = "0px";
+            roundCell.style.backgroundColor = "#00000020";
+            roundCell.style.borderRight = "1px solid #505050";
+            roundCell.style.borderRadius = "0px";
+            const roundRail = advancedCreatePanel("Panel", roundCell, "");
+            roundRail.hittest = false;
+            roundRail.hittestchildren = false;
+            roundRail.style.width = "3px";
+            roundRail.style.height = "80%";
+            roundRail.style.marginLeft = "5px";
+            roundRail.style.verticalAlign = "center";
+            roundRail.style.backgroundColor = ADVANCED_EVENT_ROUND_ACCENT;
+            roundRail.style.borderRadius = "2px";
+            const roundLabel = advancedCreateLabel(
+                roundCell,
+                roundNumber > 0 ? "R" + roundNumber : "—",
+                11,
+                ADVANCED_EVENT_ROUND_ACCENT,
+            );
+            roundLabel.style.width = "100%";
+            // Keep the label itself text-height so verticalAlign centers the
+            // text box inside a multi-row merged round cell. A 100%-high label
+            // leaves Panorama drawing the glyphs against the top edge.
+            roundLabel.style.height = "20px";
+            roundLabel.style.textAlign = "center";
+            roundLabel.style.horizontalAlign = "center";
+            roundLabel.style.verticalAlign = "center";
+            roundLabel.style.fontWeight = "bold";
+
+            const eventRows = advancedCreatePanel("Panel", group, "");
+            eventRows.style.width = "fill-parent-flow(1.0)";
+            eventRows.style.height = "100%";
+            eventRows.style.flowChildren = "down";
+            groupedEvents.forEach(function (event, groupIndex) {
+                const row = advancedCreatePanel("Panel", eventRows, "");
+                row.style.width = "100%";
+                row.style.height = ADVANCED_EVENT_ROW_HEIGHT + "px";
+                row.style.flowChildren = "right";
+                row.style.marginBottom = "0px";
+                row.style.borderBottom = groupIndex < groupedEvents.length - 1
+                    ? "1px solid #414141"
+                    : "0px solid #00000000";
+                advancedCreateEventLocateButton(row, event);
+                const preroll = advancedCreateButton(
+                    row,
+                    "▶ -3s",
+                    function () {
+                        advancedSelectPlayer(advancedSelectedXuid, { tick: event.tick, playAfter: true });
+                    },
+                    "58px",
+                );
+                preroll.style.height = ADVANCED_EVENT_ROW_HEIGHT + "px";
+                preroll.style.marginRight = "0px";
+                preroll.style.backgroundColor = "#00000000";
+                preroll.style.border = "0px solid #00000000";
+                preroll.style.borderLeft = "1px solid #505050";
+                preroll.style.borderRadius = "0px";
+            });
+        }
+        if (advancedEventPagerLabel && advancedEventPagerLabel.IsValid()) {
+            const eventCountText = advancedChinese()
+                ? events.length + " 条事件"
+                : events.length + " events";
+            advancedEventPagerLabel.text = eventCountText + "  ·  "
+                + (advancedEventPage + 1) + " / " + pageCount;
+        }
+    }
+
+    function advancedRenderMenu() {
+        if (!advancedPlayback || !advancedMenu || !advancedMenu.IsValid()) {
+            return;
+        }
+        const state = controller.GetDemoControllerState();
+        advancedRefreshRoundIntervals(state);
+        if (!advancedSelectedXuid) {
+            advancedSelectedXuid = state ? currentPovXuid(state) : "";
+        }
+        if (!advancedPlayback.byXuid[advancedSelectedXuid]) {
+            advancedSelectedXuid = advancedPlayback.players[0].xuid;
+        }
+        advancedStyleButton(
+            advancedProfileButtons.pov,
+            advancedPovVisualsEnabled && !advancedHudHidden,
+        );
+        advancedStyleButton(
+            advancedProfileButtons.demo,
+            !advancedPovVisualsEnabled && !advancedHudHidden,
+        );
+        advancedStyleButton(advancedProfileButtons.hidden, advancedHudHidden);
+        Object.keys(advancedVoiceButtons).forEach(function (key) {
+            advancedStyleButton(advancedVoiceButtons[key], key === advancedVoicePolicy);
+        });
+        Object.keys(advancedFilterButtons).forEach(function (key) {
+            advancedStyleButton(advancedFilterButtons[key], key === advancedEventFilter);
+        });
+        advancedRenderRoundPicker();
+        advancedRefreshRoundSelector(state);
+        if (advancedPinButton && advancedPinButton.IsValid()) {
+            advancedSetButtonText(
+                advancedPinButton,
+                advancedCopy(
+                    advancedMenuPinned ? "标题条开" : "标题条关",
+                    advancedMenuPinned ? "TITLE ON" : "TITLE OFF",
+                ),
+            );
+            advancedStyleButton(advancedPinButton, advancedMenuPinned);
+        }
+        if (advancedFollowRoundButton && advancedFollowRoundButton.IsValid()) {
+            advancedSetButtonText(
+                advancedFollowRoundButton,
+                advancedCopy(
+                    advancedFollowCurrentRound ? "跟随回合开" : "跟随回合关",
+                    advancedFollowCurrentRound ? "ROUND ON" : "ROUND OFF",
+                ),
+            );
+            advancedStyleButton(advancedFollowRoundButton, advancedFollowCurrentRound);
+        }
+        advancedRefreshQuickOptionButtons();
+        advancedRenderPlayers();
+        advancedRenderEvents();
+        advancedApplyMenuCollapsedState();
+    }
+
+    function advancedApplyMenuCollapsedState() {
+        if (advancedMenu && advancedMenu.IsValid()) {
+            advancedMenu.style.width = advancedMenuCollapsed
+                ? (advancedChinese() ? "108px" : "148px")
+                : "500px";
+            advancedMenu.style.padding = advancedMenuCollapsed ? "3px 6px" : "12px";
+        }
+        if (advancedMenuTitleLabel && advancedMenuTitleLabel.IsValid()) {
+            advancedMenuTitleLabel.style.textAlign = advancedMenuCollapsed ? "center" : "left";
+            advancedMenuTitleLabel.style.transform = advancedMenuCollapsed
+                ? "translateY(1px)"
+                : "translateY(0px)";
+        }
+        if (advancedMenuBody && advancedMenuBody.IsValid()) {
+            advancedMenuBody.visible = !advancedMenuCollapsed;
+            advancedMenuBody.style.visibility = advancedMenuCollapsed ? "collapse" : "visible";
+            advancedMenuBody.style.height = advancedMenuCollapsed ? "0px" : "fit-children";
+        }
+        if (advancedMenuHeaderControls && advancedMenuHeaderControls.IsValid()) {
+            advancedMenuHeaderControls.visible = !advancedMenuCollapsed;
+            advancedMenuHeaderControls.style.visibility = advancedMenuCollapsed ? "collapse" : "visible";
+            advancedMenuHeaderControls.style.width = advancedMenuCollapsed ? "0px" : "fit-children";
+        }
+    }
+
+    function advancedSetMenuCollapsed(collapsed) {
+        advancedMenuCollapsed = Boolean(collapsed);
+        if (advancedMenuCollapsed && advancedRoundPickerOpen) {
+            advancedRoundPickerOpen = false;
+            advancedRenderRoundPicker();
+        }
+        advancedApplyMenuCollapsedState();
+        advancedSetMenuDismissLayerActive(!advancedMenuCollapsed);
+    }
+
+    function advancedSetMenuDismissLayerActive(active) {
+        if (!advancedMenuDismissLayer || !advancedMenuDismissLayer.IsValid()) {
+            return;
+        }
+        const enabled = Boolean(
+            active
+            && advancedMenuVisible
+            && advancedMenu
+            && advancedMenu.IsValid()
+            && advancedMenu.visible,
+        );
+        advancedMenuDismissLayer.visible = enabled;
+        advancedMenuDismissLayer.hittest = enabled;
+    }
+
+    function advancedDismissExpandedMenu() {
+        if (!advancedMenuVisible || !advancedMenu || !advancedMenu.IsValid()) {
+            advancedSetMenuDismissLayerActive(false);
+            return;
+        }
+        advancedMenuHoverGeneration += 1;
+        advancedSetMenuDismissLayerActive(false);
+        if (advancedMenuPinned) {
+            advancedSetMenuCollapsed(true);
+        } else {
+            advancedMenuVisible = false;
+            advancedMenu.visible = false;
+        }
+    }
+
+    function advancedScheduleHideMenu() {
+        const generation = ++advancedMenuHoverGeneration;
+        $.Schedule(0.18, function () {
+            if (generation !== advancedMenuHoverGeneration || !advancedMenu || !advancedMenu.IsValid()) {
+                return;
+            }
+            try {
+                if ((advancedMenu.BHasHoverStyle && advancedMenu.BHasHoverStyle())
+                        || (advancedEdgeTrigger && advancedEdgeTrigger.IsValid()
+                            && advancedEdgeTrigger.BHasHoverStyle
+                            && advancedEdgeTrigger.BHasHoverStyle())) {
+                    advancedMenuHoverGeneration += 1;
+                    return;
+                }
+            } catch (errHoverState) {}
+            advancedDismissExpandedMenu();
+        });
+    }
+
+    function advancedShowMenu() {
+        if (!advancedMenu || !advancedMenu.IsValid()) {
+            return;
+        }
+        advancedMenuHoverGeneration += 1;
+        advancedMenuVisible = true;
+        advancedMenu.visible = true;
+        advancedMenuCollapsed = false;
+        advancedRenderMenu();
+        advancedSetMenuDismissLayerActive(true);
+    }
+
+    function advancedToggleMenuPinned() {
+        // Cancel a pending initial onmouseout before changing the mode. It can
+        // otherwise collapse the menu just before the first activation and
+        // leave TITLE OFF displaying the stale title-only layout.
+        advancedMenuHoverGeneration += 1;
+        advancedMenuPinned = !advancedMenuPinned;
+        if (advancedMenuPinned) {
+            advancedShowMenu();
+        } else {
+            // TITLE OFF only disables the persistent title bar. Keep the
+            // expanded menu open under the pointer; the dismiss layer hides it
+            // when the pointer actually leaves, including after later reveals.
+            advancedMenuVisible = true;
+            advancedMenu.visible = true;
+            advancedSetMenuCollapsed(false);
+            advancedRenderMenu();
+            advancedSetMenuDismissLayerActive(true);
+        }
+        return true;
+    }
+
+    function advancedCloseMenu() {
+        advancedMenuHoverGeneration += 1;
+        advancedMenuPinned = false;
+        advancedMenuVisible = false;
+        advancedEdgeRevealArmed = false;
+        advancedSetMenuDismissLayerActive(false);
+        if (advancedEdgeTrigger && advancedEdgeTrigger.IsValid()) {
+            advancedEdgeTrigger.hittest = false;
+        }
+        if (advancedMenu && advancedMenu.IsValid()) {
+            advancedMenu.visible = false;
+        }
+        // Briefly disable the edge trigger so the close click cannot
+        // immediately reopen the menu under the same pointer position.
+        $.Schedule(0.35, function () {
+            advancedEdgeRevealArmed = true;
+            if (advancedEdgeTrigger && advancedEdgeTrigger.IsValid()) {
+                advancedEdgeTrigger.hittest = true;
+            }
+        });
+        return true;
+    }
+
+    function advancedMenuRootOwner(root) {
+        if (!advancedMenuOwnershipSupported || !root || !root.IsValid()) {
+            return advancedMenuInstanceToken;
+        }
+        try {
+            return String(root.GetAttributeString(ADVANCED_MENU_OWNER_ATTRIBUTE, "") || "");
+        } catch (errAdvancedMenuOwnerRead) {
+            advancedMenuOwnershipSupported = false;
+            return advancedMenuInstanceToken;
+        }
+    }
+
+    function advancedMenuOwnsRoot(root) {
+        return advancedMenuRootOwner(root) === advancedMenuInstanceToken;
+    }
+
+    function advancedRemoveStaleMenuPanels(root) {
+        if (!root || !root.IsValid() || !root.Children) {
+            return false;
+        }
+        let removed = false;
+        const children = root.Children();
+        for (let i = 0; i < children.length; i += 1) {
+            const child = children[i];
+            if (!child || !child.IsValid()
+                    || ADVANCED_MENU_PANEL_IDS.indexOf(String(child.id || "")) < 0) {
+                continue;
+            }
+            removed = true;
+            child.visible = false;
+            child.hittest = false;
+            child.hittestchildren = false;
+            try {
+                child.DeleteAsync(0.0);
+            } catch (errDeleteStaleAdvancedMenu) {}
+        }
+        return removed;
+    }
+
+    function advancedClaimMenuRoot(root) {
+        if (!root || !root.IsValid()) {
+            return false;
+        }
+        if (advancedMenuClaimedRoot && advancedMenuClaimedRoot !== root) {
+            advancedMenuClaimedRoot = null;
+            advancedMenuRootClaimed = false;
+            advancedMenu = null;
+            advancedEdgeTrigger = null;
+            advancedMenuDismissLayer = null;
+        }
+        if (advancedMenuRootClaimed) {
+            return advancedMenuOwnsRoot(root);
+        }
+        try {
+            root.SetAttributeString(ADVANCED_MENU_OWNER_ATTRIBUTE, advancedMenuInstanceToken);
+        } catch (errAdvancedMenuOwnerWrite) {
+            advancedMenuOwnershipSupported = false;
+        }
+        advancedMenuClaimedRoot = root;
+        advancedMenuRootClaimed = true;
+        // A reconstructed huddemocontroller can leave its old JS timers and
+        // same-ID panels alive. Hide every direct stale instance before this
+        // owner builds a fresh menu; the previous owner's next tick will see
+        // the changed root token and terminate without scheduling again.
+        return !advancedRemoveStaleMenuPanels(root);
+    }
+
+    function advancedEnsureMenu() {
+        if (!advancedPlayback) {
+            return null;
+        }
+        const root = hudRootPanel();
+        if (!root || !root.IsValid()) {
+            return null;
+        }
+        if (!advancedClaimMenuRoot(root)) {
+            return null;
+        }
+        root.hittestchildren = true;
+        if (!advancedMenuDismissLayer || !advancedMenuDismissLayer.IsValid()) {
+            advancedMenuDismissLayer = advancedCreatePanel(
+                "Panel",
+                root,
+                "CS2InsightAdvancedDismissLayer",
+            );
+            advancedMenuDismissLayer.style.width = "100%";
+            advancedMenuDismissLayer.style.height = "100%";
+            advancedMenuDismissLayer.style.horizontalAlign = "center";
+            advancedMenuDismissLayer.style.verticalAlign = "center";
+            advancedMenuDismissLayer.style.backgroundColor = "#00000000";
+            advancedMenuDismissLayer.style.zIndex = "31999";
+            advancedMenuDismissLayer.hittestchildren = false;
+            advancedMenuDismissLayer.visible = false;
+            advancedMenuDismissLayer.hittest = false;
+            advancedMenuDismissLayer.SetPanelEvent("onmouseover", function () {
+                advancedDismissExpandedMenu();
+                return true;
+            });
+        }
+        if (!advancedEdgeTrigger || !advancedEdgeTrigger.IsValid()) {
+            advancedEdgeTrigger = advancedCreatePanel("Panel", root, "CS2InsightAdvancedEdge");
+            advancedEdgeTrigger.style.width = "18px";
+            advancedEdgeTrigger.style.height = "100%";
+            advancedEdgeTrigger.style.horizontalAlign = "right";
+            advancedEdgeTrigger.style.verticalAlign = "center";
+            advancedEdgeTrigger.style.backgroundColor = "#00000000";
+            advancedEdgeTrigger.style.border = "0px solid #00000000";
+            advancedEdgeTrigger.style.boxShadow = "none";
+            advancedEdgeTrigger.style.zIndex = "32000";
+            advancedEdgeTrigger.SetPanelEvent("onmouseover", function () {
+                if (advancedEdgeRevealArmed) {
+                    advancedShowMenu();
+                }
+            });
+            advancedEdgeTrigger.SetPanelEvent("onmouseout", function () {
+                advancedEdgeRevealArmed = true;
+            });
+        }
+        if (advancedMenu && advancedMenu.IsValid()) {
+            return advancedMenu;
+        }
+        advancedMenu = advancedCreatePanel("Panel", root, "CS2InsightAdvancedMenu");
+        advancedMenu.style.width = "500px";
+        advancedMenu.style.height = "fit-children";
+        advancedMenu.style.maxHeight = "92%";
+        advancedMenu.style.horizontalAlign = "right";
+        advancedMenu.style.verticalAlign = "center";
+        advancedMenu.style.marginRight = "6px";
+        advancedMenu.style.marginLeft = "0px";
+        advancedMenu.style.marginTop = "0px";
+        advancedMenu.style.transform = "translate3d(0px, 0px, 0px)";
+        advancedMenu.style.padding = "12px";
+        advancedMenu.style.flowChildren = "down";
+        advancedMenu.style.backgroundColor = "#191918f7";
+        advancedMenu.style.border = "1px solid #494844";
+        advancedMenu.style.borderRadius = "10px";
+        advancedMenu.style.boxShadow = "0px 8px 32px 4.0 #000000bb";
+        advancedMenu.style.zIndex = "32001";
+        advancedMenu.style.overflow = "clip";
+        advancedMenuVisible = advancedMenuPinned;
+        advancedMenu.visible = advancedMenuPinned;
+        advancedMenu.SetPanelEvent("onmouseover", function () {
+            advancedMenuHoverGeneration += 1;
+            if (advancedMenuCollapsed) {
+                advancedSetMenuCollapsed(false);
+            } else {
+                advancedSetMenuDismissLayerActive(true);
+            }
+        });
+        advancedMenu.SetPanelEvent("onmouseout", advancedScheduleHideMenu);
+
+        const titleRow = advancedCreatePanel("Panel", advancedMenu, "");
+        titleRow.style.width = "100%";
+        titleRow.style.height = "32px";
+        titleRow.style.marginBottom = "2px";
+        titleRow.style.flowChildren = "right";
+        advancedMenuTitleLabel = advancedCreateLabel(
+            titleRow,
+            advancedCopy("INSIGHT AGENT\n高级播放", "INSIGHT AGENT\nADVANCED PLAYBACK"),
+            13,
+            "#e07f0a",
+        );
+        advancedMenuTitleLabel.style.width = "fill-parent-flow(1.0)";
+        advancedMenuTitleLabel.style.height = "30px";
+        advancedMenuTitleLabel.style.horizontalAlign = "left";
+        advancedMenuTitleLabel.style.verticalAlign = "center";
+        advancedMenuTitleLabel.style.whiteSpace = "normal";
+        advancedMenuTitleLabel.style.lineHeight = "14px";
+        advancedMenuTitleLabel.style.textOverflow = "clip";
+        advancedMenuHeaderControls = advancedCreatePanel("Panel", titleRow, "");
+        advancedMenuHeaderControls.style.width = "fit-children";
+        advancedMenuHeaderControls.style.height = "25px";
+        advancedMenuHeaderControls.style.flowChildren = "right";
+        advancedMenuHeaderControls.style.verticalAlign = "center";
+        const revealHelp = advancedCreateLabel(
+            advancedMenuHeaderControls,
+            advancedCopy("鼠标移至屏幕右侧展开", "Move cursor to right edge"),
+            9,
+            "#8f8d86",
+        );
+        revealHelp.style.width = advancedChinese() ? "112px" : "136px";
+        revealHelp.style.height = "16px";
+        revealHelp.style.marginRight = "6px";
+        revealHelp.style.textAlign = "right";
+        revealHelp.style.verticalAlign = "center";
+        revealHelp.style.textOverflow = "shrink";
+        advancedPinButton = advancedCreateButton(
+            advancedMenuHeaderControls,
+            "",
+            advancedToggleMenuPinned,
+            "72px",
+        );
+        advancedPinButton.style.height = "25px";
+        advancedPinButton.style.paddingLeft = "4px";
+        advancedPinButton.style.paddingRight = "4px";
+        advancedPinButton.style.marginRight = "4px";
+        const close = advancedCreateButton(
+            advancedMenuHeaderControls,
+            "",
+            advancedCloseMenu,
+            "26px",
+        );
+        close.style.height = "25px";
+        close.style.paddingLeft = "0px";
+        close.style.paddingRight = "0px";
+        close.style.marginRight = "0px";
+        close.style.zIndex = "4";
+        close.style.flowChildren = "none";
+        const closeLabel = close.GetChild ? close.GetChild(0) : null;
+        if (closeLabel && closeLabel.IsValid()) {
+            closeLabel.visible = false;
+        }
+        const closeIcon = advancedCreatePanel("Panel", close, "");
+        closeIcon.hittest = false;
+        closeIcon.hittestchildren = false;
+        closeIcon.style.width = "12px";
+        closeIcon.style.height = "12px";
+        closeIcon.style.horizontalAlign = "center";
+        closeIcon.style.verticalAlign = "center";
+        closeIcon.style.flowChildren = "none";
+        ["45deg", "-45deg"].forEach(function (rotation) {
+            const stroke = advancedCreatePanel("Panel", closeIcon, "");
+            stroke.hittest = false;
+            stroke.style.width = "12px";
+            stroke.style.height = "2px";
+            stroke.style.horizontalAlign = "center";
+            stroke.style.verticalAlign = "center";
+            stroke.style.backgroundColor = "#eeeeec";
+            stroke.style.borderRadius = "1px";
+            stroke.style.transform = "rotateZ(" + rotation + ")";
+        });
+
+        advancedMenuBody = advancedCreatePanel("Panel", advancedMenu, "CS2InsightAdvancedBody");
+        advancedMenuBody.style.width = "100%";
+        advancedMenuBody.style.height = "fit-children";
+        advancedMenuBody.style.flowChildren = "down";
+
+        const viewRow = advancedCreatePanel("Panel", advancedMenuBody, "");
+        viewRow.style.width = "100%";
+        viewRow.style.height = "30px";
+        viewRow.style.flowChildren = "right";
+        advancedCreateSectionLabel(viewRow, "HUD");
+        const pov = advancedCreateButton(viewRow, "POV HUD", function () { advancedApplyPlaybackProfile("pov"); }, "112px");
+        const demo = advancedCreateButton(viewRow, "DEMO HUD", function () { advancedApplyPlaybackProfile("demo"); }, "112px");
+        const hidden = advancedCreateButton(
+            viewRow,
+            advancedCopy("隐藏 HUD", "HIDE HUD"),
+            function () { advancedApplyPlaybackProfile("hidden"); },
+            advancedChinese() ? "88px" : "96px",
+        );
+        advancedProfileButtons.pov = pov;
+        advancedProfileButtons.demo = demo;
+        advancedProfileButtons.hidden = hidden;
+        pov.style.marginRight = "5px";
+        demo.style.marginRight = "5px";
+        hidden.style.marginRight = "0px";
+        advancedStyleButton(pov, advancedPovVisualsEnabled && !advancedHudHidden);
+        advancedStyleButton(demo, !advancedPovVisualsEnabled && !advancedHudHidden);
+        advancedStyleButton(hidden, advancedHudHidden);
+        [pov, demo, hidden].forEach(function (button) { button.style.height = "25px"; });
+
+        const voiceRow = advancedCreatePanel("Panel", advancedMenuBody, "");
+        voiceRow.style.width = "100%";
+        voiceRow.style.height = "30px";
+        voiceRow.style.flowChildren = "right";
+        advancedCreateSectionLabel(voiceRow, advancedCopy("语音", "Voice"));
+        [
+            ["all", advancedCopy("全部", "All")],
+            ["team", advancedCopy("己方", "Team")],
+            ["enemy", advancedCopy("对方", "Enemy")],
+            ["mute", advancedCopy("静音", "Mute")],
+        ].forEach(function (entry) {
+            const button = advancedCreateButton(voiceRow, entry[1], function () { advancedSetVoicePolicy(entry[0]); }, "66px");
+            button.style.height = "25px";
+            advancedVoiceButtons[entry[0]] = button;
+            advancedStyleButton(button, advancedVoicePolicy === entry[0]);
+        });
+
+        const roundRow = advancedCreatePanel("Panel", advancedMenuBody, "");
+        roundRow.style.width = "100%";
+        roundRow.style.height = "30px";
+        roundRow.style.marginTop = "2px";
+        roundRow.style.flowChildren = "right";
+        advancedCreateSectionLabel(roundRow, advancedCopy("回合", "Round"));
+        advancedPreviousRoundButton = advancedCreateButton(
+            roundRow,
+            advancedCopy("上一局", "Prev"),
+            function () { return advancedSeekRelativeRound(-1); },
+            "58px",
+        );
+        advancedPreviousRoundButton.style.height = "25px";
+        advancedPreviousRoundButton.style.paddingLeft = "6px";
+        advancedPreviousRoundButton.style.paddingRight = "6px";
+        advancedPreviousRoundButton.style.marginRight = "3px";
+        advancedPreviousRoundButton.style.borderRadius = "6px";
+        advancedRoundButton = advancedCreateButton(roundRow, "", advancedToggleRoundPicker, "96px");
+        advancedRoundButton.style.height = "25px";
+        advancedRoundButton.style.marginRight = "3px";
+        advancedNextRoundButton = advancedCreateButton(
+            roundRow,
+            advancedCopy("下一局", "Next"),
+            function () { return advancedSeekRelativeRound(1); },
+            "58px",
+        );
+        advancedNextRoundButton.style.height = "25px";
+        advancedNextRoundButton.style.paddingLeft = "6px";
+        advancedNextRoundButton.style.paddingRight = "6px";
+        advancedNextRoundButton.style.marginRight = "3px";
+        advancedNextRoundButton.style.borderRadius = "6px";
+        advancedRoundHintLabel = advancedCreateLabel(roundRow, "", 11, "#aaa8a2");
+        advancedRoundHintLabel.style.width = "72px";
+        advancedRoundHintLabel.style.height = "16px";
+        advancedRoundHintLabel.style.marginLeft = "6px";
+        advancedRoundHintLabel.style.textAlign = "left";
+        advancedRoundHintLabel.style.verticalAlign = "center";
+
+        advancedRoundPickerPanel = advancedCreatePanel(
+            "Panel",
+            advancedMenuBody,
+            "CS2InsightAdvancedRoundPicker",
+        );
+        advancedRoundPickerPanel.style.width = "100%";
+        advancedRoundPickerPanel.style.height = "0px";
+        advancedRoundPickerPanel.style.paddingLeft = "40px";
+        advancedRoundPickerPanel.style.paddingTop = "4px";
+        advancedRoundPickerPanel.style.paddingBottom = "4px";
+        advancedRoundPickerPanel.style.flowChildren = "down";
+        advancedRoundPickerPanel.style.overflow = "clip";
+        advancedRoundPickerPanel.style.backgroundColor = "#111110dd";
+        advancedRoundPickerPanel.style.border = "1px solid #3b3a37";
+        advancedRoundPickerPanel.style.borderRadius = "6px";
+        advancedRoundPickerPanel.style.visibility = "collapse";
+        advancedRoundPickerPanel.visible = false;
+
+        const playerHelpRow = advancedCreatePanel("Panel", advancedMenuBody, "");
+        playerHelpRow.style.width = "100%";
+        playerHelpRow.style.height = "20px";
+        playerHelpRow.style.marginTop = "2px";
+        playerHelpRow.style.paddingLeft = "40px";
+        playerHelpRow.style.flowChildren = "right";
+        const playerHelp = advancedCreateLabel(
+            playerHelpRow,
+            advancedCopy(
+                "点名称切换视角 · 点喇叭开关语音",
+                "Name: switch POV · Speaker: voice",
+            ),
+            11,
+            "#aaa8a2",
+        );
+        playerHelp.style.width = "fill-parent-flow(1.0)";
+        playerHelp.style.height = "16px";
+        playerHelp.style.textAlign = "left";
+        playerHelp.style.verticalAlign = "center";
+
+        const playersRow = advancedCreatePanel("Panel", advancedMenuBody, "");
+        playersRow.style.width = "100%";
+        playersRow.style.height = "155px";
+        playersRow.style.marginTop = "2px";
+        playersRow.style.flowChildren = "right";
+        const playersTitle = advancedCreateSectionLabel(
+            playersRow,
+            advancedCopy("阵营", "Teams"),
+        );
+        playersTitle.style.verticalAlign = "top";
+        playersTitle.style.marginTop = "3px";
+        advancedPlayerListPanel = advancedCreatePanel(
+            "Panel",
+            playersRow,
+            "CS2InsightAdvancedPlayers",
+        );
+        advancedPlayerListPanel.style.width = "fill-parent-flow(1.0)";
+        advancedPlayerListPanel.style.height = "155px";
+        advancedPlayerListPanel.style.flowChildren = "right";
+        advancedPlayerListPanel.style.overflow = "clip";
+
+        const filterRow = advancedCreatePanel("Panel", advancedMenuBody, "");
+        filterRow.style.width = "100%";
+        filterRow.style.height = "25px";
+        filterRow.style.marginTop = "7px";
+        filterRow.style.flowChildren = "right";
+        advancedCreateSectionLabel(filterRow, advancedCopy("事件", "Events"));
+        advancedFollowRoundButton = advancedCreateButton(
+            filterRow,
+            "",
+            advancedToggleFollowCurrentRound,
+            advancedChinese() ? "76px" : "80px",
+        );
+        advancedFollowRoundButton.style.height = "25px";
+        advancedFollowRoundButton.style.paddingLeft = "3px";
+        advancedFollowRoundButton.style.paddingRight = "3px";
+        advancedStyleButton(advancedFollowRoundButton, advancedFollowCurrentRound);
+        [
+            ["all", advancedCopy("全部", "All")],
+            ["kill", advancedCopy("击杀", "Kills")],
+            ["death", advancedCopy("死亡", "Deaths")],
+            ["utility", advancedCopy("道具", "Utility")],
+        ].forEach(function (entry) {
+            const button = advancedCreateFilterButton(filterRow, entry[0], entry[1], function () {
+                advancedEventFilter = entry[0];
+                advancedEventPage = 0;
+                advancedRenderMenu();
+            });
+            advancedFilterButtons[entry[0]] = button;
+            advancedStyleButton(button, advancedEventFilter === entry[0]);
+        });
+        const pagerPrevious = advancedCreateButton(filterRow, "‹", function () {
+            advancedEventPage = Math.max(0, advancedEventPage - 1);
+            advancedRenderEvents();
+        }, "28px");
+        pagerPrevious.style.height = "25px";
+        pagerPrevious.style.marginRight = "3px";
+        advancedEventPagerLabel = advancedCreateLabel(filterRow, "", 10, "#aaa8a2");
+        advancedEventPagerLabel.style.width = "fill-parent-flow(1.0)";
+        advancedEventPagerLabel.style.height = "25px";
+        advancedEventPagerLabel.style.textAlign = "center";
+        advancedEventPagerLabel.style.textOverflow = "shrink";
+        const pagerNext = advancedCreateButton(filterRow, "›", function () {
+            advancedEventPage += 1;
+            advancedRenderEvents();
+        }, "28px");
+        pagerNext.style.height = "25px";
+        pagerNext.style.marginRight = "0px";
+        advancedEventListPanel = advancedCreatePanel("Panel", advancedMenuBody, "CS2InsightAdvancedEvents");
+        advancedEventListPanel.style.width = "100%";
+        advancedEventListPanel.style.height = "145px";
+        advancedEventListPanel.style.marginTop = "4px";
+        advancedEventListPanel.style.paddingTop = "4px";
+        advancedEventListPanel.style.paddingBottom = "4px";
+        advancedEventListPanel.style.paddingLeft = "5px";
+        advancedEventListPanel.style.paddingRight = "5px";
+        advancedEventListPanel.style.flowChildren = "down";
+        advancedEventListPanel.style.overflow = "clip";
+        advancedEventListPanel.style.backgroundColor = "#11111088";
+        advancedEventListPanel.style.border = "1px solid #3b3a37";
+        advancedEventListPanel.style.borderRadius = "6px";
+
+        advancedApplyQuickOptions();
+        advancedRenderMenu();
+        advancedSetMenuDismissLayerActive(!advancedMenuCollapsed);
+        return advancedMenu;
+    }
+
+    function advancedMenuTick() {
+        if (!advancedPlayback) {
+            return;
+        }
+        const root = hudRootPanel();
+        if (advancedMenuRootClaimed && advancedMenuClaimedRoot === root
+                && !advancedMenuOwnsRoot(root)) {
+            return;
+        }
+        if (!advancedEnsureMenu()) {
+            $.Schedule(0.1, advancedMenuTick);
+            return;
+        }
+        if (advancedMenuPinned && advancedMenu && advancedMenu.IsValid() && !advancedMenuVisible) {
+            advancedShowMenu();
+        }
+        const state = controller.GetDemoControllerState();
+        if (advancedMenuVisible && state) {
+            advancedRefreshRoundSelector(state);
+            const tick = Number(state.nTick || 0);
+            const currentRound = advancedRoundNumberAtTick(tick);
+            if (advancedFollowCurrentRound && currentRound !== advancedFollowedRoundNumber) {
+                advancedEventPage = 0;
+                advancedRenderEvents();
+            }
+            const teamSignature = advancedPlayback.players.map(function (player) {
+                const liveTeam = resolvePovTeam(player.xuid, tick) || player.team;
+                const alive = advancedPlayerAliveAtTick(player.xuid, tick);
+                return player.xuid + ":" + liveTeam + ":" + (alive ? "1" : "0");
+            }).join("|");
+            if (teamSignature !== advancedPlayerTeamSignature) {
+                advancedRenderPlayers();
+            }
+            const current = currentPovXuid(state);
+            if (current && current !== advancedSelectedXuid && !advancedSpecOperation) {
+                advancedSelectedXuid = current;
+                advancedEventPage = 0;
+                advancedRenderMenu();
+            }
+        }
+        $.Schedule(0.1, advancedMenuTick);
+    }
+
     $.Schedule(0, ensureDemoVoicesUnmuted);
     $.Schedule(0, update);
     $.Schedule(0, updateInputHud);
@@ -4388,5 +6858,12 @@
     }
     if (radioTrack || killFeedbackTrack) {
         $.Schedule(0, updateRadioHud);
+    }
+    $.Schedule(0, guardSpectatorHudProfile);
+    if (sessionConsoleCommands.length) {
+        $.Schedule(0, applySessionConsoleCommandsAfterDemoLoad);
+    }
+    if (advancedPlayback) {
+        $.Schedule(0, advancedMenuTick);
     }
 })();

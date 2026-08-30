@@ -78,6 +78,38 @@ const bundledDataFiles = new Set([
 ]);
 copyFiltered("data", (rel) => bundledDataFiles.has(rel.toLowerCase()));
 
+/** Open-source DEM truth-source sidecar used by every keyboard overlay. */
+function buildAndStageInputExtractor() {
+  const manifest = join(repoRoot, "tools", "demo-cosmetic-rewriter", "Cargo.toml");
+  const result = spawnSync(
+    "cargo",
+    ["build", "--release", "--locked", "--manifest-path", manifest, "--bin", "demo-input-hud-track"],
+    { cwd: repoRoot, env: process.env, stdio: "inherit", shell: false },
+  );
+  if (result.status !== 0) {
+    console.error("[desktop] failed to build authoritative DEM input extractor");
+    process.exit(result.status ?? 1);
+  }
+  const source = join(
+    repoRoot,
+    "tools",
+    "demo-cosmetic-rewriter",
+    "target",
+    "release",
+    process.platform === "win32" ? "demo-input-hud-track.exe" : "demo-input-hud-track",
+  );
+  if (!existsSync(source)) throw new Error(`Input extractor build produced no binary: ${source}`);
+  const toolsDir = join(destination, "tools");
+  mkdirSync(toolsDir, { recursive: true });
+  cpSync(
+    source,
+    join(toolsDir, process.platform === "win32" ? "demo-input-hud-track.exe" : "demo-input-hud-track"),
+  );
+  console.log(`[desktop] staged authoritative DEM input extractor from ${source}`);
+}
+
+buildAndStageInputExtractor();
+
 /** Optional proprietary sidecar — never fail OSS CI when absent. */
 function maybeStageSkinCore() {
   const toolsDir = join(destination, "tools");

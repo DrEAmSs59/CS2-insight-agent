@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Children, useCallback, useEffect, useRef, useState } from "react";
 import { ChevronDown, ChevronRight, Download, Loader2, Save, Upload, X } from "lucide-react";
 import { OptionRow, RECORD_WARMUP_DEFAULT_OPTIONS } from "./RecordWarmupModal";
 import ExperimentalPovSection from "./ExperimentalPovSection";
@@ -14,6 +14,9 @@ import {
   validateWarmupResolution,
 } from "../utils/warmupDefaults";
 import { useT } from "../i18n/useT.js";
+import { normalizeRecordingSkyboxId } from "../utils/recordingSkybox.js";
+import { normalizeRecordingMapMaterialId } from "../utils/recordingMapMaterial.js";
+import { normalizePovVoiceMode } from "../utils/povVoiceMode.js";
 import {
   buildRecordingPresetFile,
   parseRecordingPresetFile,
@@ -57,6 +60,56 @@ function WorkflowSection({ title, subtitle, badge, defaultOpen = true, accentCla
         <div className="border-t border-cs2-border px-4 py-5 sm:px-5">{children}</div>
       ) : null}
     </section>
+  );
+}
+
+function RecordingPresetColumns({ children }) {
+  const [twoColumns, setTwoColumns] = useState(
+    () => typeof window !== "undefined" && window.matchMedia("(min-width: 1280px)").matches,
+  );
+
+  useEffect(() => {
+    const media = window.matchMedia("(min-width: 1280px)");
+    const sync = () => setTwoColumns(media.matches);
+    sync();
+    media.addEventListener("change", sync);
+    return () => media.removeEventListener("change", sync);
+  }, []);
+
+  const items = Children.toArray(children);
+  if (!twoColumns) {
+    return (
+      <div
+        className="flex min-w-0 flex-col gap-3 pb-2 sm:gap-4 sm:pb-4"
+        data-testid="recording-preset-grid"
+      >
+        {items}
+      </div>
+    );
+  }
+
+  const leftColumnIndexes = new Set([0, 2, 3, 5]);
+  const leftItems = items.filter((_, index) => leftColumnIndexes.has(index));
+  const rightItems = items.filter((_, index) => !leftColumnIndexes.has(index));
+
+  return (
+    <div
+      className="grid min-w-0 grid-cols-2 items-start gap-4 pb-4"
+      data-testid="recording-preset-grid"
+    >
+      <div
+        className="flex min-w-0 flex-col gap-4"
+        data-testid="recording-preset-column-left"
+      >
+        {leftItems}
+      </div>
+      <div
+        className="flex min-w-0 flex-col gap-4"
+        data-testid="recording-preset-column-right"
+      >
+        {rightItems}
+      </div>
+    </div>
   );
 }
 
@@ -128,6 +181,8 @@ export default function CommonParamsModal({
   savedWarmupDefaults,
   onSaveAllCommonParams,
   experimentalPovEnabled = false,
+  recordingSkybox = "default",
+  recordingMapMaterial = "default",
   cs2ExtraLaunchArgs = "",
   recordInjectConsoleLines = "",
   obsTransitionEnabled: initObsTransitionEnabled = false,
@@ -181,6 +236,10 @@ export default function CommonParamsModal({
   const [killFxEnabled, setKillFxEnabled] = useState(() => !!initKillFxEnabled);
   const [killFxTickOffset, setKillFxTickOffset] = useState(() => Number(initKillFxTickOffset) || 0);
   const [povEnabled, setPovEnabled] = useState(() => !!experimentalPovEnabled);
+  const [skyboxId, setSkyboxId] = useState(() => normalizeRecordingSkyboxId(recordingSkybox));
+  const [mapMaterialId, setMapMaterialId] = useState(
+    () => normalizeRecordingMapMaterialId(recordingMapMaterial),
+  );
   const [localCs2ExtraLaunchArgs, setLocalCs2ExtraLaunchArgs] = useState(cs2ExtraLaunchArgs);
   const [localRecordInjectLines, setLocalRecordInjectLines] = useState(recordInjectConsoleLines);
   const [saveState, setSaveState] = useState("idle");
@@ -212,6 +271,11 @@ export default function CommonParamsModal({
         }
       }
     }
+    base.pov_voice_mode = normalizePovVoiceMode(
+      o?.pov_voice_mode,
+      o?.pov_voice_disabled === true,
+    );
+    base.pov_radar_mode = 0;
     setWarmupOpts(base);
     setObsTransEnabled(!!initObsTransitionEnabled);
     setObsTransName(initObsTransitionName);
@@ -222,6 +286,8 @@ export default function CommonParamsModal({
     setKillFxEnabled(!!initKillFxEnabled);
     setKillFxTickOffset(Number(initKillFxTickOffset) || 0);
     setPovEnabled(!!experimentalPovEnabled);
+    setSkyboxId(normalizeRecordingSkyboxId(recordingSkybox));
+    setMapMaterialId(normalizeRecordingMapMaterialId(recordingMapMaterial));
     setLocalCs2ExtraLaunchArgs(cs2ExtraLaunchArgs);
     setLocalRecordInjectLines(recordInjectConsoleLines);
     setWarmupResolutionError("");
@@ -237,6 +303,8 @@ export default function CommonParamsModal({
     initObsTransitionName,
     initObsTransitionDurationMs,
     experimentalPovEnabled,
+    recordingSkybox,
+    recordingMapMaterial,
     initKbOverlayEnabled,
     initKbOverlayTickOffset,
     initKbOverlayPosition,
@@ -276,6 +344,8 @@ export default function CommonParamsModal({
       kill_fx_enabled: killFxEnabled,
       kill_fx_tick_offset: Number(killFxTickOffset) || 0,
       experimental_pov_enabled: povEnabled,
+      recording_skybox: skyboxId,
+      recording_map_material: mapMaterialId,
     });
     setSaveState(result?.ok ? "saved" : "error");
     if (!result?.ok && result?.error) setSaveError(String(result.error));
@@ -299,6 +369,8 @@ export default function CommonParamsModal({
     killFxEnabled,
     killFxTickOffset,
     povEnabled,
+    skyboxId,
+    mapMaterialId,
   ]);
 
   const saveDisabled = !configReady || saveState === "saving" || batchRecording;
@@ -317,6 +389,8 @@ export default function CommonParamsModal({
     kill_fx_enabled: killFxEnabled,
     kill_fx_tick_offset: Number(killFxTickOffset) || 0,
     experimental_pov_enabled: povEnabled,
+    recording_skybox: skyboxId,
+    recording_map_material: mapMaterialId,
   }), [
     presetPacing,
     warmupOpts,
@@ -331,6 +405,8 @@ export default function CommonParamsModal({
     killFxEnabled,
     killFxTickOffset,
     povEnabled,
+    skyboxId,
+    mapMaterialId,
   ]);
 
   const handleExportPreset = useCallback(() => {
@@ -386,6 +462,8 @@ export default function CommonParamsModal({
       setKillFxEnabled(parsed.kill_fx_enabled);
       setKillFxTickOffset(parsed.kill_fx_tick_offset);
       setPovEnabled(parsed.experimental_pov_enabled);
+      setSkyboxId(parsed.recording_skybox);
+      setMapMaterialId(parsed.recording_map_material);
       setWarmupResolutionError("");
       setSaveError("");
       setSaveState("idle");
@@ -492,7 +570,10 @@ export default function CommonParamsModal({
           className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-y-contain px-3 py-3 sm:px-5 sm:py-4"
           style={{ scrollbarGutter: "stable both-edges" }}
         >
-          <div className="@container/params mx-auto w-full max-w-4xl min-w-0">
+          <div
+            className="@container/params w-full min-w-0"
+            data-testid="recording-preset-content"
+          >
             <div className="mb-3 flex flex-col gap-3 rounded-xl border border-cs2-border bg-cs2-bg-elevated p-3 sm:mb-4 sm:flex-row sm:items-center sm:justify-between sm:p-4">
               <div className="min-w-0">
                 <p className="text-sm font-bold text-cs2-text-primary">{t("record.presetShareTitle")}</p>
@@ -531,8 +612,7 @@ export default function CommonParamsModal({
                 </button>
               </div>
             </div>
-            <div className="grid min-w-0 grid-cols-1 gap-3 pb-2 sm:gap-4 sm:pb-4">
-              <div className="flex min-w-0 flex-col gap-3 sm:gap-4">
+            <RecordingPresetColumns>
           {/* A1 时间与多段节奏 */}
           <WorkflowSection
             title={t("record.commonSecPacing")}
@@ -765,14 +845,16 @@ export default function CommonParamsModal({
                 experimentalPovEnabled={povEnabled}
                 onExperimentalPovChange={setPovEnabled}
                 checkboxDisabled={batchRecording}
-                povRadarMode={warmupOpts.pov_radar_mode}
-                onPovRadarModeChange={(v) => patchWarmup({ pov_radar_mode: v })}
                 povTeamcounterNumeric={warmupOpts.pov_teamcounter_numeric}
                 onPovTeamcounterNumericChange={(v) => patchWarmup({ pov_teamcounter_numeric: v })}
-                povVoiceDisabled={warmupOpts.pov_voice_disabled}
-                onPovVoiceDisabledChange={(v) => patchWarmup({ pov_voice_disabled: v })}
+                povVoiceMode={warmupOpts.pov_voice_mode}
+                onPovVoiceModeChange={(v) => patchWarmup({ pov_voice_mode: v })}
+                recordingSkybox={skyboxId}
+                onRecordingSkyboxChange={setSkyboxId}
+                recordingMapMaterial={mapMaterialId}
+                onRecordingMapMaterialChange={setMapMaterialId}
                 omitEyebrow
-                className="rounded-lg border border-cs2-border bg-cs2-bg-card p-3"
+                embedded
               />
             </div>
 
@@ -894,8 +976,6 @@ export default function CommonParamsModal({
             </div>
           </WorkflowSection>
 
-            </div>
-            <div className="flex min-w-0 flex-col gap-3 sm:gap-4">
               <WorkflowSection
                 title={t("record.commonSecObs")}
                 subtitle={t("record.commonSecObsSubtitle")}
@@ -1249,8 +1329,7 @@ export default function CommonParamsModal({
             </div>
           </WorkflowSection>
 
-            </div>
-          </div>
+            </RecordingPresetColumns>
         </div>
         </div>
 

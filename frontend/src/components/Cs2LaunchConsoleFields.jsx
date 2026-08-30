@@ -149,6 +149,7 @@ export default function Cs2LaunchConsoleFields({
   onCs2ExtraLaunchArgsChange,
   recordInjectConsoleLines = "",
   onRecordInjectConsoleLinesChange,
+  omitConsoleHint = false,
 }) {
   const t = useT();
   const [launchArgDraft, setLaunchArgDraft] = useState("");
@@ -302,9 +303,11 @@ export default function Cs2LaunchConsoleFields({
           addLabel={t("record.consoleAddBtn")}
           disabled={consoleChips.length >= 60}
         />
-        <p className="text-[11px] leading-relaxed text-cs2-text-muted">
-          {t("record.consoleHint", { n: injectExtraCount })}
-        </p>
+        {!omitConsoleHint ? (
+          <p className="text-[11px] leading-relaxed text-cs2-text-muted">
+            {t("record.consoleHint", { n: injectExtraCount })}
+          </p>
+        ) : null}
       </div>
     </div>
   );

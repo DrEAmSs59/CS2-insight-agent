@@ -51,7 +51,13 @@ def test_launch_forwards_pov_session_options(monkeypatch, tmp_path: Path):
 
     monkeypatch.setattr(playback_api.demo_playback_service, "launch", fake_launch)
     body = playback_api.DemoPlaybackOptionsBody(
-        pov_hud=playback_api.DemoPlaybackPovBody(enabled=True, radar_mode=-1, teamcounter_numeric=True),
+        pov_hud=playback_api.DemoPlaybackPovBody(
+            enabled=True,
+            radar_mode=-1,
+            teamcounter_numeric=True,
+            skybox_id="cartoon3",
+        ),
+        map_material=playback_api.DemoPlaybackMapMaterialBody(id="waxed_reflection"),
     )
 
     result = playback_api.launch_cs2_play_demo(demo, body)
@@ -63,7 +69,44 @@ def test_launch_forwards_pov_session_options(monkeypatch, tmp_path: Path):
         enabled=True,
         radar_mode=-1,
         teamcounter_numeric=True,
+        skybox_id="cartoon3",
+        map_material_id="waxed_reflection",
     )
+
+
+def test_launch_rejects_unavailable_skybox(monkeypatch, tmp_path: Path):
+    cfg = _configured_cs2(tmp_path)
+    demo = tmp_path / "match.dem"
+    demo.write_bytes(b"demo")
+    monkeypatch.setattr(playback_api, "load_config", lambda: cfg)
+    monkeypatch.setattr(playback_api, "ensure_cs2_path", lambda value: value)
+
+    body = playback_api.DemoPlaybackOptionsBody(
+        pov_hud=playback_api.DemoPlaybackPovBody(enabled=True, skybox_id="unknown"),
+    )
+    with pytest.raises(HTTPException) as exc_info:
+        playback_api.launch_cs2_play_demo(demo, body)
+
+    assert exc_info.value.status_code == 422
+    assert "unsupported recording skybox" in str(exc_info.value.detail)
+
+
+def test_launch_rejects_unknown_map_material(monkeypatch, tmp_path: Path):
+    cfg = _configured_cs2(tmp_path)
+    demo = tmp_path / "match.dem"
+    demo.write_bytes(b"demo")
+    monkeypatch.setattr(playback_api, "load_config", lambda: cfg)
+    monkeypatch.setattr(playback_api, "ensure_cs2_path", lambda value: value)
+
+    body = playback_api.DemoPlaybackOptionsBody(
+        pov_hud=playback_api.DemoPlaybackPovBody(enabled=True),
+        map_material=playback_api.DemoPlaybackMapMaterialBody(id="chrome"),
+    )
+    with pytest.raises(HTTPException) as exc_info:
+        playback_api.launch_cs2_play_demo(demo, body)
+
+    assert exc_info.value.status_code == 422
+    assert "unsupported recording map material" in str(exc_info.value.detail)
 
 
 def test_preflight_delegates_to_playback_service(monkeypatch, tmp_path: Path):
@@ -75,10 +118,17 @@ def test_preflight_delegates_to_playback_service(monkeypatch, tmp_path: Path):
         "preflight",
         lambda config: {"ok": False, "cs2_running": config is cfg},
     )
+    monkeypatch.setattr(playback_api, "list_skybox_resources", lambda: [{"id": "cartoon3"}])
 
     result = asyncio.run(playback_api.demo_playback_preflight())
 
-    assert result == {"ok": False, "cs2_running": True}
+    assert result == {
+        "ok": False,
+        "cs2_running": True,
+        "recording_skybox": "default",
+        "recording_map_material": "default",
+        "skyboxes": [{"id": "cartoon3"}],
+    }
 
 
 def test_playback_status_returns_measured_session_report(monkeypatch):

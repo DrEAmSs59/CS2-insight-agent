@@ -37,11 +37,20 @@ describe("useDemoPlaybackDialog restoration monitor", () => {
     playDemoInCs2.mockReset();
   });
 
-  it("opens the factual restoration result returned by the backend after POV playback", async () => {
+  it("launches advanced playback directly from the preview and opens factual restoration", async () => {
+    const customSkyboxId = `custom:${"b".repeat(32)}`;
     getDemoPlaybackPreflight.mockResolvedValue({
       cs2_path_configured: true,
       cs2_running: false,
       playback_active: false,
+      recording_skybox: "cartoon3",
+      recording_map_material: "waxed_reflection",
+      skyboxes: [{
+        id: customSkyboxId,
+        display_name: "测试星空",
+        source: "custom",
+        available: true,
+      }],
     });
     playDemoInCs2.mockResolvedValue({ session_id: "session-7", pov_hud_enabled: true });
     getDemoPlaybackStatus.mockResolvedValue({
@@ -61,13 +70,22 @@ describe("useDemoPlaybackDialog restoration monitor", () => {
 
     render(<Harness />);
     fireEvent.click(screen.getByRole("button", { name: "open" }));
-    await screen.findByRole("button", { name: /实验功能：POV HUD/ });
-    fireEvent.click(screen.getByRole("button", { name: /实验功能：POV HUD/ }));
+    await screen.findByRole("button", { name: /启动高级播放 Demo/ });
+    const skyboxSelect = screen.getByRole("combobox", { name: "高级播放天空盒" });
+    const materialSelect = screen.getByRole("combobox", { name: "高级播放地图材质" });
+    expect(skyboxSelect.value).toBe("cartoon3");
+    expect(materialSelect.value).toBe("waxed_reflection");
+    fireEvent.change(skyboxSelect, { target: { value: customSkyboxId } });
+    fireEvent.click(screen.getByRole("button", { name: /启动高级播放 Demo/ }));
 
     await screen.findByText("POV 文件已按备份完整恢复");
     expect(playDemoInCs2).toHaveBeenCalledWith(expect.objectContaining({
       id: 7,
-      povHud: expect.objectContaining({ enabled: true }),
+      advancedPlayback: expect.objectContaining({
+        enabled: true,
+        skybox_id: customSkyboxId,
+        map_material_id: "waxed_reflection",
+      }),
     }));
     await waitFor(() => expect(getDemoPlaybackStatus).toHaveBeenCalledWith("session-7"));
   });

@@ -4,6 +4,7 @@ export default {
   "common.confirm": "确定",
   "common.save": "保存",
   "common.close": "关闭",
+  "common.preparingMapResources": "正在准备所需的地图资源，稍后将自动进入CS2。",
   "frameMeld.enableDialog.title": "帧混合（动态模糊）启用说明",
   "frameMeld.enableDialog.item1": "帧混合会进行补帧、去重和动态模糊，最终固定输出 60 FPS。",
   "frameMeld.enableDialog.item2Prefix": "由于补帧非常依赖高性能显卡，",

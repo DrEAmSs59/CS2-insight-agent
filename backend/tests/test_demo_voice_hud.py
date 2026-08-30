@@ -1,5 +1,6 @@
 import json
 from pathlib import Path
+import struct
 from types import SimpleNamespace
 
 import pytest
@@ -10,9 +11,11 @@ from app.demo_voice_hud import (
     VOICE_DATA_BEGIN,
     VOICE_DATA_END,
     VOICE_SCRIPT_PATH,
+    _advanced_round_starts,
     _build_player_sound_track,
     _kill_cash_award,
     _weapon_fire_sound_radius,
+    add_advanced_playback_track_to_payload,
     add_flash_blind_track_to_payload,
     add_input_tracks_to_payload,
     add_kill_feedback_track_to_payload,
@@ -79,6 +82,126 @@ def test_voice_payload_compacts_intervals_and_location_changes():
     ]
     assert input_tracks == []
     assert roster == [["111", 0, 2], ["222", 1, 3]]
+
+
+def test_advanced_playback_payload_indexes_players_kills_deaths_and_utility():
+    class _AdvancedParser(_FakeParser):
+        @staticmethod
+        def parse_event(name, **_kwargs):
+            if name == "round_announce_match_start":
+                return {"tick": [10]}
+            if name == "round_start":
+                return {"tick": [20, 200]}
+            if name == "round_freeze_end":
+                return {"tick": [50, 230]}
+            if name == "player_death":
+                return {
+                    "tick": [100],
+                    "attacker_steamid": [111],
+                    "user_steamid": [222],
+                    "weapon": ["ak47"],
+                    "headshot": [True],
+                    "thrusmoke": [True],
+                    "penetrated": [2],
+                    "noscope": [True],
+                    "attackerblind": [True],
+                    "assistedflash": [True],
+                }
+            if name == "grenade_thrown":
+                return {
+                    "tick": [120],
+                    "user_steamid": [111],
+                    "weapon": ["smokegrenade"],
+                }
+            if name == "weapon_fire":
+                return {
+                    "tick": [110],
+                    "user_steamid": [111],
+                    "weapon": ["smokegrenade"],
+                }
+            return {"tick": []}
+
+        @staticmethod
+        def parse_header():
+            return {"playback_ticks": 6400, "playback_time": 100.0}
+
+    voice_payload, _voice_stats = build_voice_payload(
+        "match.dem",
+        parser_factory=_AdvancedParser,
+    )
+    payload, stats = add_advanced_playback_track_to_payload(
+        voice_payload,
+        "match.dem",
+        parser_factory=_AdvancedParser,
+    )
+    advanced = json.loads(payload)[12]
+
+    assert stats["advanced_playback_enabled"] == 1
+    assert stats["advanced_playback_players"] == 2
+    assert stats["advanced_playback_events"] == 2
+    assert stats["advanced_playback_rounds"] == 2
+    assert stats["advanced_playback_total_tick"] == 6400
+    assert advanced[0] == 1
+    assert advanced[1] == 64000
+    assert advanced[2] == [
+        ["111", "one", 2, 0],
+        ["222", "two", 3, 1],
+    ]
+    assert "ak47" in advanced[3]
+    assert "smokegrenade" in advanced[3]
+    assert len(advanced[4].split(",")) == 2
+    kill_fields = advanced[4].split(",")[0].split(".")
+    assert int(kill_fields[5], 36) == 63
+    assert advanced[5] == 6400
+    assert advanced[6] == [[1, 20, 199], [2, 200, 6400]]
+
+
+def test_advanced_playback_round_starts_use_freeze_start_when_sources_are_complete():
+    class _CompleteRoundSourcesParser:
+        @staticmethod
+        def parse_event(name, **_kwargs):
+            if name == "round_announce_match_start":
+                return {"tick": [10]}
+            if name == "round_start":
+                return {"tick": [20, 200]}
+            if name == "round_freeze_end":
+                return {"tick": [50, 230]}
+            return {"tick": []}
+
+    assert _advanced_round_starts(_CompleteRoundSourcesParser()) == [(1, 20), (2, 200)]
+
+
+def test_advanced_playback_round_starts_fall_back_when_freeze_start_is_incomplete():
+    class _IncompleteFreezeStartParser:
+        @staticmethod
+        def parse_event(name, **_kwargs):
+            if name == "round_announce_match_start":
+                return {"tick": [10]}
+            if name == "round_start":
+                return {"tick": [20]}
+            if name == "round_freeze_end":
+                return {"tick": [50, 230]}
+            return {"tick": []}
+
+    assert _advanced_round_starts(_IncompleteFreezeStartParser()) == [(1, 20), (2, 230)]
+
+
+def test_advanced_playback_keeps_first_freeze_start_before_match_announce():
+    class _FirstFreezeStartedBeforeAnnounceParser:
+        @staticmethod
+        def parse_event(name, **_kwargs):
+            if name == "round_announce_match_start":
+                return {"tick": [30]}
+            if name == "round_start":
+                return {"tick": [5, 20, 200]}
+            if name == "round_freeze_end":
+                return {"tick": [50, 230]}
+            return {"tick": []}
+
+    assert _advanced_round_starts(_FirstFreezeStartedBeforeAnnounceParser()) == [
+        (1, 20),
+        (2, 200),
+    ]
 
 
 def test_voice_payload_reuses_tick_roster_when_player_info_is_empty():
@@ -256,6 +379,7 @@ def test_voice_payload_injection_is_bounded_and_rebuilds_vpk():
 
 def test_checked_in_voice_template_contains_only_an_empty_payload():
     template_path = Path(__file__).resolve().parents[2] / "pov" / "pov_voice_template.vpk"
+    injection_source = template_path.with_name("voice_hud_injection.js").read_bytes()
     entries = read_inline_vpk(template_path.read_bytes())
     alert_script = entries["panorama/scripts/hud/hudalerts_insight.vjs_c"]
     alert_style = entries["panorama/styles/hud/hudalerts_insight.vcss_c"]
@@ -266,6 +390,10 @@ def test_checked_in_voice_template_contains_only_an_empty_payload():
     assert script[start:end].rstrip() == b"[[], [], [], []]"
     assert "panorama/layout/hud/hudalerts.vxml_c" in entries
     assert "panorama/styles/hud/hudalerts.vcss_c" not in entries
+    assert "panorama/styles/hud/hudhealthammocenter.vcss_c" not in entries
+    assert "panorama/styles/hud/hudradar.vcss_c" in entries
+    assert "panorama/styles/hud/hudteamcounter-equipmentinfo.vcss_c" in entries
+    assert "panorama/styles/hud/hudteamcounter.vcss_c" in entries
     assert b"CSGOHudAlerts.CS2InsightSeekSuppress" in alert_style
     assert b"CSGOHudAlerts.CS2InsightPausedSeekSuppress" in alert_style
     assert b"PanoramaGameTimeJumpEvent" in alert_script
@@ -293,7 +421,8 @@ def test_checked_in_voice_template_contains_only_an_empty_payload():
         in script
     )
     assert b"FLASH_BUILD_UP_SECONDS = (255 / 45) / 60" in script
-    assert b"FLASH_CERTAIN_BLIND_SECONDS = 3" in script
+    assert b"FLASH_CERTAIN_BLIND_SECONDS = 3.43" in script
+    assert b"FLASH_FADE_EXPONENT = 4" in script
     assert b"FLASH_PAYLOAD_VERSION = 2" in script
     assert b"FLASH_FULL_DURATION_TICKS" not in script
     assert b"FLASH_ACTIVE_REFRESH_SECONDS = 0.016" in script
@@ -301,9 +430,11 @@ def test_checked_in_voice_template_contains_only_an_empty_payload():
     assert b"blind ? FLASH_ACTIVE_REFRESH_SECONDS : FLASH_IDLE_REFRESH_SECONDS" in script
     assert b"const wasActive = Boolean(state && event.tick < state.endTick)" in script
     assert b"endTick: event.tick + event.durationTicks" in script
-    assert b"Math.pow(remainingSeconds / FLASH_CERTAIN_BLIND_SECONDS, 2)" in script
-    assert b"const afterimage = strength * (1 - Math.pow(1 - screenshot, 4))" in script
-    assert b"let cover = 1 - (1 - white) * (1 - afterimage)" in script
+    assert b"Math.pow(remainingSeconds / FLASH_CERTAIN_BLIND_SECONDS, FLASH_FADE_EXPONENT)" in script
+    assert b"return Math.max(0, Math.min(1, white))" in script
+    assert b"const afterimage" not in script
+    assert b"const screenshot" not in script
+    assert b"1 - (1 - white)" not in script
     assert b"Math.min(1, flashWashOpacity(blind, tick))" in script
     assert b"if (opacity <= 0.01)" not in script
     assert b'findHudTraverse("ChatHistoryText")' in script
@@ -327,7 +458,7 @@ def test_checked_in_voice_template_contains_only_an_empty_payload():
     assert b"updatePovSoundRings(nativeRadar, tick, povXuid, povSample)" in script
     assert b"nativeSoundComplete describes the event source, not Panorama playback" in script
     assert b"setNativeSoundRingsVisible(nativeRadar, false)" in script
-    assert b"setNativeSoundRingsVisible(nativeRadar, true)" not in script
+    assert b"setNativeSoundRingsVisible(nativeRadar, true)" in script
     assert b"updatePovUnclipFx(nativeRadar, tick, povXuid, povSample, povTeam)" in script
     assert b"const MAX_POV_SOUND_RINGS = 10" in script
     assert b"fx.soundRings[soundIndex]" in script
@@ -424,8 +555,10 @@ def test_checked_in_voice_template_contains_only_an_empty_payload():
     assert b"const RADIO_FADE_OUT_END = 0.95" in script
     assert b"const NATIVE_VOICE_ALERT_PANEL_COUNT = 16" in script
     assert b'findHudTraverse("AlertPanel" + (index + 1))' in script
+    assert b'FindChildrenWithClassTraverse("AlertPanel")' in script
     assert b"function suppressNativeLowerLeft()" in script
     assert b'panel.style.opacity = "0"' in script
+    assert b'panel.style.visibility = "collapse"' in script
     assert b"nativeVoiceAlertHost" not in script
     assert b'nativeChatHistoryText.style.opacity = "0"' in script
     assert b"nativeChatHistoryText.visible = false" in script
@@ -445,6 +578,198 @@ def test_checked_in_voice_template_contains_only_an_empty_payload():
     assert b"event.attackerXuid === povXuid" in script
     assert b"#Player_Cash_Award_Killed_Enemy_Generic" in script
     assert b"function cashAwardEventHtml(event)" in script
+    assert b"CS2InsightAdvancedEdge" in script
+    assert b"CS2InsightAdvancedMenu" in script
+    assert b"function advancedAdvanceSpecOperation()" in script
+    assert b"function advancedSpecTargetSlot(xuid)" in script
+    assert b"runtimeSlot + 1 : -1" in script
+    assert b'GameInterfaceAPI.ConsoleCommand("spec_player " + operation.targetSlot)' in script
+    assert b"advancedSpecCandidates" not in script
+    assert b"operation.candidates" not in script
+    assert b"function advancedPlayerAliveAtTick(xuid, tick)" in script
+    assert b"return Boolean(sample.alive)" in script
+    assert "☠ ".encode() in script
+    assert "（死亡）".encode() in script
+    assert b'button.style.backgroundColor = "#3a2020c8"' in script
+    assert b'liveTeam + ":" + (alive ? "1" : "0")' in script
+    assert b"function advancedTogglePlayerVoice(xuid)" in script
+    assert b'let advancedVoicePolicy = "all"' in script
+    assert b'["all", advancedCopy("\xe5\x85\xa8\xe9\x83\xa8", "All")]' in script
+    assert b'["team", advancedCopy("\xe5\xb7\xb1\xe6\x96\xb9", "Team")]' in script
+    assert b'["enemy", advancedCopy("\xe5\xaf\xb9\xe6\x96\xb9", "Enemy")]' in script
+    assert b"advancedPlayback.players.forEach(function (player)" in script
+    assert b"advancedCustomVoiceXuids[playerXuid] = advancedVoiceAllows(" in script
+    assert b"function advancedApplyPlaybackProfile(profile)" in script
+    profile_start = script.index(b"function advancedApplyPlaybackProfile(profile)")
+    profile_end = script.index(b"function advancedSetVoicePolicy(policy)", profile_start)
+    assert b"spec_mode" not in script[profile_start:profile_end]
+    assert b"CS2InsightAdvancedProgress" not in script
+    assert b"CS2InsightAdvancedProgressSlider" not in script
+    assert b"function advancedNumericEntryText(entry)" not in script
+    assert b"function advancedSetNumericEntryText(entry, value)" not in script
+    assert b'GameInterfaceAPI.ConsoleCommand("demoui false")' not in script
+    assert b"demo_ui_mode" not in injection_source
+    assert b'DemoControllerHidden' not in injection_source
+    assert b'controller.visible = false' not in script
+    assert b'"SliderReleased"' not in injection_source
+    assert b"advancedSeekFromProgressSlider" not in script
+    assert b'advancedProgressFill.style.backgroundColor = "#e07f0a"' not in script
+    assert b'"s2r://panorama/images/icons/ui/"' in script
+    assert b'(voiceEnabled ? "unmuted" : "muted") + ".vsvg"' in script
+    assert b'advancedCopy("\xe8\xaf\xad\xe9\x9f\xb3\xe5\xbc\x80", "ON")' not in script
+    assert b'advancedCopy("\xe8\xaf\xad\xe9\x9f\xb3\xe5\x85\xb3", "OFF")' not in script
+    assert b'advancedMenu.style.height = "fit-children"' in script
+    assert b"advancedMenuTickLabel" not in script
+    assert b'advancedEventListPanel.style.height = "145px"' in script
+    assert b"footerSpacer" not in script
+    assert b'advancedMenuSelectionLabel' not in script
+    assert b'const pageSize = 5' in script
+    assert b"const groupedEvents = []" in script
+    assert b'group.style.height = (groupedEvents.length * ADVANCED_EVENT_ROW_HEIGHT) + "px"' in script
+    assert b'roundCell.style.height = "100%"' in script
+    assert b'roundCell.style.marginRight = "0px"' in script
+    assert b'roundCell.style.borderRadius = "0px"' in script
+    assert b'roundLabel.style.height = "20px"' in script
+    assert b'roundLabel.style.horizontalAlign = "center"' in script
+    assert b'roundLabel.style.verticalAlign = "center"' in script
+    assert b'locate.style.marginRight = "0px"' in script
+    assert b'locate.style.borderRadius = "0px"' in script
+    assert b'roundNumber > 0 ? "R" + roundNumber : "\xe2\x80\x94"' in script
+    assert b"function advancedCreateEventLocateButton(row, event)" in script
+    assert b'"s2r://panorama/images/icons/" + folder + "/" + stem + ".svg"' in script
+    assert b'icon.SetScaling("stretch-to-fit-preserve-aspect")' in script
+    assert b'headshot: "icon_headshot"' in script
+    assert b'throughsmoke: "smoke_kill"' in script
+    assert b'blindkill: "blind_kill"' in script
+    assert b'"s2r://panorama/images/hud/deathnotice/"' in script
+    assert b'"s2r://panorama/images/icons/equipment/flashbang_assist.vsvg"' in script
+    assert b'iconStrip.style.width = "fit-children"' in script
+    assert b'advancedEquipmentIconStem(event.detail),' in script
+    assert b'advancedCreateEventIcon(action, "equipment", utilityStem, 20, 20, 24)' in script
+    assert "advancedCopy(\"投掷\", \"threw\")".encode() in script
+    assert b"advancedEventTitle" not in script
+    assert b"state.RoundIntervals" not in injection_source
+    assert b"Array.isArray(raw[6])" in script
+    assert b"function advancedStepRound(delta)" not in script
+    assert b"function advancedSubmitRound()" not in script
+    assert b"CS2InsightAdvancedRoundPicker" in script
+    assert b"function advancedToggleRoundPicker()" in script
+    assert b'advancedCopy("\xe5\x9b\x9e\xe5\x90\x88", "Round")' in script
+    assert b'advancedRoundPickerPanel.style.flowChildren = "down"' in script
+    assert b'pickerRow.style.flowChildren = "right"' in script
+    assert b'rounds.slice(rowIndex * 8, (rowIndex + 1) * 8)' in script
+    assert b"advancedSelectPlayer(xuid, { tick: round.start })" in script
+    assert b"function advancedRoundElapsedTick(tick)" in script
+    assert b"advancedFormatTick(advancedRoundElapsedTick(event.tick))" in script
+    assert b'advancedRoundHintLabel.style.marginLeft = "6px"' in script
+    assert "第 \" + roundNumber + \" 回合 ▾".encode() in script
+    assert "advancedCopy(\"X光\", \"X-ray\")".encode() not in script
+    assert "advancedCopy(\"阵营\", \"Teams\")".encode() in script
+    assert b'label.style.height = "25px"' in script
+    assert b'playersTitle.style.marginTop = "3px"' in script
+    assert b'isCt ? "CT" : "T"' in script
+    assert b'radioPlayerColor(player.xuid) || (team === 3 ? "#7ed9ff" : "#ffd46d")' in script
+    assert "点名称切换视角 · 点喇叭开关语音".encode() in script
+    assert b'playerHelp.style.verticalAlign = "center"' in script
+    assert b'advancedPlayerListPanel.style.height = "155px"' in script
+    assert b'playersInset.style.width = "40px"' not in script
+    assert "advancedCopy(\"事件\", \"Events\")".encode() in script
+    assert b"let advancedFollowCurrentRound = true" in script
+    assert b"function advancedToggleFollowCurrentRound()" in script
+    assert b'advancedFollowCurrentRound ? "\xe8\xb7\x9f\xe9\x9a\x8f\xe5\x9b\x9e\xe5\x90\x88\xe5\xbc\x80" : "\xe8\xb7\x9f\xe9\x9a\x8f\xe5\x9b\x9e\xe5\x90\x88\xe5\x85\xb3"' in script
+    assert b"function advancedCreateFilterIcon(parent, kind)" in script
+    assert b"function advancedCreateFilterButton(parent, kind, text, onActivate)" in script
+    assert b"advancedRoundNumberAtTick(event.tick) === currentRound" in script
+    assert b"currentRound !== advancedFollowedRoundNumber" in script
+    assert b"const playerChanged = normalized !== advancedSelectedXuid" in script
+    assert b"if (playerChanged)" in script
+    assert b'panel.SetPanelEvent("onactivate", function () { return true; })' in script
+    assert b"advancedFocusTextEntry(advancedTickInput)" not in script
+    assert b"let advancedMenuPinned = true" in script
+    assert b"function advancedOpenNumericPad(entry, submit, title)" not in script
+    assert b"CS2InsightAdvancedNumericPad" not in script
+    assert script.count(b"_insightNumericButton = true") == 0
+    assert b'advancedTickInput.SetAttributeString("textmode", "numeric")' not in script
+    assert b'advancedRoundInput.SetAttributeString("textmode", "numeric")' not in script
+    assert b"function advancedSliderTick(panel, value)" not in script
+    assert b"advancedProgressSlider.min = 0" not in script
+    assert b"advancedProgressSlider.max = advancedPlayback.totalTick" not in script
+    assert b"advancedProgressSlider.max = 1" not in script
+    assert b"advancedQuickOptions.messages" not in script
+    assert b'["messages", advancedCopy(' not in script
+    assert b"advancedQuickOptions.input" not in script
+    assert b'["input", advancedCopy(' not in script
+    assert b'"tv_nochat 0"' in script
+    assert b"advancedNativeMessagesRestored" in script
+    assert b'"cl_drawhud_force_radar " + radarMode' in script
+    assert script.count(b'"mp_forcecamera 0"') >= 2
+    assert b'"cl_radar_square_when_spectating 1"' in script
+    assert b'"cl_radar_rotate false"' in script
+    assert b'"cl_radar_square_always true"' in script
+    assert b'"cl_radar_always_centered 0"' in script
+    assert b"restoreNativeRadarForAdvancedSpectator();" in script
+    assert b'side.RemoveClass("CS2InsightPovEnemy")' in script
+    assert b"spectatorAllPlayers" in script
+    assert b'findHudTraverse("HudHealthAmmoCenter")' in script
+    assert b"function fixPovHealthHudColor(" not in script
+    assert b"function paintHealthFillPanel(" not in script
+    assert b"advancedModifiedHealthPanels" not in script
+    assert b"Leave the native health fill untouched in both recording POV" in script
+    assert b'"HudSpecplayerParentContainer"' in script
+    assert b"function guardSpectatorHudProfile()" in script
+    assert b"advancedPlayback && !advancedPovVisualsEnabled" in script
+    assert b"$.Schedule(0, guardSpectatorHudProfile);" in script
+    assert b"function advancedGuardSpectatorHud()" not in script
+    assert b"restoreAdvancedHealthPanels" not in script
+    assert b'"cl_spec_stats 1"' in script
+    assert b'"cl_teamid_overhead_maxdist 9999"' in script
+    assert b"_insightOriginalOverheadText" in script
+    assert b"_insightOriginalNormalHealthClass" in script
+    assert b"advancedNativeOverheadRestored" in script
+    assert b'panel.visible = false' in script
+    assert b'"RI_BombDefuserPackage"' in script
+    assert b"resumeAfterSeek" in script
+    assert b"CS2InsightAdvancedDragHandle" not in script
+    assert b'$.RegisterEventHandler("DragStart", handle' not in script
+    assert b"advancedMenuDragGhost" not in script
+    assert b"let advancedMenuPosition = null" not in script
+    assert b"let advancedMenuCollapsed = true" in script
+    assert b"CS2InsightAdvancedBody" in script
+    assert b"function advancedSetMenuCollapsed(collapsed)" in script
+    assert b"advancedFoldButton" not in script
+    assert b'advancedMenuBody.style.visibility = advancedMenuCollapsed ? "collapse" : "visible"' in script
+    assert b'advancedMenuHeaderControls.style.visibility = advancedMenuCollapsed ? "collapse" : "visible"' in script
+    assert b'advancedMenuTitleLabel.style.textAlign = advancedMenuCollapsed ? "center" : "left"' in script
+    assert b'$.Schedule(0.18, function ()' in script
+    assert b"advancedSetMenuCollapsed(true)" in script
+    assert b"advancedSetMenuCollapsed(false)" in script
+    assert b'advancedMenu.style.horizontalAlign = "right"' in script
+    assert b'advancedMenu.style.verticalAlign = "center"' in script
+    assert b'advancedMenu.style.marginRight = "6px"' in script
+    assert b'advancedMenu.style.marginTop = "0px"' in script
+    assert b'advancedEdgeTrigger.style.height = "100%"' in script
+    assert b'advancedEdgeTrigger.style.verticalAlign = "center"' in script
+    assert b"advancedMenu.style.x =" not in script
+    assert b"advancedMenu.style.y =" not in script
+    assert b"function restrictPovTeamCounterEquipment()" in script
+    assert b"renderTeam(3);" in script
+    assert b"renderTeam(2);" in script
+    assert b'FindChildrenWithClassTraverse("hud-HA__stroke")' in script
+    assert b"[healthAmmo, hudRootPanel()]" in script
+    assert b"stroke.visible = enabled" in script
+    assert b'stroke.style.visibility = enabled ? "visible" : "collapse"' in script
+    assert b"CS2InsightPovFactionLines" in script
+    assert b'overlay.style.marginBottom = "35px"' in script
+    assert b"advancedEnsurePovFactionLineOverlay(healthAmmo, enabled)" in script
+    assert b"function advancedCloseMenu()" in script
+    assert b"advancedEdgeRevealArmed = false" in script
+    assert b"advancedEdgeTrigger.hittest = false" in script
+    assert b"$.Schedule(0.35, function ()" in script
+    assert b"advancedEdgeTrigger.hittest = true" in script
+    assert b"advancedSyncMenuToDragPanel" not in script
+    assert b"function advancedCreateSectionLabel(parent, text)" in script
+    assert b'button.style.verticalAlign = "center"' in script
+    assert b'GameInterfaceAPI.ConsoleCommand("demo_gototick " + initialSeekTick)' in script
     assert b'return color ? radioHtmlSpan(color, "\xe2\x97\x8f ") : ""' in script
     assert b'createClassedPanel("Label", notice, "VoiceMarker", "VoiceText")' in script
     assert b'marker.text = markerColor ? "\xe2\x97\x8f " : ""' in script
@@ -456,6 +781,18 @@ def test_checked_in_voice_template_contains_only_an_empty_payload():
     assert b'locationLabel.style.color = "#40ff40"' in script
     assert b'notice.FindChildTraverse("VoiceLocation")' in script
     assert b'notice.SetHasClass("Hidden", !active);' in script
+    assert b'const encodedRecordingVoiceMode = String(packed[13] || "team")' in script
+    assert b"const encodedSessionConsoleCommands = Array.isArray(packed[14])" in script
+    assert b"function applySessionConsoleCommandsAfterDemoLoad()" in script
+    assert b"const state = controller.GetDemoControllerState();" in script
+    assert b"$.Schedule(0, applySessionConsoleCommandsAfterDemoLoad);" in script
+    assert b'function activeVoicePolicy()' in script
+    assert b'if (policy === "enemy")' in script
+    assert b'const allowed = advancedVoiceAllows(slotXuid, povTeam, tick);' in script
+    voice_update_start = script.index(b"function update()")
+    voice_update_end = script.index(b"function advancedChinese()", voice_update_start)
+    assert b"advancedPovVisualsActive" not in script[voice_update_start:voice_update_end]
+    assert b'speaker.panel.AddClass("Hidden")' not in script[profile_start:profile_end]
     assert b"reward: Math.max(0, parseInt(fields[3], 36) || 0)" in script
     assert b"if (radioTrack || killFeedbackTrack)" in script
     assert b'join("<br>")' not in script
@@ -466,6 +803,237 @@ def test_checked_in_voice_template_contains_only_an_empty_payload():
     assert b"765611" not in script
 
 
+def test_advanced_playback_template_uses_native_hot_switchable_hud_styles():
+    template_path = (
+        Path(__file__).resolve().parents[2]
+        / "pov"
+        / "pov_advanced_playback_template.vpk"
+    )
+    entries = read_inline_vpk(template_path.read_bytes())
+    script = entries[VOICE_SCRIPT_PATH]
+    assert struct.unpack_from("<I", script, 0)[0] == len(script)
+    block_count = struct.unpack_from("<I", script, 12)[0]
+    for index in range(block_count):
+        descriptor = 16 + index * 12
+        relative_offset, block_size = struct.unpack_from("<II", script, descriptor + 4)
+        block_start = descriptor + 4 + relative_offset
+        assert block_start + block_size <= len(script)
+    start = script.index(VOICE_DATA_BEGIN) + len(VOICE_DATA_BEGIN)
+    end = script.index(VOICE_DATA_END)
+
+    assert script[start:end].rstrip() == b"[[], [], [], []]"
+    assert b"Math.pow(remainingSeconds / FLASH_CERTAIN_BLIND_SECONDS, FLASH_FADE_EXPONENT)" in script
+    assert b"return Math.max(0, Math.min(1, white))" in script
+    assert b"const afterimage" not in script
+    assert b"const screenshot" not in script
+    assert "panorama/layout/hud/hudalerts.vxml_c" in entries
+    assert "panorama/styles/hud/hudhealthammocenter.vcss_c" not in entries
+    assert "panorama/styles/hud/hudradar.vcss_c" not in entries
+    assert "panorama/styles/hud/hudteamcounter-equipmentinfo.vcss_c" not in entries
+    assert "panorama/styles/hud/hudteamcounter.vcss_c" not in entries
+    assert b'const isCt = team === 3' in script
+    assert b'const teamAccent = isCt ? "#67c7ef" : "#e7bb4b"' in script
+    assert b'const teamSurface = isCt ? "#10242bcc" : "#2a2413cc"' in script
+    assert b'const rowSurface = isCt ? "#16252cba" : "#292517ba"' in script
+    assert b'const rowBorder = isCt ? "#3a535db8" : "#5d4d28b8"' in script
+    assert b'column.style.backgroundColor = teamSurface' in script
+    assert b'column.style.border = "1px solid " + teamBorder' in script
+    assert b'teamHeader.style.backgroundColor = teamHeaderSurface' in script
+    assert b'teamHeader.style.height = "25px"' in script
+    assert b'teamHeader.style.borderBottom = "1px solid " + teamBorder' in script
+    assert b'isCt ? "CT" : "T"' in script
+    assert b'teamLabel.style.height = "16px"' in script
+    assert b'teamLabel.style.textAlign = "left"' in script
+    assert b'teamLabel.style.verticalAlign = "center"' in script
+    assert b'const row = advancedCreatePanel("Panel", playerRows, "")' in script
+    assert b'button.style.backgroundColor = rowSurface' in script
+    assert b'voice.style.backgroundColor = rowSurface' in script
+    assert b'button.style.backgroundColor = "#3a2020c8"' in script
+    assert b'filterRow.style.height = "25px"' in script
+    assert b'advancedEventPagerLabel.style.height = "25px"' in script
+    assert 'events.length + " 条事件"'.encode() in script
+    assert 'advancedEventPagerLabel.text = eventCountText + "  ·  "'.encode() in script
+    assert b'advancedEventPagerLabel = advancedCreateLabel(filterRow, "", 10, "#aaa8a2")' in script
+    assert b'advancedEventPagerLabel.style.textOverflow = "shrink"' in script
+    assert b"const ADVANCED_EVENT_ICON_HEIGHT = 16" in script
+    assert b"const ADVANCED_EVENT_ICON_TRACK_HEIGHT = 20" in script
+    assert b"const ADVANCED_FILTER_ICON_SIZE = 14" in script
+    assert b"const ADVANCED_FILTER_ICON_CELL = 18" in script
+    assert b"const ADVANCED_EVENT_ROW_HEIGHT = 24" in script
+    assert b"const ADVANCED_EVENT_GROUP_GAP = 4" in script
+    assert b'const ADVANCED_EVENT_GROUP_ODD_SURFACE = "#101010f7"' in script
+    assert b'const ADVANCED_EVENT_GROUP_EVEN_SURFACE = "#232323f7"' in script
+    assert b'const ADVANCED_EVENT_GROUP_BORDER = "#505050"' in script
+    assert b'const ADVANCED_EVENT_ROUND_ACCENT = "#e07f0a"' in script
+    assert b'label.style.height = "16px"' in script
+    assert b'time.style.height = "14px"' in script
+    assert b'iconStrip.style.height = ADVANCED_EVENT_ICON_TRACK_HEIGHT + "px"' in script
+    assert b'iconContent.style.height = ADVANCED_EVENT_ICON_TRACK_HEIGHT + "px"' in script
+    assert b'"headshot", ADVANCED_EVENT_ICON_HEIGHT, ADVANCED_EVENT_ICON_HEIGHT, ADVANCED_EVENT_ICON_TRACK_HEIGHT' in script
+    assert b'"throughsmoke", ADVANCED_EVENT_ICON_HEIGHT, ADVANCED_EVENT_ICON_HEIGHT, ADVANCED_EVENT_ICON_TRACK_HEIGHT' in script
+    assert b'"penetrate", ADVANCED_EVENT_ICON_HEIGHT, ADVANCED_EVENT_ICON_HEIGHT, ADVANCED_EVENT_ICON_TRACK_HEIGHT' in script
+    assert b'cell.style.width = ADVANCED_FILTER_ICON_CELL + "px"' in script
+    assert b'cell.style.height = ADVANCED_FILTER_ICON_CELL + "px"' in script
+    assert 'advancedCreateLabel(cell, "☠", ADVANCED_FILTER_ICON_SIZE, "#ece9e2")'.encode() in script
+    assert b'utilityIcon.style.horizontalAlign = "center"' in script
+    assert b'skull.style.transform = "translateY(-1px)"' in script
+    assert b'utilityIcon.style.transform = "translateY(-1px)"' in script
+    assert b'iconStrip.style.marginLeft = "6px"' in script
+    assert b'iconStrip.style.marginRight = "6px"' in script
+    assert b'locate.style.height = ADVANCED_EVENT_ROW_HEIGHT + "px"' in script
+    assert b'locate.style.backgroundColor = "#00000000"' in script
+    assert b'locate.style.border = "0px solid #00000000"' in script
+    assert b"const groupSurface = roundNumber % 2 === 0" in script
+    assert b"group.style.backgroundColor = groupSurface" in script
+    assert b'group.style.border = "1px solid " + ADVANCED_EVENT_GROUP_BORDER' in script
+    assert b'group.style.borderRadius = "6px"' in script
+    assert b'group.style.marginBottom = visibleIndex < visible.length' in script
+    assert b'roundRail.style.backgroundColor = ADVANCED_EVENT_ROUND_ACCENT' in script
+    assert b"ADVANCED_EVENT_ROUND_ACCENT," in script
+    assert b'row.style.height = ADVANCED_EVENT_ROW_HEIGHT + "px"' in script
+    assert b'row.style.borderBottom = groupIndex < groupedEvents.length - 1' in script
+    assert b'preroll.style.backgroundColor = "#00000000"' in script
+    assert b'preroll.style.borderLeft = "1px solid #505050"' in script
+    assert b'advancedEventListPanel.style.paddingTop = "4px"' in script
+    assert b'advancedEventListPanel.style.paddingBottom = "4px"' in script
+    assert b'"#e0a13d"' not in script
+    assert 'advancedMenuPinned ? "标题条开" : "标题条关"'.encode() in script
+    assert b'advancedMenuPinned ? "TITLE ON" : "TITLE OFF"' in script
+    assert b'advancedChinese() ? "108px" : "148px"' in script
+    assert b'advancedMenu.style.padding = advancedMenuCollapsed ? "3px 6px" : "12px"' in script
+    assert b'advancedMenuTitleLabel.style.transform = advancedMenuCollapsed' in script
+    assert b'"translateY(1px)"' in script
+    assert b'titleRow.style.height = "32px"' in script
+    assert b'"INSIGHT AGENT\\n' in script
+    assert b'advancedMenuTitleLabel.style.height = "30px"' in script
+    assert b'advancedMenuTitleLabel.style.whiteSpace = "normal"' in script
+    assert b'advancedMenuTitleLabel.style.lineHeight = "14px"' in script
+    assert 'advancedCopy("鼠标移至屏幕右侧展开", "Move cursor to right edge")'.encode() in script
+    assert b'revealHelp.style.textOverflow = "shrink"' in script
+    assert b'advancedToggleMenuPinned,' in script
+    assert b'advancedEdgeTrigger.hittest = false' in script
+    assert b'advancedRenderMenu();' in script
+    assert b'advancedMenu.SetPanelEvent("onmouseout", advancedScheduleHideMenu)' in script
+    assert b"TITLE OFF only disables the persistent title bar" in script
+    assert b"Cancel a pending initial onmouseout before changing the mode" in script
+    assert b"leave TITLE OFF displaying the stale title-only layout" in script
+    assert b"advancedMenuVisible = true;" in script
+    assert b"advancedMenu.visible = true;" in script
+    assert b"advancedSetMenuCollapsed(false);" in script
+    assert b"advancedRenderMenu();" in script
+    assert b"advancedSetMenuDismissLayerActive(true);" in script
+    assert b"function advancedMenuHasHover()" not in script
+    assert b"function waitForPointerLeave()" not in script
+    assert b"function advancedRearmMenuHoverTracking()" not in script
+    assert b"let advancedMenuDismissLayer = null" in script
+    assert b"function advancedSetMenuDismissLayerActive(active)" in script
+    assert b"function advancedDismissExpandedMenu()" in script
+    assert b'"CS2InsightAdvancedDismissLayer"' in script
+    assert b'advancedMenuDismissLayer.style.zIndex = "31999"' in script
+    assert b'advancedMenuDismissLayer.SetPanelEvent("onmouseover"' in script
+    assert b"advancedDismissExpandedMenu();" in script
+    assert b'const ADVANCED_MENU_OWNER_ATTRIBUTE = "cs2_insight_advanced_owner"' in script
+    assert b'"CS2InsightAdvancedMenu"' in script
+    assert b'"CS2InsightAdvancedEdge"' in script
+    assert b'"CS2InsightAdvancedDismissLayer"' in script
+    assert b"function advancedClaimMenuRoot(root)" in script
+    assert b"function advancedRemoveStaleMenuPanels(root)" in script
+    assert b"root.SetAttributeString(ADVANCED_MENU_OWNER_ATTRIBUTE, advancedMenuInstanceToken)" in script
+    assert b"child.DeleteAsync(0.0)" in script
+    assert b"!advancedMenuOwnsRoot(root)" in script
+    assert b"the changed root token and terminate without scheduling again" in script
+    assert b'"72px",' in script
+    assert b'advancedPinButton.style.marginRight = "4px"' in script
+    assert b'const close = advancedCreateButton(' in script
+    assert b'advancedCloseMenu,' in script
+    assert b'close.style.paddingLeft = "0px"' in script
+    assert b'close.style.flowChildren = "none"' in script
+    assert b'closeLabel.visible = false' in script
+    assert b'closeIcon.style.width = "12px"' in script
+    assert b'closeIcon.style.height = "12px"' in script
+    assert b'stroke.style.width = "12px"' in script
+    assert b'stroke.style.height = "2px"' in script
+    assert b'stroke.style.transform = "rotateZ(" + rotation + ")"' in script
+    assert b"advancedQuickOptions.grenadeView" not in script
+    assert b'"sv_grenade_trajectory_prac_pipreview "' not in script
+    assert b'"cl_demo_predict "' not in script
+    assert 'advancedCopy("投掷物视角", "GRENADE VIEW ")'.encode() not in script
+    assert b'let advancedHudHidden = false' in script
+    assert 'advancedCopy("隐藏 HUD", "HIDE HUD")'.encode() in script
+    assert b'advancedApplyPlaybackProfile("hidden")' in script
+    assert b'"cl_draw_only_deathnotices true"' in script
+    assert b"const trackedRestriction = advancedRestrictedTeamCounterPanels.indexOf(panel) >= 0" in script
+    assert b"if (advancedPlayback && !trackedRestriction)" in script
+    assert b"Do not claim ownership of that state" in script
+    assert b'panel.style.height = "4px"' in script
+    assert b'panel.style.opacity = restricted ? "0" : null' in script
+    assert b"Collapsing the panel removes its flow height" in script
+    assert b'FindChildrenWithClassTraverse("healthbar__health-number")' in script
+    assert b'healthNumbers[numberIndex].style.opacity = "0"' in script
+    assert b'healthNumbers[numberIndex].style.opacity = null' in script
+    assert b'clipped fragments of "100"' in script
+    assert b"DEMO HUD owns SHOW-EQUIPINFO" in script
+    assert b"panel.style.height = null" in script
+    assert b"never force visibility" in script
+    assert b'"AvatarL_BG",' in script
+    assert b"expands this" in script
+    assert b"teammate-color panel to 120px" in script
+    assert b'"equipinfo__bg-container",' in script
+    assert b'if (className === "equipinfo__bg-container"' in script
+    assert b'&& panelHasAncestorId(panels[index], "ScoreAndTimeAndBomb"))' in script
+    assert b"function panelHasAncestorId(panel, wantedId)" in script
+    assert b"panel.style.opacity = null" in script
+    assert b"panel.style.visibility = null" in script
+    assert b"forcing 1/visible expands every" in script
+    assert b'advancedSetPanelRuntimeVisible(findTeamCounterRoot(), false)' in script
+    assert b'advancedSetPanelRuntimeVisible(findNativeRadar(), false)' in script
+    assert b'!advancedHudHidden && advancedQuickOptions.radar' in script
+    assert b'advancedEdgeTrigger.style.backgroundColor = "#00000000"' in script
+    assert b'advancedEdgeTrigger.style.border = "0px solid #00000000"' in script
+    assert b'advancedEdgeTrigger.style.boxShadow = "none"' in script
+    assert b"#e07f0a02" not in script
+    assert b"let advancedPreviousRoundButton = null" in script
+    assert b"let advancedNextRoundButton = null" in script
+    assert b"function advancedRoundIndexAtTick(tick)" in script
+    assert b"function advancedSeekRelativeRound(delta)" in script
+    assert b"advancedSetRoundStepEnabled(advancedPreviousRoundButton, currentIndex > 0)" in script
+    assert b"currentIndex >= 0 && currentIndex < advancedRoundIntervals.length - 1" in script
+    assert b'function () { return advancedSeekRelativeRound(-1); }' in script
+    assert b'function () { return advancedSeekRelativeRound(1); }' in script
+    assert 'advancedCopy("上一局", "Prev")'.encode() in script
+    assert 'advancedCopy("下一局", "Next")'.encode() in script
+    assert b'advancedRoundButton = advancedCreateButton(roundRow, "", advancedToggleRoundPicker, "96px")' in script
+    assert b'advancedPreviousRoundButton.style.borderRadius = "6px"' in script
+    assert b'advancedNextRoundButton.style.borderRadius = "6px"' in script
+    assert b'advancedPreviousRoundButton.style.marginRight = "3px"' in script
+    assert b'advancedNextRoundButton.style.marginRight = "3px"' in script
+    assert b'marker.style.height = "14px"' in script
+    assert b'marker.style.verticalAlign = "center"' in script
+    assert b'advancedRoundHintLabel = advancedCreateLabel(roundRow, "", 11, "#aaa8a2")' in script
+    assert b'advancedRoundHintLabel.style.width = "72px"' in script
+    assert b'advancedRoundHintLabel.style.height = "16px"' in script
+    assert b'const playerHelpRow = advancedCreatePanel("Panel", advancedMenuBody, "")' in script
+    assert b'playerHelpRow.style.paddingLeft = "40px"' in script
+    assert b'playerHelpRow.style.height = "20px"' in script
+    assert b'playerHelp.style.height = "16px"' in script
+    assert b'playersRow.style.marginTop = "2px"' in script
+
+
+def test_recording_build_keeps_pov_only_compiled_styles():
+    template_path = Path(__file__).resolve().parents[2] / "pov" / "pov_voice_template.vpk"
+    build = build_demo_voice_hud_vpk(
+        "match.dem",
+        template_path,
+        parser_factory=_FakeParser,
+    )
+    entries = read_inline_vpk(build.vpk_bytes)
+
+    assert "panorama/styles/hud/hudhealthammocenter.vcss_c" not in entries
+    assert "panorama/styles/hud/hudradar.vcss_c" in entries
+    assert "panorama/styles/hud/hudteamcounter-equipmentinfo.vcss_c" in entries
+    assert "panorama/styles/hud/hudteamcounter.vcss_c" in entries
+
+
 def test_static_pov_package_resets_only_stale_match_alert_toasts():
     package_path = Path(__file__).resolve().parents[2] / "pov" / "pov_default.vpk"
     entries = read_inline_vpk(package_path.read_bytes())
@@ -474,6 +1042,10 @@ def test_static_pov_package_resets_only_stale_match_alert_toasts():
     alert_style = entries["panorama/styles/hud/hudalerts_insight.vcss_c"]
     assert "panorama/layout/hud/hudalerts.vxml_c" in entries
     assert "panorama/styles/hud/hudalerts.vcss_c" not in entries
+    assert "panorama/styles/hud/hudhealthammocenter.vcss_c" not in entries
+    assert "panorama/styles/hud/hudradar.vcss_c" in entries
+    assert "panorama/styles/hud/hudteamcounter-equipmentinfo.vcss_c" in entries
+    assert "panorama/styles/hud/hudteamcounter.vcss_c" in entries
     assert b"CSGOHudAlerts.CS2InsightSeekSuppress" in alert_style
     assert b"CSGOHudAlerts.CS2InsightPausedSeekSuppress" in alert_style
     assert b"PanoramaGameTimeJumpEvent" in alert_script
@@ -495,9 +1067,63 @@ def test_disabled_voice_omits_speaking_schedule_but_keeps_other_payload_data():
     assert payload[0] == [""]
     assert payload[1] == []
     assert payload[3] == [["111", 0, 2], ["222", 1, 3]]
+    assert payload[13] == "mute"
     assert build.voice_packets == 0
     assert build.speakers == 0
     assert build.intervals == 0
+
+
+def test_enemy_voice_mode_keeps_schedule_and_is_embedded_in_the_payload():
+    template_path = Path(__file__).resolve().parents[2] / "pov" / "pov_voice_template.vpk"
+    build = build_demo_voice_hud_vpk(
+        "match.dem",
+        template_path,
+        parser_factory=_FakeParser,
+        voice_mode="enemy",
+    )
+    script = read_inline_vpk(build.vpk_bytes)[VOICE_SCRIPT_PATH]
+    start = script.index(VOICE_DATA_BEGIN) + len(VOICE_DATA_BEGIN)
+    end = script.index(VOICE_DATA_END)
+    payload = json.loads(script[start:end].rstrip())
+
+    assert payload[1]
+    assert payload[13] == "enemy"
+    assert build.speakers > 0
+
+
+def test_session_console_commands_are_embedded_in_the_payload():
+    template_path = Path(__file__).resolve().parents[2] / "pov" / "pov_advanced_playback_template.vpk"
+    commands = [
+        "sv_cheats 1",
+        "mat_fullbright 0",
+        "r_rendersun 0",
+        "r_directlighting 0",
+        "r_indirectlighting 1",
+    ]
+    build = build_demo_voice_hud_vpk(
+        "match.dem",
+        template_path,
+        parser_factory=_FakeParser,
+        session_console_commands=commands,
+    )
+    script = read_inline_vpk(build.vpk_bytes)[VOICE_SCRIPT_PATH]
+    start = script.index(VOICE_DATA_BEGIN) + len(VOICE_DATA_BEGIN)
+    end = script.index(VOICE_DATA_END)
+    payload = json.loads(script[start:end].rstrip())
+
+    assert payload[14] == commands
+
+
+def test_session_console_commands_reject_command_separators():
+    template_path = Path(__file__).resolve().parents[2] / "pov" / "pov_advanced_playback_template.vpk"
+
+    with pytest.raises(DemoVoiceHudError, match="unsafe"):
+        build_demo_voice_hud_vpk(
+            "match.dem",
+            template_path,
+            parser_factory=_FakeParser,
+            session_console_commands=["r_rendersun 0;quit"],
+        )
 
 
 def test_radar_track_is_appended_at_payload_index_eight(monkeypatch):
@@ -1468,6 +2094,8 @@ def test_pov_manager_installs_generated_voice_package(monkeypatch, tmp_path: Pat
     (pov_dir / "pov_default.vpk").write_bytes(b"static")
     template = pov_dir / "pov_voice_template.vpk"
     template.write_bytes(b"template")
+    advanced_template = pov_dir / "pov_advanced_playback_template.vpk"
+    advanced_template.write_bytes(b"advanced-template")
 
     built = DemoVoiceHudBuild(
         vpk_bytes=b"generated",
@@ -1480,8 +2108,27 @@ def test_pov_manager_installs_generated_voice_package(monkeypatch, tmp_path: Pat
     )
     calls = []
 
-    def fake_build(demo_path, template_path, *, input_track_report=None, voice_enabled=True):
-        calls.append((Path(demo_path), Path(template_path), input_track_report, voice_enabled))
+    def fake_build(
+        demo_path,
+        template_path,
+        *,
+        input_track_report=None,
+        voice_enabled=True,
+        voice_mode="team",
+        advanced_playback_enabled=False,
+        session_console_commands=(),
+    ):
+        calls.append(
+            (
+                Path(demo_path),
+                Path(template_path),
+                input_track_report,
+                voice_enabled,
+                voice_mode,
+                advanced_playback_enabled,
+                tuple(session_console_commands),
+            )
+        )
         return built
 
     monkeypatch.setattr(pov_hud_manager, "build_demo_voice_hud_vpk", fake_build)
@@ -1491,8 +2138,40 @@ def test_pov_manager_installs_generated_voice_package(monkeypatch, tmp_path: Pat
     result = manager.install(demo_path=demo)
 
     assert result is built
-    assert calls == [(demo, template, None, True)]
+    assert calls == [(demo, template, None, True, "team", False, ())]
     assert (csgo / "pov.vpk").read_bytes() == b"generated"
     manifest = json.loads(manager.get_manifest_path().read_text(encoding="utf-8"))
     assert manifest["demo_voice_hud_generated"] is True
     assert manifest["demo_voice_hud"]["speakers"] == 2
+    assert manifest["demo_voice_hud"]["voice_mode"] == "team"
+
+    map_materials_dir = pov_dir / "map_materials"
+    map_materials_dir.mkdir()
+    monkeypatch.setattr(
+        pov_hud_manager,
+        "compose_recording_map_material_vpk",
+        lambda *, base_vpk_bytes, **_kwargs: base_vpk_bytes,
+    )
+    advanced_result = manager.install(
+        demo_path=demo,
+        advanced_playback_enabled=True,
+        map_material_id="waxed_reflection",
+    )
+
+    assert advanced_result is built
+    assert calls[-1] == (
+        demo,
+        advanced_template,
+        None,
+        True,
+        "team",
+        True,
+        (
+            "sv_cheats 1",
+            "mat_fullbright 0",
+            "r_rendersun 0",
+            "r_directlighting 0",
+            "r_indirectlighting 1",
+        ),
+    )
+    assert (csgo / "pov.vpk").read_bytes() == b"generated"

@@ -27,6 +27,13 @@ from ..demo_compat_service import ensure_demo_compatible
 from ..demo_paths import resolve_working_demo_path
 from ..databases import demo_db
 from ..runtime_session import runtime_session_dependency
+from ..skybox_vpk import DEFAULT_SKYBOX_ID, SkyboxVpkError, normalize_skybox_id
+from ..map_material_vpk import (
+    DEFAULT_MAP_MATERIAL_ID,
+    MapMaterialVpkError,
+    normalize_map_material_id,
+)
+from ..pov_constants import normalize_pov_voice_mode
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/recording", tags=["recording"])
@@ -569,7 +576,9 @@ class QueueRecordingRequest(BaseModel):
     requests: list[RecordingRequestDTO] = Field(..., min_length=1, max_length=100)
     warmup: Optional[dict] = None
     obs: Optional[dict] = None
-    pov_hud: Optional[dict] = None  # {enabled, radar_mode, teamcounter_numeric, voice_disabled}
+    pov_hud: Optional[dict] = None  # {enabled, radar_mode, teamcounter_numeric, voice_mode}
+    skybox: Optional[dict] = None  # {id: default|built-in id|custom:<uuid hex>}
+    map_material: Optional[dict] = None  # {id: default|waxed_reflection}
     # 仅本次录制队列生效，不写入 cs2-insight.config.json
     cs2_extra_launch_args: Optional[str] = None
     record_inject_console_lines: Optional[str] = None
@@ -772,21 +781,77 @@ async def execute_recording_queue(
         pov_hud_cfg = req.pov_hud
         if warmup_extras is None:
             warmup_extras = RecordingWarmupExtras()
+        explicit_voice_mode = pov_hud_cfg.get("voice_mode")
+        voice_mode = normalize_pov_voice_mode(
+            explicit_voice_mode
+            if explicit_voice_mode is not None
+            else warmup_extras.pov_voice_mode,
+            legacy_voice_disabled=(
+                explicit_voice_mode is None
+                and bool(
+                    pov_hud_cfg.get(
+                        "voice_disabled",
+                        warmup_extras.pov_voice_disabled,
+                    )
+                )
+            ),
+        )
         # Patch warmup extras with POV HUD settings
         warmup_extras = dataclasses.replace(
             warmup_extras,
             pov_hud_enabled=True,
             pov_radar_mode=int(pov_hud_cfg.get("radar_mode", 0)),
             pov_teamcounter_numeric=bool(pov_hud_cfg.get("teamcounter_numeric", False)),
-            pov_voice_disabled=bool(
-                pov_hud_cfg.get("voice_disabled", warmup_extras.pov_voice_disabled)
-            ),
+            pov_voice_mode=voice_mode,
+            pov_voice_disabled=False,
         )
         logger.info(
-            "[RecordingV3] POV HUD enabled: radar_mode=%s, teamcounter_numeric=%s, voice_disabled=%s",
+            "[RecordingV3] POV HUD enabled: radar_mode=%s, teamcounter_numeric=%s, voice_mode=%s",
             warmup_extras.pov_radar_mode,
             warmup_extras.pov_teamcounter_numeric,
-            warmup_extras.pov_voice_disabled,
+            warmup_extras.pov_voice_mode,
+        )
+
+    saved_skybox_id = getattr(cfg, "recording_skybox", DEFAULT_SKYBOX_ID)
+    raw_skybox_id = (
+        req.skybox.get("id", saved_skybox_id)
+        if isinstance(req.skybox, dict)
+        else saved_skybox_id
+    )
+    try:
+        recording_skybox_id = normalize_skybox_id(raw_skybox_id)
+    except SkyboxVpkError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    if recording_skybox_id != DEFAULT_SKYBOX_ID:
+        if warmup_extras is None:
+            warmup_extras = RecordingWarmupExtras()
+        warmup_extras = dataclasses.replace(
+            warmup_extras,
+            skybox_id=recording_skybox_id,
+        )
+        logger.info("[RecordingV3] skybox enabled: %s", recording_skybox_id)
+
+    saved_map_material_id = getattr(
+        cfg, "recording_map_material", DEFAULT_MAP_MATERIAL_ID
+    )
+    raw_map_material_id = (
+        req.map_material.get("id", saved_map_material_id)
+        if isinstance(req.map_material, dict)
+        else saved_map_material_id
+    )
+    try:
+        recording_map_material_id = normalize_map_material_id(raw_map_material_id)
+    except MapMaterialVpkError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    if recording_map_material_id != DEFAULT_MAP_MATERIAL_ID:
+        if warmup_extras is None:
+            warmup_extras = RecordingWarmupExtras()
+        warmup_extras = dataclasses.replace(
+            warmup_extras,
+            map_material_id=recording_map_material_id,
+        )
+        logger.info(
+            "[RecordingV3] map material enabled: %s", recording_map_material_id
         )
 
     global _queue_abort_event

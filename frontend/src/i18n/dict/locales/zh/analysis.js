@@ -6,7 +6,7 @@ export default {
   "analysis.workspace.waitForAll": "全部 Demo 解析完成后将自动进入计分板。",
   "analysis.workspace.resetDemos": "重置 Demo",
   "analysis.workspace.switchDemo": "切换 Demo",
-  "analysis.workspace.playDemo": "播放 Demo",
+  "analysis.workspace.playDemo": "高级播放 Demo",
   "analysis.workspace.demoViews": "Demo 分析视图",
   "analysis.workspace.demoSelector": "切换 Demo",
   "analysis.workspace.noDemoLoaded": "未载入 Demo",

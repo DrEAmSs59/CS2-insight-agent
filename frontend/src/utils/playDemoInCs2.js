@@ -1,5 +1,7 @@
 import API from "../api/api.js";
 import { messageFromApiCode, parseApiDetail } from "./apiErrorMessages.js";
+import { normalizeRecordingSkyboxId } from "./recordingSkybox.js";
+import { normalizeRecordingMapMaterialId } from "./recordingMapMaterial.js";
 
 export async function getDemoPlaybackPreflight() {
   const { data } = await API.get("/demo/playback/preflight");
@@ -15,12 +17,17 @@ export async function getDemoPlaybackStatus(sessionId) {
  * 启动 CS2 播放 Demo。优先库内 id，否则按 path。
  * @param {{ id?: number | string | null, path?: string | null }} opts
  */
-export async function playDemoInCs2({ id = null, path = null, povHud = null } = {}) {
+export async function playDemoInCs2({ id = null, path = null, advancedPlayback = null, povHud = null } = {}) {
+  const playback = advancedPlayback || povHud;
   const body = {
     pov_hud: {
-      enabled: !!povHud?.enabled,
-      radar_mode: Number(povHud?.radar_mode) === -1 ? -1 : 0,
-      teamcounter_numeric: !!povHud?.teamcounter_numeric,
+      enabled: !!playback?.enabled,
+      radar_mode: Number(playback?.radar_mode) === -1 ? -1 : 0,
+      teamcounter_numeric: !!playback?.teamcounter_numeric,
+      skybox_id: normalizeRecordingSkyboxId(playback?.skybox_id),
+    },
+    map_material: {
+      id: normalizeRecordingMapMaterialId(playback?.map_material_id),
     },
   };
   const demoId = id != null && String(id).trim() !== "" ? Number(id) : null;

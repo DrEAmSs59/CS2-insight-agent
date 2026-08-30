@@ -39,6 +39,24 @@ tools\demo-cosmetic-rewriter\target\release\demo-cosmetic-verifier.exe `
 
 第三方来源、六个修改文件和许可证见 `THIRD_PARTY.md`。不得提交真实或生成的 demo、本机 Steam 路径和用户绝对路径。
 
+## UserCmd 按键真源
+
+`demo-input-hud-track` 是只读的 DEM 按键提取器。它直接解码
+`svc_UserCmds -> CMsgServerUserCmd -> CCSGOUserCmdPB`，完整还原三组
+button-state bit plane、上下沿、stateful codegen-delta subtick 列表和
+`userinfo` player-slot 身份时间线；不从坐标、速度或游戏事件猜按键。
+
+```powershell
+cargo run --release --manifest-path tools\demo-cosmetic-rewriter\Cargo.toml `
+  --bin demo-input-hud-track -- `
+  --input input.dem `
+  --output tmp\input-track.json `
+  --include-evidence
+```
+
+完整掩码目录、三平面状态码、subtick delta wire 语义与 EWC 2026 实测见
+[`docs/demo-input-truth-source.md`](../../docs/demo-input-truth-source.md)。
+
 ## 玩家 HUD 只读审计（Probe 4A）
 
 `demo-hud-audit` 不修改 Demo，也不生成 Demo 副本。它扫描

@@ -6,6 +6,11 @@ import { useT } from "../i18n/useT.js";
 import { getDemoPlaybackPreflight, getDemoPlaybackStatus, playDemoErrorLabel, playDemoInCs2 } from "../utils/playDemoInCs2.js";
 import { parseApiDetail } from "../utils/apiErrorMessages.js";
 import { usePlayDemoToast } from "./usePlayDemoToast.jsx";
+import { DEFAULT_RECORDING_SKYBOX, normalizeRecordingSkyboxId } from "../utils/recordingSkybox.js";
+import {
+  DEFAULT_RECORDING_MAP_MATERIAL,
+  normalizeRecordingMapMaterialId,
+} from "../utils/recordingMapMaterial.js";
 
 function blockedReasonFromPreflight(data) {
   if (!data?.cs2_path_configured) return "path";
@@ -31,6 +36,11 @@ export function useDemoPlaybackDialog() {
   const [blockedReason, setBlockedReason] = useState("");
   const [launchingMode, setLaunchingMode] = useState("");
   const [error, setError] = useState("");
+  const [recordingSkybox, setRecordingSkybox] = useState(DEFAULT_RECORDING_SKYBOX);
+  const [recordingMapMaterial, setRecordingMapMaterial] = useState(
+    DEFAULT_RECORDING_MAP_MATERIAL,
+  );
+  const [skyboxResources, setSkyboxResources] = useState([]);
   const [restoreMonitor, setRestoreMonitor] = useState(null);
   const [restorePollError, setRestorePollError] = useState("");
 
@@ -71,6 +81,9 @@ export function useDemoPlaybackDialog() {
     try {
       const data = await getDemoPlaybackPreflight();
       setBlockedReason(blockedReasonFromPreflight(data));
+      setRecordingSkybox(normalizeRecordingSkyboxId(data?.recording_skybox));
+      setRecordingMapMaterial(normalizeRecordingMapMaterialId(data?.recording_map_material));
+      setSkyboxResources(Array.isArray(data?.skyboxes) ? data.skyboxes : []);
     } catch (preflightError) {
       // The launch endpoint remains authoritative; keep the choices available if preflight itself fails.
       setError(playDemoErrorLabel(preflightError, t));
@@ -83,6 +96,9 @@ export function useDemoPlaybackDialog() {
     setTarget({ id, path, label });
     setOpen(true);
     setLaunchingMode("");
+    setRecordingSkybox(DEFAULT_RECORDING_SKYBOX);
+    setRecordingMapMaterial(DEFAULT_RECORDING_MAP_MATERIAL);
+    setSkyboxResources([]);
     await runPreflight();
   }, [runPreflight]);
 
@@ -94,24 +110,26 @@ export function useDemoPlaybackDialog() {
     setError("");
   }, [launchingMode]);
 
-  const launch = useCallback(async (mode) => {
+  const launch = useCallback(async () => {
     if (!target || launchingMode) return;
-    setLaunchingMode(mode);
+    setLaunchingMode("advanced");
     setError("");
     try {
       const launchResult = await playDemoInCs2({
         id: target.id,
         path: target.path,
-        povHud: {
-          enabled: mode === "pov",
+        advancedPlayback: {
+          enabled: true,
           radar_mode: 0,
           teamcounter_numeric: false,
+          skybox_id: recordingSkybox,
+          map_material_id: recordingMapMaterial,
         },
       });
       setOpen(false);
       setTarget(null);
       setBlockedReason("");
-      if (mode === "pov" && launchResult?.session_id) {
+      if (launchResult?.session_id) {
         setRestorePollError("");
         setRestoreMonitor({
           sessionId: String(launchResult.session_id),
@@ -135,7 +153,7 @@ export function useDemoPlaybackDialog() {
     } finally {
       setLaunchingMode("");
     }
-  }, [launchingMode, showPlayToast, t, target]);
+  }, [launchingMode, recordingMapMaterial, recordingSkybox, showPlayToast, t, target]);
 
   const retryRestoreStatus = useCallback(async () => {
     const sessionId = restoreMonitor?.sessionId;
@@ -161,10 +179,14 @@ export function useDemoPlaybackDialog() {
         blockedReason={blockedReason}
         error={error}
         launchingMode={launchingMode}
+        recordingSkybox={recordingSkybox}
+        recordingMapMaterial={recordingMapMaterial}
+        skyboxResources={skyboxResources}
         onClose={close}
         onRetry={runPreflight}
-        onPlayNormal={() => void launch("normal")}
-        onPlayPov={() => void launch("pov")}
+        onPlayAdvanced={() => void launch()}
+        onRecordingSkyboxChange={setRecordingSkybox}
+        onRecordingMapMaterialChange={setRecordingMapMaterial}
       />
       <PlayDemoToast />
       <DemoPlaybackRestoreModal
@@ -178,7 +200,7 @@ export function useDemoPlaybackDialog() {
         }}
       />
     </>
-  ), [PlayDemoToast, blockedReason, checking, close, error, launch, launchingMode, open, restoreMonitor, restorePollError, retryRestoreStatus, runPreflight, target?.label]);
+  ), [PlayDemoToast, blockedReason, checking, close, error, launch, launchingMode, open, recordingMapMaterial, recordingSkybox, restoreMonitor, restorePollError, retryRestoreStatus, runPreflight, skyboxResources, target?.label]);
 
   return { requestPlayDemo, DemoPlaybackUi };
 }

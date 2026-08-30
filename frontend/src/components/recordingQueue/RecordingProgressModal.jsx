@@ -11,7 +11,7 @@ export default function RecordingProgressModal({
   onAbort,
 }) {
   const t = useT();
-  const status = statusText || t("app.batchRecording");
+  const status = statusText || t("common.preparingMapResources");
 
   return (
     <Modal

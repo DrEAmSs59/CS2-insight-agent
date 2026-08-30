@@ -19,6 +19,8 @@ import struct
 from typing import Any, Callable, Iterable, Mapping
 import zlib
 
+from .pov_constants import DEFAULT_POV_VOICE_MODE, normalize_pov_voice_mode
+
 # Radar overview edge mask for CT dropped-C4 LOS (grid^2 bits, hex-packed).
 RADAR_OCCLUSION_GRID = 96
 
@@ -42,11 +44,18 @@ class DemoVoiceHudError(RuntimeError):
 # subtitles / weapon pulses / broadcast (see internal Panorama VPK guide).
 # Index 8 is the custom radar track; index 9 is POV kill/HS feedback audio;
 # index 10 is POV flash-blind intervals (HUD wash + tinnitus cues); index 11
-# is the fully reconstructed lower-left feed (radio, chat, server notices).
+# is the fully reconstructed lower-left feed (radio, chat, server notices);
+# index 12 is the interactive advanced-playback roster/event index; index 13
+# stores the fixed recording voice audience (advanced playback has live controls);
+# index 14 stores trusted session console commands that Panorama reapplies only
+# after the demo controller reports a loaded map.
 RADAR_PAYLOAD_INDEX = 8
 KILL_FEEDBACK_PAYLOAD_INDEX = 9
 FLASH_BLIND_PAYLOAD_INDEX = 10
 RADIO_PAYLOAD_INDEX = 11
+ADVANCED_PLAYBACK_PAYLOAD_INDEX = 12
+VOICE_MODE_PAYLOAD_INDEX = 13
+SESSION_CONSOLE_COMMANDS_PAYLOAD_INDEX = 14
 RADAR_SAMPLE_HZ = 8
 _GROUND_ENTITY_FIELD = "CCSPlayerPawn.m_hGroundEntity"
 _LAST_JUMP_TICK_FIELD = (
@@ -97,6 +106,12 @@ class DemoVoiceHudBuild:
     radio_chat_messages: int = 0
     radio_server_messages: int = 0
     radio_parse_failed: int = 0
+    advanced_playback_enabled: int = 0
+    advanced_playback_players: int = 0
+    advanced_playback_events: int = 0
+    advanced_playback_rounds: int = 0
+    advanced_playback_total_tick: int = 0
+    advanced_playback_parse_failed: int = 0
 
 
 def _read_cstring(data: bytes, cursor: int, limit: int) -> tuple[str, int]:
@@ -110,8 +125,17 @@ def _read_cstring(data: bytes, cursor: int, limit: int) -> tuple[str, int]:
     return value, end + 1
 
 
-def read_inline_vpk(vpk_bytes: bytes) -> dict[str, bytes]:
+def read_inline_vpk(
+    vpk_bytes: bytes,
+    *,
+    include_paths: Iterable[str] | None = None,
+) -> dict[str, bytes]:
     """Read the inline entries used by the bundled, single-file VPK."""
+    selected_paths = (
+        {str(path).replace("\\", "/").strip("/") for path in include_paths}
+        if include_paths is not None
+        else None
+    )
     if len(vpk_bytes) < _VPK_HEADER.size:
         raise DemoVoiceHudError("VPK is shorter than its header")
     (
@@ -172,15 +196,15 @@ def read_inline_vpk(vpk_bytes: bytes) -> dict[str, bytes]:
                 entry_end = entry_start + entry_length
                 if entry_start < data_start or entry_end > data_end:
                     raise DemoVoiceHudError("VPK entry exceeds its inline data section")
-                body = preload + vpk_bytes[entry_start:entry_end]
-                if zlib.crc32(body) & 0xFFFFFFFF != expected_crc:
-                    raise DemoVoiceHudError("VPK entry CRC does not match its payload")
-
                 directory_part = "" if directory == " " else directory.strip("/")
                 extension_part = "" if extension == " " else f".{extension}"
                 leaf = f"{stem}{extension_part}"
                 full_path = f"{directory_part}/{leaf}" if directory_part else leaf
-                entries[full_path] = body
+                if selected_paths is None or full_path in selected_paths:
+                    body = preload + vpk_bytes[entry_start:entry_end]
+                    if zlib.crc32(body) & 0xFFFFFFFF != expected_crc:
+                        raise DemoVoiceHudError("VPK entry CRC does not match its payload")
+                    entries[full_path] = body
 
     if cursor != tree_end:
         raise DemoVoiceHudError("VPK directory tree has trailing or missing bytes")
@@ -341,7 +365,7 @@ def _normalize_map_name(raw: Any) -> str:
 
 def _pad_payload_slots(
     packed: list[Any],
-    length: int = RADIO_PAYLOAD_INDEX + 1,
+    length: int = SESSION_CONSOLE_COMMANDS_PAYLOAD_INDEX + 1,
 ) -> list[Any]:
     if not isinstance(packed, list):
         raise DemoVoiceHudError("voice HUD payload has an unsupported shape")
@@ -350,6 +374,22 @@ def _pad_payload_slots(
     while len(packed) < length:
         packed.append([])
     return packed
+
+
+def _normalize_session_console_commands(
+    commands: Iterable[object] | None,
+) -> list[str]:
+    normalized: list[str] = []
+    for raw in commands or ():
+        command = str(raw or "").strip()
+        if not command:
+            continue
+        if len(command) > 256 or any(char in command for char in "\r\n;"):
+            raise DemoVoiceHudError("session console command is unsafe")
+        normalized.append(command)
+        if len(normalized) > 32:
+            raise DemoVoiceHudError("too many session console commands")
+    return normalized
 
 
 def _encode_kill_feedback_events(
@@ -3160,6 +3200,378 @@ def add_radio_track_to_payload(
     return payload, stats
 
 
+_ADVANCED_EVENT_KILL = 0
+_ADVANCED_EVENT_UTILITY = 1
+_ADVANCED_UTILITY_STEMS = {
+    0: "smokegrenade",
+    1: "flashbang",
+    2: "hegrenade",
+    3: "molotov",
+    4: "incgrenade",
+    5: "decoy",
+}
+
+
+def _advanced_player_names(parser: Any) -> dict[int, str]:
+    try:
+        rows = parser.parse_player_info()
+    except Exception:  # noqa: BLE001 - names are optional at runtime
+        return {}
+    if not isinstance(rows, Mapping):
+        return {}
+    xuids = _row_values(rows, "steamid", "steam_id64", "xuid")
+    names = _row_values(rows, "name", "player_name")
+    result: dict[int, str] = {}
+    for raw_xuid, raw_name in zip(xuids, names):
+        xuid = _as_positive_int(raw_xuid)
+        name = str(raw_name or "").strip()
+        if xuid is not None and name:
+            result[xuid] = name
+    return result
+
+
+def _advanced_demo_total_tick(
+    parser: Any,
+    demo_path: str | Path,
+    *,
+    event_max_tick: int,
+) -> int:
+    """Resolve the real playback boundary for the Insight progress bar."""
+    candidates = [max(0, int(event_max_tick))]
+    header: Mapping[str, Any] = {}
+    try:
+        parsed = parser.parse_header()
+        if isinstance(parsed, Mapping):
+            header = parsed
+    except Exception:  # noqa: BLE001 - the file frame scan remains authoritative
+        pass
+    header_ticks = _as_int(header.get("playback_ticks") or header.get("playback_frames"))
+    if header_ticks is not None and header_ticks > 0:
+        candidates.append(header_ticks)
+    try:
+        playback_time = float(header.get("playback_time") or 0.0)
+    except (TypeError, ValueError):
+        playback_time = 0.0
+    if playback_time > 0:
+        candidates.append(int(round(playback_time * _infer_demo_tick_rate(parser, header))))
+    try:
+        from .demo_playback_compat import read_demo_end_tick
+
+        file_tick = int(read_demo_end_tick(demo_path))
+        if file_tick > 0:
+            candidates.append(file_tick)
+    except Exception:  # noqa: BLE001 - synthetic tests and malformed EOF use header fallback
+        pass
+    return max(1, *candidates)
+
+
+def _advanced_round_starts(parser: Any) -> list[tuple[int, int]]:
+    """Return stable ``(round_number, start_tick)`` rows for the menu.
+
+    Panorama's live ``RoundIntervals`` field is absent on several CS2 demo
+    controller builds. Resolve the timeline while the demo is already open in
+    demoparser instead. ``round_start`` is preferred because it is the round's
+    ``startFreezeTick`` anchor: event grouping, elapsed time, and navigation
+    must include the freeze phase. ``round_freeze_end`` remains a fallback for
+    demos whose round-start table is missing or incomplete.
+    """
+
+    match_start_tick: int | None = None
+    try:
+        announce = parser.parse_event("round_announce_match_start")
+    except Exception:  # noqa: BLE001 - warmup filtering is best effort
+        announce = None
+    announce_ticks = _row_values(announce, "tick") if isinstance(announce, Mapping) else []
+    valid_announce_ticks = sorted(
+        tick
+        for tick in (_as_int(raw_tick) for raw_tick in announce_ticks)
+        if tick is not None and tick >= 0
+    )
+    if valid_announce_ticks:
+        # A demo can contain several announces after warmup/knife restarts.
+        # The last one is the beginning of the retained competitive match.
+        match_start_tick = valid_announce_ticks[-1]
+
+    candidates_by_source: dict[str, list[int]] = {}
+    for event_name in ("round_start", "round_freeze_end"):
+        try:
+            rows = parser.parse_event(event_name)
+        except Exception:  # noqa: BLE001 - either source may be omitted by a demo
+            rows = None
+        ticks = _row_values(rows, "tick") if isinstance(rows, Mapping) else []
+        candidates = sorted(
+            {
+                tick
+                for tick in (_as_int(raw_tick) for raw_tick in ticks)
+                if tick is not None and tick >= 0
+            }
+        )
+        candidates_by_source[event_name] = candidates
+
+    freeze_ends = candidates_by_source.get("round_freeze_end", [])
+    if match_start_tick is not None and freeze_ends:
+        filtered_freeze_ends = [tick for tick in freeze_ends if tick >= match_start_tick]
+        if filtered_freeze_ends:
+            freeze_ends = filtered_freeze_ends
+
+    raw_freeze_starts = candidates_by_source.get("round_start", [])
+    freeze_starts = raw_freeze_starts
+    if match_start_tick is not None and raw_freeze_starts:
+        freeze_starts = [tick for tick in raw_freeze_starts if tick >= match_start_tick]
+
+        # round_announce_match_start can be emitted *inside* round one's freeze
+        # phase. In that case a strict >= filter drops the real startFreezeTick
+        # and makes the entire timeline fall back to round_freeze_end. Preserve
+        # the closest preceding round_start only when no post-announce start
+        # already exists before the first retained freeze end.
+        first_freeze_end = freeze_ends[0] if freeze_ends else None
+        has_post_announce_first_start = bool(
+            first_freeze_end is not None
+            and any(
+                match_start_tick <= tick < first_freeze_end
+                for tick in raw_freeze_starts
+            )
+        )
+        preceding = [tick for tick in raw_freeze_starts if tick < match_start_tick]
+        if first_freeze_end is not None and preceding and not has_post_announce_first_start:
+            freeze_starts.insert(0, preceding[-1])
+
+    if len(freeze_starts) >= len(freeze_ends):
+        starts = freeze_starts
+    else:
+        # Keep every known startFreezeTick even when the round_start table is
+        # partially retained. Fall back to freeze end only for the individual
+        # round whose freeze-start event is missing.
+        starts = []
+        previous_freeze_end: int | None = None
+        for freeze_end in freeze_ends:
+            matching_starts = [
+                tick
+                for tick in freeze_starts
+                if (previous_freeze_end is None or tick > previous_freeze_end)
+                and tick < freeze_end
+            ]
+            starts.append(matching_starts[-1] if matching_starts else freeze_end)
+            previous_freeze_end = freeze_end
+
+    return [(index + 1, tick) for index, tick in enumerate(starts)]
+
+
+def _advanced_round_intervals(
+    starts: list[tuple[int, int]],
+    *,
+    total_tick: int,
+) -> list[list[int]]:
+    intervals: list[list[int]] = []
+    for index, (round_number, start_tick) in enumerate(starts):
+        next_start = starts[index + 1][1] if index + 1 < len(starts) else total_tick + 1
+        intervals.append(
+            [
+                int(round_number),
+                max(0, int(start_tick)),
+                max(int(start_tick), int(next_start) - 1),
+            ]
+        )
+    return intervals
+
+
+def _encode_advanced_playback_events(
+    events: list[tuple[int, int, int, int, int, int]],
+) -> str:
+    """Delta encode ``tick,type,actor+1,target+1,detail,flags`` rows."""
+    previous_tick = 0
+    encoded: list[str] = []
+    for tick, kind, actor, target, detail, flags in events:
+        encoded.append(
+            ".".join(
+                (
+                    _base36(tick - previous_tick),
+                    _base36(kind),
+                    _base36(actor + 1),
+                    _base36(target + 1),
+                    _base36(detail),
+                    _base36(flags),
+                )
+            )
+        )
+        previous_tick = tick
+    return ",".join(encoded)
+
+
+def add_advanced_playback_track_to_payload(
+    voice_payload: bytes,
+    demo_path: str | Path,
+    *,
+    parser_factory: Callable[[str], Any] | None = None,
+) -> tuple[bytes, dict[str, Any]]:
+    """Append the XUID-bound interactive player/event menu at payload index 12."""
+    try:
+        packed = json.loads(voice_payload.decode("ascii"))
+    except (UnicodeDecodeError, ValueError, TypeError) as exc:
+        raise DemoVoiceHudError("voice HUD payload is not valid compact JSON") from exc
+    packed = _pad_payload_slots(packed)
+
+    encoded_roster = packed[3]
+    if not isinstance(encoded_roster, list):
+        raise DemoVoiceHudError("voice HUD payload contains no player roster")
+    roster_by_xuid: dict[int, tuple[int, int]] = {}
+    ordered_xuids: list[int] = []
+    for row in encoded_roster:
+        if not isinstance(row, list) or len(row) < 3:
+            continue
+        xuid = _as_positive_int(row[0])
+        slot = _as_int(row[1])
+        team = _as_int(row[2])
+        if xuid is None or slot is None or team not in (2, 3):
+            continue
+        roster_by_xuid[xuid] = (slot, team)
+        ordered_xuids.append(xuid)
+    if not ordered_xuids:
+        raise DemoVoiceHudError("advanced playback contains no team-bound players")
+
+    if parser_factory is None:
+        from demoparser2 import DemoParser
+
+        parser_factory = DemoParser
+    parser = parser_factory(str(demo_path))
+    names = _advanced_player_names(parser)
+    player_index = {xuid: index for index, xuid in enumerate(ordered_xuids)}
+    players = [
+        [str(xuid), names.get(xuid, ""), roster_by_xuid[xuid][1], roster_by_xuid[xuid][0]]
+        for xuid in ordered_xuids
+    ]
+
+    details = [""]
+    detail_indexes = {"": 0}
+
+    def detail_index(value: Any) -> int:
+        text = str(value or "").strip()
+        if text not in detail_indexes:
+            detail_indexes[text] = len(details)
+            details.append(text)
+        return detail_indexes[text]
+
+    events: list[tuple[int, int, int, int, int, int]] = []
+    try:
+        deaths = parser.parse_event("player_death")
+    except Exception:  # noqa: BLE001 - individual event families are best effort
+        deaths = None
+    if isinstance(deaths, Mapping):
+        ticks = _row_values(deaths, "tick")
+        attackers = _row_values(deaths, "attacker_steamid")
+        victims = _row_values(deaths, "user_steamid")
+        weapons = _row_values(deaths, "weapon")
+        headshots = _row_values(deaths, "headshot")
+        through_smokes = _row_values(deaths, "thrusmoke", "through_smoke")
+        penetrated = _row_values(deaths, "penetrated")
+        noscopes = _row_values(deaths, "noscope")
+        attacker_blinds = _row_values(deaths, "attackerblind", "attacker_blind")
+        assisted_flashes = _row_values(deaths, "assistedflash", "assisted_flash")
+        count = min(len(ticks), len(victims))
+        for index in range(count):
+            tick = _as_int(ticks[index])
+            attacker = _as_positive_int(attackers[index]) if index < len(attackers) else None
+            victim = _as_positive_int(victims[index])
+            actor_index = player_index.get(attacker, -1)
+            victim_index = player_index.get(victim, -1)
+            if tick is None or tick < 0 or (actor_index < 0 and victim_index < 0):
+                continue
+            weapon = weapons[index] if index < len(weapons) else ""
+            flags = (
+                (1 if index < len(headshots) and bool(headshots[index]) else 0)
+                | (2 if index < len(through_smokes) and bool(through_smokes[index]) else 0)
+                | (
+                    4
+                    if index < len(penetrated)
+                    and (_as_int(penetrated[index]) or 0) > 0
+                    else 0
+                )
+                | (8 if index < len(noscopes) and bool(noscopes[index]) else 0)
+                | (16 if index < len(attacker_blinds) and bool(attacker_blinds[index]) else 0)
+                | (32 if index < len(assisted_flashes) and bool(assisted_flashes[index]) else 0)
+            )
+            events.append(
+                (
+                    tick,
+                    _ADVANCED_EVENT_KILL,
+                    actor_index,
+                    victim_index,
+                    detail_index(weapon),
+                    flags,
+                )
+            )
+
+    native_utility: list[_RadioEvent] = []
+    rebuilt_utility: list[_RadioEvent] = []
+    try:
+        native_utility = _parse_radio_event_rows(
+            parser,
+            "grenade_thrown",
+            roster_by_xuid,
+            native=True,
+        )
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        rebuilt_utility = _parse_radio_event_rows(
+            parser,
+            "weapon_fire",
+            roster_by_xuid,
+        )
+    except Exception:  # noqa: BLE001
+        pass
+    utility_events, _rebuilt_count = _merge_native_and_rebuilt_radio_events(
+        native_utility,
+        rebuilt_utility,
+    )
+    for event in utility_events:
+        actor_index = player_index.get(event.xuid, -1)
+        if actor_index < 0:
+            continue
+        events.append(
+            (
+                event.tick,
+                _ADVANCED_EVENT_UTILITY,
+                actor_index,
+                -1,
+                detail_index(_ADVANCED_UTILITY_STEMS.get(event.kind, "utility")),
+                1 if event.native else 0,
+            )
+        )
+
+    events.sort(key=lambda row: (row[0], row[1], row[2], row[3]))
+    round_starts = _advanced_round_starts(parser)
+    total_tick = _advanced_demo_total_tick(
+        parser,
+        demo_path,
+        event_max_tick=max(
+            max((row[0] for row in events), default=0),
+            max((row[1] for row in round_starts), default=0),
+        ),
+    )
+    round_intervals = _advanced_round_intervals(round_starts, total_tick=total_tick)
+    advanced = [
+        1,
+        int(round(_infer_demo_tick_rate(parser) * 1000.0)),
+        players,
+        details,
+        _encode_advanced_playback_events(events),
+        total_tick,
+        round_intervals,
+    ]
+    packed[ADVANCED_PLAYBACK_PAYLOAD_INDEX] = advanced
+    payload = json.dumps(packed, ensure_ascii=True, separators=(",", ":")).encode("ascii")
+    return payload, {
+        "advanced_playback_enabled": 1,
+        "advanced_playback_players": len(players),
+        "advanced_playback_events": len(events),
+        "advanced_playback_rounds": len(round_intervals),
+        "advanced_playback_total_tick": total_tick,
+        "advanced_playback_parse_failed": 0,
+        "payload_bytes": len(payload),
+    }
+
+
 def inject_voice_payload(template_vpk: bytes, payload: bytes) -> bytes:
     """Fill the bounded data slot and rebuild the VPK with fresh CRCs."""
     entries = read_inline_vpk(template_vpk)
@@ -3194,6 +3606,9 @@ def build_demo_voice_hud_vpk(
     parser_factory: Callable[[str], Any] | None = None,
     input_track_report: Mapping[str, Any] | None = None,
     voice_enabled: bool = True,
+    voice_mode: str = DEFAULT_POV_VOICE_MODE,
+    advanced_playback_enabled: bool = False,
+    session_console_commands: Iterable[object] | None = None,
 ) -> DemoVoiceHudBuild:
     payload, stats = build_voice_payload(demo_path, parser_factory=parser_factory)
     input_stats = {
@@ -3301,11 +3716,56 @@ def build_demo_voice_hud_vpk(
             "radio_parse_failed": 1,
         }
 
-    if not voice_enabled:
+    advanced_playback_stats: dict[str, Any] = {
+        "advanced_playback_enabled": 0,
+        "advanced_playback_players": 0,
+        "advanced_playback_events": 0,
+        "advanced_playback_rounds": 0,
+        "advanced_playback_total_tick": 0,
+        "advanced_playback_parse_failed": 0,
+    }
+    if advanced_playback_enabled:
+        try:
+            payload, advanced_playback_stats = add_advanced_playback_track_to_payload(
+                payload,
+                demo_path,
+                parser_factory=parser_factory,
+            )
+            stats["payload_bytes"] = int(
+                advanced_playback_stats.pop("payload_bytes", len(payload))
+            )
+        except DemoVoiceHudError:
+            advanced_playback_stats = {
+                "advanced_playback_enabled": 1,
+                "advanced_playback_players": 0,
+                "advanced_playback_events": 0,
+                "advanced_playback_rounds": 0,
+                "advanced_playback_total_tick": 0,
+                "advanced_playback_parse_failed": 1,
+            }
+            raise
+
+    resolved_voice_mode = normalize_pov_voice_mode(
+        voice_mode,
+        legacy_voice_disabled=not voice_enabled,
+    )
+    packed = _pad_payload_slots(json.loads(payload.decode("ascii")))
+    packed[VOICE_MODE_PAYLOAD_INDEX] = resolved_voice_mode
+    packed[SESSION_CONSOLE_COMMANDS_PAYLOAD_INDEX] = (
+        _normalize_session_console_commands(session_console_commands)
+    )
+    payload = json.dumps(
+        packed,
+        ensure_ascii=True,
+        separators=(",", ":"),
+    ).encode("ascii")
+    stats["payload_bytes"] = len(payload)
+
+    if resolved_voice_mode == "mute":
         # Keep roster, input, radar, kill-feedback, flash, and radio tracks intact.
         # Only remove the precomputed speaking schedule that drives the custom
         # lower-left notice; native voice volume is muted by the warmup policy.
-        packed = json.loads(payload.decode("ascii"))
+        packed = _pad_payload_slots(json.loads(payload.decode("ascii")))
         packed[0] = [""]
         packed[1] = []
         payload = json.dumps(
@@ -3332,4 +3792,5 @@ def build_demo_voice_hud_vpk(
         **kill_feedback_stats,
         **flash_blind_stats,
         **radio_stats,
+        **advanced_playback_stats,
     )

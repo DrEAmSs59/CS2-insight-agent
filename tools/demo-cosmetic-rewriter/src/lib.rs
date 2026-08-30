@@ -1,6 +1,7 @@
 pub mod config;
 mod entity;
 pub mod header;
+pub mod input_command;
 mod rewrite;
 pub mod verify;
 mod workflow;

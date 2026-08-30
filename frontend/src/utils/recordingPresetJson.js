@@ -1,5 +1,12 @@
+import { isRecordingSkyboxId } from "./recordingSkybox.js";
+import {
+  isRecordingMapMaterialId,
+  normalizeRecordingMapMaterialId,
+} from "./recordingMapMaterial.js";
+import { isPovVoiceMode, normalizePovVoiceMode } from "./povVoiceMode.js";
+
 export const RECORDING_PRESET_FORMAT = "cs2-insight-recording-preset";
-export const RECORDING_PRESET_VERSION = 2;
+export const RECORDING_PRESET_VERSION = 4;
 export const RECORDING_PRESET_MAX_BYTES = 256 * 1024;
 
 const isObject = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
@@ -56,6 +63,9 @@ function parsePacing(value) {
 
 function parseWarmup(value, defaults) {
   if (!isObject(value)) invalid("default_record_warmup", "type");
+  const legacyVoiceDisabled = Object.hasOwn(value, "pov_voice_disabled")
+    ? requireBoolean(value.pov_voice_disabled, "default_record_warmup.pov_voice_disabled")
+    : false;
   const result = { ...defaults };
   for (const [key, defaultValue] of Object.entries(defaults)) {
     if (!Object.hasOwn(value, key)) continue;
@@ -67,6 +77,10 @@ function parseWarmup(value, defaults) {
       const n = requireNumber(value[key], field, -1, 0, true);
       if (n !== -1 && n !== 0) invalid(field, "range");
       result[key] = n;
+    } else if (key === "pov_voice_mode") {
+      const text = requireString(value[key], field, 16);
+      if (!isPovVoiceMode(text)) invalid(field, "range");
+      result[key] = text;
     } else if (key === "aspect_ratio") {
       const text = requireString(value[key], field, 8);
       if (!["", "4:3", "16:9", "16:10"].includes(text)) invalid(field, "range");
@@ -77,6 +91,11 @@ function parseWarmup(value, defaults) {
       result[key] = text;
     }
   }
+  result.pov_voice_mode = normalizePovVoiceMode(
+    Object.hasOwn(value, "pov_voice_mode") ? result.pov_voice_mode : undefined,
+    legacyVoiceDisabled,
+  );
+  result.pov_radar_mode = 0;
   return result;
 }
 
@@ -93,7 +112,7 @@ export function buildRecordingPresetFile(preset, exportedAt = new Date().toISOSt
 export function parseRecordingPresetFile(value, warmupDefaults) {
   if (!isObject(value)) invalid("root", "type");
   if (value.format !== RECORDING_PRESET_FORMAT) invalid("format", "format");
-  if (value.version !== 1 && value.version !== RECORDING_PRESET_VERSION) invalid("version", "version");
+  if (![1, 2, 3, RECORDING_PRESET_VERSION].includes(value.version)) invalid("version", "version");
   if (!isObject(value.preset)) invalid("preset", "type");
 
   const p = value.preset;
@@ -121,9 +140,24 @@ export function parseRecordingPresetFile(value, warmupDefaults) {
       ? kbOverlayTickOffset + storedKillFxOffset
       : (Object.hasOwn(p, "kill_fx_tick_offset") ? storedKillFxOffset : 6),
     experimental_pov_enabled: requireBoolean(p.experimental_pov_enabled, "experimental_pov_enabled"),
+    recording_skybox: Object.hasOwn(p, "recording_skybox")
+      ? requireString(p.recording_skybox, "recording_skybox", 64)
+      : "default",
+    recording_map_material: Object.hasOwn(p, "recording_map_material")
+      ? requireString(p.recording_map_material, "recording_map_material", 64)
+      : "default",
   };
   if (!["bottom_center", "minimap_below", "weapon_right"].includes(result.kb_overlay_position)) {
     invalid("kb_overlay_position", "range");
   }
+  if (!isRecordingSkyboxId(result.recording_skybox)) {
+    invalid("recording_skybox", "range");
+  }
+  if (!isRecordingMapMaterialId(result.recording_map_material)) {
+    invalid("recording_map_material", "range");
+  }
+  result.recording_map_material = normalizeRecordingMapMaterialId(
+    result.recording_map_material,
+  );
   return result;
 }

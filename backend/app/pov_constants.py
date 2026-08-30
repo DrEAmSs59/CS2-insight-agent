@@ -3,13 +3,32 @@
 from __future__ import annotations
 
 
+POV_VOICE_MODES = frozenset({"all", "team", "enemy", "mute"})
+DEFAULT_POV_VOICE_MODE = "team"
+
+
+def normalize_pov_voice_mode(
+    value: object,
+    *,
+    legacy_voice_disabled: bool = False,
+) -> str:
+    """Return one recording voice audience, migrating the old mute boolean."""
+    if legacy_voice_disabled:
+        return "mute"
+    text = str(value or "").strip().lower()
+    if text in POV_VOICE_MODES:
+        return text
+    return DEFAULT_POV_VOICE_MODE
+
+
 def pov_tail_commands(
     *,
     teamcounter_numeric: bool,
     radar_mode: int,
+    voice_mode: str = DEFAULT_POV_VOICE_MODE,
     voice_disabled: bool = False,
 ) -> list[str]:
-    """POV 末尾追加：局内玩家显示方式 + 雷达（值由录制前观战选项决定）。"""
+    """POV 末尾追加局内玩家、固定雷达状态与语音全局音量。"""
     rm = int(radar_mode)
     if rm not in (-1, 0):
         rm = -1
@@ -19,7 +38,11 @@ def pov_tail_commands(
     ]
     # This is deliberately last: POV_CORE_FORCED_COMMANDS first enables the
     # native demo voice path, then the per-session switch can mute its volume.
-    if voice_disabled:
+    mode = normalize_pov_voice_mode(
+        voice_mode,
+        legacy_voice_disabled=voice_disabled,
+    )
+    if mode == "mute":
         commands.append("snd_voipvolume 0")
     return commands
 
@@ -38,6 +61,10 @@ POV_CORE_FORCED_COMMANDS: list[str] = [
     "mp_forcecamera 0",
     "cl_trueview_show_status 0",
     "cl_spec_show_bindings 0",
+    # Suppress the demo spectator player card. Panorama keeps CS2's native
+    # HudHealthAmmoCenter visible instead, which provides the CT/T faction logo
+    # without replacing or recoloring any health-bar resource.
+    "cl_spec_stats 0",
     "r_spectator_flashbang_opacity 1",
     "cl_radar_always_centered 1",
     "cl_radar_square_always false",

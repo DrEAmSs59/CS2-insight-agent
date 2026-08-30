@@ -29,6 +29,8 @@ from ..env_utils import (
     save_config,
 )
 from ..update_info import build_update_payload, resolve_local_version_info
+from ..skybox_vpk import SkyboxVpkError, normalize_skybox_id
+from ..map_material_vpk import MapMaterialVpkError, normalize_map_material_id
 
 router = APIRouter(tags=["config"])
 
@@ -54,6 +56,8 @@ class ConfigPayload(BaseModel):
     expected_parse_players: Optional[list[str]] = None
     recording_global_pacing: Optional[dict[str, Any]] = None
     default_record_warmup: Optional[dict[str, Any]] = None
+    recording_skybox: Optional[str] = None
+    recording_map_material: Optional[str] = None
     cs2_extra_launch_args: Optional[str] = None
     cs2_extra_launch_args_user_configured: Optional[bool] = None
     record_inject_console_lines: Optional[str] = None
@@ -404,6 +408,18 @@ async def update_config(payload: ConfigPayload):
             if isinstance(payload.default_record_warmup, dict)
             else {}
         )
+    if payload.recording_skybox is not None:
+        try:
+            skybox_id = normalize_skybox_id(payload.recording_skybox)
+        except SkyboxVpkError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        cfg.recording_skybox = skybox_id
+    if payload.recording_map_material is not None:
+        try:
+            map_material_id = normalize_map_material_id(payload.recording_map_material)
+        except MapMaterialVpkError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        cfg.recording_map_material = map_material_id
     if payload.cs2_extra_launch_args is not None:
         next_launch_args = str(payload.cs2_extra_launch_args)
         if payload.cs2_extra_launch_args_user_configured is not None:

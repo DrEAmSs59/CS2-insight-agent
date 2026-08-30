@@ -13,7 +13,7 @@ export default {
   "api.err.demoPlaybackBusy": "A demo playback session is starting, running, or cleaning up. Exit CS2 and try again.",
   "api.err.demoPlaybackCs2PathMissing": "No valid CS2 path is configured. Select cs2.exe in Settings first.",
   "api.err.demoPlaybackDemoNotFound": "Demo file not found: {path}",
-  "api.err.demoPlaybackPovFailed": "POV HUD preparation failed: {err}",
+  "api.err.demoPlaybackPovFailed": "Advanced playback preparation failed: {err}",
   "api.err.demoPlaybackLaunchFailed": "Failed to launch CS2 demo playback: {err}",
   "api.err.demoFileNotFound": "The Demo was moved, deleted, or is unavailable. Select the file again.",
   "api.err.demoInvalidExtension": "The selected file is not a .dem file. Select a CS2 Demo with the .dem extension.",

@@ -1,4 +1,4 @@
-"""POV HUD：安装统一的 pov_default.vpk、增量 patch gameinfo.gi、备份与恢复（实验性功能）。"""
+"""录制 VPK 生命周期：生成天空/POV 包，临时挂载 gameinfo.gi，并可靠恢复。"""
 
 from __future__ import annotations
 
@@ -18,6 +18,21 @@ from typing import Any, Callable, Mapping, Optional
 
 from .cs2_config_backup import is_cs2_running
 from .demo_voice_hud import DemoVoiceHudBuild, DemoVoiceHudError, build_demo_voice_hud_vpk
+from .map_material_vpk import (
+    DEFAULT_MAP_MATERIAL_ID,
+    MapMaterialVpkError,
+    compose_recording_map_material_vpk,
+    map_material_console_commands,
+    normalize_map_material_id,
+)
+from .pov_constants import DEFAULT_POV_VOICE_MODE, normalize_pov_voice_mode
+from .skybox_vpk import (
+    DEFAULT_SKYBOX_ID,
+    SKYBOX_ASSETS,
+    SkyboxVpkError,
+    compose_recording_skybox_vpk,
+    normalize_skybox_id,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -132,19 +147,20 @@ def _atomic_write_json(path: Path, payload: Mapping[str, Any]) -> None:
     _atomic_write_text(path, json.dumps(dict(payload), ensure_ascii=False, indent=2))
 
 
-def _pov_dir_has_any_vpk(pov_dir: Path) -> bool:
+def _pov_dir_has_recording_assets(pov_dir: Path) -> bool:
     return (
         (pov_dir / "pov.vpk").is_file()
         or (pov_dir / "pov_default.vpk").is_file()
+        or (pov_dir / "skyboxes").is_dir()
     )
 
 
 def find_project_root() -> Path:
     current = Path(__file__).resolve()
     for parent in [current.parent, *current.parents]:
-        if _pov_dir_has_any_vpk(parent / "pov"):
+        if _pov_dir_has_recording_assets(parent / "pov"):
             return parent
-    raise PovHudError("未找到项目根目录下的 POV 资源（pov/pov_default.vpk 或旧版 pov/pov.vpk）")
+    raise PovHudError("未找到项目根目录下的录制资源（POV HUD 或天空盒目录）。")
 
 
 def resolve_pov_vpk_source_in_project_pov_dir(pov_dir: Path, map_name: Optional[str]) -> Path:
@@ -278,8 +294,23 @@ class PovHudManager:
     def get_pov_vpk_source_path(self, map_name: Optional[str] = None) -> Path:
         return resolve_pov_vpk_source_in_project_pov_dir(self.get_project_pov_dir(), map_name)
 
-    def get_voice_hud_template_path(self) -> Path:
-        return self.get_project_pov_dir() / "pov_voice_template.vpk"
+    def get_voice_hud_template_path(
+        self,
+        *,
+        advanced_playback_enabled: bool = False,
+    ) -> Path:
+        filename = (
+            "pov_advanced_playback_template.vpk"
+            if advanced_playback_enabled
+            else "pov_voice_template.vpk"
+        )
+        return self.get_project_pov_dir() / filename
+
+    def get_skybox_assets_dir(self) -> Path:
+        return self.get_project_pov_dir() / "skyboxes"
+
+    def get_map_material_assets_dir(self) -> Path:
+        return self.get_project_pov_dir() / "map_materials"
 
     def get_reference_default_gameinfo_path(self) -> Path:
         return self.get_project_pov_dir() / "gameinfo.gi.default"
@@ -421,6 +452,10 @@ class PovHudManager:
         demo_path: Optional[str | Path] = None,
         input_track_report: Optional[Mapping[str, Any]] = None,
         voice_enabled: bool = True,
+        voice_mode: str = DEFAULT_POV_VOICE_MODE,
+        advanced_playback_enabled: bool = False,
+        skybox_id: str = DEFAULT_SKYBOX_ID,
+        map_material_id: str = DEFAULT_MAP_MATERIAL_ID,
     ) -> Optional[DemoVoiceHudBuild]:
         if sys.platform != "win32":
             raise PovHudError("POV HUD 仅支持 Windows。")
@@ -431,12 +466,39 @@ class PovHudManager:
         if current_status.get("needs_restore"):
             self.restore()
 
-        pov_src = self.get_pov_vpk_source_path(map_name)
-        if not pov_src.is_file():
-            raise PovHudError("未找到 POV HUD 资源文件，请确认 pov 目录下资源完整。")
+        try:
+            selected_skybox = normalize_skybox_id(skybox_id)
+        except SkyboxVpkError as exc:
+            raise PovHudError(str(exc)) from exc
+        try:
+            selected_map_material = normalize_map_material_id(map_material_id)
+        except MapMaterialVpkError as exc:
+            raise PovHudError(str(exc)) from exc
 
+        needs_pov_source = demo_path is not None or (
+            selected_skybox == DEFAULT_SKYBOX_ID
+            and selected_map_material == DEFAULT_MAP_MATERIAL_ID
+        )
+        pov_src: Optional[Path] = None
+        if needs_pov_source:
+            pov_src = self.get_pov_vpk_source_path(map_name)
+            if not pov_src.is_file():
+                raise PovHudError("未找到 POV HUD 资源文件，请确认 pov 目录下资源完整。")
+
+        resolved_voice_mode = normalize_pov_voice_mode(
+            voice_mode,
+            legacy_voice_disabled=not voice_enabled,
+        )
         voice_build: Optional[DemoVoiceHudBuild] = None
-        voice_template = self.get_voice_hud_template_path()
+        voice_template = self.get_voice_hud_template_path(
+            advanced_playback_enabled=advanced_playback_enabled,
+        )
+        if (
+            demo_path is not None
+            and advanced_playback_enabled
+            and not voice_template.is_file()
+        ):
+            raise PovHudError(f"未找到高级播放 HUD 模板：{voice_template}")
         if demo_path is not None and voice_template.is_file():
             try:
                 voice_build = build_demo_voice_hud_vpk(
@@ -444,6 +506,13 @@ class PovHudManager:
                     voice_template,
                     input_track_report=input_track_report,
                     voice_enabled=voice_enabled,
+                    voice_mode=resolved_voice_mode,
+                    advanced_playback_enabled=advanced_playback_enabled,
+                    session_console_commands=(
+                        map_material_console_commands(selected_map_material)
+                        if advanced_playback_enabled
+                        else ()
+                    ),
                 )
                 logger.info(
                     "Built demo voice HUD: packets=%d speakers=%d intervals=%d "
@@ -466,10 +535,62 @@ class PovHudManager:
                     voice_build.payload_bytes,
                 )
             except (DemoVoiceHudError, OSError) as exc:
+                if advanced_playback_enabled:
+                    raise PovHudError(f"高级播放菜单数据生成失败：{exc}") from exc
                 logger.warning(
                     "Could not build demo-specific voice HUD; using the static POV package: %s",
                     exc,
                 )
+
+        package_bytes: Optional[bytes] = voice_build.vpk_bytes if voice_build is not None else None
+        effective_map_name = str(map_name or "").strip()
+        if not effective_map_name and voice_build is not None:
+            # Advanced playback already parses the demo header while building
+            # its HUD package. Reuse that detected map for skybox composition
+            # when the caller did not have a separate map name.
+            effective_map_name = str(voice_build.radar_map or "").strip()
+        visual_layer_enabled = (
+            selected_map_material != DEFAULT_MAP_MATERIAL_ID
+            or selected_skybox != DEFAULT_SKYBOX_ID
+        )
+        if demo_path is not None and package_bytes is None and visual_layer_enabled:
+            if pov_src is None:
+                raise PovHudError("未找到 POV HUD 资源文件，请确认 pov 目录下资源完整。")
+            package_bytes = pov_src.read_bytes()
+        if selected_map_material != DEFAULT_MAP_MATERIAL_ID:
+            map_material_assets_dir = self.get_map_material_assets_dir()
+            if not map_material_assets_dir.is_dir():
+                raise PovHudError(f"未找到地图材质资源目录：{map_material_assets_dir}")
+            try:
+                package_bytes = compose_recording_map_material_vpk(
+                    assets_dir=map_material_assets_dir,
+                    base_vpk_bytes=package_bytes,
+                    material_id=selected_map_material,
+                    map_name=effective_map_name,
+                )
+            except (OSError, MapMaterialVpkError) as exc:
+                raise PovHudError(f"地图材质 VPK 生成失败：{exc}") from exc
+        if selected_skybox != DEFAULT_SKYBOX_ID:
+            skybox_assets_dir = (
+                self.get_skybox_assets_dir()
+                if selected_skybox in SKYBOX_ASSETS
+                else None
+            )
+            if skybox_assets_dir is not None and not skybox_assets_dir.is_dir():
+                raise PovHudError(f"未找到内置天空盒资源目录：{skybox_assets_dir}")
+            try:
+                # Normal recording deliberately starts with an empty package,
+                # so enabling a skybox never brings the POV Panorama overrides
+                # into the ordinary HUD. POV recording composes onto its
+                # demo-specific package (or its static fallback).
+                package_bytes = compose_recording_skybox_vpk(
+                    builtin_assets_dir=skybox_assets_dir,
+                    base_vpk_bytes=package_bytes,
+                    skybox_id=selected_skybox,
+                    map_name=effective_map_name,
+                )
+            except (OSError, SkyboxVpkError) as exc:
+                raise PovHudError(f"天空盒 VPK 生成失败：{exc}") from exc
 
         gi_path = self.get_gameinfo_path()
         if not gi_path.is_file():
@@ -498,21 +619,51 @@ class PovHudManager:
                 f"无法备份 gameinfo.gi 到 {bak_path}。请检查 CS2 目录权限。系统错误：{e}"
             ) from e
 
+        if voice_build is not None:
+            source_basename = voice_template.name
+        elif selected_map_material != DEFAULT_MAP_MATERIAL_ID and demo_path is None:
+            source_basename = f"map_material:{selected_map_material}"
+        elif selected_skybox != DEFAULT_SKYBOX_ID and demo_path is None:
+            source_basename = (
+                Path(SKYBOX_ASSETS[selected_skybox][0]).name
+                if selected_skybox in SKYBOX_ASSETS
+                else selected_skybox
+            )
+        else:
+            source_basename = pov_src.name if pov_src is not None else ""
+
+        if selected_map_material != DEFAULT_MAP_MATERIAL_ID:
+            if demo_path is not None and selected_skybox != DEFAULT_SKYBOX_ID:
+                feature = "experimental_pov_with_map_material_and_skybox"
+            elif demo_path is not None:
+                feature = "experimental_pov_with_map_material"
+            elif selected_skybox != DEFAULT_SKYBOX_ID:
+                feature = "recording_map_material_with_skybox"
+            else:
+                feature = "recording_map_material"
+        else:
+            feature = (
+                "experimental_pov_with_skybox"
+                if demo_path is not None and selected_skybox != DEFAULT_SKYBOX_ID
+                else "recording_skybox"
+                if selected_skybox != DEFAULT_SKYBOX_ID
+                else "experimental_pov"
+            )
+
         manifest = {
             "state": "prepared",
             "enabled_by": "CS2 Insight Agent",
-            "feature": "experimental_pov",
+            "feature": feature,
             "installed_at": datetime.now(timezone.utc).isoformat(),
             "gameinfo_path": str(gi_path),
             "backup_gameinfo_path": str(bak_path),
             "pov_vpk_path": str(pov_dst),
-            "pov_vpk_source_basename": (
-                voice_template.name if voice_build is not None else pov_src.name
-            ),
+            "pov_vpk_source_basename": source_basename,
             "demo_voice_hud_generated": voice_build is not None,
             "demo_voice_hud": (
                 {
                     "voice_packets": voice_build.voice_packets,
+                    "voice_mode": resolved_voice_mode,
                     "speakers": voice_build.speakers,
                     "intervals": voice_build.intervals,
                     "location_changes": voice_build.location_changes,
@@ -542,11 +693,19 @@ class PovHudManager:
                     "radio_chat_messages": voice_build.radio_chat_messages,
                     "radio_server_messages": voice_build.radio_server_messages,
                     "radio_parse_failed": bool(voice_build.radio_parse_failed),
+                    "advanced_playback_enabled": bool(voice_build.advanced_playback_enabled),
+                    "advanced_playback_players": voice_build.advanced_playback_players,
+                    "advanced_playback_events": voice_build.advanced_playback_events,
+                    "advanced_playback_rounds": voice_build.advanced_playback_rounds,
+                    "advanced_playback_total_tick": voice_build.advanced_playback_total_tick,
+                    "advanced_playback_parse_failed": bool(voice_build.advanced_playback_parse_failed),
                 }
                 if voice_build is not None
                 else None
             ),
-            "demo_map_name_used": (map_name or "").strip(),
+            "demo_map_name_used": effective_map_name,
+            "recording_skybox_id": selected_skybox,
+            "recording_map_material_id": selected_map_material,
             "original_gameinfo_sha256": original_sha,
         }
         try:
@@ -567,12 +726,16 @@ class PovHudManager:
                 logger.error("Could not roll back failed POV HUD install: %s", rollback_error)
 
         try:
-            if voice_build is not None:
-                _atomic_write_bytes(pov_dst, voice_build.vpk_bytes)
+            if package_bytes is not None:
+                _atomic_write_bytes(pov_dst, package_bytes)
             else:
+                if pov_src is None:
+                    raise PovHudError("未找到可安装的录制 VPK 资源。")
                 _atomic_copy(pov_src, pov_dst)
-        except OSError as e:
+        except (OSError, PovHudError) as e:
             rollback_failed_install()
+            if isinstance(e, PovHudError):
+                raise
             raise PovHudError(
                 f"无法写入 POV HUD 文件 {pov_dst}。请检查 CS2 目录权限。系统错误：{e}"
             ) from e

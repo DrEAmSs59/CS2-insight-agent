@@ -981,13 +981,7 @@ class DemoAnalyzer:
             expected_players=players,
         )
         self.has_player_keyboard_input = detect_player_keyboard_input(
-            self.parser,
-            start_tick=match_start_tick,
-            end_tick=getattr(
-                shared_facts,
-                "demo_end_tick",
-                getattr(shared_facts, "demo_max_tick", match_start_tick),
-            ),
+            demo_path=self.dem_path,
         )
         shared_roster = getattr(shared_facts, "all_players_roster", None)
         if isinstance(shared_roster, list):

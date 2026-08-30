@@ -82,7 +82,7 @@ export default {
   "match.remarkClickAdd": "点击添加备注...",
   "match.remarkCancel": "取消",
   "match.remarkSave": "保存",
-  "match.btnPlayCs2": "启动 CS2 播放 Demo",
+  "match.btnPlayCs2": "高级播放 Demo",
   "match.btnLocate": "定位",
   "match.btnDelete": "删除",
   "match.btnRemark": "备注",

@@ -46,6 +46,7 @@ from .api.demo_replay import router as demo_replay_router
 from .api.cosmetics_skin import router as cosmetics_skin_router
 from .api.config_backup import router as config_backup_router
 from .api.gsi import router as gsi_router
+from .api.game_resources import router as game_resources_router
 from .recording.api import router as recording_router
 from .features.lite_cut.api import router as lite_cut_router
 from .features.demo_playback.api import router as demo_playback_router
@@ -200,6 +201,7 @@ app.include_router(demo_replay_router)
 app.include_router(cosmetics_skin_router)
 app.include_router(config_backup_router)
 app.include_router(gsi_router)
+app.include_router(game_resources_router)
 
 app.add_middleware(
     CORSMiddleware,

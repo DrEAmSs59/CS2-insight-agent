@@ -41,6 +41,10 @@ def test_pov_forces_teammate_hud_color():
     assert "cl_hud_color 12" in POV_CORE_FORCED_COMMANDS
 
 
+def test_pov_suppresses_demo_player_card_without_replacing_health_hud():
+    assert "cl_spec_stats 0" in POV_CORE_FORCED_COMMANDS
+
+
 def test_pov_forces_native_player_overhead_name_equipment_and_range():
     expected = {
         "mp_forcecamera 0",
