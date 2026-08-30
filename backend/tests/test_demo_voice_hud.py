@@ -343,7 +343,175 @@ def test_exact_input_tracks_are_mapped_from_usercmd_slots_to_xuids():
         "input_commands": 100,
         "input_button_updates": 25,
         "input_subtick_steps": 12,
+        "input_weaponselect_requests": 0,
+        "input_weaponselect_resolved": 0,
+        "input_weaponselect_unresolved": 0,
+        "input_weaponselect_tracks": 0,
+        "input_weaponselect_parse_failed": 0,
+        "input_mouse_tracks": 0,
+        "input_mouse_samples": 0,
+        "input_mouse_updates": 0,
     }
+
+
+def test_exact_input_tracks_follow_userinfo_when_a_player_slot_is_reused():
+    voice_payload, _ = build_voice_payload("match.dem", parser_factory=_FakeParser)
+    payload, stats = add_input_tracks_to_payload(
+        voice_payload,
+        "match.dem",
+        {
+            "format_version": 4,
+            "commands": 40,
+            "button_updates": 4,
+            "subtick_steps": 0,
+            "player_identity_updates": [
+                {"demo_tick": 0, "player_slot": 0, "xuid": 111},
+                {"demo_tick": 20, "player_slot": 0, "xuid": 222},
+            ],
+            "tracks": [
+                {"slot": 0, "changes": 4, "encoded": "5.1,f.0,5.2,5.0"},
+            ],
+        },
+        parser_factory=_FakeParser,
+    )
+
+    assert json.loads(payload)[2] == [
+        ["111", "5.1,f.0"],
+        ["222", "p.2,5.0"],
+    ]
+    assert stats["input_tracks"] == 2
+    assert stats["input_changes"] == 4
+
+
+def test_exact_mouse_tracks_follow_userinfo_and_preserve_signed_axes():
+    voice_payload, _ = build_voice_payload("match.dem", parser_factory=_FakeParser)
+    payload, stats = add_input_tracks_to_payload(
+        voice_payload,
+        "match.dem",
+        {
+            "format_version": 8,
+            "commands": 3,
+            "button_updates": 1,
+            "subtick_steps": 0,
+            "mouse_updates": 3,
+            "player_identity_updates": [
+                {"demo_tick": 0, "player_slot": 0, "xuid": 111},
+                {"demo_tick": 20, "player_slot": 0, "xuid": 222},
+            ],
+            "tracks": [{"slot": 0, "changes": 1, "encoded": "0.1"}],
+            "mouse_tracks": [
+                {"slot": 0, "samples": 3, "encoded": "5.4.1,a.5.8,a.2.4"},
+            ],
+        },
+        parser_factory=_FakeParser,
+    )
+
+    assert json.loads(payload)[15] == [
+        ["111", "5.4.1,a.5.8"],
+        ["222", "p.2.4"],
+    ]
+    assert stats["input_mouse_tracks"] == 2
+    assert stats["input_mouse_samples"] == 3
+    assert stats["input_mouse_updates"] == 3
+
+
+def test_weaponselect_entity_indexes_drive_exact_number_row_pulses():
+    class _WeaponSelectionParser:
+        def __init__(self, _path: str):
+            pass
+
+        @staticmethod
+        def parse_ticks(fields, *, ticks):
+            assert fields == ["active_weapon", "item_def_idx"]
+            assert {10, 20, 30, 40, 50}.issubset(ticks)
+            return {
+                "tick": [10, 20, 30, 40, 50],
+                "steamid": [111, 111, 111, 111, 111],
+                "active_weapon": [
+                    0x4000 | 101,
+                    0x8000 | 102,
+                    0xC000 | 103,
+                    0x10000 | 104,
+                    0x14000 | 105,
+                ],
+                "item_def_idx": [7, 4, 42, 43, 49],
+            }
+
+    voice_payload, _ = build_voice_payload("match.dem", parser_factory=_FakeParser)
+    payload, stats = add_input_tracks_to_payload(
+        voice_payload,
+        "match.dem",
+        {
+            "format_version": 5,
+            "commands": 5,
+            "button_updates": 1,
+            "subtick_steps": 0,
+            "player_identity_updates": [
+                {"demo_tick": 0, "player_slot": 0, "xuid": 111},
+            ],
+            "tracks": [{"slot": 0, "changes": 1, "encoded": "0.1"}],
+            "weaponselect_requests": [
+                {
+                    "demo_tick": tick,
+                    "player_slot": 0,
+                    "command_index": index,
+                    "weaponselect": entity,
+                }
+                for index, (tick, entity) in enumerate(
+                    ((10, 101), (20, 102), (30, 103), (40, 104), (50, 105))
+                )
+            ],
+        },
+        parser_factory=_WeaponSelectionParser,
+    )
+
+    assert json.loads(payload)[6] == [
+        ["111", "a.1,1.0,9.2,1.0,9.3,1.0,9.4,1.0,9.5,1.0"]
+    ]
+    assert stats["input_weaponselect_requests"] == 5
+    assert stats["input_weaponselect_resolved"] == 5
+    assert stats["input_weaponselect_unresolved"] == 0
+    assert stats["input_weaponselect_tracks"] == 1
+    assert stats["input_weaponselect_parse_failed"] == 0
+
+
+def test_weaponselect_resolution_failure_does_not_drop_exact_button_track():
+    class _UnavailableWeaponStateParser:
+        def __init__(self, _path: str):
+            pass
+
+        @staticmethod
+        def parse_ticks(_fields, *, ticks):
+            assert ticks
+            raise RuntimeError("weapon state unavailable")
+
+    voice_payload, _ = build_voice_payload("match.dem", parser_factory=_FakeParser)
+    payload, stats = add_input_tracks_to_payload(
+        voice_payload,
+        "match.dem",
+        {
+            "format_version": 5,
+            "commands": 1,
+            "button_updates": 1,
+            "subtick_steps": 0,
+            "player_identity_updates": [
+                {"demo_tick": 0, "player_slot": 0, "xuid": 111},
+            ],
+            "tracks": [{"slot": 0, "changes": 1, "encoded": "0.1"}],
+            "weaponselect_requests": [
+                {"demo_tick": 10, "player_slot": 0, "weaponselect": 101},
+            ],
+        },
+        parser_factory=_UnavailableWeaponStateParser,
+    )
+
+    packed = json.loads(payload)
+    assert packed[2] == [["111", "0.1"]]
+    assert packed[6] == []
+    assert stats["input_weaponselect_requests"] == 1
+    assert stats["input_weaponselect_resolved"] == 0
+    assert stats["input_weaponselect_unresolved"] == 1
+    assert stats["input_weaponselect_parse_failed"] == 1
 
 
 def test_inline_vpk_round_trip_preserves_entries_and_checks_crc():
@@ -489,9 +657,70 @@ def test_checked_in_voice_template_contains_only_an_empty_payload():
     assert b'fx.anchor.style.x = "0px"' not in script
     assert b'fx.anchor.style.y = "0px"' not in script
     assert b'ConsoleCommand("cl_drawhud_force_radar 0")' not in script
-    assert b'["SHIFT", 0, 0' in script
-    assert b'["SPACE", 82, 112' in script
-    assert b'["R", 194, 0' in script
+    assert b'["1", 68, 0' in script
+    assert b'["5", 228, 0' in script
+    assert b'["E", 148, 35' in script
+    assert b'["TAB", 8, 35, 56, 32, 13, 7, 12' in script
+    assert b'["SHIFT", 8, 70' in script
+    assert b'["F", 188, 70, 36, 32, 18, 4, 11' in script
+    assert b'["SPACE", 68, 105' in script
+    assert b'["R", 188, 35' in script
+    assert b'["M1", 296, 35, 32, 32, 12, 6, 8' in script
+    assert b'["M2", 332, 35, 32, 32, 12, 6, 9' in script
+    assert b'pad.style.position = "276px 70px 0px"' in script
+    assert b"const MOUSE_PAD_WIDTH = 108" in script
+    assert b"const MOUSE_PAD_HEIGHT = 78" in script
+    assert b"const encodedMouseTracks = packed[15] || []" in script
+    assert b"const mouseTracksByXuid = {}" in script
+    assert b"let inputMousePad = null" in script
+    assert b"let inputMouseHeadDot = null" in script
+    assert b"inputMouseTrailDots" not in script
+    assert b"let inputMousePathXuid = \"\"" in script
+    assert b"let inputMousePathPoints = []" in script
+    assert b"const MOUSE_TRAIL_POINT_COUNT = 24" in script
+    assert b"function advanceMousePath(samples, xuid, tick)" in script
+    assert b"function panMousePathAtEdge()" in script
+    assert b"function smoothMousePath(points)" in script
+    assert b"smoothMousePath(advanceMousePath(samples || [], xuid, tick))" in script
+    assert b'pad.style.backgroundColor = "#00000000"' in script
+    assert b'pad.style.border = "0px solid #00000000"' in script
+    assert b'head.style.boxShadow = "fill #57ead780 0px 0px 5px 0px"' in script
+    assert b'segment.style.boxShadow = "none"' in script
+    assert b"horizontalAxis" not in script
+    assert b"verticalAxis" not in script
+    assert b"inputMouseCursorX += dx" in script
+    assert b"inputMouseCursorY += dy" in script
+    assert b"offsetX = 34 - newest.x * scale" not in script
+    assert b"offsetY = 33.5 - newest.y * scale" not in script
+    assert b"function updateMouseMotionPad(samples, xuid, tick)" in script
+    assert b"updateMouseMotionPad(mouseSamples, xuid, tick)" in script
+    assert b"const INPUT_HUD_REFRESH_SECONDS = 0.016" in script
+    assert b"function currentInputPovXuid(state)" not in script
+    assert b"const xuid = currentPovXuid(state)" in script
+    assert b"inputHudRenderedXuid === xuid && inputHudRenderedTick === tick" in script
+    assert b"$.Schedule(INPUT_HUD_REFRESH_SECONDS, updateInputHud)" in script
+    assert b"$.Schedule(0, updateInputHud)" not in script
+    assert b'inputHud.style.width = "392px"' in script
+    assert b'inputHud.style.height = "156px"' in script
+    assert b'inputHud.style.marginBottom = "139px"' in script
+    assert b'inputHud.style.flowChildren = "none"' in script
+    assert b'inputHud.style.overflow = "noclip"' not in script
+    assert b'inputHud.style.zIndex = "1000"' in script
+    assert b'key.style.verticalAlign = "center"' not in script
+    assert b'key.style.transform = "rotateZ(-2deg)"' not in script
+    assert b'key.style.fontStyle = "italic"' not in script
+    assert b'panel.style.backgroundColor = active ? "#12cfae9c" : "#00000000"' in script
+    assert b'panel.style.border = active ? "2px solid #d2fff8" : "1px solid #c9eef2dc"' in script
+    assert b'? "fill #19f5c455 0px 0px 8px 0px"' in script
+    assert b': "none"' in script
+    assert b"weaponSelectTracksByXuid" in script
+    input_hud_start = script.index(b"function createInputKey")
+    input_hud_end = script.index(b"function playerColorHex", input_hud_start)
+    assert b"stickyMask" not in script[input_hud_start:input_hud_end]
+    assert b"transitionDuration" not in script[input_hud_start:input_hud_end]
+    input_update_start = script.index(b"function updateInputHud()")
+    input_update_end = script.index(b"function playerColorHex", input_update_start)
+    assert b"advancedPovVisualsActive" not in script[input_update_start:input_update_end]
     assert b"onlyWhenActive" in script
     assert b'findHudTraverse("VisiblePlayerIDs")' in script
     assert b'GameInterfaceAPI.ConsoleCommand(commands[index])' in script
@@ -2130,13 +2359,15 @@ def test_pov_manager_installs_generated_voice_package(monkeypatch, tmp_path: Pat
         return built
 
     monkeypatch.setattr(pov_hud_manager, "build_demo_voice_hud_vpk", fake_build)
+    input_report = {"format_version": 4, "tracks": []}
+    monkeypatch.setattr(pov_hud_manager, "load_input_report", lambda _path: input_report)
     manager = PovHudManager(SimpleNamespace(cs2_path=str(cs2)))
     monkeypatch.setattr(manager, "get_project_pov_dir", lambda: pov_dir)
 
     result = manager.install(demo_path=demo)
 
     assert result is built
-    assert calls == [(demo, template, None, True, "team", False, ())]
+    assert calls == [(demo, template, input_report, True, "team", False, ())]
     assert (csgo / "pov.vpk").read_bytes() == b"generated"
     manifest = json.loads(manager.get_manifest_path().read_text(encoding="utf-8"))
     assert manifest["demo_voice_hud_generated"] is True
@@ -2160,7 +2391,7 @@ def test_pov_manager_installs_generated_voice_package(monkeypatch, tmp_path: Pat
     assert calls[-1] == (
         demo,
         advanced_template,
-        None,
+        input_report,
         True,
         "team",
         True,

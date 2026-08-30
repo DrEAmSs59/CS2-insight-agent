@@ -40,6 +40,7 @@ from .inline_vpk_stream import (
     VerifiedFileSource,
     write_inline_vpk_file,
 )
+from .input_command import InputCommandError, load_input_report
 from .map_material_vpk import (
     DEFAULT_MAP_MATERIAL_ID,
     MapMaterialVpkError,
@@ -987,6 +988,15 @@ class PovHudManager:
             voice_mode,
             legacy_voice_disabled=not voice_enabled,
         )
+        resolved_input_track_report = input_track_report
+        if demo_path is not None and resolved_input_track_report is None:
+            try:
+                resolved_input_track_report = load_input_report(demo_path)
+            except InputCommandError as exc:
+                # The in-game keyboard is an independent exact-data layer. A
+                # demo without the authoritative UserCmd stream simply keeps
+                # that panel hidden while the other VPK layers remain usable.
+                logger.info("No exact UserCmd track for the VPK keyboard: %s", exc)
         voice_build: Optional[DemoVoiceHudBuild] = None
         voice_template = self.get_voice_hud_template_path(
             advanced_playback_enabled=advanced_playback_enabled,
@@ -1002,7 +1012,7 @@ class PovHudManager:
                 voice_build = build_demo_voice_hud_vpk(
                     demo_path,
                     voice_template,
-                    input_track_report=input_track_report,
+                    input_track_report=resolved_input_track_report,
                     voice_enabled=voice_enabled,
                     voice_mode=resolved_voice_mode,
                     advanced_playback_enabled=advanced_playback_enabled,
@@ -1014,7 +1024,8 @@ class PovHudManager:
                 )
                 logger.info(
                     "Built demo voice HUD: packets=%d speakers=%d intervals=%d "
-                    "locations=%d input_tracks=%d input_changes=%d radio=%d "
+                    "locations=%d input_tracks=%d input_changes=%d mouse=%d/%d "
+                    "weaponselect=%d/%d radio=%d "
                     "chat=%d server=%d native_radio=%d rebuilt_radio=%d radar_sounds=%d "
                     "native_sound_table=%d payload=%d bytes",
                     voice_build.voice_packets,
@@ -1023,6 +1034,10 @@ class PovHudManager:
                     voice_build.location_changes,
                     voice_build.input_tracks,
                     voice_build.input_changes,
+                    voice_build.input_mouse_tracks,
+                    voice_build.input_mouse_samples,
+                    voice_build.input_weaponselect_resolved,
+                    voice_build.input_weaponselect_requests,
                     voice_build.radio_events,
                     voice_build.radio_chat_messages,
                     voice_build.radio_server_messages,
@@ -1375,6 +1390,16 @@ class PovHudManager:
                     "input_commands": voice_build.input_commands,
                     "input_button_updates": voice_build.input_button_updates,
                     "input_subtick_steps": voice_build.input_subtick_steps,
+                    "input_weaponselect_requests": voice_build.input_weaponselect_requests,
+                    "input_weaponselect_resolved": voice_build.input_weaponselect_resolved,
+                    "input_weaponselect_unresolved": voice_build.input_weaponselect_unresolved,
+                    "input_weaponselect_tracks": voice_build.input_weaponselect_tracks,
+                    "input_weaponselect_parse_failed": bool(
+                        voice_build.input_weaponselect_parse_failed
+                    ),
+                    "input_mouse_tracks": voice_build.input_mouse_tracks,
+                    "input_mouse_samples": voice_build.input_mouse_samples,
+                    "input_mouse_updates": voice_build.input_mouse_updates,
                     "radar_players": voice_build.radar_players,
                     "radar_samples": voice_build.radar_samples,
                     "radar_parse_failed": bool(voice_build.radar_parse_failed),

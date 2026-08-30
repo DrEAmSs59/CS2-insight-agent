@@ -4,11 +4,12 @@
 // demo_voice_hud.py replaces only the bounded payload
 // between the two marker comments before installing the package. The payload
 // contains [location tokens, voice speakers, exact svc_UserCmd input tracks,
-// SteamID/slot/team roster, reserved slots, radar track at index 8,
+// SteamID/slot/team roster, reserved slots, exact weapon-selection pulses at
+// index 6, radar track at index 8,
 // kill/HS attacker-feedback cues at index 9, flash-blind intervals at index 10,
 // reconstructed team radio at index 11, advanced-playback menu data at index 12,
 // fixed recording voice audience at index 13, trusted post-load session console
-// commands at index 14].
+// commands at index 14, exact UserCmd mouse deltas at index 15].
 ;(function CS2InsightDemoVoiceHud() {
     "use strict";
 
@@ -17,6 +18,7 @@
     const encodedSpeakers = packed[1];
     const encodedInputTracks = packed[2] || [];
     const encodedRoster = packed[3] || [];
+    const encodedWeaponSelectTracks = packed[6] || [];
     const encodedRadar = packed[8] || null;
     const encodedKillFeedback = packed[9] || null;
     const encodedFlashBlind = packed[10] || null;
@@ -24,6 +26,7 @@
     const encodedAdvancedPlayback = packed[12] || null;
     const encodedRecordingVoiceMode = String(packed[13] || "team");
     const encodedSessionConsoleCommands = Array.isArray(packed[14]) ? packed[14] : [];
+    const encodedMouseTracks = packed[15] || [];
     const sessionConsoleCommands = encodedSessionConsoleCommands.map(function (command) {
         return String(command || "").trim();
     }).filter(Boolean);
@@ -89,6 +92,14 @@
     const STOCK_HUD_ALERT_SUPPRESS_CLASS = "CS2InsightPausedSeekSuppress";
     const STOCK_HUD_ALERT_RESUME_GRACE_TICKS = 128;
     const STOCK_HUD_ALERT_HIDDEN_STABLE_FRAMES = 10;
+    const MOUSE_TRAIL_POINT_COUNT = 24;
+    const MOUSE_TRAIL_WINDOW_TICKS = 48;
+    const MOUSE_PAD_WIDTH = 108;
+    const MOUSE_PAD_HEIGHT = 78;
+    const MOUSE_PAD_EDGE_INSET = 6;
+    const MOUSE_PATH_VISUAL_SCALE = 1.2;
+    const MOUSE_PATH_MAX_VISUAL_STEP = 26;
+    const INPUT_HUD_REFRESH_SECONDS = 0.016;
     const RADIO_PAYLOAD_VERSION = 2;
     // Current CS2 hudvoicestatus.vcss: AlertNoticeLifetime is 15.5s. The
     // ShowAndHide animation fades over 0-5%, holds through 90%, then fades to
@@ -153,6 +164,32 @@
             return [tick, parseInt(fields[1], 36)];
         });
         inputTracksByXuid[String(encoded[0])] = changes;
+    });
+    const weaponSelectTracksByXuid = {};
+    encodedWeaponSelectTracks.forEach(function (encoded) {
+        let previousTick = 0;
+        const changes = encoded[1].split(",").filter(Boolean).map(function (pair) {
+            const fields = pair.split(".");
+            const tick = previousTick + parseInt(fields[0], 36);
+            previousTick = tick;
+            return [tick, parseInt(fields[1], 36)];
+        });
+        weaponSelectTracksByXuid[String(encoded[0])] = changes;
+    });
+    const mouseTracksByXuid = {};
+    encodedMouseTracks.forEach(function (encoded) {
+        let previousTick = 0;
+        const samples = encoded[1].split(",").filter(Boolean).map(function (token) {
+            const fields = token.split(".");
+            const tick = previousTick + parseInt(fields[0], 36);
+            previousTick = tick;
+            return [
+                tick,
+                zigzagDecode(parseInt(fields[1], 36)),
+                zigzagDecode(parseInt(fields[2], 36)),
+            ];
+        });
+        mouseTracksByXuid[String(encoded[0])] = samples;
     });
 
     function zigzagDecode(value) {
@@ -584,6 +621,17 @@
     let audienceRefreshFrames = 0;
     let inputHud = null;
     let inputKeyPanels = [];
+    let inputMousePad = null;
+    let inputMouseHeadDot = null;
+    let inputMouseTrailSegments = [];
+    let inputMousePathXuid = "";
+    let inputMousePathLastTick = -1;
+    let inputMousePathSampleIndex = -1;
+    let inputMouseCursorX = MOUSE_PAD_WIDTH * 0.5;
+    let inputMouseCursorY = MOUSE_PAD_HEIGHT * 0.5;
+    let inputMousePathPoints = [];
+    let inputHudRenderedXuid = "";
+    let inputHudRenderedTick = -1;
     let radarHud = null;
     let flashWashPanel = null;
     let flashTinnitusArmedTick = -1;
@@ -2204,12 +2252,12 @@
     }
 
     function styleKey(panel, active) {
-        panel.style.backgroundColor = active ? "#12cfaee8" : "#071015c9";
-        panel.style.border = active ? "2px solid #a4fff0" : "1px solid #8aa3ad88";
-        panel.style.color = active ? "#ffffffff" : "#edf6f9e8";
+        panel.style.backgroundColor = active ? "#12cfae9c" : "#00000000";
+        panel.style.border = active ? "2px solid #d2fff8" : "1px solid #c9eef2dc";
+        panel.style.color = active ? "#ffffffff" : "#e9fbffff";
         panel.style.boxShadow = active
-            ? "fill #19f5c466 0px 0px 14px 0px"
-            : "fill #00000099 0px 2px 7px 0px";
+            ? "fill #19f5c455 0px 0px 8px 0px"
+            : "none";
     }
 
     function createInputKey(parent, spec, index) {
@@ -2222,13 +2270,227 @@
         key.style.fontSize = spec[5] + "px";
         key.style.fontWeight = "bold";
         key.style.textAlign = "center";
-        key.style.verticalAlign = "center";
         key.style.paddingTop = spec[6] + "px";
-        key.style.borderRadius = "5px";
-        key.style.transitionProperty = "background-color, border, color, box-shadow";
-        key.style.transitionDuration = "0.025s";
+        key.style.borderRadius = "3px";
+        key.style.textShadow = "0px 1px 2px #000000ff";
         styleKey(key, false);
         return key;
+    }
+
+    function createMouseMotionPad(parent) {
+        const pad = $.CreatePanel("Panel", parent, "CS2InsightMouseMotionPad");
+        pad.hittest = false;
+        pad.style.position = "276px 70px 0px";
+        pad.style.width = MOUSE_PAD_WIDTH + "px";
+        pad.style.height = MOUSE_PAD_HEIGHT + "px";
+        pad.style.flowChildren = "none";
+        pad.style.backgroundColor = "#00000000";
+        pad.style.border = "0px solid #00000000";
+        pad.style.boxShadow = "none";
+
+        inputMouseTrailSegments = [];
+        for (let index = 0; index < MOUSE_TRAIL_POINT_COUNT - 1; index += 1) {
+            const segment = $.CreatePanel("Panel", pad, "CS2InsightMouseTrailSegment" + index);
+            segment.hittest = false;
+            segment.visible = false;
+            segment.style.height = "2px";
+            segment.style.transformOrigin = "0% 50%";
+            segment.style.backgroundColor = "#d6f4f0";
+            segment.style.borderRadius = "1px";
+            segment.style.boxShadow = "none";
+            inputMouseTrailSegments.push(segment);
+        }
+
+        const head = $.CreatePanel("Panel", pad, "CS2InsightMouseHead");
+        head.hittest = false;
+        head.visible = false;
+        head.style.width = "6px";
+        head.style.height = "6px";
+        head.style.backgroundColor = "#effffcff";
+        head.style.borderRadius = "50%";
+        head.style.boxShadow = "fill #57ead780 0px 0px 5px 0px";
+        inputMouseHeadDot = head;
+        inputMousePad = pad;
+        return pad;
+    }
+
+    function mouseSampleIndexAtOrBefore(samples, tick) {
+        let low = 0;
+        let high = samples.length - 1;
+        let found = -1;
+        while (low <= high) {
+            const middle = (low + high) >> 1;
+            if (samples[middle][0] <= tick) {
+                found = middle;
+                low = middle + 1;
+            } else {
+                high = middle - 1;
+            }
+        }
+        return found;
+    }
+
+    function mouseVisualDelta(value) {
+        const scaled = Number(value || 0) * MOUSE_PATH_VISUAL_SCALE;
+        return Math.max(
+            -MOUSE_PATH_MAX_VISUAL_STEP,
+            Math.min(MOUSE_PATH_MAX_VISUAL_STEP, scaled)
+        );
+    }
+
+    function panMousePathAtEdge() {
+        const maximumX = MOUSE_PAD_WIDTH - MOUSE_PAD_EDGE_INSET;
+        const maximumY = MOUSE_PAD_HEIGHT - MOUSE_PAD_EDGE_INSET;
+        let shiftX = 0;
+        let shiftY = 0;
+        if (inputMouseCursorX < MOUSE_PAD_EDGE_INSET) {
+            shiftX = MOUSE_PAD_EDGE_INSET - inputMouseCursorX;
+        } else if (inputMouseCursorX > maximumX) {
+            shiftX = maximumX - inputMouseCursorX;
+        }
+        if (inputMouseCursorY < MOUSE_PAD_EDGE_INSET) {
+            shiftY = MOUSE_PAD_EDGE_INSET - inputMouseCursorY;
+        } else if (inputMouseCursorY > maximumY) {
+            shiftY = maximumY - inputMouseCursorY;
+        }
+        if (!shiftX && !shiftY) {
+            return;
+        }
+        inputMouseCursorX += shiftX;
+        inputMouseCursorY += shiftY;
+        inputMousePathPoints.forEach(function (point) {
+            point.x += shiftX;
+            point.y += shiftY;
+        });
+    }
+
+    function trimMousePath(tick) {
+        const minimumTick = tick - MOUSE_TRAIL_WINDOW_TICKS;
+        while (inputMousePathPoints.length
+                && inputMousePathPoints[0].tick < minimumTick) {
+            inputMousePathPoints.shift();
+        }
+        if (inputMousePathPoints.length > MOUSE_TRAIL_POINT_COUNT) {
+            inputMousePathPoints = inputMousePathPoints.slice(-MOUSE_TRAIL_POINT_COUNT);
+        }
+    }
+
+    function appendMousePathSample(sample) {
+        const sampleTick = Number(sample[0] || 0);
+        const dx = mouseVisualDelta(sample[1]);
+        const dy = mouseVisualDelta(sample[2]);
+        if (!dx && !dy) {
+            return;
+        }
+        if (!inputMousePathPoints.length) {
+            inputMousePathPoints.push({
+                x: inputMouseCursorX,
+                y: inputMouseCursorY,
+                tick: sampleTick,
+            });
+        }
+        inputMouseCursorX += dx;
+        inputMouseCursorY += dy;
+        panMousePathAtEdge();
+        inputMousePathPoints.push({
+            x: inputMouseCursorX,
+            y: inputMouseCursorY,
+            tick: sampleTick,
+        });
+        if (inputMousePathPoints.length > MOUSE_TRAIL_POINT_COUNT) {
+            inputMousePathPoints.shift();
+        }
+    }
+
+    function resetMousePath(samples, xuid, tick) {
+        inputMousePathXuid = xuid;
+        inputMousePathLastTick = tick;
+        inputMouseCursorX = MOUSE_PAD_WIDTH * 0.5;
+        inputMouseCursorY = MOUSE_PAD_HEIGHT * 0.5;
+        inputMousePathPoints = [];
+        inputMousePathSampleIndex = mouseSampleIndexAtOrBefore(
+            samples,
+            tick - MOUSE_TRAIL_WINDOW_TICKS - 1
+        );
+        while (inputMousePathSampleIndex + 1 < samples.length
+                && samples[inputMousePathSampleIndex + 1][0] <= tick) {
+            inputMousePathSampleIndex += 1;
+            appendMousePathSample(samples[inputMousePathSampleIndex]);
+        }
+        trimMousePath(tick);
+    }
+
+    function advanceMousePath(samples, xuid, tick) {
+        const discontinuity = inputMousePathXuid !== xuid
+            || inputMousePathLastTick < 0
+            || tick < inputMousePathLastTick
+            || tick - inputMousePathLastTick > TRANSIENT_HUD_TICK_JUMP_THRESHOLD;
+        if (discontinuity) {
+            resetMousePath(samples, xuid, tick);
+            return inputMousePathPoints;
+        }
+        while (inputMousePathSampleIndex + 1 < samples.length
+                && samples[inputMousePathSampleIndex + 1][0] <= tick) {
+            inputMousePathSampleIndex += 1;
+            appendMousePathSample(samples[inputMousePathSampleIndex]);
+        }
+        inputMousePathLastTick = tick;
+        trimMousePath(tick);
+        return inputMousePathPoints;
+    }
+
+    function smoothMousePath(points) {
+        return points.map(function (point, index) {
+            if (index === 0 || index === points.length - 1) {
+                return point;
+            }
+            const previous = points[index - 1];
+            const next = points[index + 1];
+            return {
+                x: (previous.x + point.x * 2 + next.x) * 0.25,
+                y: (previous.y + point.y * 2 + next.y) * 0.25,
+                tick: point.tick,
+            };
+        });
+    }
+
+    function updateMouseMotionPad(samples, xuid, tick) {
+        if (!inputMousePad || !inputMousePad.IsValid()) {
+            return;
+        }
+        inputMousePad.visible = Boolean(samples && samples.length);
+        const points = smoothMousePath(advanceMousePath(samples || [], xuid, tick));
+        inputMouseTrailSegments.forEach(function (segment, index) {
+            if (!segment || !segment.IsValid()) {
+                return;
+            }
+            if (index >= points.length - 1) {
+                segment.visible = false;
+                return;
+            }
+            const start = points[index];
+            const end = points[index + 1];
+            const dx = end.x - start.x;
+            const dy = end.y - start.y;
+            const distance = Math.max(1, Math.sqrt(dx * dx + dy * dy));
+            const age = (index + 1) / Math.max(1, points.length - 1);
+            segment.visible = true;
+            segment.style.position = start.x + "px " + start.y + "px 0px";
+            segment.style.width = distance + "px";
+            segment.style.opacity = String((0.06 + age * 0.54).toFixed(3));
+            segment.style.transform = "rotateZ(" + (Math.atan2(dy, dx) * 180 / Math.PI) + "deg)";
+        });
+        if (!inputMouseHeadDot || !inputMouseHeadDot.IsValid()) {
+            return;
+        }
+        if (!points.length) {
+            inputMouseHeadDot.visible = false;
+            return;
+        }
+        const head = points[points.length - 1];
+        inputMouseHeadDot.visible = true;
+        inputMouseHeadDot.style.position = (head.x - 3) + "px "
+            + (head.y - 3) + "px 0px";
     }
 
     function ensureInputHud() {
@@ -2243,24 +2505,33 @@
 
         inputHud = $.CreatePanel("Panel", root, "CS2InsightInputHud");
         inputHud.hittest = false;
-        inputHud.style.width = "396px";
-        inputHud.style.height = "144px";
+        inputHud.style.width = "392px";
+        inputHud.style.height = "156px";
         inputHud.style.horizontalAlign = "center";
         inputHud.style.verticalAlign = "bottom";
-        inputHud.style.marginBottom = "132px";
+        inputHud.style.marginBottom = "139px";
+        inputHud.style.flowChildren = "none";
         inputHud.style.zIndex = "1000";
 
         const specs = [
-            ["SHIFT", 0, 0, 74, 50, 16, 12, 6, false],
-            ["CTRL", 0, 56, 74, 50, 17, 11, 5, false],
-            ["W", 138, 0, 50, 50, 24, 8, 0, false],
-            ["A", 82, 56, 50, 50, 24, 8, 1, false],
-            ["S", 138, 56, 50, 50, 24, 8, 2, false],
-            ["D", 194, 56, 50, 50, 24, 8, 3, false],
-            ["R", 194, 0, 50, 50, 24, 8, 7, true],
-            ["SPACE", 82, 112, 162, 32, 14, 5, 4, false],
-            ["M1", 264, 0, 58, 144, 18, 52, 8, false],
-            ["M2", 338, 0, 58, 144, 18, 52, 9, false],
+            ["1", 68, 0, 36, 32, 18, 4, -1, false, 1],
+            ["2", 108, 0, 36, 32, 18, 4, -1, false, 2],
+            ["3", 148, 0, 36, 32, 18, 4, -1, false, 3],
+            ["4", 188, 0, 36, 32, 18, 4, -1, false, 4],
+            ["5", 228, 0, 36, 32, 18, 4, -1, false, 5],
+            ["W", 108, 35, 36, 32, 18, 4, 0, false, 0],
+            ["E", 148, 35, 36, 32, 18, 4, 10, false, 0],
+            ["R", 188, 35, 36, 32, 18, 4, 7, false, 0],
+            ["TAB", 8, 35, 56, 32, 13, 7, 12, false, 0],
+            ["SHIFT", 8, 70, 56, 32, 12, 7, 6, false, 0],
+            ["A", 68, 70, 36, 32, 18, 4, 1, false, 0],
+            ["S", 108, 70, 36, 32, 18, 4, 2, false, 0],
+            ["D", 148, 70, 36, 32, 18, 4, 3, false, 0],
+            ["F", 188, 70, 36, 32, 18, 4, 11, false, 0],
+            ["CTRL", 8, 105, 56, 32, 13, 7, 5, false, 0],
+            ["SPACE", 68, 105, 156, 32, 12, 7, 4, false, 0],
+            ["M1", 296, 35, 32, 32, 12, 6, 8, false, 0],
+            ["M2", 332, 35, 32, 32, 12, 6, 9, false, 0],
         ];
         inputKeyPanels = specs.map(function (spec, index) {
             const panel = createInputKey(inputHud, spec, index);
@@ -2270,8 +2541,12 @@
                 panel: panel,
                 bit: spec[7],
                 onlyWhenActive: onlyWhenActive,
+                weaponSlot: Number(spec[9]) || 0,
             };
         });
+        createMouseMotionPad(inputHud);
+        inputHudRenderedXuid = "";
+        inputHudRenderedTick = -1;
         return inputHud;
     }
 
@@ -2291,52 +2566,56 @@
         if (found < 0) {
             return 0;
         }
-        let mask = changes[found][1];
-        // Keep single-tick jump/reload/fire/scope transitions visible for four demo
-        // ticks without introducing a wall-clock that would desync after goto.
-        const stickyMask = (1 << 4) | (1 << 7) | (1 << 8) | (1 << 9);
-        for (let index = found; index >= 0 && changes[index][0] >= tick - 3; index -= 1) {
-            mask |= changes[index][1] & stickyMask;
-        }
-        return mask;
+        return changes[found][1];
     }
 
     function updateInputHud() {
+        // Register the next pass first. A transient Panorama panel invalidation
+        // during spec_player must not permanently kill the keyboard/mouse loop.
+        $.Schedule(INPUT_HUD_REFRESH_SECONDS, updateInputHud);
         const state = controller.GetDemoControllerState();
-        if (!advancedPovVisualsActive()) {
-            if (inputHud && inputHud.IsValid()) {
-                inputHud.visible = false;
-            }
-            $.Schedule(0.1, updateInputHud);
-            return;
-        }
         if (!state) {
             if (inputHud && inputHud.IsValid()) {
                 inputHud.visible = false;
             }
-            $.Schedule(0.1, updateInputHud);
+            inputHudRenderedXuid = "";
+            inputHudRenderedTick = -1;
             return;
         }
 
-        let xuid = currentPovXuid(state);
-        let changes = inputTracksByXuid[xuid];
+        const xuid = currentPovXuid(state);
+        const changes = inputTracksByXuid[xuid];
         if (!changes) {
             if (inputHud && inputHud.IsValid()) {
                 inputHud.visible = false;
             }
-            $.Schedule(0, updateInputHud);
+            inputHudRenderedXuid = "";
+            inputHudRenderedTick = -1;
             return;
         }
 
         const panel = ensureInputHud();
         panel.visible = true;
-        const mask = inputMaskAt(changes, state.nTick);
+        const tick = Number(state.nTick || 0);
+        if (inputHudRenderedXuid === xuid && inputHudRenderedTick === tick) {
+            return;
+        }
+        inputHudRenderedXuid = xuid;
+        inputHudRenderedTick = tick;
+        const mask = inputMaskAt(changes, tick);
+        const weaponSlot = inputMaskAt(weaponSelectTracksByXuid[xuid] || [], tick);
+        const mouseSamples = mouseTracksByXuid[xuid] || [];
         inputKeyPanels.forEach(function (key) {
-            const active = Boolean(mask & (1 << key.bit));
+            if (!key.panel || !key.panel.IsValid()) {
+                return;
+            }
+            const active = key.weaponSlot > 0
+                ? weaponSlot === key.weaponSlot
+                : Boolean(mask & (1 << key.bit));
             key.panel.visible = !key.onlyWhenActive || active;
             styleKey(key.panel, active);
         });
-        $.Schedule(0, updateInputHud);
+        updateMouseMotionPad(mouseSamples, xuid, tick);
     }
 
     function playerColorHex(xuid, colorSlot) {
@@ -6844,7 +7123,7 @@
 
     $.Schedule(0, ensureDemoVoicesUnmuted);
     $.Schedule(0, update);
-    $.Schedule(0, updateInputHud);
+    $.Schedule(INPUT_HUD_REFRESH_SECONDS, updateInputHud);
     $.Schedule(0, tickTeamCounterHud);
     $.Schedule(0, updateOverheadInfoHud);
     $.Schedule(0, tickFlashBlindHud);

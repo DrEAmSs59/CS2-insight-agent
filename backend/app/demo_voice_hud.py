@@ -9,6 +9,7 @@ locations extracted from the demo itself.
 
 from __future__ import annotations
 
+from bisect import bisect_right
 from collections import defaultdict
 from dataclasses import dataclass
 import json
@@ -40,15 +41,16 @@ class DemoVoiceHudError(RuntimeError):
     """Raised when a safe demo-specific HUD package cannot be produced."""
 
 
-# Payload indices 0-3 are voice/input/roster. 4-7 are reserved for mouse /
-# subtitles / weapon pulses / broadcast (see internal Panorama VPK guide).
+# Payload indices 0-3 are voice/input/roster. Index 6 carries exact
+# weapon-selection pulses; 4, 5, and 7 remain reserved.
 # Index 8 is the custom radar track; index 9 is POV kill/HS feedback audio;
 # index 10 is POV flash-blind intervals (HUD wash + tinnitus cues); index 11
 # is the fully reconstructed lower-left feed (radio, chat, server notices);
 # index 12 is the interactive advanced-playback roster/event index; index 13
 # stores the fixed recording voice audience (advanced playback has live controls);
 # index 14 stores trusted session console commands that Panorama reapplies only
-# after the demo controller reports a loaded map.
+# after the demo controller reports a loaded map; index 15 carries exact
+# CBaseUserCmdPB mousedx/mousedy samples for the keyboard's mouse-motion pad.
 RADAR_PAYLOAD_INDEX = 8
 KILL_FEEDBACK_PAYLOAD_INDEX = 9
 FLASH_BLIND_PAYLOAD_INDEX = 10
@@ -56,6 +58,10 @@ RADIO_PAYLOAD_INDEX = 11
 ADVANCED_PLAYBACK_PAYLOAD_INDEX = 12
 VOICE_MODE_PAYLOAD_INDEX = 13
 SESSION_CONSOLE_COMMANDS_PAYLOAD_INDEX = 14
+MOUSE_INPUT_PAYLOAD_INDEX = 15
+WEAPON_SELECT_PAYLOAD_INDEX = 6
+WEAPON_SELECT_ENTITY_INDEX_MASK = 0x3FFF
+WEAPON_SELECT_MATCH_MAX_TICKS = 4
 RADAR_SAMPLE_HZ = 8
 _GROUND_ENTITY_FIELD = "CCSPlayerPawn.m_hGroundEntity"
 _LAST_JUMP_TICK_FIELD = (
@@ -85,6 +91,14 @@ class DemoVoiceHudBuild:
     input_commands: int = 0
     input_button_updates: int = 0
     input_subtick_steps: int = 0
+    input_weaponselect_requests: int = 0
+    input_weaponselect_resolved: int = 0
+    input_weaponselect_unresolved: int = 0
+    input_weaponselect_tracks: int = 0
+    input_weaponselect_parse_failed: int = 0
+    input_mouse_tracks: int = 0
+    input_mouse_samples: int = 0
+    input_mouse_updates: int = 0
     radar_players: int = 0
     radar_samples: int = 0
     radar_parse_failed: int = 0
@@ -345,6 +359,10 @@ def _zigzag_encode(value: int) -> int:
     return (value << 1) if value >= 0 else ((-value << 1) - 1)
 
 
+def _zigzag_decode(value: int) -> int:
+    return -(value // 2) - 1 if value & 1 else value // 2
+
+
 def _player_color_slot(value: Any) -> int:
     if isinstance(value, str):
         key = value.strip().lower()
@@ -365,7 +383,7 @@ def _normalize_map_name(raw: Any) -> str:
 
 def _pad_payload_slots(
     packed: list[Any],
-    length: int = SESSION_CONSOLE_COMMANDS_PAYLOAD_INDEX + 1,
+    length: int = MOUSE_INPUT_PAYLOAD_INDEX + 1,
 ) -> list[Any]:
     if not isinstance(packed, list):
         raise DemoVoiceHudError("voice HUD payload has an unsupported shape")
@@ -2948,6 +2966,430 @@ def build_voice_payload(
 
 
 _ENCODED_INPUT_TRACK = re.compile(r"(?:[0-9a-z]+\.[0-9a-z]+)(?:,[0-9a-z]+\.[0-9a-z]+)*\Z")
+_ENCODED_MOUSE_TRACK = re.compile(
+    r"(?:[0-9a-z]+\.[0-9a-z]+\.[0-9a-z]+)"
+    r"(?:,[0-9a-z]+\.[0-9a-z]+\.[0-9a-z]+)*\Z"
+)
+
+
+def _decode_input_changes(encoded: str) -> list[tuple[int, int]]:
+    previous_tick = 0
+    changes: list[tuple[int, int]] = []
+    for token in encoded.split(","):
+        fields = token.split(".")
+        if len(fields) != 2:
+            raise DemoVoiceHudError("input-track report contains an invalid token")
+        try:
+            tick = previous_tick + int(fields[0], 36)
+            mask = int(fields[1], 36)
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise DemoVoiceHudError("input-track report contains invalid base36 data") from exc
+        if tick < previous_tick or mask < 0:
+            raise DemoVoiceHudError("input-track report contains a negative delta or mask")
+        changes.append((tick, mask))
+        previous_tick = tick
+    return changes
+
+
+def _encode_input_changes(changes: Iterable[tuple[int, int]]) -> str:
+    previous_tick = 0
+    encoded: list[str] = []
+    previous_mask = 0
+    for raw_tick, raw_mask in sorted(changes):
+        tick = int(raw_tick)
+        mask = int(raw_mask)
+        if tick < previous_tick or mask < 0:
+            raise DemoVoiceHudError("input-track projection is not monotonic")
+        if mask == previous_mask:
+            continue
+        encoded.append(f"{_base36(tick - previous_tick)}.{_base36(mask)}")
+        previous_tick = tick
+        previous_mask = mask
+    return ",".join(encoded)
+
+
+def _decode_mouse_samples(encoded: str) -> list[tuple[int, int, int]]:
+    previous_tick = 0
+    samples: list[tuple[int, int, int]] = []
+    for token in encoded.split(","):
+        fields = token.split(".")
+        if len(fields) != 3:
+            raise DemoVoiceHudError("mouse-track report contains an invalid token")
+        try:
+            tick = previous_tick + int(fields[0], 36)
+            mousedx = _zigzag_decode(int(fields[1], 36))
+            mousedy = _zigzag_decode(int(fields[2], 36))
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise DemoVoiceHudError("mouse-track report contains invalid base36 data") from exc
+        if tick < previous_tick:
+            raise DemoVoiceHudError("mouse-track report contains a negative tick delta")
+        if mousedx != 0 or mousedy != 0:
+            samples.append((tick, mousedx, mousedy))
+        previous_tick = tick
+    return samples
+
+
+def _encode_mouse_samples(samples: Iterable[tuple[int, int, int]]) -> str:
+    previous_tick = 0
+    encoded: list[str] = []
+    for raw_tick, raw_mousedx, raw_mousedy in sorted(samples):
+        tick = int(raw_tick)
+        mousedx = int(raw_mousedx)
+        mousedy = int(raw_mousedy)
+        if tick < previous_tick:
+            raise DemoVoiceHudError("mouse-track projection is not monotonic")
+        if mousedx == 0 and mousedy == 0:
+            continue
+        encoded.append(
+            f"{_base36(tick - previous_tick)}."
+            f"{_base36(_zigzag_encode(mousedx))}."
+            f"{_base36(_zigzag_encode(mousedy))}"
+        )
+        previous_tick = tick
+    return ",".join(encoded)
+
+
+def _identity_timeline_by_slot(
+    report: Mapping[str, Any],
+) -> dict[int, list[tuple[int, int]]]:
+    collected: dict[int, list[tuple[int, int]]] = defaultdict(list)
+    raw_identities = report.get("player_identity_updates")
+    if not isinstance(raw_identities, list):
+        return {}
+    for raw_update in raw_identities:
+        if not isinstance(raw_update, Mapping):
+            continue
+        try:
+            slot = int(raw_update.get("player_slot"))
+            tick = int(raw_update.get("demo_tick"))
+            xuid = int(raw_update.get("xuid") or raw_update.get("steamid") or 0)
+        except (TypeError, ValueError, OverflowError):
+            continue
+        if slot >= 0 and tick >= 0:
+            collected[slot].append((tick, xuid))
+
+    timelines: dict[int, list[tuple[int, int]]] = {}
+    for slot, updates in collected.items():
+        collapsed: list[tuple[int, int]] = []
+        for tick, xuid in sorted(updates, key=lambda item: item[0]):
+            if collapsed and collapsed[-1][1] == xuid:
+                continue
+            collapsed.append((tick, xuid))
+        if collapsed:
+            timelines[slot] = collapsed
+    return timelines
+
+
+def _identity_xuid_at(updates: list[tuple[int, int]], tick: int) -> int:
+    index = bisect_right([update_tick for update_tick, _xuid in updates], tick) - 1
+    return updates[index][1] if index >= 0 else 0
+
+
+def _weapon_slot_from_item_def(raw_item_def: Any) -> int | None:
+    from .features.demo_analysis.cs2_item_catalog import resolve_cs2_item
+
+    item = resolve_cs2_item(raw_item_def, 0)
+    if not item:
+        return None
+    item_type = str(item.get("type") or "")
+    category = str(item.get("category") or "")
+    model = str(item.get("model") or "")
+    if category in {"rifle", "smg", "heavy"}:
+        return 1
+    if category == "secondary":
+        return 2
+    if item_type == "melee" or category == "equipment":
+        return 3
+    if item_type == "utility":
+        return 4
+    if category == "c4" or model == "c4":
+        return 5
+    return None
+
+
+def _build_weapon_select_tracks(
+    demo_path: str | Path,
+    report: Mapping[str, Any],
+    slot_to_xuid: Mapping[int, int],
+    *,
+    parser_factory: Callable[[str], Any] | None,
+) -> tuple[list[list[str]], dict[str, int]]:
+    raw_requests = report.get("weaponselect_requests")
+    if not isinstance(raw_requests, list) or not raw_requests:
+        return [], {
+            "input_weaponselect_requests": 0,
+            "input_weaponselect_resolved": 0,
+            "input_weaponselect_unresolved": 0,
+            "input_weaponselect_tracks": 0,
+            "input_weaponselect_parse_failed": 0,
+        }
+
+    requests: list[tuple[int, int, int, int]] = []
+    for order, raw_request in enumerate(raw_requests):
+        if not isinstance(raw_request, Mapping):
+            continue
+        tick = _as_int(raw_request.get("demo_tick"))
+        slot = _as_int(raw_request.get("player_slot"))
+        entity_index = _as_int(raw_request.get("weaponselect"))
+        if tick is None or tick < 0 or slot is None or slot < 0 or entity_index is None:
+            continue
+        if entity_index <= 0:
+            continue
+        entity_index &= WEAPON_SELECT_ENTITY_INDEX_MASK
+        if entity_index <= 0:
+            continue
+        requests.append((tick, order, slot, entity_index))
+    requests.sort()
+    request_count = len(requests)
+    if not requests:
+        return [], {
+            "input_weaponselect_requests": 0,
+            "input_weaponselect_resolved": 0,
+            "input_weaponselect_unresolved": 0,
+            "input_weaponselect_tracks": 0,
+            "input_weaponselect_parse_failed": 0,
+        }
+
+    probe_ticks = sorted({
+        tick + offset
+        for tick, _order, _slot, _entity_index in requests
+        for offset in range(WEAPON_SELECT_MATCH_MAX_TICKS + 1)
+    })
+    if parser_factory is None:
+        from demoparser2 import DemoParser
+
+        parser_factory = DemoParser
+    parser = parser_factory(str(demo_path))
+    try:
+        rows = parser.parse_ticks(
+            ["active_weapon", "item_def_idx"],
+            ticks=probe_ticks,
+        )
+    except Exception as exc:  # noqa: BLE001 - native parser error boundary
+        raise DemoVoiceHudError(f"could not resolve weaponselect entities: {exc}") from exc
+    if not isinstance(rows, Mapping):
+        raise DemoVoiceHudError("demoparser returned unsupported weaponselect tick state")
+    ticks = rows.get("tick")
+    xuids = rows.get("steamid")
+    handles = rows.get("active_weapon")
+    item_defs = rows.get("item_def_idx")
+    if not all(isinstance(column, list) for column in (ticks, xuids, handles, item_defs)):
+        raise DemoVoiceHudError("weaponselect tick-state columns are missing")
+    assert isinstance(ticks, list)
+    assert isinstance(xuids, list)
+    assert isinstance(handles, list)
+    assert isinstance(item_defs, list)
+    if not (len(ticks) == len(xuids) == len(handles) == len(item_defs)):
+        raise DemoVoiceHudError("weaponselect tick-state columns are misaligned")
+
+    slots_by_entity: dict[tuple[int, int, int], int] = {}
+    item_def_slot_cache: dict[int, int | None] = {}
+    for raw_tick, raw_xuid, raw_handle, raw_item_def in zip(
+        ticks, xuids, handles, item_defs
+    ):
+        tick = _as_int(raw_tick)
+        xuid = _as_positive_int(raw_xuid)
+        handle = _as_int(raw_handle)
+        item_def = _as_int(raw_item_def)
+        if item_def is None:
+            continue
+        if item_def not in item_def_slot_cache:
+            item_def_slot_cache[item_def] = _weapon_slot_from_item_def(item_def)
+        weapon_slot = item_def_slot_cache[item_def]
+        if (
+            tick is None
+            or xuid is None
+            or handle is None
+            or handle <= 0
+            or weapon_slot is None
+        ):
+            continue
+        entity_index = handle & WEAPON_SELECT_ENTITY_INDEX_MASK
+        if entity_index > 0:
+            slots_by_entity[(tick, xuid, entity_index)] = weapon_slot
+
+    identity_by_slot = _identity_timeline_by_slot(report)
+    roster_xuids = set(slot_to_xuid.values())
+    pulses_by_xuid: dict[int, dict[int, int]] = defaultdict(dict)
+    resolved = 0
+    for tick, _order, player_slot, entity_index in requests:
+        identities = identity_by_slot.get(player_slot)
+        xuid = (
+            _identity_xuid_at(identities, tick)
+            if identities
+            else slot_to_xuid.get(player_slot, 0)
+        )
+        if xuid not in roster_xuids:
+            continue
+        weapon_slot = next(
+            (
+                slots_by_entity[(tick + offset, xuid, entity_index)]
+                for offset in range(WEAPON_SELECT_MATCH_MAX_TICKS + 1)
+                if (tick + offset, xuid, entity_index) in slots_by_entity
+            ),
+            None,
+        )
+        if weapon_slot is None:
+            continue
+        pulses_by_xuid[xuid][tick] = weapon_slot
+        pulses_by_xuid[xuid].setdefault(tick + 1, 0)
+        resolved += 1
+
+    encoded_tracks: list[list[str]] = []
+    for xuid, pulses in pulses_by_xuid.items():
+        encoded = _encode_input_changes(pulses.items())
+        if encoded:
+            encoded_tracks.append([str(xuid), encoded])
+    return encoded_tracks, {
+        "input_weaponselect_requests": request_count,
+        "input_weaponselect_resolved": resolved,
+        "input_weaponselect_unresolved": request_count - resolved,
+        "input_weaponselect_tracks": len(encoded_tracks),
+        "input_weaponselect_parse_failed": 0,
+    }
+
+
+def _identity_bound_input_tracks(
+    report: Mapping[str, Any],
+    slot_to_xuid: Mapping[int, int],
+) -> list[list[str]]:
+    tracks_by_slot: dict[int, list[tuple[int, int]]] = {}
+    raw_tracks = report.get("tracks")
+    if not isinstance(raw_tracks, list):
+        raise DemoVoiceHudError("input-track report contains no track list")
+    for raw_track in raw_tracks:
+        if not isinstance(raw_track, Mapping):
+            continue
+        try:
+            slot = int(raw_track.get("slot"))
+            changes = int(raw_track.get("changes"))
+        except (TypeError, ValueError, OverflowError):
+            continue
+        encoded = raw_track.get("encoded")
+        if (
+            slot < 0
+            or changes <= 0
+            or not isinstance(encoded, str)
+            or not _ENCODED_INPUT_TRACK.fullmatch(encoded)
+        ):
+            continue
+        decoded = _decode_input_changes(encoded)
+        if len(decoded) != changes:
+            raise DemoVoiceHudError(
+                f"input-track report change count mismatch for player slot {slot}"
+            )
+        tracks_by_slot[slot] = decoded
+
+    roster_xuids = set(slot_to_xuid.values())
+    identity_by_slot = _identity_timeline_by_slot(report)
+
+    # V3 reports without an identity timeline retain the old exact static-slot
+    # binding. V4 reports normally take the branch below, which prevents a
+    # reconnect or slot reuse from leaking one player's mask into another.
+    if not identity_by_slot:
+        encoded_tracks: list[list[str]] = []
+        for slot, changes in tracks_by_slot.items():
+            xuid = slot_to_xuid.get(slot)
+            encoded = _encode_input_changes(changes)
+            if xuid is not None and encoded:
+                encoded_tracks.append([str(xuid), encoded])
+        return encoded_tracks
+
+    projected: dict[int, list[tuple[int, int]]] = defaultdict(list)
+    for slot, changes in tracks_by_slot.items():
+        identities = identity_by_slot.get(slot)
+        if not identities:
+            xuid = slot_to_xuid.get(slot)
+            if xuid is not None:
+                projected[xuid].extend(changes)
+            continue
+        for index, (start_tick, xuid) in enumerate(identities):
+            end_tick = identities[index + 1][0] if index + 1 < len(identities) else None
+            if xuid not in roster_xuids:
+                continue
+            interval_changes = [
+                (tick, mask)
+                for tick, mask in changes
+                if tick >= start_tick and (end_tick is None or tick < end_tick)
+            ]
+            projected[xuid].extend(interval_changes)
+            if end_tick is not None:
+                projected[xuid].append((end_tick, 0))
+
+    encoded_tracks = []
+    for xuid, changes in projected.items():
+        # At equal ticks the later identity-bound event wins. This is needed
+        # when the Rust track resets a reused player slot at the same tick.
+        by_tick: dict[int, int] = {}
+        for tick, mask in changes:
+            by_tick[int(tick)] = int(mask)
+        encoded = _encode_input_changes(by_tick.items())
+        if encoded:
+            encoded_tracks.append([str(xuid), encoded])
+    return encoded_tracks
+
+
+def _identity_bound_mouse_tracks(
+    report: Mapping[str, Any],
+    slot_to_xuid: Mapping[int, int],
+) -> list[list[str]]:
+    samples_by_slot: dict[int, list[tuple[int, int, int]]] = {}
+    raw_tracks = report.get("mouse_tracks")
+    if not isinstance(raw_tracks, list):
+        return []
+    for raw_track in raw_tracks:
+        if not isinstance(raw_track, Mapping):
+            continue
+        try:
+            slot = int(raw_track.get("slot"))
+            sample_count = int(raw_track.get("samples"))
+        except (TypeError, ValueError, OverflowError):
+            continue
+        encoded = raw_track.get("encoded")
+        if (
+            slot < 0
+            or sample_count <= 0
+            or not isinstance(encoded, str)
+            or not _ENCODED_MOUSE_TRACK.fullmatch(encoded)
+        ):
+            continue
+        decoded = _decode_mouse_samples(encoded)
+        if len(decoded) != sample_count:
+            raise DemoVoiceHudError(
+                f"mouse-track report sample count mismatch for player slot {slot}"
+            )
+        samples_by_slot[slot] = decoded
+
+    roster_xuids = set(slot_to_xuid.values())
+    identity_by_slot = _identity_timeline_by_slot(report)
+    projected: dict[int, list[tuple[int, int, int]]] = defaultdict(list)
+    for slot, samples in samples_by_slot.items():
+        identities = identity_by_slot.get(slot)
+        if not identities:
+            xuid = slot_to_xuid.get(slot)
+            if xuid is not None:
+                projected[xuid].extend(samples)
+            continue
+        for tick, mousedx, mousedy in samples:
+            xuid = _identity_xuid_at(identities, tick)
+            if xuid in roster_xuids:
+                projected[xuid].append((tick, mousedx, mousedy))
+
+    encoded_tracks: list[list[str]] = []
+    for xuid, samples in projected.items():
+        by_tick: dict[int, tuple[int, int]] = {}
+        for tick, mousedx, mousedy in samples:
+            previous_dx, previous_dy = by_tick.get(int(tick), (0, 0))
+            by_tick[int(tick)] = (
+                previous_dx + int(mousedx),
+                previous_dy + int(mousedy),
+            )
+        encoded = _encode_mouse_samples(
+            (tick, axes[0], axes[1]) for tick, axes in by_tick.items()
+        )
+        if encoded:
+            encoded_tracks.append([str(xuid), encoded])
+    return encoded_tracks
 
 
 def add_input_tracks_to_payload(
@@ -2979,36 +3421,34 @@ def add_input_tracks_to_payload(
         if xuid is not None and slot >= 0:
             slot_to_xuid[slot] = xuid
 
-    raw_tracks = input_track_report.get("tracks")
-    if not isinstance(raw_tracks, list):
-        raise DemoVoiceHudError("input-track report contains no track list")
-    encoded_tracks: list[list[str]] = []
-    input_changes = 0
-    seen_xuids: set[str] = set()
-    for raw_track in raw_tracks:
-        if not isinstance(raw_track, Mapping):
-            continue
-        try:
-            slot = int(raw_track.get("slot"))
-            changes = int(raw_track.get("changes"))
-        except (TypeError, ValueError, OverflowError):
-            continue
-        if slot < 0 or changes <= 0:
-            continue
-        xuid = slot_to_xuid.get(slot)
-        encoded = raw_track.get("encoded")
-        if xuid is None or not isinstance(encoded, str) or not _ENCODED_INPUT_TRACK.fullmatch(encoded):
-            continue
-        xuid_text = str(xuid)
-        if xuid_text in seen_xuids:
-            raise DemoVoiceHudError(f"input-track report repeats Steam ID {xuid_text}")
-        seen_xuids.add(xuid_text)
-        encoded_tracks.append([xuid_text, encoded])
-        input_changes += changes
+    encoded_tracks = _identity_bound_input_tracks(input_track_report, slot_to_xuid)
+    input_changes = sum(encoded.count(",") + 1 for _, encoded in encoded_tracks)
     if not encoded_tracks:
         raise DemoVoiceHudError("input-track report contains no usable player tracks")
 
     packed[2] = encoded_tracks
+    try:
+        weapon_select_tracks, weapon_select_stats = _build_weapon_select_tracks(
+            demo_path,
+            input_track_report,
+            slot_to_xuid,
+            parser_factory=parser_factory,
+        )
+    except DemoVoiceHudError:
+        raw_requests = input_track_report.get("weaponselect_requests")
+        request_count = len(raw_requests) if isinstance(raw_requests, list) else 0
+        weapon_select_tracks = []
+        weapon_select_stats = {
+            "input_weaponselect_requests": request_count,
+            "input_weaponselect_resolved": 0,
+            "input_weaponselect_unresolved": request_count,
+            "input_weaponselect_tracks": 0,
+            "input_weaponselect_parse_failed": int(request_count > 0),
+        }
+    packed[WEAPON_SELECT_PAYLOAD_INDEX] = weapon_select_tracks
+    mouse_tracks = _identity_bound_mouse_tracks(input_track_report, slot_to_xuid)
+    packed[MOUSE_INPUT_PAYLOAD_INDEX] = mouse_tracks
+    mouse_samples = sum(encoded.count(",") + 1 for _, encoded in mouse_tracks)
     payload = json.dumps(packed, ensure_ascii=True, separators=(",", ":")).encode("ascii")
 
     def report_int(key: str) -> int:
@@ -3023,6 +3463,10 @@ def add_input_tracks_to_payload(
         "input_commands": report_int("commands"),
         "input_button_updates": report_int("button_updates"),
         "input_subtick_steps": report_int("subtick_steps"),
+        "input_mouse_tracks": len(mouse_tracks),
+        "input_mouse_samples": mouse_samples,
+        "input_mouse_updates": report_int("mouse_updates"),
+        **weapon_select_stats,
     }
 
 
@@ -3617,6 +4061,14 @@ def build_demo_voice_hud_vpk(
         "input_commands": 0,
         "input_button_updates": 0,
         "input_subtick_steps": 0,
+        "input_weaponselect_requests": 0,
+        "input_weaponselect_resolved": 0,
+        "input_weaponselect_unresolved": 0,
+        "input_weaponselect_tracks": 0,
+        "input_weaponselect_parse_failed": 0,
+        "input_mouse_tracks": 0,
+        "input_mouse_samples": 0,
+        "input_mouse_updates": 0,
     }
     if input_track_report is not None:
         payload, input_stats = add_input_tracks_to_payload(

@@ -26,7 +26,21 @@ _CACHE_LOCK = threading.Lock()
 _LOAD_LOCKS = tuple(threading.Lock() for _ in range(8))
 _report_cache: dict[tuple[str, int, int], dict[str, Any]] = {}
 
-_KEYS = ("W", "A", "S", "D", "jump", "crouch", "walk", "reload", "fire", "scope")
+_KEYS = (
+    "W",
+    "A",
+    "S",
+    "D",
+    "jump",
+    "crouch",
+    "walk",
+    "reload",
+    "fire",
+    "scope",
+    "use",
+    "inspect",
+    "scoreboard",
+)
 
 
 class InputCommandError(RuntimeError):
