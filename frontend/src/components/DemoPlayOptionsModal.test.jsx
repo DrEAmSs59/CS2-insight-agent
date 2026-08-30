@@ -64,6 +64,19 @@ describe("DemoPlayOptionsModal", () => {
         "cartoon9",
         "cartoon10",
       ]);
+    const skyboxGroups = Array.from(skyboxSelect.querySelectorAll("optgroup"));
+    expect(skyboxGroups.map(({ label }) => label)).toEqual([
+      "纯色天空盒",
+      "Insight 内置天空盒",
+      "我的天空盒",
+    ]);
+    expect(Array.from(skyboxGroups[0].querySelectorAll("option")).map((option) => ({
+      value: option.value,
+      label: option.textContent,
+    }))).toEqual([
+      { value: "chroma_blue", label: "蓝色" },
+      { value: "chroma_green", label: "绿色" },
+    ]);
     expect(screen.getByTestId("demo-play-skybox-preview").getAttribute("src"))
       .toBe("/skyboxes/cartoon3.webp");
     fireEvent.change(skyboxSelect, { target: { value: customSkyboxId } });

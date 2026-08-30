@@ -1,0 +1,311 @@
+{
+  "schema_version": 1,
+  "purpose": "color-agnostic compiled child-skybox patches",
+  "payload_catalog": {
+    "format": "zip",
+    "relative_path": "payloads.zip",
+    "entry_count": 20
+  },
+  "maps": {
+    "de_ancient": {
+      "status": "validated",
+      "main_map_patch_required": false,
+      "source_relative_path": "maps/prefabs/de_ancient/de_ancient_skybox.vpk",
+      "source_size": 52876914,
+      "source_sha256": "5faf10aa53d3e5a0d0f7987e57b0655297eac6f5dca7bff43230a394edd0673a",
+      "output_logical_path": "maps/prefabs/de_ancient/de_ancient_skybox.vpk",
+      "validated_output_size": 52879003,
+      "validated_output_sha256": "e6df489b25cefb402ec881650382581ca5eb130c223eae40a01d69acd3503ec5",
+      "replacements": [
+        {
+          "kind": "worldnode",
+          "entry_path": "maps/prefabs/de_ancient/de_ancient_skybox/worldnodes/n0.vwnod_c",
+          "original_size": 2919,
+          "original_sha256": "706ab1f26c91b57e4d8c02119ce9dbc5c7d5fdcb8eeecc31120256295aa4ea7a",
+          "payload_relative_path": "payloads/de_ancient/maps/prefabs/de_ancient/de_ancient_skybox/worldnodes/n0.vwnod_c",
+          "payload_size": 1774,
+          "payload_sha256": "e4bbb2ba49ffef1763414667ba243885e1028ca04fc783da399dc6869d30a4b6"
+        },
+        {
+          "kind": "entity_lump",
+          "entry_path": "maps/prefabs/de_ancient/de_ancient_skybox/entities/default_ents.vents_c",
+          "original_size": 3643,
+          "original_sha256": "f168591dac2dfb64e2e3dcbdc603a111fb323630f389dbe2c99cdf80b966a381",
+          "payload_relative_path": "payloads/de_ancient/maps/prefabs/de_ancient/de_ancient_skybox/entities/default_ents.vents_c",
+          "payload_size": 2825,
+          "payload_sha256": "ca82cd2bb0a70f73b81363148c516d6bf9ab675bbfbf18e5e13a068fd8f25a05"
+        }
+      ]
+    },
+    "de_anubis": {
+      "status": "validated",
+      "main_map_patch_required": false,
+      "source_relative_path": "maps/prefabs/de_anubis/de_anubis_skybox.vpk",
+      "source_size": 2579013,
+      "source_sha256": "aca7079335447a6bce255a8efc285345372de0336c6bcdbdb37749affa7828f8",
+      "output_logical_path": "maps/prefabs/de_anubis/de_anubis_skybox.vpk",
+      "validated_output_size": 2609479,
+      "validated_output_sha256": "ef0bafdc2792f94644eb5caa62ba5369b842d50b6328b9e573f0eb2a612f0c86",
+      "replacements": [
+        {
+          "kind": "worldnode",
+          "entry_path": "maps/prefabs/de_anubis/de_anubis_skybox/worldnodes/node000.vwnod_c",
+          "original_size": 35226,
+          "original_sha256": "bf459fad4fd6c3e4d8fc8aa791512d7484a1f3f359e9c7913901a57f5631a1a0",
+          "payload_relative_path": "payloads/de_anubis/maps/prefabs/de_anubis/de_anubis_skybox/worldnodes/node000.vwnod_c",
+          "payload_size": 28879,
+          "payload_sha256": "10c6371680842f94c4d65b93871048f78f0a80af9c0fdfa63f468421fcdba5c8"
+        },
+        {
+          "kind": "entity_lump",
+          "entry_path": "maps/prefabs/de_anubis/de_anubis_skybox/entities/default_ents.vents_c",
+          "original_size": 3818,
+          "original_sha256": "84220102eef7b7edd813dd1c1fdf9574457f52b3bf71f520a1f6f67185143b2c",
+          "payload_relative_path": "payloads/de_anubis/maps/prefabs/de_anubis/de_anubis_skybox/entities/default_ents.vents_c",
+          "payload_size": 2753,
+          "payload_sha256": "763192f1f5eba8504b19e8b541050e7487b57a82c3f87f46c4d91b8242845c74"
+        }
+      ]
+    },
+    "de_cache": {
+      "status": "validated",
+      "main_map_patch_required": false,
+      "source_relative_path": "maps/prefabs/de_cache/de_cache_sky.vpk",
+      "source_size": 22647681,
+      "source_sha256": "887f5d07a326022d500f2ecb4db07062e0f8926afb073ad1abd41c9eb940d418",
+      "output_logical_path": "maps/prefabs/de_cache/de_cache_sky.vpk",
+      "validated_output_size": 22670964,
+      "validated_output_sha256": "7b828f6116ed8b29d131f3c4e96268cd578f18944ef6bac7895f0b2edf9abad2",
+      "replacements": [
+        {
+          "kind": "worldnode",
+          "entry_path": "maps/prefabs/de_cache/de_cache_sky/worldnodes/n0.vwnod_c",
+          "original_size": 271163,
+          "original_sha256": "529f8341180ba0f820d3ba7295d09c4a0a558c63d62c7ba92b8343f131b2a2b3",
+          "payload_relative_path": "payloads/de_cache/maps/prefabs/de_cache/de_cache_sky/worldnodes/n0.vwnod_c",
+          "payload_size": 15499,
+          "payload_sha256": "84b41475fc7e7cd2d7b32d854e02e4b04009cfd0e0223bf6377a7e9c6b2c7d44"
+        },
+        {
+          "kind": "entity_lump",
+          "entry_path": "maps/prefabs/de_cache/de_cache_sky/entities/default_ents.vents_c",
+          "original_size": 13322,
+          "original_sha256": "702caaac0b562355c9b1a90b2c49055337f825f281923d14df55cc54d4b5ada1",
+          "payload_relative_path": "payloads/de_cache/maps/prefabs/de_cache/de_cache_sky/entities/default_ents.vents_c",
+          "payload_size": 9482,
+          "payload_sha256": "516a753e6a838022123877bcc1c3707a3ecafa982847257a3366587956dc6550"
+        }
+      ]
+    },
+    "de_dust2": {
+      "status": "validated",
+      "main_map_patch_required": false,
+      "source_relative_path": "maps/prefabs/de_dust2/de_dust2_skybox.vpk",
+      "source_size": 4771894,
+      "source_sha256": "751b648d2fa42292f3d133e3c491311fde5c639d79b188229f10c37e8ed3d496",
+      "output_logical_path": "maps/prefabs/de_dust2/de_dust2_skybox.vpk",
+      "validated_output_size": 4785065,
+      "validated_output_sha256": "c8167f2ca603f093d8b6bc2f32864d65feaacc6cd749ecad9353da378de91fef",
+      "replacements": [
+        {
+          "kind": "worldnode",
+          "entry_path": "maps/prefabs/de_dust2/de_dust2_skybox/worldnodes/node000.vwnod_c",
+          "original_size": 16066,
+          "original_sha256": "9950867676a8aa2f55bffb8f988ccf9478f44b571a48fe38e6e5418dc100e939",
+          "payload_relative_path": "payloads/de_dust2/maps/prefabs/de_dust2/de_dust2_skybox/worldnodes/node000.vwnod_c",
+          "payload_size": 12006,
+          "payload_sha256": "6adf39b544a058e8e006d3d5edc6ac135d26ad1174d8f329530a5b5010fb6501"
+        },
+        {
+          "kind": "entity_lump",
+          "entry_path": "maps/prefabs/de_dust2/de_dust2_skybox/entities/default_ents.vents_c",
+          "original_size": 3300,
+          "original_sha256": "7aaf1d127174bb2b32d1befd2ce0623d7c581ad3e4870e0a6de9c3b7ba3e869a",
+          "payload_relative_path": "payloads/de_dust2/maps/prefabs/de_dust2/de_dust2_skybox/entities/default_ents.vents_c",
+          "payload_size": 2387,
+          "payload_sha256": "ab74cd87d20aafa1d8ea20838d003724a2516967989548bcfe368bf37f046136"
+        }
+      ]
+    },
+    "de_inferno": {
+      "status": "validated",
+      "main_map_patch_required": false,
+      "source_relative_path": "maps/prefabs/de_inferno/inferno_skybox.vpk",
+      "source_size": 12810829,
+      "source_sha256": "c90aab57ea0425abd68af0a89f974a819aced3a67ad3c2628141b63dc190ad74",
+      "output_logical_path": "maps/prefabs/de_inferno/inferno_skybox.vpk",
+      "validated_output_size": 12816477,
+      "validated_output_sha256": "3da0d8f257fb2870dea5a20d6ddc9e1e9a722e676378737f3f7b9b899822c9a0",
+      "replacements": [
+        {
+          "kind": "worldnode",
+          "entry_path": "maps/prefabs/de_inferno/inferno_skybox/worldnodes/node000.vwnod_c",
+          "original_size": 6809,
+          "original_sha256": "b3f66083e54ccb4daf21e2ea68800ff44c0663cfeb965688519bdef44c6764c9",
+          "payload_relative_path": "payloads/de_inferno/maps/prefabs/de_inferno/inferno_skybox/worldnodes/node000.vwnod_c",
+          "payload_size": 4393,
+          "payload_sha256": "8123f203dd97da145d00e247420cbb3e6089890cc727437f04baaf20ea8118f2"
+        },
+        {
+          "kind": "entity_lump",
+          "entry_path": "maps/prefabs/de_inferno/inferno_skybox/entities/default_ents.vents_c",
+          "original_size": 3448,
+          "original_sha256": "8dc5bba565d5c2da28002185eb4ff5413ed37002e623fdd95e9782c5cf6de3e9",
+          "payload_relative_path": "payloads/de_inferno/maps/prefabs/de_inferno/inferno_skybox/entities/default_ents.vents_c",
+          "payload_size": 2701,
+          "payload_sha256": "38a117ca7bb5768e1e207e929fc029f40990333e88c86a84b2558df318c6144e"
+        }
+      ]
+    },
+    "de_mirage": {
+      "status": "validated",
+      "main_map_patch_required": false,
+      "source_relative_path": "maps/prefabs/de_mirage/3dskybox_mirage_legacy.vpk",
+      "source_size": 7257125,
+      "source_sha256": "7a68e4c6ce0236fa793b178e737bc021b940aef2044b39e1b586499ec39f5788",
+      "output_logical_path": "maps/prefabs/de_mirage/3dskybox_mirage_legacy.vpk",
+      "validated_output_size": 7278827,
+      "validated_output_sha256": "b37d56ea1d5bb51c616b070b16ea79f489678ef3032b8ece2cbb3f310100ab89",
+      "replacements": [
+        {
+          "kind": "worldnode",
+          "entry_path": "maps/prefabs/de_mirage/3dskybox_mirage_legacy/worldnodes/node000.vwnod_c",
+          "original_size": 24294,
+          "original_sha256": "f627c24aa13274b69e8468e24f3ee7356e2e28250f0debad27887c159233ff65",
+          "payload_relative_path": "payloads/de_mirage/maps/prefabs/de_mirage/3dskybox_mirage_legacy/worldnodes/node000.vwnod_c",
+          "payload_size": 20895,
+          "payload_sha256": "c204043516a8676d161c9a6c6a3962daffdd53fa55689a5072a9afaef3b2705d"
+        },
+        {
+          "kind": "entity_lump",
+          "entry_path": "maps/prefabs/de_mirage/3dskybox_mirage_legacy/entities/default_ents.vents_c",
+          "original_size": 2505,
+          "original_sha256": "aa34a5734553013f84531346157d4b144e5a2e2adee67a56c2ab507100accb9c",
+          "payload_relative_path": "payloads/de_mirage/maps/prefabs/de_mirage/3dskybox_mirage_legacy/entities/default_ents.vents_c",
+          "payload_size": 2085,
+          "payload_sha256": "726868eb0d2407f848689345eadfe1114c00f951c8ebb7616b83c70cb7429774"
+        }
+      ]
+    },
+    "de_nuke": {
+      "status": "validated",
+      "main_map_patch_required": false,
+      "source_relative_path": "maps/prefabs/de_nuke/de_nuke_skybox02.vpk",
+      "source_size": 4708053,
+      "source_sha256": "7a72c7adea4d4a0a4352cb56bfc0a48f52e7f63b2a4657eb7b57b103946ca2e7",
+      "output_logical_path": "maps/prefabs/de_nuke/de_nuke_skybox02.vpk",
+      "validated_output_size": 4735562,
+      "validated_output_sha256": "29a5d54155e760e5380bf6b9775c7e94dcf3b4ee6bbdb62dbce66017a842e7c6",
+      "replacements": [
+        {
+          "kind": "worldnode",
+          "entry_path": "maps/prefabs/de_nuke/de_nuke_skybox02/worldnodes/node000.vwnod_c",
+          "original_size": 33851,
+          "original_sha256": "dd6e78a0ad161e8098e1089f9bbb11ce53a0d8e1af991b0baab7dbe28cddf722",
+          "payload_relative_path": "payloads/de_nuke/maps/prefabs/de_nuke/de_nuke_skybox02/worldnodes/node000.vwnod_c",
+          "payload_size": 26169,
+          "payload_sha256": "a5a920c7b55c7a67a51d4fbb2fe1f60ee418111e51c854c87f1bf9852c17a43a"
+        },
+        {
+          "kind": "entity_lump",
+          "entry_path": "maps/prefabs/de_nuke/de_nuke_skybox02/entities/default_ents.vents_c",
+          "original_size": 6808,
+          "original_sha256": "2d721e0323b8c3743bb7229ee18fdcf7a050a71422afb4b04dfffa6443add3ce",
+          "payload_relative_path": "payloads/de_nuke/maps/prefabs/de_nuke/de_nuke_skybox02/entities/default_ents.vents_c",
+          "payload_size": 2562,
+          "payload_sha256": "1c1e33a27e8e3f93673c52bc65086c5fd9e38f5cdfec5f53aec9385efd75a6c9"
+        }
+      ]
+    },
+    "de_overpass": {
+      "status": "validated",
+      "main_map_patch_required": false,
+      "source_relative_path": "maps/prefabs/overpass/overpass_3d_skybox.vpk",
+      "source_size": 3241774,
+      "source_sha256": "06f1b7e51bfdcb69f7c397f4d7ff0fd5a116947c54e61fd8c3bb4ae0e37497e3",
+      "output_logical_path": "maps/prefabs/overpass/overpass_3d_skybox.vpk",
+      "validated_output_size": 3251254,
+      "validated_output_sha256": "dd5a105c9fa6cf4739cd88a56fd9c5f5f32d1f01c771996794da324a586eab66",
+      "replacements": [
+        {
+          "kind": "worldnode",
+          "entry_path": "maps/prefabs/overpass/overpass_3d_skybox/worldnodes/node000.vwnod_c",
+          "original_size": 8534,
+          "original_sha256": "0e78f7769671e3461c62085caadade6bee11c93f41fdd6baae77f74f58da9abf",
+          "payload_relative_path": "payloads/de_overpass/maps/prefabs/overpass/overpass_3d_skybox/worldnodes/node000.vwnod_c",
+          "payload_size": 6796,
+          "payload_sha256": "bb81d36e674a92554e99b6ad8d502a330dd19684689f1dc4ae4a400c3fd72ba5"
+        },
+        {
+          "kind": "entity_lump",
+          "entry_path": "maps/prefabs/overpass/overpass_3d_skybox/entities/default_ents.vents_c",
+          "original_size": 6117,
+          "original_sha256": "ca349e99c68102755d7814687ac83c8dba95ccb0f0e11751dc934ea200648c53",
+          "payload_relative_path": "payloads/de_overpass/maps/prefabs/overpass/overpass_3d_skybox/entities/default_ents.vents_c",
+          "payload_size": 3878,
+          "payload_sha256": "a6d19cb41af1a7ff8ddb45926fa2f629aa6fdc1486348766cf4b991d13ae4df1"
+        }
+      ]
+    },
+    "de_train": {
+      "status": "validated",
+      "main_map_patch_required": false,
+      "source_relative_path": "maps/prefabs/de_train/de_train_skybox.vpk",
+      "source_size": 5849042,
+      "source_sha256": "83b9d16d61bd09b29e4f6d8c40c2c429e25adadfb37597ae12fac79df6cfa1e5",
+      "output_logical_path": "maps/prefabs/de_train/de_train_skybox.vpk",
+      "validated_output_size": 5860748,
+      "validated_output_sha256": "b78ebb709cf1e23c547aea973fb7751de3f01bb34faab4fd3be3a5dda46ab1a3",
+      "replacements": [
+        {
+          "kind": "worldnode",
+          "entry_path": "maps/prefabs/de_train/de_train_skybox/worldnodes/n0.vwnod_c",
+          "original_size": 16224,
+          "original_sha256": "b9f348ebeb8235c1f08287db3a3ca6b54c5185f01fa692dee5f0050461bbd285",
+          "payload_relative_path": "payloads/de_train/maps/prefabs/de_train/de_train_skybox/worldnodes/n0.vwnod_c",
+          "payload_size": 9892,
+          "payload_sha256": "a400b15370bef83dbac7bea9a84bad2837458cfbdb4b9ac9684cf8610242d028"
+        },
+        {
+          "kind": "entity_lump",
+          "entry_path": "maps/prefabs/de_train/de_train_skybox/entities/default_ents.vents_c",
+          "original_size": 3901,
+          "original_sha256": "40b57e7a62dbf56b0b54eb33767487a777d328946264ac738c50b2967d70c349",
+          "payload_relative_path": "payloads/de_train/maps/prefabs/de_train/de_train_skybox/entities/default_ents.vents_c",
+          "payload_size": 3064,
+          "payload_sha256": "6a35547fe5ec4ca4a5dab34bf19b9481a00d2af9a9fd4f1c77dd8ce7e356616a"
+        }
+      ]
+    },
+    "de_vertigo": {
+      "status": "validated",
+      "main_map_patch_required": false,
+      "source_relative_path": "maps/prefabs/de_vertigo/skybox2.vpk",
+      "source_size": 7356765,
+      "source_sha256": "cc6c7a528f41b2963bbe00b46a255f614d24beaf4da85f6ba7425bc081937360",
+      "output_logical_path": "maps/prefabs/de_vertigo/skybox2.vpk",
+      "validated_output_size": 7418893,
+      "validated_output_sha256": "2320f79b5162b3f5ae8b6e0e8cf956a956e3616fe05e0de958b0c905f1a70fdd",
+      "replacements": [
+        {
+          "kind": "worldnode",
+          "entry_path": "maps/prefabs/de_vertigo/skybox2/worldnodes/node000.vwnod_c",
+          "original_size": 69425,
+          "original_sha256": "b0caf77cbea2b019f28e0b8982d3007c95cc9a0cfa3cc0529a69fe2d20d58439",
+          "payload_relative_path": "payloads/de_vertigo/maps/prefabs/de_vertigo/skybox2/worldnodes/node000.vwnod_c",
+          "payload_size": 60809,
+          "payload_sha256": "59bb4c24e4e5fbb9723821b4c4a16d12585f9268e4c54bd10b8cf025ef9e9397"
+        },
+        {
+          "kind": "entity_lump",
+          "entry_path": "maps/prefabs/de_vertigo/skybox2/entities/default_ents.vents_c",
+          "original_size": 4718,
+          "original_sha256": "e7d6bd1c98f61a414c23a8be8ca8e9bf502f1d4c08484e94808dad7c59b1d6b8",
+          "payload_relative_path": "payloads/de_vertigo/maps/prefabs/de_vertigo/skybox2/entities/default_ents.vents_c",
+          "payload_size": 2597,
+          "payload_sha256": "fdf04038cb8c222650e599f6224fe298b5a5ffdb71ca3a1ac11ff908d8917942"
+        }
+      ]
+    }
+  }
+}

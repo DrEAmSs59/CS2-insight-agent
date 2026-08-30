@@ -18,6 +18,7 @@ validated ``CEntityMessageRemoveAllDecals`` wire schema.
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import struct
 import tempfile
@@ -25,7 +26,7 @@ import time
 from dataclasses import asdict, dataclass
 from functools import lru_cache
 from pathlib import Path
-from typing import BinaryIO, Callable, Literal, Optional
+from typing import BinaryIO, Callable, Literal, Mapping, Optional
 
 
 PATCH_ID = "drop-legacy-remove-all-decals-138"
@@ -87,6 +88,8 @@ class PlaybackDemoReport:
     tolerated_truncated_packet_tail: bool = False
     recovered_unfinalized_demo: bool = False
     discarded_truncated_packet_bytes: int = 0
+    rewritten_chroma_sky_references: int = 0
+    remaining_chroma_sky_references: int = 0
 
     def to_dict(self) -> dict[str, object]:
         return asdict(self)
@@ -124,6 +127,8 @@ class _PatchStats:
     last_tick: Optional[int] = None
     max_per_frame: int = 0
     outer_frames: int = 0
+    rewritten_chroma_sky_references: int = 0
+    remaining_chroma_sky_references: int = 0
 
     def add_frame(
         self,
@@ -140,6 +145,15 @@ class _PatchStats:
         self.first_tick = tick if self.first_tick is None else self.first_tick
         self.last_tick = tick
         self.max_per_frame = max(self.max_per_frame, removed_total)
+
+    def add_chroma_frame(self, tick: int, rewritten: int) -> None:
+        if rewritten <= 0:
+            return
+        self.rewritten_chroma_sky_references += rewritten
+        self.changed_frames += 1
+        self.first_tick = tick if self.first_tick is None else self.first_tick
+        self.last_tick = tick
+        self.max_per_frame = max(self.max_per_frame, rewritten)
 
 
 @dataclass(frozen=True)
@@ -1147,6 +1161,713 @@ def scan_demo_playback_messages(
     )
 
 
+def _rewrite_length_delimited_proto_fields(
+    data: bytes,
+    *,
+    target_field_number: int,
+    transform: Callable[[bytes], tuple[Optional[bytes], int]],
+) -> tuple[Optional[bytes], int]:
+    pos = 0
+    out = bytearray()
+    changed = 0
+    while pos < len(data):
+        key, key_end, raw_key = _read_varint_bytes(
+            data, pos, max_bits=64, context="protobuf field key"
+        )
+        if raw_key != _encode_varint(key) or key == 0:
+            raise _fail("non-canonical protobuf field key")
+        pos = key_end
+        field_number = key >> 3
+        wire_type = key & 7
+        out.extend(raw_key)
+        if wire_type == 0:
+            _value, value_end, raw_value = _read_varint_bytes(
+                data, pos, max_bits=64, context="protobuf varint field"
+            )
+            out.extend(raw_value)
+            pos = value_end
+        elif wire_type == 1:
+            end = pos + 8
+            if end > len(data):
+                raise _fail("truncated protobuf fixed64 field")
+            out.extend(data[pos:end])
+            pos = end
+        elif wire_type == 2:
+            size, value_start, raw_size = _read_varint_bytes(
+                data, pos, max_bits=64, context="protobuf bytes length"
+            )
+            value_end = value_start + size
+            if value_end > len(data):
+                raise _fail("protobuf bytes field extends past payload")
+            value = data[value_start:value_end]
+            replacement: Optional[bytes] = None
+            replacement_count = 0
+            if field_number == target_field_number:
+                replacement, replacement_count = transform(value)
+            if replacement is None:
+                out.extend(raw_size)
+                out.extend(value)
+            else:
+                out.extend(_encode_varint(len(replacement)))
+                out.extend(replacement)
+                changed += replacement_count
+            pos = value_end
+        elif wire_type == 5:
+            end = pos + 4
+            if end > len(data):
+                raise _fail("truncated protobuf fixed32 field")
+            out.extend(data[pos:end])
+            pos = end
+        else:
+            raise _fail(f"unsupported protobuf wire type: {wire_type}")
+    return (bytes(out), changed) if changed else (None, 0)
+
+
+def _spawn_group_manifest_details(
+    payload: bytes,
+) -> Optional[tuple[bytes, bytes]]:
+    pos = 0
+    world_name: Optional[bytes] = None
+    world_group_name: Optional[bytes] = None
+    manifest: Optional[bytes] = None
+    while pos < len(payload):
+        key, pos, raw_key = _read_varint_bytes(
+            payload, pos, max_bits=64, context="SpawnGroupLoad field key"
+        )
+        if raw_key != _encode_varint(key) or key == 0:
+            raise _fail("non-canonical SpawnGroupLoad field key")
+        field_number = key >> 3
+        wire_type = key & 7
+        if wire_type == 0:
+            _value, pos, _raw_value = _read_varint_bytes(
+                payload, pos, max_bits=64, context="SpawnGroupLoad varint"
+            )
+            continue
+        if wire_type == 1:
+            pos += 8
+            continue
+        if wire_type == 5:
+            pos += 4
+            continue
+        if wire_type != 2:
+            raise _fail(f"unsupported SpawnGroupLoad wire type: {wire_type}")
+        size, pos, _raw_size = _read_varint_bytes(
+            payload, pos, max_bits=64, context="SpawnGroupLoad bytes length"
+        )
+        end = pos + size
+        if end > len(payload):
+            raise _fail("SpawnGroupLoad bytes field extends past payload")
+        value = payload[pos:end]
+        pos = end
+        if field_number == 1:
+            if world_name is not None:
+                raise _fail("duplicate SpawnGroupLoad worldname")
+            world_name = value
+        elif field_number == 8:
+            if manifest is not None:
+                raise _fail("duplicate SpawnGroupLoad manifest")
+            manifest = value
+        elif field_number == 20:
+            if world_group_name is not None:
+                raise _fail("duplicate SpawnGroupLoad worldgroupname")
+            world_group_name = value
+    if not world_group_name or not world_group_name.startswith(b"skyboxWorldGroup"):
+        return None
+    if not world_name:
+        raise _fail("skybox world group has no worldname")
+    if manifest is None:
+        raise _fail("skybox world group has no recorded manifest field")
+    return world_name, manifest
+
+
+def _spawn_group_world_details(payload: bytes) -> tuple[bytes, bytes]:
+    """Read only the routing identity from one SpawnGroupLoad protobuf."""
+
+    pos = 0
+    world_name: Optional[bytes] = None
+    world_group_name: Optional[bytes] = None
+    while pos < len(payload):
+        key, pos, raw_key = _read_varint_bytes(
+            payload, pos, max_bits=64, context="SpawnGroupLoad field key"
+        )
+        if raw_key != _encode_varint(key) or key == 0:
+            raise _fail("non-canonical SpawnGroupLoad field key")
+        field_number = key >> 3
+        wire_type = key & 7
+        if wire_type == 0:
+            _value, pos, _raw_value = _read_varint_bytes(
+                payload, pos, max_bits=64, context="SpawnGroupLoad varint"
+            )
+            continue
+        if wire_type == 1:
+            pos += 8
+            continue
+        if wire_type == 5:
+            pos += 4
+            continue
+        if wire_type != 2:
+            raise _fail(f"unsupported SpawnGroupLoad wire type: {wire_type}")
+        size, pos, _raw_size = _read_varint_bytes(
+            payload, pos, max_bits=64, context="SpawnGroupLoad bytes length"
+        )
+        end = pos + size
+        if end > len(payload):
+            raise _fail("SpawnGroupLoad bytes field extends past payload")
+        value = payload[pos:end]
+        pos = end
+        if field_number == 1:
+            if world_name is not None:
+                raise _fail("duplicate SpawnGroupLoad worldname")
+            world_name = value
+        elif field_number == 20:
+            if world_group_name is not None:
+                raise _fail("duplicate SpawnGroupLoad worldgroupname")
+            world_group_name = value
+    return world_name or b"", world_group_name or b""
+
+
+def detect_demo_map_name_from_spawn_groups(
+    path: os.PathLike[str] | str,
+) -> str:
+    """Detect a Demo map from terminal SpawnGroups, independent of its name.
+
+    Some locally recorded PBDEMS2 headers omit ``map_name`` even though their
+    finalized DEM_SpawnGroups contains the authoritative main world.  Only one
+    exact ``de_*`` default-world candidate is accepted.
+    """
+
+    source = Path(path)
+    if not source.is_file():
+        raise FileNotFoundError(f"Demo file not found: {source}")
+    candidates: set[str] = set()
+
+    def inspect_packet(packet_data: bytes) -> tuple[Optional[bytes], int]:
+        for record in _parse_netmessages(packet_data):
+            if record.message_type != 8:
+                continue
+            world_name, world_group_name = _spawn_group_world_details(
+                _read_unaligned_bytes(
+                    packet_data,
+                    record.payload_start_bit,
+                    record.payload_size,
+                )
+            )
+            if world_group_name not in {b"", b"default"}:
+                continue
+            try:
+                decoded = world_name.decode("utf-8").strip().lower()
+            except UnicodeDecodeError:
+                continue
+            if re.fullmatch(r"de_[a-z0-9_]+", decoded):
+                candidates.add(decoded)
+        return None, 0
+
+    with source.open("rb") as reader:
+        header = _read_exact(reader, 16, context="PBDEMS2 short header")
+        if header[:8] != _MAGIC:
+            raise _fail("expected PBDEMS2 short header")
+        while True:
+            command_result = _read_stream_varint(
+                reader, context="outer command", allow_clean_eof=True
+            )
+            if command_result is None:
+                break
+            raw_command, _raw_command_bytes = command_result
+            tick_result = _read_stream_varint(reader, context="outer tick")
+            size_result = _read_stream_varint(reader, context="outer payload size")
+            assert tick_result is not None and size_result is not None
+            size, _raw_size_bytes = size_result
+            if size > _MAX_OUTER_FRAME_SIZE:
+                raise _fail(f"outer frame exceeds size limit: {size}")
+            payload = _read_exact(reader, size, context="outer frame payload")
+            command = raw_command & ~_COMPRESSED_COMMAND_FLAG
+            if command not in (15, 18):
+                continue
+            decoded = (
+                _snappy_decompress(payload)
+                if raw_command & _COMPRESSED_COMMAND_FLAG
+                else payload
+            )
+            _rewrite_length_delimited_proto_fields(
+                decoded,
+                target_field_number=3 if command == 15 else 2,
+                transform=inspect_packet,
+            )
+    if len(candidates) != 1:
+        detail = ", ".join(sorted(candidates)) or "none"
+        raise _fail(
+            "Demo terminal SpawnGroups did not identify one map: " + detail
+        )
+    return next(iter(candidates))
+
+
+def _spawn_group_manifest_state(payload: bytes) -> Optional[bool]:
+    details = _spawn_group_manifest_details(payload)
+    return None if details is None else bool(details[1])
+
+
+def _replace_spawn_group_manifest(
+    payload: bytes,
+    replacement_manifest: bytes,
+    *,
+    expected_world_name: Optional[bytes] = None,
+) -> tuple[Optional[bytes], int]:
+    details = _spawn_group_manifest_details(payload)
+    if details is None:
+        return None, 0
+    world_name, current_manifest = details
+    if expected_world_name is not None and world_name != expected_world_name:
+        raise _fail(
+            "skybox SpawnGroup worldname does not match the selected chroma profile"
+        )
+    if current_manifest == replacement_manifest:
+        return None, 0
+    return _rewrite_length_delimited_proto_fields(
+        payload,
+        target_field_number=8,
+        transform=lambda _manifest: (replacement_manifest, 1),
+    )
+
+
+def _find_lsb_bitpacked_occurrences(data: bytes, needle: bytes) -> list[int]:
+    if not needle:
+        raise _fail("bit-packed manifest reference is empty")
+    needle_bits = len(needle) * 8
+    data_bits = len(data) * 8
+    if needle_bits > data_bits:
+        return []
+    matches: list[int] = []
+    for start_bit in range(data_bits - needle_bits + 1):
+        for index in range(needle_bits):
+            source_bit = (data[(start_bit + index) // 8] >> ((start_bit + index) & 7)) & 1
+            wanted_bit = (needle[index // 8] >> (index & 7)) & 1
+            if source_bit != wanted_bit:
+                break
+        else:
+            matches.append(start_bit)
+    return matches
+
+
+def _replace_lsb_bitpacked_reference(
+    data: bytes,
+    retail_reference: bytes,
+    redirect_reference: bytes,
+) -> tuple[Optional[bytes], int]:
+    if len(retail_reference) != len(redirect_reference):
+        raise _fail("bit-packed sky reference replacement changes its bit length")
+    retail_offsets = _find_lsb_bitpacked_occurrences(data, retail_reference)
+    redirect_offsets = _find_lsb_bitpacked_occurrences(data, redirect_reference)
+    if not retail_offsets:
+        if len(redirect_offsets) == 1:
+            return None, 0
+        raise _fail("retail sky reference is missing from the SpawnGroup manifest")
+    if len(retail_offsets) != 1 or redirect_offsets:
+        raise _fail("SpawnGroup manifest has an ambiguous sky reference")
+
+    start_bit = retail_offsets[0]
+    output = bytearray(data)
+    for index in range(len(redirect_reference) * 8):
+        destination_bit = start_bit + index
+        mask = 1 << (destination_bit & 7)
+        if (redirect_reference[index // 8] >> (index & 7)) & 1:
+            output[destination_bit // 8] |= mask
+        else:
+            output[destination_bit // 8] &= ~mask
+    rewritten = bytes(output)
+    if _find_lsb_bitpacked_occurrences(rewritten, retail_reference):
+        raise _fail("bit-packed retail sky reference survived replacement")
+    if _find_lsb_bitpacked_occurrences(rewritten, redirect_reference) != [start_bit]:
+        raise _fail("bit-packed private sky reference was not installed exactly once")
+    return rewritten, 1
+
+
+def _redirect_spawn_group_manifest_reference(
+    payload: bytes,
+    *,
+    retail_reference: bytes,
+    redirect_reference: bytes,
+    expected_world_name: bytes,
+) -> tuple[Optional[bytes], int]:
+    details = _spawn_group_manifest_details(payload)
+    if details is None:
+        return None, 0
+    world_name, manifest = details
+    if world_name != expected_world_name:
+        raise _fail(
+            "skybox SpawnGroup worldname does not match the selected chroma profile"
+        )
+    rewritten_manifest, count = _replace_lsb_bitpacked_reference(
+        manifest,
+        retail_reference,
+        redirect_reference,
+    )
+    if rewritten_manifest is None:
+        return None, 0
+    return _rewrite_length_delimited_proto_fields(
+        payload,
+        target_field_number=8,
+        transform=lambda _manifest: (rewritten_manifest, count),
+    )
+
+
+def _clear_spawn_group_manifest(payload: bytes) -> tuple[Optional[bytes], int]:
+    return _replace_spawn_group_manifest(payload, b"")
+
+
+def _rewrite_spawn_group_packet(
+    packet_data: bytes,
+    *,
+    replacement_manifest: bytes = b"",
+    expected_world_name: Optional[bytes] = None,
+    reference_redirect: Optional[tuple[bytes, bytes]] = None,
+) -> tuple[Optional[bytes], int]:
+    records = _parse_netmessages(packet_data)
+    replacements: dict[int, bytes] = {}
+    changed = 0
+    for record in records:
+        if record.message_type != 8:
+            continue
+        payload = _read_unaligned_bytes(
+            packet_data,
+            record.payload_start_bit,
+            record.payload_size,
+        )
+        if reference_redirect is None:
+            replacement, count = _replace_spawn_group_manifest(
+                payload,
+                replacement_manifest,
+                expected_world_name=expected_world_name,
+            )
+        else:
+            if expected_world_name is None:
+                raise _fail("chroma sky reference redirect has no expected worldname")
+            replacement, count = _redirect_spawn_group_manifest_reference(
+                payload,
+                retail_reference=reference_redirect[0],
+                redirect_reference=reference_redirect[1],
+                expected_world_name=expected_world_name,
+            )
+        if replacement is not None:
+            replacements[record.start_bit] = replacement
+            changed += count
+    if not replacements:
+        return None, 0
+
+    residual_start = records[-1].end_bit if records else 0
+    residual_bits = len(packet_data) * 8 - residual_start
+    output_bits = residual_bits
+    for record in records:
+        replacement = replacements.get(record.start_bit)
+        output_bits += (
+            record.end_bit - record.start_bit
+            if replacement is None
+            else (record.type_end_bit - record.start_bit)
+            + len(_encode_varint(len(replacement))) * 8
+            + len(replacement) * 8
+        )
+    output = bytearray((output_bits + 7) // 8)
+    destination_bit = 0
+    for record in records:
+        replacement = replacements.get(record.start_bit)
+        if replacement is None:
+            destination_bit = _copy_bit_range(
+                output,
+                destination_bit,
+                packet_data,
+                record.start_bit,
+                record.end_bit,
+            )
+            continue
+        destination_bit = _copy_bit_range(
+            output,
+            destination_bit,
+            packet_data,
+            record.start_bit,
+            record.type_end_bit,
+        )
+        size_bytes = _encode_varint(len(replacement))
+        destination_bit = _copy_bit_range(
+            output, destination_bit, size_bytes, 0, len(size_bytes) * 8
+        )
+        destination_bit = _copy_bit_range(
+            output, destination_bit, replacement, 0, len(replacement) * 8
+        )
+    destination_bit = _copy_bit_range(
+        output,
+        destination_bit,
+        packet_data,
+        residual_start,
+        len(packet_data) * 8,
+    )
+    if destination_bit != output_bits:
+        raise _fail("SpawnGroups bitstream rewrite length mismatch")
+
+    rewritten = bytes(output)
+    output_records = _parse_netmessages(rewritten)
+    if len(output_records) != len(records):
+        raise _fail("SpawnGroups rewrite changed the netmessage count")
+    for original, current in zip(records, output_records):
+        if original.message_type != current.message_type:
+            raise _fail("SpawnGroups rewrite changed a netmessage type")
+        replacement = replacements.get(original.start_bit)
+        current_payload = _read_unaligned_bytes(
+            rewritten,
+            current.payload_start_bit,
+            current.payload_size,
+        )
+        if replacement is None:
+            original_payload = _read_unaligned_bytes(
+                packet_data,
+                original.payload_start_bit,
+                original.payload_size,
+            )
+            if current_payload != original_payload:
+                raise _fail("SpawnGroups rewrite changed an unrelated netmessage")
+        elif current_payload != replacement:
+            raise _fail("SpawnGroups rewrite changed the replacement payload")
+        else:
+            details = _spawn_group_manifest_details(current_payload)
+            if details is None:
+                raise _fail("SpawnGroups rewrite lost the skybox manifest")
+            if reference_redirect is None:
+                if details[1] != replacement_manifest:
+                    raise _fail("SpawnGroups rewrite did not install the skybox manifest")
+            else:
+                if _find_lsb_bitpacked_occurrences(
+                    details[1], reference_redirect[0]
+                ) or len(
+                    _find_lsb_bitpacked_occurrences(
+                        details[1], reference_redirect[1]
+                    )
+                ) != 1:
+                    raise _fail("SpawnGroups rewrite did not redirect the sky reference")
+    return rewritten, changed
+
+
+def _rewrite_terminal_chroma_spawn_groups(
+    command: int,
+    payload: bytes,
+    *,
+    replacement_manifest: bytes = b"",
+    expected_world_name: Optional[bytes] = None,
+    reference_redirect: Optional[tuple[bytes, bytes]] = None,
+) -> tuple[Optional[bytes], int]:
+    field_number = 3 if command == 15 else 2
+    return _rewrite_length_delimited_proto_fields(
+        payload,
+        target_field_number=field_number,
+        transform=lambda packet: _rewrite_spawn_group_packet(
+            packet,
+            replacement_manifest=replacement_manifest,
+            expected_world_name=expected_world_name,
+            reference_redirect=reference_redirect,
+        ),
+    )
+
+
+def _count_terminal_chroma_spawn_group_manifests(path: Path) -> tuple[int, int]:
+    nonempty = 0
+    empty = 0
+
+    def inspect_packet(packet_data: bytes) -> tuple[Optional[bytes], int]:
+        nonlocal nonempty, empty
+        for record in _parse_netmessages(packet_data):
+            if record.message_type != 8:
+                continue
+            state = _spawn_group_manifest_state(
+                _read_unaligned_bytes(
+                    packet_data,
+                    record.payload_start_bit,
+                    record.payload_size,
+                )
+            )
+            if state is True:
+                nonempty += 1
+            elif state is False:
+                empty += 1
+        return None, 0
+
+    with path.open("rb") as reader:
+        header = _read_exact(reader, 16, context="PBDEMS2 short header")
+        if header[:8] != _MAGIC:
+            raise _fail("expected PBDEMS2 short header")
+        while True:
+            command_result = _read_stream_varint(
+                reader, context="outer command", allow_clean_eof=True
+            )
+            if command_result is None:
+                break
+            raw_command, _raw_command_bytes = command_result
+            tick_result = _read_stream_varint(reader, context="outer tick")
+            size_result = _read_stream_varint(reader, context="outer payload size")
+            assert tick_result is not None and size_result is not None
+            _tick, _raw_tick_bytes = tick_result
+            size, _raw_size_bytes = size_result
+            if size > _MAX_OUTER_FRAME_SIZE:
+                raise _fail(f"outer frame exceeds size limit: {size}")
+            payload = _read_exact(reader, size, context="outer frame payload")
+            command = raw_command & ~_COMPRESSED_COMMAND_FLAG
+            if command not in (15, 18):
+                continue
+            decoded = (
+                _snappy_decompress(payload)
+                if raw_command & _COMPRESSED_COMMAND_FLAG
+                else payload
+            )
+            _rewrite_length_delimited_proto_fields(
+                decoded,
+                target_field_number=3 if command == 15 else 2,
+                transform=inspect_packet,
+            )
+    return nonempty, empty
+
+
+def _count_terminal_chroma_spawn_group_manifest_matches(
+    path: Path,
+    *,
+    expected_world_name: bytes,
+    manifests_by_command: Mapping[int, bytes],
+) -> tuple[int, int]:
+    matched = 0
+    mismatched = 0
+
+    with path.open("rb") as reader:
+        header = _read_exact(reader, 16, context="PBDEMS2 short header")
+        if header[:8] != _MAGIC:
+            raise _fail("expected PBDEMS2 short header")
+        while True:
+            command_result = _read_stream_varint(
+                reader, context="outer command", allow_clean_eof=True
+            )
+            if command_result is None:
+                break
+            raw_command, _raw_command_bytes = command_result
+            tick_result = _read_stream_varint(reader, context="outer tick")
+            size_result = _read_stream_varint(reader, context="outer payload size")
+            assert tick_result is not None and size_result is not None
+            _tick, _raw_tick_bytes = tick_result
+            size, _raw_size_bytes = size_result
+            if size > _MAX_OUTER_FRAME_SIZE:
+                raise _fail(f"outer frame exceeds size limit: {size}")
+            payload = _read_exact(reader, size, context="outer frame payload")
+            command = raw_command & ~_COMPRESSED_COMMAND_FLAG
+            expected_manifest = manifests_by_command.get(command)
+            if expected_manifest is None:
+                continue
+            decoded = (
+                _snappy_decompress(payload)
+                if raw_command & _COMPRESSED_COMMAND_FLAG
+                else payload
+            )
+
+            def inspect_packet(packet_data: bytes) -> tuple[Optional[bytes], int]:
+                nonlocal matched, mismatched
+                for record in _parse_netmessages(packet_data):
+                    if record.message_type != 8:
+                        continue
+                    details = _spawn_group_manifest_details(
+                        _read_unaligned_bytes(
+                            packet_data,
+                            record.payload_start_bit,
+                            record.payload_size,
+                        )
+                    )
+                    if details is None:
+                        continue
+                    world_name, manifest = details
+                    if (
+                        world_name == expected_world_name
+                        and manifest == expected_manifest
+                    ):
+                        matched += 1
+                    else:
+                        mismatched += 1
+                return None, 0
+
+            _rewrite_length_delimited_proto_fields(
+                decoded,
+                target_field_number=3 if command == 15 else 2,
+                transform=inspect_packet,
+            )
+    return matched, mismatched
+
+
+def _count_terminal_chroma_spawn_group_reference_redirects(
+    path: Path,
+    *,
+    expected_world_name: bytes,
+    retail_reference: bytes,
+    redirect_reference: bytes,
+) -> tuple[int, int]:
+    redirected = 0
+    mismatched = 0
+
+    def inspect_packet(packet_data: bytes) -> tuple[Optional[bytes], int]:
+        nonlocal redirected, mismatched
+        for record in _parse_netmessages(packet_data):
+            if record.message_type != 8:
+                continue
+            details = _spawn_group_manifest_details(
+                _read_unaligned_bytes(
+                    packet_data,
+                    record.payload_start_bit,
+                    record.payload_size,
+                )
+            )
+            if details is None:
+                continue
+            world_name, manifest = details
+            retail_count = len(
+                _find_lsb_bitpacked_occurrences(manifest, retail_reference)
+            )
+            redirect_count = len(
+                _find_lsb_bitpacked_occurrences(manifest, redirect_reference)
+            )
+            if (
+                world_name == expected_world_name
+                and retail_count == 0
+                and redirect_count == 1
+            ):
+                redirected += 1
+            else:
+                mismatched += 1
+        return None, 0
+
+    with path.open("rb") as reader:
+        header = _read_exact(reader, 16, context="PBDEMS2 short header")
+        if header[:8] != _MAGIC:
+            raise _fail("expected PBDEMS2 short header")
+        while True:
+            command_result = _read_stream_varint(
+                reader, context="outer command", allow_clean_eof=True
+            )
+            if command_result is None:
+                break
+            raw_command, _raw_command_bytes = command_result
+            tick_result = _read_stream_varint(reader, context="outer tick")
+            size_result = _read_stream_varint(reader, context="outer payload size")
+            assert tick_result is not None and size_result is not None
+            _tick, _raw_tick_bytes = tick_result
+            size, _raw_size_bytes = size_result
+            if size > _MAX_OUTER_FRAME_SIZE:
+                raise _fail(f"outer frame exceeds size limit: {size}")
+            payload = _read_exact(reader, size, context="outer frame payload")
+            command = raw_command & ~_COMPRESSED_COMMAND_FLAG
+            if command not in (15, 18):
+                continue
+            decoded = (
+                _snappy_decompress(payload)
+                if raw_command & _COMPRESSED_COMMAND_FLAG
+                else payload
+            )
+            _rewrite_length_delimited_proto_fields(
+                decoded,
+                target_field_number=3 if command == 15 else 2,
+                transform=inspect_packet,
+            )
+    return redirected, mismatched
+
+
 def _rewrite_stream(
     reader: BinaryIO,
     writer: BinaryIO,
@@ -1154,6 +1875,12 @@ def _rewrite_stream(
     drop_legacy_type138: bool = True,
     drop_win_panel_match: bool = False,
     win_panel_match_tick: Optional[int] = None,
+    clear_chroma_skybox_spawn_group_manifest: bool = False,
+    chroma_skybox_spawn_group_manifests: Optional[Mapping[int, bytes]] = None,
+    chroma_skybox_spawn_group_world_name: Optional[bytes] = None,
+    chroma_skybox_spawn_group_reference_redirect: Optional[
+        tuple[bytes, bytes]
+    ] = None,
 ) -> _PatchStats:
     header = _read_exact(reader, 16, context="PBDEMS2 short header")
     if header[:8] != _MAGIC:
@@ -1215,6 +1942,39 @@ def _rewrite_stream(
                     if raw_command & _COMPRESSED_COMMAND_FLAG
                     else patched
                 )
+        if command in (15, 18) and (
+            clear_chroma_skybox_spawn_group_manifest
+            or chroma_skybox_spawn_group_manifests is not None
+            or chroma_skybox_spawn_group_reference_redirect is not None
+        ):
+            decoded = (
+                _snappy_decompress(payload)
+                if raw_command & _COMPRESSED_COMMAND_FLAG
+                else payload
+            )
+            patched, rewritten = _rewrite_terminal_chroma_spawn_groups(
+                command,
+                decoded,
+                replacement_manifest=(
+                    b""
+                    if clear_chroma_skybox_spawn_group_manifest
+                    or chroma_skybox_spawn_group_reference_redirect is not None
+                    else chroma_skybox_spawn_group_manifests[command]
+                ),
+                expected_world_name=(
+                    None
+                    if clear_chroma_skybox_spawn_group_manifest
+                    else chroma_skybox_spawn_group_world_name
+                ),
+                reference_redirect=chroma_skybox_spawn_group_reference_redirect,
+            )
+            if patched is not None:
+                replacement = (
+                    _snappy_compress(patched)
+                    if raw_command & _COMPRESSED_COMMAND_FLAG
+                    else patched
+                )
+                stats.add_chroma_frame(int(tick), rewritten)
 
         writer.write(raw_command_bytes)
         writer.write(raw_tick_bytes)
@@ -1635,6 +2395,12 @@ def _verify_rewritten_demo(
     drop_win_panel_match: bool = False,
     win_panel_match_tick: Optional[int] = None,
     structural_recovery: bool = False,
+    clear_chroma_skybox_spawn_group_manifest: bool = False,
+    chroma_skybox_spawn_group_manifests: Optional[Mapping[int, bytes]] = None,
+    chroma_skybox_spawn_group_world_name: Optional[bytes] = None,
+    chroma_skybox_spawn_group_reference_redirect: Optional[
+        tuple[bytes, bytes]
+    ] = None,
 ) -> DemoCompatibilityScan:
     verification = scan_demo_playback_messages(
         rewritten,
@@ -1655,9 +2421,63 @@ def _verify_rewritten_demo(
             f"{verification.selected_win_panel_events} selected "
             "cs_win_panel_match event(s)"
         )
+    if clear_chroma_skybox_spawn_group_manifest:
+        remaining, cleared = _count_terminal_chroma_spawn_group_manifests(
+            rewritten
+        )
+        stats.remaining_chroma_sky_references = remaining
+        if remaining:
+            raise _fail(
+                "rewritten demo still contains "
+                f"{remaining} retail chroma sky reference(s)"
+            )
+        if cleared < stats.rewritten_chroma_sky_references:
+            raise _fail(
+                "rewritten demo lost one or more cleared chroma skybox manifests"
+            )
+    elif chroma_skybox_spawn_group_manifests is not None:
+        assert chroma_skybox_spawn_group_world_name is not None
+        matched, mismatched = _count_terminal_chroma_spawn_group_manifest_matches(
+            rewritten,
+            expected_world_name=chroma_skybox_spawn_group_world_name,
+            manifests_by_command=chroma_skybox_spawn_group_manifests,
+        )
+        stats.remaining_chroma_sky_references = mismatched
+        if stats.rewritten_chroma_sky_references == 0:
+            raise _fail("demo contains no replaceable chroma skybox SpawnGroup manifest")
+        if mismatched:
+            raise _fail(
+                "rewritten demo still contains "
+                f"{mismatched} mismatched chroma skybox manifest(s)"
+            )
+        if matched != stats.rewritten_chroma_sky_references:
+            raise _fail(
+                "rewritten demo lost one or more replacement chroma skybox manifests"
+            )
+    elif chroma_skybox_spawn_group_reference_redirect is not None:
+        assert chroma_skybox_spawn_group_world_name is not None
+        redirected, mismatched = (
+            _count_terminal_chroma_spawn_group_reference_redirects(
+                rewritten,
+                expected_world_name=chroma_skybox_spawn_group_world_name,
+                retail_reference=chroma_skybox_spawn_group_reference_redirect[0],
+                redirect_reference=chroma_skybox_spawn_group_reference_redirect[1],
+            )
+        )
+        stats.remaining_chroma_sky_references = mismatched
+        if stats.rewritten_chroma_sky_references == 0:
+            raise _fail("demo contains no redirectable chroma sky reference")
+        if mismatched:
+            raise _fail(
+                "rewritten demo still contains "
+                f"{mismatched} mismatched chroma sky reference(s)"
+            )
+        if redirected != stats.rewritten_chroma_sky_references:
+            raise _fail("rewritten demo lost one or more private sky redirects")
     if (
         stats.removed_messages == 0
         and stats.removed_win_panel_events == 0
+        and stats.rewritten_chroma_sky_references == 0
         and not structural_recovery
         and not _files_equal(source, rewritten)
     ):
@@ -1679,6 +2499,7 @@ def _build_report(
             if (
                 stats.removed_messages
                 or stats.removed_win_panel_events
+                or stats.rewritten_chroma_sky_references
                 or recovered_plan is not None
             )
             else "clean"
@@ -1699,6 +2520,8 @@ def _build_report(
             if recovered_plan is not None
             else 0
         ),
+        rewritten_chroma_sky_references=stats.rewritten_chroma_sky_references,
+        remaining_chroma_sky_references=stats.remaining_chroma_sky_references,
     )
 
 
@@ -1997,6 +2820,12 @@ def prepare_cs2_playback_demo(
     *,
     win_panel_match_tick: Optional[int] = None,
     drop_legacy_type138: bool = True,
+    clear_chroma_skybox_spawn_group_manifest: bool = False,
+    chroma_skybox_spawn_group_manifests: Optional[Mapping[int, bytes]] = None,
+    chroma_skybox_spawn_group_world_name: Optional[str] = None,
+    chroma_skybox_spawn_group_reference_redirect: Optional[
+        tuple[bytes, bytes]
+    ] = None,
 ) -> PlaybackDemoReport:
     """Create a verified CS2 playback copy with selected blockers removed.
 
@@ -2022,6 +2851,66 @@ def prepare_cs2_playback_demo(
     selected_win_panel_tick = (
         int(win_panel_match_tick) if win_panel_match_tick is not None else None
     )
+    selected_chroma_modes = sum(
+        (
+            bool(clear_chroma_skybox_spawn_group_manifest),
+            chroma_skybox_spawn_group_manifests is not None,
+            chroma_skybox_spawn_group_reference_redirect is not None,
+        )
+    )
+    if selected_chroma_modes > 1:
+        raise _fail("cannot combine multiple chroma skybox manifest rewrite modes")
+    normalized_chroma_manifests: Optional[dict[int, bytes]] = None
+    normalized_chroma_world_name: Optional[bytes] = None
+    if chroma_skybox_spawn_group_manifests is not None:
+        if set(chroma_skybox_spawn_group_manifests) != {15, 18}:
+            raise _fail(
+                "chroma skybox manifest profile must contain DEM_SpawnGroups "
+                "and DEM_Recovery payloads"
+            )
+        normalized_chroma_manifests = {}
+        for command in (15, 18):
+            value = chroma_skybox_spawn_group_manifests[command]
+            if not isinstance(value, bytes) or not value:
+                raise _fail("chroma skybox manifest payload must be non-empty bytes")
+            if len(value) > _MAX_PROTOBUF_FIELD_SIZE:
+                raise _fail("chroma skybox manifest payload exceeds size limit")
+            normalized_chroma_manifests[command] = value
+        world_name = str(chroma_skybox_spawn_group_world_name or "").strip()
+        normalized_world = world_name.replace("\\", "/")
+        if (
+            world_name != normalized_world
+            or not normalized_world.startswith("maps/prefabs/")
+            or "sky" not in normalized_world.lower()
+            or any(part in {"", ".", ".."} for part in normalized_world.split("/"))
+        ):
+            raise _fail("chroma skybox manifest profile has an invalid worldname")
+        normalized_chroma_world_name = world_name.encode("utf-8")
+    normalized_chroma_redirect: Optional[tuple[bytes, bytes]] = None
+    if chroma_skybox_spawn_group_reference_redirect is not None:
+        retail_reference, redirect_reference = (
+            chroma_skybox_spawn_group_reference_redirect
+        )
+        if (
+            not isinstance(retail_reference, bytes)
+            or not isinstance(redirect_reference, bytes)
+            or not retail_reference
+            or len(retail_reference) != len(redirect_reference)
+        ):
+            raise _fail(
+                "chroma skybox reference redirect must be equal-length non-empty bytes"
+            )
+        world_name = str(chroma_skybox_spawn_group_world_name or "").strip()
+        normalized_world = world_name.replace("\\", "/")
+        if (
+            world_name != normalized_world
+            or not normalized_world.startswith("maps/prefabs/")
+            or "sky" not in normalized_world.lower()
+            or any(part in {"", ".", ".."} for part in normalized_world.split("/"))
+        ):
+            raise _fail("chroma skybox manifest profile has an invalid worldname")
+        normalized_chroma_redirect = (retail_reference, redirect_reference)
+        normalized_chroma_world_name = world_name.encode("utf-8")
 
     temp_file = tempfile.NamedTemporaryFile(
         mode="w+b",
@@ -2039,6 +2928,14 @@ def prepare_cs2_playback_demo(
                 writer,
                 drop_legacy_type138=drop_legacy_type138,
                 win_panel_match_tick=selected_win_panel_tick,
+                clear_chroma_skybox_spawn_group_manifest=(
+                    clear_chroma_skybox_spawn_group_manifest
+                ),
+                chroma_skybox_spawn_group_manifests=normalized_chroma_manifests,
+                chroma_skybox_spawn_group_world_name=normalized_chroma_world_name,
+                chroma_skybox_spawn_group_reference_redirect=(
+                    normalized_chroma_redirect
+                ),
             )
             writer.flush()
             os.fsync(writer.fileno())
@@ -2049,6 +2946,14 @@ def prepare_cs2_playback_demo(
             stats,
             drop_legacy_type138=drop_legacy_type138,
             win_panel_match_tick=selected_win_panel_tick,
+            clear_chroma_skybox_spawn_group_manifest=(
+                clear_chroma_skybox_spawn_group_manifest
+            ),
+            chroma_skybox_spawn_group_manifests=normalized_chroma_manifests,
+            chroma_skybox_spawn_group_world_name=normalized_chroma_world_name,
+            chroma_skybox_spawn_group_reference_redirect=(
+                normalized_chroma_redirect
+            ),
         )
 
         _publish_without_overwrite(temp_path, destination)
@@ -2060,6 +2965,12 @@ def prepare_cs2_playback_demo(
             if selected_win_panel_tick is not None
             else PATCH_ID
         )
+        if clear_chroma_skybox_spawn_group_manifest:
+            playback_patch_id += "+clear-demo-chroma-skybox-manifest"
+        elif normalized_chroma_manifests is not None:
+            playback_patch_id += "+replace-demo-chroma-skybox-manifest"
+        elif normalized_chroma_redirect is not None:
+            playback_patch_id += "+redirect-demo-chroma-sky-reference"
         return _build_report(stats, verification, patch_id=playback_patch_id)
     finally:
         if not published:

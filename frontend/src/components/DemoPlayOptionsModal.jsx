@@ -5,6 +5,7 @@ import {
   DEFAULT_RECORDING_SKYBOX,
   isCustomRecordingSkyboxId,
   normalizeRecordingSkyboxId,
+  partitionBuiltinRecordingSkyboxes,
   recordingSkyboxDisplayName,
   recordingSkyboxPreviewUrl,
   RECORDING_SKYBOX_OPTIONS,
@@ -45,6 +46,10 @@ export default function DemoPlayOptionsModal({
   const builtinSkyboxes = catalogBuiltinSkyboxes.length
     ? catalogBuiltinSkyboxes
     : RECORDING_SKYBOX_OPTIONS.slice(1).map((option) => ({ id: option.value }));
+  const {
+    solidColor: solidColorSkyboxes,
+    standard: standardBuiltinSkyboxes,
+  } = partitionBuiltinRecordingSkyboxes(builtinSkyboxes);
   const customSkyboxes = Array.isArray(skyboxResources)
     ? skyboxResources.filter((item) => item?.source === "custom" && item?.available)
     : [];
@@ -287,8 +292,15 @@ export default function DemoPlayOptionsModal({
                 className="min-w-44 max-w-[48%] rounded-md border border-cs2-border bg-cs2-bg-input px-2.5 py-2 text-xs font-semibold text-cs2-text-primary outline-none focus:border-cs2-accent/60 disabled:opacity-50"
               >
                 <option value={DEFAULT_RECORDING_SKYBOX}>{t("record.skyboxDefault")}</option>
+                <optgroup label={t("record.skyboxSolidColorOptions")}>
+                  {solidColorSkyboxes.map((item) => (
+                    <option key={item.id} value={item.id}>
+                      {recordingSkyboxDisplayName(item.id, item.display_name, t)}
+                    </option>
+                  ))}
+                </optgroup>
                 <optgroup label={t("record.skyboxBuiltinOptions")}>
-                  {builtinSkyboxes.map((item) => (
+                  {standardBuiltinSkyboxes.map((item) => (
                     <option key={item.id} value={item.id}>
                       {recordingSkyboxDisplayName(item.id, item.display_name, t)}
                     </option>

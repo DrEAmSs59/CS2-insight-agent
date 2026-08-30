@@ -5,6 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from app.chroma_skybox_child import ChromaChildVpkBuild
 from app.demo_voice_hud import read_inline_vpk, write_inline_vpk
 from app import pov_hud_manager
 from app.map_material_vpk import (
@@ -18,7 +19,11 @@ from app.map_material_vpk import (
     normalize_map_material_id,
 )
 from app.pov_hud_manager import PovHudManager
-from app.skybox_vpk import MAP_SKY_MATERIAL_PATHS, SKYBOX_ASSETS
+from app.skybox_vpk import (
+    CHROMA_ACTIVE_SKY_MATERIAL_PATH,
+    MAP_SKY_MATERIAL_PATHS,
+    SKYBOX_ASSETS,
+)
 
 
 def _write_profile(root: Path) -> Path:
@@ -196,6 +201,102 @@ def test_manager_merges_material_and_skybox_into_one_runtime_vpk(
     assert entries[texture_path] == b"sky-texture"
     assert entries[MAP_SKY_MATERIAL_PATHS["de_dust2"][0]] == b"sky-material"
     assert manager._read_manifest()["feature"] == "recording_map_material_with_skybox"
+
+
+def test_manager_merges_waxed_material_chroma_and_verified_child_into_one_vpk(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    manager, pov_dir, csgo = _manager_for_tmp_game(monkeypatch, tmp_path)
+    _write_profile(pov_dir / "map_materials")
+    original_material_path, texture_path = SKYBOX_ASSETS["chroma_blue"]
+    skybox_dir = pov_dir / "skyboxes" / "chroma_blue"
+    skybox_dir.mkdir(parents=True)
+    (skybox_dir / Path(original_material_path).name).write_bytes(b"blue-material")
+    (skybox_dir / Path(texture_path).name).write_bytes(b"blue-texture")
+    child_assets = pov_dir / "chroma_skybox_children"
+    child_assets.mkdir()
+    (child_assets / "payloads").mkdir()
+    (child_assets / "manifest.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "maps": {
+                    "de_dust2": {"main_map_patch_required": False},
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    main_assets = pov_dir / "chroma_main_maps"
+    main_assets.mkdir()
+    (main_assets / "payloads").mkdir()
+    (main_assets / "manifest.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 2,
+                "no_main_patch_required": ["de_dust2"],
+                "maps": {},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    logical_path = "maps/prefabs/de_dust2/de_dust2_skybox.vpk"
+    official_bytes = b"official-child"
+    official_child = csgo / Path(logical_path)
+    official_child.parent.mkdir(parents=True)
+    official_child.write_bytes(official_bytes)
+    child_vpk = write_inline_vpk({"nested/verified.txt": b"child"})
+    child_metadata = {
+        "map_name": "de_dust2",
+        "status": "validated",
+        "logical_path": logical_path,
+        "source": {
+            "sha256": hashlib.sha256(official_bytes).hexdigest(),
+            "size": len(official_bytes),
+        },
+        "output": {
+            "sha256": hashlib.sha256(child_vpk).hexdigest(),
+            "size": len(child_vpk),
+        },
+    }
+    monkeypatch.setattr(
+        pov_hud_manager,
+        "build_chroma_child_vpk",
+        lambda **_kwargs: ChromaChildVpkBuild(
+            logical_path,
+            child_vpk,
+            child_metadata,
+        ),
+    )
+
+    manager.install(
+        map_name="de_dust2",
+        map_material_id="waxed_reflection",
+        skybox_id="chroma_blue",
+    )
+
+    entries = read_inline_vpk((csgo / "pov.vpk").read_bytes())
+    assert entries["materials/cs2_insight/flat_normal.vtex_c"] == b"normal"
+    assert entries["materials/ground/floor.vmat_c"] == b"dust-floor"
+    assert entries[CHROMA_ACTIVE_SKY_MATERIAL_PATH] == b"blue-material"
+    assert entries[texture_path] == b"blue-texture"
+    assert logical_path not in entries
+    assert official_child.read_bytes() == child_vpk
+    assert not (csgo / "cs2_insight_chroma_runtime").exists()
+    assert original_material_path not in entries
+    assert not set(MAP_SKY_MATERIAL_PATHS["de_dust2"]).intersection(entries)
+    manifest = manager._read_manifest()
+    assert manifest["feature"] == "recording_map_material_with_skybox"
+    assert manifest["recording_map_material_id"] == "waxed_reflection"
+    assert manifest["recording_skybox_id"] == "chroma_blue"
+    assert manifest["chroma_child_skybox"] == child_metadata
+    assert manifest["chroma_official_swaps"]["route"] == (
+        "transactional_official_child_vpk_swap"
+    )
+    assert manager.restore()["verified"] is True
+    assert official_child.read_bytes() == official_bytes
 
 
 @pytest.mark.parametrize(

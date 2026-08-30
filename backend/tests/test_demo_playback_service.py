@@ -223,6 +223,59 @@ def test_pov_playback_installs_cfg_and_restores_after_exit(monkeypatch, tmp_path
     assert rechecked["restore"]["verified"] is False
 
 
+def test_chroma_pov_playback_redirects_only_the_disposable_demo_copy(
+    monkeypatch,
+    tmp_path: Path,
+):
+    cfg, demo, _game_root = _paths(tmp_path)
+    original = demo.read_bytes()
+    process = _FakeProcess()
+    calls = []
+
+    def fake_prepare(source, destination, **kwargs):
+        calls.append((Path(source), Path(destination), kwargs))
+        Path(destination).write_bytes(b"redirected-handle-demo")
+        return SimpleNamespace(
+            manifest_report=SimpleNamespace(rewritten_chroma_sky_references=2),
+            handle_report=SimpleNamespace(
+                fields_rewritten=28,
+                input_sha256="1" * 64,
+                output_sha256="2" * 64,
+            ),
+        )
+
+    monkeypatch.setattr(playback, "prepare_chroma_demo_copy", fake_prepare)
+    monkeypatch.setattr(
+        playback,
+        "_detect_chroma_demo_map_name",
+        lambda _path: "de_ancient",
+    )
+    monkeypatch.setattr(playback.subprocess, "Popen", lambda *_args, **_kwargs: process)
+
+    service = playback.DemoPlaybackService()
+    service.launch(
+        demo,
+        cfg,
+        playback.DemoPlaybackPovOptions(
+            enabled=True,
+            skybox_id="chroma_blue",
+        ),
+    )
+
+    session = service._active
+    assert session is not None
+    assert demo.read_bytes() == original
+    assert session.copied_demo.read_bytes() == b"redirected-handle-demo"
+    assert len(calls) == 1
+    source, destination, kwargs = calls[0]
+    assert source == demo
+    assert destination == session.copied_demo
+    assert kwargs == {"map_name": "de_ancient"}
+
+    session.started_at_monotonic = time.monotonic() - 4
+    service._monitor_session(session)
+
+
 def test_pov_playback_snapshots_and_restores_player_configs(monkeypatch, tmp_path: Path):
     cfg, demo, _game_root = _paths(tmp_path)
     process = _FakeProcess()

@@ -72,6 +72,20 @@ rmSync(catalogJson);
 console.log(`[desktop] compressed generated catalog: ${normalizedRelative(destination, catalogGzip)}`);
 writeFileSync(join(destination, "backend", "app", "release_version.txt"), `${appVersion}\n`);
 copyFiltered("pov", () => true);
+const requiredPovResources = [
+  "chroma_demo_references/manifest.json",
+  "chroma_main_maps/manifest.json",
+  "chroma_skybox_children/manifest.json",
+  "chroma_skybox_children/payloads.zip",
+  "skyboxes/chroma_blue/chroma_blue.vmat_c",
+  "skyboxes/chroma_blue/chroma_blue.vtex_c",
+  "skyboxes/chroma_green/chroma_green.vmat_c",
+  "skyboxes/chroma_green/chroma_green.vtex_c",
+];
+for (const rel of requiredPovResources) {
+  const resource = join(destination, "pov", ...rel.split("/"));
+  if (!existsSync(resource)) throw new Error(`Missing staged POV resource: ${resource}`);
+}
 const bundledDataFiles = new Set([
   "basic.ini",
   "cs2-insight.config.example.json",
@@ -79,36 +93,40 @@ const bundledDataFiles = new Set([
 copyFiltered("data", (rel) => bundledDataFiles.has(rel.toLowerCase()));
 
 /** Open-source DEM truth-source sidecar used by every keyboard overlay. */
-function buildAndStageInputExtractor() {
+function buildAndStageDemoTools() {
   const manifest = join(repoRoot, "tools", "demo-cosmetic-rewriter", "Cargo.toml");
+  const binaries = ["demo-input-hud-track", "demo-sky-handle-rewriter"];
   const result = spawnSync(
     "cargo",
-    ["build", "--release", "--locked", "--manifest-path", manifest, "--bin", "demo-input-hud-track"],
+    [
+      "build", "--release", "--locked", "--manifest-path", manifest,
+      ...binaries.flatMap((name) => ["--bin", name]),
+    ],
     { cwd: repoRoot, env: process.env, stdio: "inherit", shell: false },
   );
   if (result.status !== 0) {
-    console.error("[desktop] failed to build authoritative DEM input extractor");
+    console.error("[desktop] failed to build authoritative DEM tools");
     process.exit(result.status ?? 1);
   }
-  const source = join(
-    repoRoot,
-    "tools",
-    "demo-cosmetic-rewriter",
-    "target",
-    "release",
-    process.platform === "win32" ? "demo-input-hud-track.exe" : "demo-input-hud-track",
-  );
-  if (!existsSync(source)) throw new Error(`Input extractor build produced no binary: ${source}`);
   const toolsDir = join(destination, "tools");
   mkdirSync(toolsDir, { recursive: true });
-  cpSync(
-    source,
-    join(toolsDir, process.platform === "win32" ? "demo-input-hud-track.exe" : "demo-input-hud-track"),
-  );
-  console.log(`[desktop] staged authoritative DEM input extractor from ${source}`);
+  for (const binary of binaries) {
+    const filename = process.platform === "win32" ? `${binary}.exe` : binary;
+    const source = join(
+      repoRoot,
+      "tools",
+      "demo-cosmetic-rewriter",
+      "target",
+      "release",
+      filename,
+    );
+    if (!existsSync(source)) throw new Error(`DEM tool build produced no binary: ${source}`);
+    cpSync(source, join(toolsDir, filename));
+    console.log(`[desktop] staged authoritative DEM tool from ${source}`);
+  }
 }
 
-buildAndStageInputExtractor();
+buildAndStageDemoTools();
 
 /** Optional proprietary sidecar — never fail OSS CI when absent. */
 function maybeStageSkinCore() {

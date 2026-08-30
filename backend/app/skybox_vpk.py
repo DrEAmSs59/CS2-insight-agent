@@ -5,11 +5,21 @@ from __future__ import annotations
 from collections.abc import Mapping
 from pathlib import Path
 
+from .chroma_demo_manifest import (
+    chroma_demo_redirect_material_path,
+    chroma_demo_registered_material_path,
+)
 from .demo_voice_hud import read_inline_vpk, write_inline_vpk
 
 
 DEFAULT_SKYBOX_ID = "default"
+CHROMA_SKYBOX_IDS = frozenset({"chroma_green", "chroma_blue"})
+CHROMA_ACTIVE_SKY_MATERIAL_PATH = (
+    "materials/cs2_insight/chroma/active_sky.vmat_c"
+)
 _SKYBOX_TEXTURE_FILENAMES: Mapping[str, str] = {
+    "chroma_green": "chroma_green.vtex_c",
+    "chroma_blue": "chroma_blue.vtex_c",
     "cartoon": "cartoon_exr_b1862b2d.vtex_c",
     "cartoon1": "cartoon1_exr_7d8a29ad.vtex_c",
     "cartoon2": "cartoon2_exr_900b0049.vtex_c",
@@ -62,8 +72,13 @@ MAP_SKY_MATERIAL_PATHS: Mapping[str, tuple[str, ...]] = {
         "materials/skybox/sky_hr_aztec_02_lighting.vmat_c",
         "materials/skybox/sky_hr_aztec_02_v1.vmat_c",
     ),
+    "de_train": (
+        "materials/skybox/sky_overcast_01.vmat_c",
+    ),
+    "de_vertigo": (
+        "materials/skybox/sky_de_vertigo.vmat_c",
+    ),
 }
-
 
 class SkyboxVpkError(RuntimeError):
     pass
@@ -119,9 +134,14 @@ def _selected_sky_entries(
         )
     material_bytes = material_source.read_bytes()
     texture_bytes = texture_source.read_bytes()
+    output_material_path = (
+        CHROMA_ACTIVE_SKY_MATERIAL_PATH
+        if skybox_id in CHROMA_SKYBOX_IDS
+        else material_path
+    )
     return (
         {
-            material_path: material_bytes,
+            output_material_path: material_bytes,
             texture_path: texture_bytes,
         },
         material_bytes,
@@ -134,6 +154,7 @@ def compose_recording_skybox_vpk(
     skybox_id: object,
     map_name: object,
     base_vpk_bytes: bytes | None = None,
+    advanced_demo_chroma: bool = False,
 ) -> bytes:
     """Build a normal sky-only VPK or add the sky layer to a POV VPK."""
 
@@ -155,6 +176,23 @@ def compose_recording_skybox_vpk(
     entries = read_inline_vpk(base_vpk_bytes) if base_vpk_bytes is not None else {}
     selected_entries, material = _selected_sky_entries(builtin_assets_dir, selected)
     entries.update(selected_entries)
-    for target_path in target_paths:
-        entries[target_path] = material
+    # Chroma child-skybox profiles point their active env_sky at our own
+    # virtual material. Advanced playback migrates the validated reference
+    # SpawnGroup registration for that same path into its disposable Demo.
+    # Valve's retail sky/fog material paths remain untouched.
+    if selected in CHROMA_SKYBOX_IDS:
+        redirect_path = chroma_demo_redirect_material_path(normalized_map)
+        if redirect_path is not None:
+            entries[redirect_path] = material
+        if advanced_demo_chroma:
+            registered_path = chroma_demo_registered_material_path(normalized_map)
+            if registered_path is None:
+                raise SkyboxVpkError(
+                    "advanced chroma demo has no registered material profile for "
+                    f"{normalized_map}"
+                )
+            entries[registered_path] = material
+    else:
+        for target_path in target_paths:
+            entries[target_path] = material
     return write_inline_vpk(entries)

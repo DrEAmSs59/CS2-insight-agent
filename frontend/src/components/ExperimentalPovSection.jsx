@@ -5,6 +5,7 @@ import { useT } from "../i18n/useT.js";
 import {
   normalizeRecordingSkyboxId,
   isCustomRecordingSkyboxId,
+  partitionBuiltinRecordingSkyboxes,
   recordingSkyboxDisplayName,
   recordingSkyboxPreviewUrl,
   RECORDING_SKYBOX_OPTIONS,
@@ -58,6 +59,10 @@ export default function ExperimentalPovSection({
   const builtinSkyboxOptions = catalogBuiltinSkyboxOptions.length
     ? catalogBuiltinSkyboxOptions
     : RECORDING_SKYBOX_OPTIONS.slice(1).map((option) => ({ id: option.value }));
+  const {
+    solidColor: solidColorSkyboxOptions,
+    standard: standardBuiltinSkyboxOptions,
+  } = partitionBuiltinRecordingSkyboxes(builtinSkyboxOptions);
   const customSkyboxOptions = useMemo(
     () => skyboxResources.filter((item) => item.source === "custom" && item.available),
     [skyboxResources],
@@ -315,8 +320,15 @@ export default function ExperimentalPovSection({
               className="mt-2 w-full rounded border border-cs2-border bg-cs2-bg-input px-2 py-1.5 text-xs text-cs2-text-primary outline-none focus:border-cs2-accent/50 disabled:opacity-40"
             >
               <option value="default">{t("record.skyboxDefault")}</option>
+              <optgroup label={t("record.skyboxSolidColorOptions")}>
+                {solidColorSkyboxOptions.map((item) => (
+                  <option key={item.id} value={item.id}>
+                    {recordingSkyboxDisplayName(item.id, item.display_name, t)}
+                  </option>
+                ))}
+              </optgroup>
               <optgroup label={t("record.skyboxBuiltinOptions")}>
-                {builtinSkyboxOptions.map((item) => (
+                {standardBuiltinSkyboxOptions.map((item) => (
                   <option key={item.id} value={item.id}>
                     {recordingSkyboxDisplayName(item.id, item.display_name, t)}
                   </option>

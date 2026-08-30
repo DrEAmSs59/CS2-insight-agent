@@ -20,13 +20,20 @@ from .cs2_config_backup import (
     snapshot_user_configs,
     write_persistent_backup_from_snap,
 )
+from .chroma_demo_copy import prepare_chroma_demo_copy
 from .demo_compat_service import ensure_demo_compatible
 from .map_material_vpk import (
     DEFAULT_MAP_MATERIAL_ID,
     map_material_console_commands,
 )
 from .pov_constants import POV_CORE_FORCED_COMMANDS, pov_tail_commands
-from .pov_hud_manager import PovHudError, PovHudManager, restore_pov_after_cs2_exit
+from .pov_hud_manager import (
+    PovHudError,
+    PovHudManager,
+    _detect_chroma_demo_map_name,
+    restore_pov_after_cs2_exit,
+)
+from .skybox_vpk import CHROMA_SKYBOX_IDS
 
 logger = logging.getLogger(__name__)
 
@@ -329,14 +336,39 @@ class DemoPlaybackService:
                 player_config_snapshot = self._start_player_config_protection(cs2_path)
 
                 compat = ensure_demo_compatible(dem_path)
-                shutil.copy2(dem_path, copied_demo)
+                selected_skybox = str(options.skybox_id or "").strip().lower()
+                chroma_redirect_report = None
+                if options.enabled and selected_skybox in CHROMA_SKYBOX_IDS:
+                    demo_map_name = _detect_chroma_demo_map_name(dem_path)
+                    chroma_copy_report = prepare_chroma_demo_copy(
+                        dem_path,
+                        copied_demo,
+                        map_name=demo_map_name,
+                    )
+                    chroma_redirect_report = chroma_copy_report.manifest_report
+                    chroma_handle_report = chroma_copy_report.handle_report
+                    logger.info(
+                        "Direct playback chroma CEnvSky handle ready: "
+                        "rewritten=%d input_sha256=%s output_sha256=%s",
+                        chroma_handle_report.fields_rewritten,
+                        chroma_handle_report.input_sha256,
+                        chroma_handle_report.output_sha256,
+                    )
+                else:
+                    shutil.copy2(dem_path, copied_demo)
                 logger.info(
                     "Direct playback compatibility ready: cached=%s outcome=%s "
-                    "removed_type138=%d removed_win_panel=%d source=%s",
+                    "removed_type138=%d removed_win_panel=%d "
+                    "replaced_chroma_skybox_manifests=%d source=%s",
                     compat.cached,
                     compat.report.outcome,
                     compat.report.removed_messages,
                     getattr(compat.report, "removed_win_panel_events", 0),
+                    (
+                        chroma_redirect_report.rewritten_chroma_sky_references
+                        if chroma_redirect_report is not None
+                        else 0
+                    ),
                     dem_path,
                 )
 

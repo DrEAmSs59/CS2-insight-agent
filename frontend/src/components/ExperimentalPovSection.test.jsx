@@ -84,6 +84,20 @@ describe("ExperimentalPovSection POV recovery", () => {
     expect(featureCard.contains(skyboxCard)).toBe(true);
     expect(povCard.className).not.toContain("bg-");
     expect(skyboxCard.className).not.toContain("bg-");
+    const optionGroups = Array.from(selector.querySelectorAll("optgroup"));
+    expect(optionGroups.map(({ label }) => label)).toEqual([
+      "纯色天空盒",
+      "Insight 内置天空盒",
+    ]);
+    expect(Array.from(optionGroups[0].querySelectorAll("option")).map((option) => ({
+      value: option.value,
+      label: option.textContent,
+    }))).toEqual([
+      { value: "chroma_blue", label: "蓝色" },
+      { value: "chroma_green", label: "绿色" },
+    ]);
+    expect(Array.from(optionGroups[1].querySelectorAll("option"))
+      .every(({ value }) => value.startsWith("cartoon"))).toBe(true);
     fireEvent.change(selector, { target: { value: "cartoon4" } });
     expect(onSkyboxChange).toHaveBeenCalledWith("cartoon4");
   });

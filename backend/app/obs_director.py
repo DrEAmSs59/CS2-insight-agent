@@ -26,6 +26,7 @@ from obswebsocket import obsws, requests as obs_requests
 from obswebsocket.core import RecvThread, ReconnectThread
 
 from .demo_parse_isolation import IsolatedParseError, get_demo_match_summary_isolated
+from .chroma_demo_copy import ChromaDemoCopyReport, prepare_chroma_demo_copy
 from .demo_parser import (
     BUFFER_SECONDS_AFTER,
     BUFFER_SECONDS_BEFORE,
@@ -66,6 +67,24 @@ from .pov_constants import (
 from .win_cs2_console import ensure_cs2_foreground, find_cs2_hwnd, inject_console_sequence, send_cs2_space_taps
 
 logger = logging.getLogger(__name__)
+
+
+def _prepare_recording_playback_demo_copy(
+    source: Path,
+    destination: Path,
+    *,
+    chroma_demo_map_name: Optional[str] = None,
+) -> ChromaDemoCopyReport | None:
+    """Create only the disposable Demo that CS2 will play for recording."""
+
+    if chroma_demo_map_name:
+        return prepare_chroma_demo_copy(
+            source,
+            destination,
+            map_name=chroma_demo_map_name,
+        )
+    shutil.copy2(source, destination)
+    return None
 
 
 def _empty_voice_ban_payload(original: bytes) -> bytes:
@@ -2325,6 +2344,8 @@ class OBSDirector:
         self,
         demo_abs: Path,
         warmup: Optional[RecordingWarmupExtras] = None,
+        *,
+        chroma_demo_map_name: Optional[str] = None,
     ) -> None:
         """
         将 Demo 复制到 CS2 的 game/csgo/ 下再以 +playdemo 启动。
@@ -2364,9 +2385,20 @@ class OBSDirector:
         csgo_dir = game_root / "csgo"
         dest_name = f"_insight_{uuid.uuid4().hex}.dem"
         dest = csgo_dir / dest_name
-        # The persistent compatibility preflight has already removed legacy
-        # type 138 and the terminal win-panel event from the source.
-        shutil.copy2(demo_abs, dest)
+        chroma_report = _prepare_recording_playback_demo_copy(
+            demo_abs,
+            dest,
+            chroma_demo_map_name=chroma_demo_map_name,
+        )
+        if chroma_report is not None:
+            logger.info(
+                "[RecordingV3][CHROMA] disposable Demo ready: map=%s "
+                "manifests=%d handles=%d output_sha256=%s",
+                chroma_report.map_name,
+                chroma_report.manifest_report.rewritten_chroma_sky_references,
+                chroma_report.handle_report.fields_rewritten,
+                chroma_report.handle_report.output_sha256,
+            )
         self._copied_demo = dest
 
         cfg_dir = csgo_dir / "cfg"
@@ -3574,6 +3606,7 @@ class OBSDirector:
         from .pov_hud_manager import (
             PovHudError,
             PovHudManager,
+            _detect_chroma_demo_map_name,
             restore_pov_after_cs2_exit,
         )
         from .pov_constants import POV_CORE_FORCED_COMMANDS, pov_tail_commands
@@ -3582,7 +3615,12 @@ class OBSDirector:
             map_material_console_commands,
             normalize_map_material_id,
         )
-        from .skybox_vpk import DEFAULT_SKYBOX_ID, normalize_skybox_id
+        from .skybox_vpk import (
+            CHROMA_SKYBOX_IDS,
+            DEFAULT_SKYBOX_ID,
+            normalize_skybox_id,
+            normalize_skybox_map_name,
+        )
 
         logger.info("[RecordingV3] execute_plan_queue: %d requests", len(requests))
 
@@ -3810,6 +3848,15 @@ class OBSDirector:
                         demo_map_name = str(
                             getattr(demo_requests[0].demo, "map_name", "") or ""
                         ).strip()
+                        if skybox_id_v3 in CHROMA_SKYBOX_IDS:
+                            detected_demo_map = _detect_chroma_demo_map_name(demo_abs)
+                            declared_demo_map = normalize_skybox_map_name(demo_map_name)
+                            if declared_demo_map and declared_demo_map != detected_demo_map:
+                                raise PovHudError(
+                                    "录制任务地图与 Demo 文件检测结果不一致："
+                                    f"{declared_demo_map} != {detected_demo_map}。"
+                                )
+                            demo_map_name = detected_demo_map
                         logger.info(
                             "[RecordingV3][VPK] build and install package for %s "
                             "(pov=%s map_material=%s skybox=%s map=%s)",
@@ -3862,7 +3909,14 @@ class OBSDirector:
 
                 # ── CS2 launch ────────────────────────────────────────────────
                 try:
-                    self._launch_cs2(demo_abs, warmup)
+                    if skybox_id_v3 in CHROMA_SKYBOX_IDS:
+                        self._launch_cs2(
+                            demo_abs,
+                            warmup,
+                            chroma_demo_map_name=demo_map_name,
+                        )
+                    else:
+                        self._launch_cs2(demo_abs, warmup)
                 except CS2AlreadyRunningError:
                     raise
                 except CS2NotReadyError:

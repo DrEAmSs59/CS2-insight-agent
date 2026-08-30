@@ -93,11 +93,17 @@ def test_bundled_cartoon_catalog_uses_natural_numeric_order() -> None:
     ]
 
 
-def test_builtin_catalog_contains_only_cartoon_skyboxes() -> None:
+def test_builtin_catalog_contains_chroma_then_cartoon_skyboxes() -> None:
     resources = list_skybox_resources()
-    builtin_ids = [item["id"] for item in resources if item["source"] == "builtin"]
+    builtin = [item for item in resources if item["source"] == "builtin"]
+    builtin_ids = [item["id"] for item in builtin]
     assert builtin_ids == list(SKYBOX_ASSETS)
-    assert all(skybox_id.startswith("cartoon") for skybox_id in builtin_ids)
+    assert builtin_ids[:2] == ["chroma_green", "chroma_blue"]
+    assert all(skybox_id.startswith("cartoon") for skybox_id in builtin_ids[2:])
+    assert [item["display_name"] for item in builtin[:2]] == [
+        "绿色",
+        "蓝色",
+    ]
 
 
 def test_upload_rejects_texture_that_does_not_match_vmat(

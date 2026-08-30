@@ -7,17 +7,39 @@ import hashlib
 import json
 import logging
 import os
+import re
 import shutil
 import sys
+import tempfile
 import threading
 import time
+from contextlib import ExitStack
 from datetime import datetime, timezone
 from functools import wraps
 from pathlib import Path
 from typing import Any, Callable, Mapping, Optional
 
+from .chroma_skybox_child import (
+    CHROMA_CHILD_MANIFEST_SCHEMA_VERSION,
+    ChromaSkyboxChildError,
+    build_chroma_child_vpk,
+)
+from .chroma_main_map import (
+    CHROMA_MAIN_MAP_MANIFEST_SCHEMA_VERSION,
+)
 from .cs2_config_backup import is_cs2_running
-from .demo_voice_hud import DemoVoiceHudBuild, DemoVoiceHudError, build_demo_voice_hud_vpk
+from .demo_voice_hud import (
+    DemoVoiceHudBuild,
+    DemoVoiceHudError,
+    build_demo_voice_hud_vpk,
+    read_inline_vpk,
+)
+from .demo_playback_compat import detect_demo_map_name_from_spawn_groups
+from .inline_vpk_stream import (
+    InlineVpkStreamError,
+    VerifiedFileSource,
+    write_inline_vpk_file,
+)
 from .map_material_vpk import (
     DEFAULT_MAP_MATERIAL_ID,
     MapMaterialVpkError,
@@ -27,11 +49,13 @@ from .map_material_vpk import (
 )
 from .pov_constants import DEFAULT_POV_VOICE_MODE, normalize_pov_voice_mode
 from .skybox_vpk import (
+    CHROMA_SKYBOX_IDS,
     DEFAULT_SKYBOX_ID,
     SKYBOX_ASSETS,
     SkyboxVpkError,
     compose_recording_skybox_vpk,
     normalize_skybox_id,
+    normalize_skybox_map_name,
 )
 
 logger = logging.getLogger(__name__)
@@ -47,6 +71,12 @@ class PovHudError(RuntimeError):
 
 _POV_OPERATION_LOCK = threading.RLock()
 _POV_OPERATION_MUTEX_NAME = "Local\\CS2InsightAgentPovHudOperation"
+_CHROMA_MAP_NAME_RE = re.compile(r"^de_[a-z0-9_]+$")
+_SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+_CHROMA_RUNTIME_DIRNAME = "cs2_insight_chroma_runtime"
+_CHROMA_RUNTIME_SEARCH_PATH = f"csgo/{_CHROMA_RUNTIME_DIRNAME}"
+_CHROMA_SWAP_BACKUP_DIRNAME = "chroma_originals"
+_CHROMA_OFFICIAL_SWAP_ROUTE = "transactional_official_child_vpk_swap"
 
 
 class _CrossProcessPovMutex:
@@ -206,20 +236,54 @@ def _line_loads_pov_vpk(line: str) -> bool:
     )
 
 
+def _line_loads_chroma_runtime(line: str) -> bool:
+    stripped = line.strip()
+    if not stripped or stripped.startswith("//"):
+        return False
+    parts = stripped.split()
+    return bool(
+        len(parts) >= 2
+        and parts[0].lower() == "game"
+        and parts[1].replace("\\", "/").lower()
+        == _CHROMA_RUNTIME_SEARCH_PATH.lower()
+    )
+
+
 def gameinfo_loads_pov_vpk(content: str) -> bool:
     return any(_line_loads_pov_vpk(line) for line in content.splitlines())
 
 
+def gameinfo_loads_chroma_runtime(content: str) -> bool:
+    return any(_line_loads_chroma_runtime(line) for line in content.splitlines())
+
+
 def remove_pov_gameinfo_entries(content: str) -> tuple[str, int]:
-    """Remove only Agent-owned POV search-path entries, preserving other bytes."""
+    """Remove only Agent-owned POV/chroma search-path entries."""
     lines = content.splitlines(keepends=True)
-    kept = [line for line in lines if not _line_loads_pov_vpk(line)]
+    kept = [
+        line
+        for line in lines
+        if not _line_loads_pov_vpk(line)
+        and not _line_loads_chroma_runtime(line)
+    ]
     return "".join(kept), len(lines) - len(kept)
 
 
-def patch_gameinfo_content(content: str) -> str:
-    if gameinfo_loads_pov_vpk(content):
+def patch_gameinfo_content(
+    content: str,
+    *,
+    include_chroma_runtime: bool = False,
+) -> str:
+    has_pov = gameinfo_loads_pov_vpk(content)
+    has_runtime = gameinfo_loads_chroma_runtime(content)
+    if has_pov and (not include_chroma_runtime or has_runtime):
         return content
+
+    managed_lines: list[str] = []
+    if not has_pov:
+        managed_lines.append("Game    csgo/pov.vpk")
+    if include_chroma_runtime and not has_runtime:
+        managed_lines.append(f"Game    {_CHROMA_RUNTIME_SEARCH_PATH}")
 
     lines = content.splitlines()
     patched: list[str] = []
@@ -230,7 +294,7 @@ def patch_gameinfo_content(content: str) -> str:
         if not inserted and "Game_LowViolence" in line and "csgo_lv" in line:
             indent = line[: len(line) - len(line.lstrip())]
             patched.append("")
-            patched.append(f"{indent}Game    csgo/pov.vpk")
+            patched.extend(f"{indent}{managed_line}" for managed_line in managed_lines)
             inserted = True
 
     if inserted:
@@ -245,7 +309,7 @@ def patch_gameinfo_content(content: str) -> str:
             parts = stripped.split()
             if len(parts) >= 2 and parts[0] == "Game" and parts[1] == "csgo":
                 indent = line[: len(line) - len(line.lstrip())]
-                patched.append(f"{indent}Game    csgo/pov.vpk")
+                patched.extend(f"{indent}{managed_line}" for managed_line in managed_lines)
                 inserted = True
         patched.append(line)
 
@@ -264,6 +328,236 @@ def sha256_file(path: Path) -> str:
     return h.hexdigest()
 
 
+def _read_json_manifest(path: Path, *, label: str) -> dict[str, Any]:
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError) as exc:
+        raise PovHudError(f"无法读取{label}：{path}；{exc}") from exc
+    if not isinstance(value, dict):
+        raise PovHudError(f"{label}必须是 JSON 对象：{path}")
+    return value
+
+
+def _normalize_catalog_map_key(value: object, *, field: str) -> str:
+    if not isinstance(value, str):
+        raise PovHudError(f"蓝/绿幕主地图目录字段 {field} 必须是字符串。")
+    normalized = normalize_skybox_map_name(value)
+    if value != normalized or not _CHROMA_MAP_NAME_RE.fullmatch(normalized):
+        raise PovHudError(f"蓝/绿幕主地图目录字段 {field} 不是规范地图名：{value!r}")
+    return normalized
+
+
+def _chroma_main_patch_required(
+    manifest: Mapping[str, Any],
+    map_name: object,
+) -> bool:
+    """Resolve the explicit, fail-closed main-map routing contract."""
+
+    if manifest.get("schema_version") != CHROMA_MAIN_MAP_MANIFEST_SCHEMA_VERSION:
+        raise PovHudError("不支持的蓝/绿幕主地图目录版本。")
+    maps = manifest.get("maps")
+    no_main = manifest.get("no_main_patch_required")
+    if not isinstance(maps, Mapping):
+        raise PovHudError("蓝/绿幕主地图目录 maps 必须是对象。")
+    if not isinstance(no_main, list):
+        raise PovHudError("蓝/绿幕主地图目录缺少 no_main_patch_required 显式列表。")
+
+    map_keys = {
+        _normalize_catalog_map_key(key, field=f"maps.{key}")
+        for key in maps
+    }
+    no_main_keys = [
+        _normalize_catalog_map_key(value, field=f"no_main_patch_required[{index}]")
+        for index, value in enumerate(no_main)
+    ]
+    if len(no_main_keys) != len(set(no_main_keys)):
+        raise PovHudError("蓝/绿幕主地图目录 no_main_patch_required 存在重复地图。")
+    no_main_set = set(no_main_keys)
+    overlap = map_keys.intersection(no_main_set)
+    if overlap:
+        raise PovHudError(
+            "蓝/绿幕主地图目录同时要求构建和跳过主地图补丁："
+            + ", ".join(sorted(overlap))
+        )
+
+    normalized_map = normalize_skybox_map_name(map_name)
+    if not _CHROMA_MAP_NAME_RE.fullmatch(normalized_map):
+        raise PovHudError("蓝/绿幕需要明确且有效的 Demo 地图名。")
+    in_maps = normalized_map in map_keys
+    in_no_main = normalized_map in no_main_set
+    if in_maps == in_no_main:
+        raise PovHudError(
+            f"蓝/绿幕主地图目录没有给 {normalized_map} 唯一且明确的处理策略。"
+        )
+    return in_maps
+
+
+def _chroma_child_main_patch_required(
+    manifest: Mapping[str, Any],
+    map_name: object,
+) -> bool:
+    """Read the child's duplicate routing assertion with strict typing."""
+
+    if manifest.get("schema_version") != CHROMA_CHILD_MANIFEST_SCHEMA_VERSION:
+        raise PovHudError("不支持的蓝/绿幕子天空盒目录版本。")
+    maps = manifest.get("maps")
+    if not isinstance(maps, Mapping):
+        raise PovHudError("蓝/绿幕子天空盒目录 maps 必须是对象。")
+    normalized_map = normalize_skybox_map_name(map_name)
+    if not _CHROMA_MAP_NAME_RE.fullmatch(normalized_map):
+        raise PovHudError("蓝/绿幕需要明确且有效的 Demo 地图名。")
+    profile = maps.get(normalized_map)
+    if not isinstance(profile, Mapping):
+        raise PovHudError(
+            f"蓝/绿幕子天空盒目录不支持地图 {normalized_map}。"
+        )
+    required = profile.get("main_map_patch_required")
+    if type(required) is not bool:
+        raise PovHudError(
+            "蓝/绿幕子天空盒目录的 main_map_patch_required "
+            f"必须是布尔值：{normalized_map}。"
+        )
+    return required
+
+
+def _detect_chroma_demo_map_name(demo_path: str | Path) -> str:
+    """Detect a map from the header, then authoritative terminal SpawnGroups."""
+
+    path = Path(demo_path).expanduser()
+    if not path.is_file():
+        raise PovHudError(f"无法读取蓝/绿幕 Demo 地图：Demo 文件不存在 {path}。")
+    header_error = ""
+    try:
+        from demoparser2 import DemoParser
+
+        header = DemoParser(str(path)).parse_header()
+    except (KeyboardInterrupt, SystemExit, GeneratorExit):
+        raise
+    except BaseException as exc:  # PyO3 PanicException is not an Exception subclass.
+        header = None
+        header_error = str(exc)
+    if isinstance(header, Mapping):
+        detected = normalize_skybox_map_name(header.get("map_name"))
+        if _CHROMA_MAP_NAME_RE.fullmatch(detected):
+            return detected
+        header_error = "map_name 缺失或无效"
+    elif not header_error:
+        header_error = "返回格式无效"
+
+    try:
+        detected = normalize_skybox_map_name(
+            detect_demo_map_name_from_spawn_groups(path)
+        )
+    except (OSError, ValueError) as exc:
+        raise PovHudError(
+            "无法从 Demo 头或 SpawnGroups 确认蓝/绿幕地图："
+            f"header={header_error or 'unknown'}; SpawnGroups={exc}"
+        ) from exc
+    if not _CHROMA_MAP_NAME_RE.fullmatch(detected):
+        raise PovHudError("Demo SpawnGroups 返回了无效地图名。")
+    return detected
+
+
+def _enter_chroma_staging_dir(stack: ExitStack, *, csgo_dir: Path) -> Path:
+    """Create staging outside the game tree and bind cleanup to the install call."""
+
+    temp_root = Path(tempfile.gettempdir()).resolve()
+    game_root = Path(csgo_dir).resolve()
+    if temp_root == game_root or temp_root.is_relative_to(game_root):
+        raise PovHudError("系统临时目录位于 CS2 游戏目录内，无法安全构建蓝/绿幕 VPK。")
+    staging = stack.enter_context(
+        tempfile.TemporaryDirectory(prefix="cs2-insight-chroma-", dir=temp_root)
+    )
+    return Path(staging)
+
+
+def _resolve_chroma_runtime_target(runtime_root: Path, logical_path: str) -> Path:
+    normalized = str(logical_path or "").replace("\\", "/")
+    parts = normalized.split("/")
+    if (
+        not normalized
+        or normalized.startswith("/")
+        or ":" in normalized
+        or any(not part or part in {".", ".."} for part in parts)
+        or not normalized.lower().endswith(".vpk")
+    ):
+        raise PovHudError(f"蓝/绿幕运行 VPK 路径无效：{logical_path!r}")
+    root = runtime_root.resolve()
+    target = root.joinpath(*parts).resolve()
+    if target == root or not target.is_relative_to(root):
+        raise PovHudError(f"蓝/绿幕运行 VPK 路径越界：{logical_path!r}")
+    return target
+
+
+def _verified_vpk_identity(
+    metadata: Mapping[str, Any],
+    *,
+    field: str,
+) -> tuple[int, str]:
+    value = metadata.get(field)
+    if not isinstance(value, Mapping):
+        raise PovHudError(f"蓝/绿幕 VPK 缺少 {field} 身份信息。")
+    size = value.get("size")
+    sha256 = str(value.get("sha256") or "").strip().lower()
+    if isinstance(size, bool) or not isinstance(size, int) or size < 0:
+        raise PovHudError(f"蓝/绿幕 VPK 的 {field}.size 无效。")
+    if not _SHA256_RE.fullmatch(sha256):
+        raise PovHudError(f"蓝/绿幕 VPK 的 {field}.sha256 无效。")
+    return size, sha256
+
+
+def _chroma_official_swap_records(
+    manifest: Mapping[str, Any],
+) -> list[Mapping[str, Any]]:
+    section = manifest.get("chroma_official_swaps")
+    if section is None:
+        return []
+    if not isinstance(section, Mapping):
+        raise PovHudError("蓝/绿幕官方 VPK 恢复记录格式无效。")
+    if section.get("route") != _CHROMA_OFFICIAL_SWAP_ROUTE:
+        raise PovHudError("蓝/绿幕官方 VPK 恢复路线无效。")
+    files = section.get("files")
+    if not isinstance(files, list) or not files:
+        raise PovHudError("蓝/绿幕官方 VPK 恢复记录没有文件。")
+    if any(not isinstance(item, Mapping) for item in files):
+        raise PovHudError("蓝/绿幕官方 VPK 恢复文件记录格式无效。")
+    return files
+
+
+def _validated_chroma_swap_record(
+    record: Mapping[str, Any],
+    *,
+    csgo_root: Path,
+    backup_root: Path,
+) -> tuple[Path, Path, int, str, int, str]:
+    logical_path = str(record.get("logical_path") or "")
+    target = _resolve_chroma_runtime_target(csgo_root, logical_path)
+    backup = _resolve_chroma_runtime_target(backup_root, logical_path)
+    original_size = record.get("original_size")
+    installed_size = record.get("installed_size")
+    original_sha256 = str(record.get("original_sha256") or "").strip().lower()
+    installed_sha256 = str(record.get("installed_sha256") or "").strip().lower()
+    if (
+        isinstance(original_size, bool)
+        or not isinstance(original_size, int)
+        or original_size < 0
+        or isinstance(installed_size, bool)
+        or not isinstance(installed_size, int)
+        or installed_size < 0
+        or not _SHA256_RE.fullmatch(original_sha256)
+        or not _SHA256_RE.fullmatch(installed_sha256)
+    ):
+        raise PovHudError(f"蓝/绿幕官方 VPK 恢复身份无效：{logical_path!r}")
+    return (
+        target,
+        backup,
+        original_size,
+        original_sha256,
+        installed_size,
+        installed_sha256,
+    )
+
+
 class PovHudManager:
     """定位资源、安装 / 恢复 POV HUD 文件。"""
 
@@ -279,6 +573,9 @@ class PovHudManager:
     def get_pov_vpk_target_path(self) -> Path:
         return self.get_csgo_dir() / "pov.vpk"
 
+    def get_chroma_runtime_dir(self) -> Path:
+        return self.get_csgo_dir() / _CHROMA_RUNTIME_DIRNAME
+
     def get_backup_dir(self) -> Path:
         return self.get_csgo_dir() / ".cs2_insight_pov_backup"
 
@@ -287,6 +584,9 @@ class PovHudManager:
 
     def get_backup_gameinfo_path(self) -> Path:
         return self.get_backup_dir() / "gameinfo.gi.bak"
+
+    def get_chroma_swap_backup_dir(self) -> Path:
+        return self.get_backup_dir() / _CHROMA_SWAP_BACKUP_DIRNAME
 
     def get_project_pov_dir(self) -> Path:
         return find_project_root() / "pov"
@@ -312,6 +612,12 @@ class PovHudManager:
     def get_map_material_assets_dir(self) -> Path:
         return self.get_project_pov_dir() / "map_materials"
 
+    def get_chroma_child_assets_dir(self) -> Path:
+        return self.get_project_pov_dir() / "chroma_skybox_children"
+
+    def get_chroma_main_map_assets_dir(self) -> Path:
+        return self.get_project_pov_dir() / "chroma_main_maps"
+
     def get_reference_default_gameinfo_path(self) -> Path:
         return self.get_project_pov_dir() / "gameinfo.gi.default"
 
@@ -319,7 +625,10 @@ class PovHudManager:
         return self.get_project_pov_dir() / "gameinfo.gi.pov"
 
     def is_gameinfo_patched(self, content: str) -> bool:
-        return gameinfo_loads_pov_vpk(content)
+        return bool(
+            gameinfo_loads_pov_vpk(content)
+            or gameinfo_loads_chroma_runtime(content)
+        )
 
     def _read_manifest(self) -> dict[str, Any]:
         path = self.get_manifest_path()
@@ -331,12 +640,130 @@ class PovHudManager:
             return {}
         return value if isinstance(value, dict) else {}
 
+    def _verify_chroma_official_swaps(
+        self,
+        manifest: Mapping[str, Any],
+    ) -> tuple[bool, list[str]]:
+        errors: list[str] = []
+        try:
+            records = _chroma_official_swap_records(manifest)
+        except PovHudError as exc:
+            return False, [str(exc)]
+        if not records:
+            return True, errors
+        csgo_root = self.get_csgo_dir()
+        backup_root = self.get_chroma_swap_backup_dir()
+        for record in records:
+            try:
+                target, _backup, original_size, original_sha, _installed_size, _installed_sha = (
+                    _validated_chroma_swap_record(
+                        record,
+                        csgo_root=csgo_root,
+                        backup_root=backup_root,
+                    )
+                )
+                if not target.is_file() or target.is_symlink():
+                    raise PovHudError(f"官方蓝/绿幕 VPK 不存在或不是普通文件：{target}")
+                if target.stat().st_size != original_size or sha256_file(target) != original_sha:
+                    raise PovHudError(f"官方蓝/绿幕 VPK 尚未恢复：{target}")
+            except (OSError, PovHudError) as exc:
+                errors.append(str(exc))
+        return not errors, errors
+
+    def _restore_chroma_official_swaps(
+        self,
+        manifest: Mapping[str, Any],
+    ) -> list[str]:
+        records = _chroma_official_swap_records(manifest)
+        if not records:
+            return []
+        csgo_root = self.get_csgo_dir()
+        backup_root = self.get_chroma_swap_backup_dir()
+        restored: list[str] = []
+        for record in records:
+            (
+                target,
+                backup,
+                original_size,
+                original_sha,
+                installed_size,
+                installed_sha,
+            ) = _validated_chroma_swap_record(
+                record,
+                csgo_root=csgo_root,
+                backup_root=backup_root,
+            )
+            if not target.is_file() or target.is_symlink():
+                raise PovHudError(f"无法恢复官方蓝/绿幕 VPK：目标不存在或不是普通文件 {target}")
+            current_size = target.stat().st_size
+            current_sha = sha256_file(target)
+            if current_size == original_size and current_sha == original_sha:
+                restored.append(str(target))
+                continue
+            if current_size != installed_size or current_sha != installed_sha:
+                raise PovHudError(
+                    "拒绝覆盖会话外发生变化的官方蓝/绿幕 VPK："
+                    f"{target}"
+                )
+            if not backup.is_file() or backup.is_symlink():
+                raise PovHudError(f"无法恢复官方蓝/绿幕 VPK：备份不存在 {backup}")
+            if backup.stat().st_size != original_size or sha256_file(backup) != original_sha:
+                raise PovHudError(f"无法恢复官方蓝/绿幕 VPK：备份身份校验失败 {backup}")
+            _atomic_copy(backup, target)
+            if target.stat().st_size != original_size or sha256_file(target) != original_sha:
+                raise PovHudError(f"官方蓝/绿幕 VPK 恢复后校验失败：{target}")
+            restored.append(str(target))
+        return restored
+
+    def _cleanup_chroma_swap_backups(self) -> None:
+        swap_root = self.get_chroma_swap_backup_dir()
+        if not swap_root.exists():
+            return
+        backup_root = self.get_backup_dir().resolve()
+        resolved = swap_root.resolve()
+        if (
+            swap_root.name != _CHROMA_SWAP_BACKUP_DIRNAME
+            or resolved.parent != backup_root
+        ):
+            raise PovHudError(f"拒绝清理越界的蓝/绿幕 VPK 备份目录：{swap_root}")
+        try:
+            shutil.rmtree(swap_root)
+        except OSError as exc:
+            raise PovHudError(f"无法清理蓝/绿幕 VPK 备份目录 {swap_root}：{exc}") from exc
+
+    def _assert_orphan_chroma_swap_backups_safe(self) -> None:
+        swap_root = self.get_chroma_swap_backup_dir()
+        if not swap_root.exists():
+            return
+        if swap_root.is_symlink() or not swap_root.is_dir():
+            raise PovHudError(f"蓝/绿幕 VPK 备份目录无效：{swap_root}")
+        csgo_root = self.get_csgo_dir()
+        for backup in swap_root.rglob("*"):
+            if backup.is_dir():
+                continue
+            if backup.is_symlink() or not backup.is_file():
+                raise PovHudError(f"蓝/绿幕 VPK 孤立备份无效：{backup}")
+            relative = backup.relative_to(swap_root).as_posix()
+            target = _resolve_chroma_runtime_target(csgo_root, relative)
+            if (
+                not target.is_file()
+                or target.is_symlink()
+                or target.stat().st_size != backup.stat().st_size
+                or sha256_file(target) != sha256_file(backup)
+            ):
+                raise PovHudError(
+                    "蓝/绿幕官方 VPK 恢复记录缺失且目标与备份不同，"
+                    f"拒绝自动覆盖或删除备份：{target}"
+                )
+
     def verify_restoration(self, expected_gameinfo_sha256: Optional[str] = None) -> dict[str, Any]:
         """Return file-system evidence for POV restoration without inferring success."""
         gi_path = self.get_gameinfo_path()
         pov_path = self.get_pov_vpk_target_path()
+        chroma_runtime_path = self.get_chroma_runtime_dir()
         manifest_path = self.get_manifest_path()
         backup_path = self.get_backup_gameinfo_path()
+        manifest = self._read_manifest() if manifest_path.is_file() else {}
         expected_sha = str(expected_gameinfo_sha256 or "").strip().lower() or None
         actual_sha: Optional[str] = None
         gameinfo_has_pov_entry: Optional[bool] = None
@@ -358,8 +785,19 @@ class PovHudManager:
         gameinfo_restored = bool(expected_sha and actual_sha == expected_sha and gameinfo_has_pov_entry is False)
         pov_vpk_exists = pov_path.is_file()
         pov_vpk_removed = not pov_vpk_exists
+        chroma_runtime_exists = chroma_runtime_path.exists()
+        chroma_runtime_removed = not chroma_runtime_exists
+        chroma_official_swaps_restored, swap_errors = (
+            self._verify_chroma_official_swaps(manifest)
+        )
+        errors.extend(swap_errors)
         return {
-            "verified": bool(gameinfo_restored and pov_vpk_removed),
+            "verified": bool(
+                gameinfo_restored
+                and pov_vpk_removed
+                and chroma_runtime_removed
+                and chroma_official_swaps_restored
+            ),
             "gameinfo_path": str(gi_path),
             "gameinfo_exists": gi_path.is_file(),
             "gameinfo_restored": gameinfo_restored,
@@ -369,6 +807,10 @@ class PovHudManager:
             "pov_vpk_path": str(pov_path),
             "pov_vpk_exists": pov_vpk_exists,
             "pov_vpk_removed": pov_vpk_removed,
+            "chroma_runtime_path": str(chroma_runtime_path),
+            "chroma_runtime_exists": chroma_runtime_exists,
+            "chroma_runtime_removed": chroma_runtime_removed,
+            "chroma_official_swaps_restored": chroma_official_swaps_restored,
             "manifest_exists": manifest_path.is_file(),
             "backup_exists": backup_path.is_file(),
             "checked_at": datetime.now(timezone.utc).isoformat(),
@@ -388,6 +830,12 @@ class PovHudManager:
         manifest_path = csgo / ".cs2_insight_pov_backup" / "pov_manifest.json" if csgo else None
         bak_path = csgo / ".cs2_insight_pov_backup" / "gameinfo.gi.bak" if csgo else None
         pov_dst = csgo / "pov.vpk" if csgo else None
+        chroma_runtime = csgo / _CHROMA_RUNTIME_DIRNAME if csgo else None
+        chroma_swap_backup = (
+            csgo / ".cs2_insight_pov_backup" / _CHROMA_SWAP_BACKUP_DIRNAME
+            if csgo
+            else None
+        )
 
         gameinfo_patched = False
         if gi_path and gi_path.is_file():
@@ -400,7 +848,14 @@ class PovHudManager:
         manifest_exists = bool(manifest_path and manifest_path.is_file())
         backup_exists = bool(bak_path and bak_path.is_file())
         pov_installed = bool(pov_dst and pov_dst.is_file())
+        chroma_runtime_installed = bool(chroma_runtime and chroma_runtime.exists())
+        chroma_swap_backup_exists = bool(
+            chroma_swap_backup and chroma_swap_backup.exists()
+        )
         manifest = self._read_manifest() if manifest_exists else {}
+        chroma_official_swap_managed = bool(
+            isinstance(manifest.get("chroma_official_swaps"), Mapping)
+        )
         original_gameinfo_sha256 = str(manifest.get("original_gameinfo_sha256") or "").strip().lower() or None
 
         if gameinfo_patched and not manifest_exists:
@@ -410,12 +865,26 @@ class PovHudManager:
 
         if pov_installed and not manifest_exists:
             warnings.append("检测到 Agent 遗留的 pov.vpk，但未找到恢复记录，将使用残留修复。")
+        if chroma_runtime_installed and not manifest_exists:
+            warnings.append(
+                "检测到 Agent 遗留的蓝/绿幕运行目录，但未找到恢复记录，将使用残留修复。"
+            )
+        if chroma_swap_backup_exists and not manifest_exists:
+            warnings.append(
+                "检测到蓝/绿幕官方 VPK 备份但恢复记录缺失；若官方文件身份不一致将拒绝自动覆盖。"
+            )
         if backup_exists and not manifest_exists:
             warnings.append("检测到 Agent 遗留的 gameinfo.gi.bak，将在残留修复后清理。")
 
         orphaned_changes = bool(
             not manifest_exists
-            and (gameinfo_patched or pov_installed or backup_exists)
+            and (
+                gameinfo_patched
+                or pov_installed
+                or chroma_runtime_installed
+                or chroma_swap_backup_exists
+                or backup_exists
+            )
         )
         manifest_corrupted = bool(manifest_exists and not backup_exists)
         if manifest_corrupted:
@@ -433,6 +902,9 @@ class PovHudManager:
         return {
             "state": state,
             "installed": pov_installed,
+            "chroma_runtime_installed": chroma_runtime_installed,
+            "chroma_official_swap_managed": chroma_official_swap_managed,
+            "chroma_swap_backup_exists": chroma_swap_backup_exists,
             "gameinfo_patched": gameinfo_patched,
             "backup_exists": backup_exists,
             "manifest_exists": manifest_exists,
@@ -456,6 +928,32 @@ class PovHudManager:
         advanced_playback_enabled: bool = False,
         skybox_id: str = DEFAULT_SKYBOX_ID,
         map_material_id: str = DEFAULT_MAP_MATERIAL_ID,
+    ) -> Optional[DemoVoiceHudBuild]:
+        with ExitStack() as staging_stack:
+            return self._install_impl(
+                map_name,
+                demo_path=demo_path,
+                input_track_report=input_track_report,
+                voice_enabled=voice_enabled,
+                voice_mode=voice_mode,
+                advanced_playback_enabled=advanced_playback_enabled,
+                skybox_id=skybox_id,
+                map_material_id=map_material_id,
+                staging_stack=staging_stack,
+            )
+
+    def _install_impl(
+        self,
+        map_name: Optional[str] = None,
+        *,
+        demo_path: Optional[str | Path] = None,
+        input_track_report: Optional[Mapping[str, Any]] = None,
+        voice_enabled: bool = True,
+        voice_mode: str = DEFAULT_POV_VOICE_MODE,
+        advanced_playback_enabled: bool = False,
+        skybox_id: str = DEFAULT_SKYBOX_ID,
+        map_material_id: str = DEFAULT_MAP_MATERIAL_ID,
+        staging_stack: ExitStack,
     ) -> Optional[DemoVoiceHudBuild]:
         if sys.platform != "win32":
             raise PovHudError("POV HUD 仅支持 Windows。")
@@ -543,12 +1041,29 @@ class PovHudManager:
                 )
 
         package_bytes: Optional[bytes] = voice_build.vpk_bytes if voice_build is not None else None
-        effective_map_name = str(map_name or "").strip()
-        if not effective_map_name and voice_build is not None:
-            # Advanced playback already parses the demo header while building
-            # its HUD package. Reuse that detected map for skybox composition
-            # when the caller did not have a separate map name.
-            effective_map_name = str(voice_build.radar_map or "").strip()
+        explicit_map_name = normalize_skybox_map_name(map_name)
+        detected_map_name = (
+            normalize_skybox_map_name(voice_build.radar_map)
+            if demo_path is not None and voice_build is not None
+            else ""
+        )
+        if (
+            demo_path is not None
+            and selected_skybox in CHROMA_SKYBOX_IDS
+            and not detected_map_name
+        ):
+            detected_map_name = _detect_chroma_demo_map_name(demo_path)
+        if (
+            demo_path is not None
+            and explicit_map_name
+            and detected_map_name
+            and explicit_map_name != detected_map_name
+        ):
+            raise PovHudError(
+                "显式 Demo 地图与 Demo 文件检测结果不一致："
+                f"{explicit_map_name} != {detected_map_name}。"
+            )
+        effective_map_name = explicit_map_name or detected_map_name
         visual_layer_enabled = (
             selected_map_material != DEFAULT_MAP_MATERIAL_ID
             or selected_skybox != DEFAULT_SKYBOX_ID
@@ -570,6 +1085,13 @@ class PovHudManager:
                 )
             except (OSError, MapMaterialVpkError) as exc:
                 raise PovHudError(f"地图材质 VPK 生成失败：{exc}") from exc
+        chroma_child_metadata: Optional[dict[str, Any]] = None
+        chroma_main_metadata: Optional[dict[str, Any]] = None
+        chroma_outer_metadata: Optional[dict[str, Any]] = None
+        chroma_official_swap_metadata: Optional[dict[str, Any]] = None
+        staged_chroma_swap_files: dict[str, VerifiedFileSource] = {}
+        staged_chroma_original_identities: dict[str, tuple[int, str]] = {}
+        staged_package_path: Optional[Path] = None
         if selected_skybox != DEFAULT_SKYBOX_ID:
             skybox_assets_dir = (
                 self.get_skybox_assets_dir()
@@ -588,9 +1110,137 @@ class PovHudManager:
                     base_vpk_bytes=package_bytes,
                     skybox_id=selected_skybox,
                     map_name=effective_map_name,
+                    advanced_demo_chroma=(
+                        demo_path is not None
+                        and advanced_playback_enabled
+                        and selected_skybox in CHROMA_SKYBOX_IDS
+                    ),
                 )
             except (OSError, SkyboxVpkError) as exc:
                 raise PovHudError(f"天空盒 VPK 生成失败：{exc}") from exc
+        if selected_skybox in CHROMA_SKYBOX_IDS:
+            child_assets_dir = self.get_chroma_child_assets_dir()
+            child_manifest_path = child_assets_dir / "manifest.json"
+            if not child_manifest_path.is_file():
+                raise PovHudError(
+                    f"未找到蓝/绿幕子天空盒资源：{child_assets_dir}"
+                )
+            main_assets_dir = self.get_chroma_main_map_assets_dir()
+            main_manifest_path = main_assets_dir / "manifest.json"
+            if not main_manifest_path.is_file():
+                raise PovHudError(
+                    f"未找到蓝/绿幕主地图资源：{main_assets_dir}"
+                )
+            try:
+                child_manifest = _read_json_manifest(
+                    child_manifest_path,
+                    label="蓝/绿幕子天空盒目录",
+                )
+                main_manifest = _read_json_manifest(
+                    main_manifest_path,
+                    label="蓝/绿幕主地图目录",
+                )
+                main_required = _chroma_main_patch_required(
+                    main_manifest,
+                    effective_map_name,
+                )
+                child_main_required = _chroma_child_main_patch_required(
+                    child_manifest,
+                    effective_map_name,
+                )
+                if child_main_required != main_required:
+                    raise PovHudError(
+                        "蓝/绿幕子天空盒与主地图目录的补丁策略不一致："
+                        f"{effective_map_name}。"
+                    )
+                if main_required:
+                    raise PovHudError(
+                        "蓝/绿幕正式路线禁止临时替换官方主地图 VPK："
+                        f"{effective_map_name}。"
+                    )
+                child_build = build_chroma_child_vpk(
+                    csgo_dir=self.get_csgo_dir(),
+                    payload_root=child_assets_dir,
+                    manifest=child_manifest,
+                    map_name=effective_map_name,
+                )
+                if package_bytes is None:
+                    raise ChromaSkyboxChildError(
+                        "outer chroma VPK was not generated"
+                    )
+                staging_dir = _enter_chroma_staging_dir(
+                    staging_stack,
+                    csgo_dir=self.get_csgo_dir(),
+                )
+                child_output = child_build.metadata.get("output")
+                if not isinstance(child_output, Mapping):
+                    raise ChromaSkyboxChildError(
+                        "verified child-skybox build has no output metadata"
+                    )
+                staged_child_path = staging_dir / "runtime" / child_build.logical_path
+                staged_child_path.parent.mkdir(parents=True, exist_ok=True)
+                _atomic_write_bytes(staged_child_path, child_build.vpk_bytes)
+                staged_chroma_swap_files[child_build.logical_path] = VerifiedFileSource(
+                    path=staged_child_path,
+                    size=int(child_output.get("size", -1)),
+                    sha256=str(child_output.get("sha256") or ""),
+                )
+                staged_chroma_original_identities[child_build.logical_path] = (
+                    _verified_vpk_identity(child_build.metadata, field="source")
+                )
+                chroma_main_metadata = {
+                    "schema_version": CHROMA_MAIN_MAP_MANIFEST_SCHEMA_VERSION,
+                    "map_name": effective_map_name,
+                    "required": False,
+                    "route": "explicit_no_main_patch_required",
+                }
+
+                outer_entries = read_inline_vpk(package_bytes)
+                if child_build.logical_path in outer_entries:
+                    raise ChromaSkyboxChildError(
+                        "outer POV package unexpectedly contains a nested child skybox"
+                    )
+                outer_build = write_inline_vpk_file(
+                    output_path=staging_dir / "pov.vpk",
+                    byte_entries=outer_entries,
+                )
+                staged_package_path = outer_build.output_path
+                package_bytes = None
+                chroma_child_metadata = child_build.metadata
+                chroma_outer_metadata = {
+                    **outer_build.metadata,
+                    "logical_path": "csgo/pov.vpk",
+                    "skybox_id": selected_skybox,
+                }
+                chroma_official_swap_metadata = {
+                    "schema_version": 1,
+                    "route": _CHROMA_OFFICIAL_SWAP_ROUTE,
+                    "files": [
+                        {
+                            "logical_path": logical_path,
+                            "original_size": staged_chroma_original_identities[
+                                logical_path
+                            ][0],
+                            "original_sha256": staged_chroma_original_identities[
+                                logical_path
+                            ][1],
+                            "installed_size": source.size,
+                            "installed_sha256": source.sha256,
+                        }
+                        for logical_path, source in sorted(
+                            staged_chroma_swap_files.items()
+                        )
+                    ],
+                }
+            except (
+                OSError,
+                ValueError,
+                TypeError,
+                DemoVoiceHudError,
+                ChromaSkyboxChildError,
+                InlineVpkStreamError,
+            ) as exc:
+                raise PovHudError(f"蓝/绿幕运行 VPK 生成失败：{exc}") from exc
 
         gi_path = self.get_gameinfo_path()
         if not gi_path.is_file():
@@ -600,14 +1250,65 @@ class PovHudManager:
         manifest_path = self.get_manifest_path()
         bak_path = self.get_backup_gameinfo_path()
         pov_dst = self.get_pov_vpk_target_path()
+        chroma_swap_backup_dir = self.get_chroma_swap_backup_dir()
+
+        try:
+            raw_gi = gi_path.read_text(encoding="utf-8", errors="surrogateescape")
+            original_gameinfo_sha = sha256_file(gi_path)
+            patched_txt = patch_gameinfo_content(
+                raw_gi,
+                include_chroma_runtime=False,
+            )
+            planned_patched_sha = hashlib.sha256(
+                patched_txt.encode("utf-8")
+            ).hexdigest()
+        except (OSError, UnicodeError) as e:
+            raise PovHudError(
+                f"无法读取或校验 gameinfo.gi {gi_path}。系统错误：{e}"
+            ) from e
+
+        # Voice parsing and chroma main-map reconstruction can be lengthy.  Do
+        # not trust the check made at method entry after all staging has
+        # completed: no game-tree write is allowed if CS2 started meanwhile.
+        if is_cs2_running():
+            raise PovHudError(CS2_RUNNING_POV_MSG)
+
+        if chroma_official_swap_metadata is not None:
+            for record in _chroma_official_swap_records(
+                {"chroma_official_swaps": chroma_official_swap_metadata}
+            ):
+                (
+                    target,
+                    backup,
+                    original_size,
+                    original_vpk_sha,
+                    _installed_size,
+                    _installed_sha,
+                ) = _validated_chroma_swap_record(
+                    record,
+                    csgo_root=self.get_csgo_dir(),
+                    backup_root=chroma_swap_backup_dir,
+                )
+                if not target.is_file() or target.is_symlink():
+                    raise PovHudError(
+                        f"蓝/绿幕官方 child VPK 不存在或不是普通文件：{target}"
+                    )
+                if (
+                    target.stat().st_size != original_size
+                    or sha256_file(target) != original_vpk_sha
+                ):
+                    raise PovHudError(
+                        "蓝/绿幕官方 child VPK 已变化，拒绝开始会话："
+                        f"{target}"
+                    )
+                record["target_path"] = str(target)
+                record["backup_path"] = str(backup)
 
         try:
             backup_dir.mkdir(parents=True, exist_ok=True)
-            raw_gi = gi_path.read_text(encoding="utf-8", errors="surrogateescape")
-            original_sha = sha256_file(gi_path)
         except OSError as e:
             raise PovHudError(
-                f"无法读取 gameinfo.gi 或创建备份目录 {backup_dir}。系统错误：{e}"
+                f"无法创建备份目录 {backup_dir}。系统错误：{e}"
             ) from e
 
         # Each session must back up the current gameinfo.gi. Reusing an older
@@ -705,8 +1406,14 @@ class PovHudManager:
             ),
             "demo_map_name_used": effective_map_name,
             "recording_skybox_id": selected_skybox,
+            "chroma_child_skybox": chroma_child_metadata,
+            "chroma_main_map": chroma_main_metadata,
+            "chroma_outer_vpk": chroma_outer_metadata,
+            "chroma_runtime": None,
+            "chroma_official_swaps": chroma_official_swap_metadata,
             "recording_map_material_id": selected_map_material,
-            "original_gameinfo_sha256": original_sha,
+            "original_gameinfo_sha256": original_gameinfo_sha,
+            "planned_patched_gameinfo_sha256": planned_patched_sha,
         }
         try:
             _atomic_write_json(manifest_path, manifest)
@@ -726,12 +1433,94 @@ class PovHudManager:
                 logger.error("Could not roll back failed POV HUD install: %s", rollback_error)
 
         try:
-            if package_bytes is not None:
+            if chroma_official_swap_metadata is not None:
+                for record in _chroma_official_swap_records(manifest):
+                    (
+                        target,
+                        backup,
+                        original_size,
+                        original_vpk_sha,
+                        _installed_size,
+                        _installed_sha,
+                    ) = _validated_chroma_swap_record(
+                        record,
+                        csgo_root=self.get_csgo_dir(),
+                        backup_root=chroma_swap_backup_dir,
+                    )
+                    if (
+                        target.stat().st_size != original_size
+                        or sha256_file(target) != original_vpk_sha
+                    ):
+                        raise PovHudError(
+                            "备份前官方蓝/绿幕 child VPK 身份发生变化："
+                            f"{target}"
+                        )
+                    backup.parent.mkdir(parents=True, exist_ok=True)
+                    _atomic_copy(target, backup)
+                    if (
+                        backup.stat().st_size != original_size
+                        or sha256_file(backup) != original_vpk_sha
+                    ):
+                        raise PovHudError(
+                            f"官方蓝/绿幕 child VPK 备份校验失败：{backup}"
+                        )
+
+            if staged_package_path is not None:
+                _atomic_copy(staged_package_path, pov_dst)
+            elif package_bytes is not None:
                 _atomic_write_bytes(pov_dst, package_bytes)
             else:
                 if pov_src is None:
                     raise PovHudError("未找到可安装的录制 VPK 资源。")
                 _atomic_copy(pov_src, pov_dst)
+            pov_sha = sha256_file(pov_dst)
+            if chroma_outer_metadata is not None:
+                outer_output = chroma_outer_metadata.get("output")
+                expected_outer_sha = (
+                    str(outer_output.get("sha256") or "").strip().lower()
+                    if isinstance(outer_output, Mapping)
+                    else ""
+                )
+                if not expected_outer_sha or pov_sha != expected_outer_sha:
+                    raise PovHudError(
+                        "安装后的蓝/绿幕 pov.vpk 与已验证 staging 输出 SHA-256 不一致。"
+                    )
+
+            for logical_path, source in sorted(staged_chroma_swap_files.items()):
+                if not source.path.is_file():
+                    raise PovHudError(
+                        f"蓝/绿幕 staging VPK 不存在：{source.path}"
+                    )
+                source_size = source.path.stat().st_size
+                source_sha = sha256_file(source.path)
+                if source_size != source.size or source_sha != source.sha256:
+                    raise PovHudError(
+                        f"蓝/绿幕 staging VPK 身份校验失败：{logical_path}"
+                    )
+                record = next(
+                    item
+                    for item in _chroma_official_swap_records(manifest)
+                    if item.get("logical_path") == logical_path
+                )
+                target, backup, original_size, original_vpk_sha, installed_size, installed_sha = (
+                    _validated_chroma_swap_record(
+                        record,
+                        csgo_root=self.get_csgo_dir(),
+                        backup_root=chroma_swap_backup_dir,
+                    )
+                )
+                if (
+                    backup.stat().st_size != original_size
+                    or sha256_file(backup) != original_vpk_sha
+                ):
+                    raise PovHudError(
+                        f"安装前官方蓝/绿幕 child VPK 备份校验失败：{backup}"
+                    )
+                _atomic_copy(source.path, target)
+                if target.stat().st_size != installed_size or sha256_file(target) != installed_sha:
+                    raise PovHudError(
+                        f"安装后的官方蓝/绿幕 child VPK 校验失败：{logical_path}"
+                    )
         except (OSError, PovHudError) as e:
             rollback_failed_install()
             if isinstance(e, PovHudError):
@@ -741,10 +1530,10 @@ class PovHudManager:
             ) from e
 
         try:
-            patched_txt = patch_gameinfo_content(raw_gi)
             _atomic_write_text(gi_path, patched_txt)
             patched_sha = sha256_file(gi_path)
-            pov_sha = sha256_file(pov_dst)
+            if patched_sha != planned_patched_sha:
+                raise PovHudError("gameinfo.gi 写入后与预计的补丁哈希不一致。")
         except (OSError, PovHudError) as e:
             rollback_failed_install()
             if isinstance(e, PovHudError):
@@ -779,6 +1568,7 @@ class PovHudManager:
         bak_path = self.get_backup_gameinfo_path()
         gi_path = self.get_gameinfo_path()
         pov_dst = self.get_pov_vpk_target_path()
+        chroma_runtime_dir = self.get_chroma_runtime_dir()
         backup_dir = self.get_backup_dir()
 
         if not gi_path.is_file():
@@ -813,8 +1603,33 @@ class PovHudManager:
                     f"无法删除 Agent 安装的 POV HUD 文件 {pov_dst}。系统错误：{e}"
                 ) from e
 
+        def remove_chroma_runtime() -> None:
+            if not chroma_runtime_dir.exists():
+                return
+            try:
+                csgo_root = self.get_csgo_dir().resolve()
+                runtime_resolved = chroma_runtime_dir.resolve()
+            except OSError as e:
+                raise PovHudError(
+                    f"无法解析 Agent 蓝/绿幕运行目录 {chroma_runtime_dir}。系统错误：{e}"
+                ) from e
+            if (
+                chroma_runtime_dir.name != _CHROMA_RUNTIME_DIRNAME
+                or runtime_resolved.parent != csgo_root
+            ):
+                raise PovHudError(
+                    f"拒绝清理越界的蓝/绿幕运行目录：{chroma_runtime_dir}"
+                )
+            try:
+                shutil.rmtree(chroma_runtime_dir)
+            except OSError as e:
+                raise PovHudError(
+                    f"无法删除 Agent 蓝/绿幕运行目录 {chroma_runtime_dir}。系统错误：{e}"
+                ) from e
+
         def cleanup_recovery_files() -> None:
             try:
+                self._cleanup_chroma_swap_backups()
                 manifest_path.unlink(missing_ok=True)
                 bak_path.unlink(missing_ok=True)
                 if backup_dir.is_dir() and not any(backup_dir.iterdir()):
@@ -825,11 +1640,17 @@ class PovHudManager:
                 ) from e
 
         manifest = self._read_manifest() if manifest_path.is_file() else {}
+        if manifest.get("chroma_official_swaps") is not None:
+            self._restore_chroma_official_swaps(manifest)
+        elif self.get_chroma_swap_backup_dir().exists():
+            self._assert_orphan_chroma_swap_backups_safe()
         expected_sha = str(
             manifest.get("original_gameinfo_sha256") or ""
         ).strip().lower() or None
         patched_sha = str(
-            manifest.get("patched_gameinfo_sha256") or ""
+            manifest.get("patched_gameinfo_sha256")
+            or manifest.get("planned_patched_gameinfo_sha256")
+            or ""
         ).strip().lower() or None
         strict_fallback_reason = "missing_or_incomplete_restore_record"
 
@@ -859,6 +1680,7 @@ class PovHudManager:
                             f"无法从 {bak_path} 恢复 {gi_path}。系统错误：{e}"
                         ) from e
                     remove_installed_vpk()
+                    remove_chroma_runtime()
                     verification = self.verify_restoration(expected_sha)
                     if verification.get("verified"):
                         cleanup_recovery_files()
@@ -891,14 +1713,19 @@ class PovHudManager:
             ) from e
 
         remove_installed_vpk()
+        remove_chroma_runtime()
         verification = self.verify_restoration(None)
         semantic_verified = bool(
             verification.get("gameinfo_exists")
             and verification.get("gameinfo_has_pov_entry") is False
             and verification.get("pov_vpk_removed")
+            and verification.get("chroma_runtime_removed")
+            and verification.get("chroma_official_swaps_restored")
         )
         if not semantic_verified:
-            raise PovHudError("POV 残留修复验证失败：加载项或 pov.vpk 仍然存在。")
+            raise PovHudError(
+                "POV 残留修复验证失败：加载项、pov.vpk 或蓝/绿幕运行目录仍然存在。"
+            )
 
         cleanup_recovery_files()
         verification = self.verify_restoration(None)
