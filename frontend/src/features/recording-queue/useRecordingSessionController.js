@@ -174,6 +174,7 @@ export function useRecordingSessionController({
             input_hud_enabled: session.input_hud_enabled !== false,
             input_hud_display_mode: session.input_hud_display_mode,
             input_audio_enabled: session.input_audio_enabled !== false,
+            combat_stats_hud_enabled: session.combat_stats_hud_enabled !== false,
           }
         : undefined;
       const body = {

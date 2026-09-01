@@ -934,6 +934,7 @@ class PovHudManager:
         input_hud_scale_percent: int = 100,
         input_audio_enabled: bool = True,
         input_audio_volume_percent: int = 100,
+        combat_stats_enabled: bool = True,
     ) -> Optional[DemoVoiceHudBuild]:
         with ExitStack() as staging_stack:
             return self._install_impl(
@@ -1026,6 +1027,7 @@ class PovHudManager:
                     input_hud_scale_percent=input_hud_scale_percent,
                     input_audio_enabled=input_audio_enabled,
                     input_audio_volume_percent=input_audio_volume_percent,
+                    combat_stats_enabled=combat_stats_enabled,
                     session_console_commands=(
                         map_material_console_commands(selected_map_material)
                         if advanced_playback_enabled
@@ -1037,7 +1039,7 @@ class PovHudManager:
                     "locations=%d input_tracks=%d input_changes=%d mouse=%d/%d "
                     "weaponselect=%d/%d radio=%d "
                     "chat=%d server=%d native_radio=%d rebuilt_radio=%d radar_sounds=%d "
-                    "native_sound_table=%d payload=%d bytes",
+                    "native_sound_table=%d combat_stats=%d/%d payload=%d bytes",
                     voice_build.voice_packets,
                     voice_build.speakers,
                     voice_build.intervals,
@@ -1055,6 +1057,8 @@ class PovHudManager:
                     voice_build.radio_rebuilt_events,
                     voice_build.radar_player_sounds,
                     voice_build.radar_native_sound_complete,
+                    voice_build.combat_stats_players,
+                    voice_build.combat_stats_changes,
                     voice_build.payload_bytes,
                 )
             except (DemoVoiceHudError, OSError) as exc:
@@ -1429,6 +1433,11 @@ class PovHudManager:
                     "radio_chat_messages": voice_build.radio_chat_messages,
                     "radio_server_messages": voice_build.radio_server_messages,
                     "radio_parse_failed": bool(voice_build.radio_parse_failed),
+                    "combat_stats_players": voice_build.combat_stats_players,
+                    "combat_stats_changes": voice_build.combat_stats_changes,
+                    "combat_stats_parse_failed": bool(
+                        voice_build.combat_stats_parse_failed
+                    ),
                     "advanced_playback_enabled": bool(voice_build.advanced_playback_enabled),
                     "advanced_playback_players": voice_build.advanced_playback_players,
                     "advanced_playback_events": voice_build.advanced_playback_events,
@@ -1452,6 +1461,7 @@ class PovHudManager:
             "input_hud_scale_percent": int(input_hud_scale_percent),
             "input_audio_enabled": bool(input_audio_enabled),
             "input_audio_volume_percent": int(input_audio_volume_percent),
+            "combat_stats_enabled": bool(combat_stats_enabled),
             "original_gameinfo_sha256": original_gameinfo_sha,
             "planned_patched_gameinfo_sha256": planned_patched_sha,
         }

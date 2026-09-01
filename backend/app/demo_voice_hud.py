@@ -53,7 +53,9 @@ class DemoVoiceHudError(RuntimeError):
 # CBaseUserCmdPB mousedx/mousedy samples for the keyboard's mouse-motion pad;
 # index 16 carries authoritative CSGOUserCmdPB.left_hand_desired edges; index
 # 17 carries exact button press/release edges for the input-audio SoundEvents;
-# index 18 stores the per-session input-HUD presentation settings.
+# index 18 stores the per-session input-HUD presentation settings; index 19
+# carries the controller's authoritative K/D/A, current-round damage, and
+# match-damage state at every relevant network update tick.
 RADAR_PAYLOAD_INDEX = 8
 KILL_FEEDBACK_PAYLOAD_INDEX = 9
 FLASH_BLIND_PAYLOAD_INDEX = 10
@@ -65,6 +67,7 @@ MOUSE_INPUT_PAYLOAD_INDEX = 15
 HAND_SWITCH_PAYLOAD_INDEX = 16
 INPUT_AUDIO_EDGE_PAYLOAD_INDEX = 17
 INPUT_PRESENTATION_PAYLOAD_INDEX = 18
+COMBAT_STATS_PAYLOAD_INDEX = 19
 WEAPON_SELECT_PAYLOAD_INDEX = 6
 WEAPON_SELECT_ENTITY_INDEX_MASK = 0x3FFF
 WEAPON_SELECT_MATCH_MAX_TICKS = 4
@@ -86,6 +89,17 @@ _COLOR_SLOT_NAMES = {
     "orange": 3,
     "purple": 4,
 }
+
+_ACTION_TRACKING_PREFIX = (
+    "CCSPlayerController.CCSPlayerController_ActionTrackingServices."
+)
+_COMBAT_STAT_PROPS = (
+    _ACTION_TRACKING_PREFIX + "m_iKills",
+    _ACTION_TRACKING_PREFIX + "m_iDeaths",
+    _ACTION_TRACKING_PREFIX + "m_iAssists",
+    _ACTION_TRACKING_PREFIX + "m_iDamage",
+    _ACTION_TRACKING_PREFIX + "m_flTotalRoundDamageDealt",
+)
 
 
 @dataclass(frozen=True)
@@ -143,6 +157,9 @@ class DemoVoiceHudBuild:
     advanced_playback_rounds: int = 0
     advanced_playback_total_tick: int = 0
     advanced_playback_parse_failed: int = 0
+    combat_stats_players: int = 0
+    combat_stats_changes: int = 0
+    combat_stats_parse_failed: int = 0
 
 
 def _read_cstring(data: bytes, cursor: int, limit: int) -> tuple[str, int]:
@@ -400,7 +417,7 @@ def _normalize_map_name(raw: Any) -> str:
 
 def _pad_payload_slots(
     packed: list[Any],
-    length: int = INPUT_PRESENTATION_PAYLOAD_INDEX + 1,
+    length: int = COMBAT_STATS_PAYLOAD_INDEX + 1,
 ) -> list[Any]:
     if not isinstance(packed, list):
         raise DemoVoiceHudError("voice HUD payload has an unsupported shape")
@@ -3649,6 +3666,7 @@ def add_input_presentation_to_payload(
     scale_percent: int,
     audio_enabled: bool,
     audio_volume_percent: int,
+    combat_stats_enabled: bool = True,
 ) -> bytes:
     """Append validated per-session keyboard/mouse presentation settings."""
     try:
@@ -3673,8 +3691,194 @@ def add_input_presentation_to_payload(
         scale,
         int(bool(audio_enabled)),
         volume,
+        int(bool(combat_stats_enabled)),
     ]
     return json.dumps(packed, ensure_ascii=True, separators=(",", ":")).encode("ascii")
+
+
+def _combat_stat_sample_ticks(parser: Any) -> tuple[list[int], set[int]]:
+    """Return ticks that can change ActionTrackingServices combat state.
+
+    The values themselves always come from controller sendprops. Events only
+    select the sparse ticks passed to ``parse_ticks``; they are never used to
+    reconstruct a kill, assist, or damage value.
+    """
+
+    sample_ticks = {0}
+    round_start_ticks: set[int] = set()
+    for event_name in (
+        "player_hurt",
+        "player_death",
+        "round_start",
+        "round_end",
+        "round_prestart",
+        "round_announce_match_start",
+        "begin_new_match",
+    ):
+        try:
+            rows = parser.parse_event(event_name)
+        except Exception:  # noqa: BLE001 - event availability varies by demo build
+            continue
+        if not isinstance(rows, Mapping):
+            continue
+        for raw_tick in _row_values(rows, "tick"):
+            tick = _as_int(raw_tick)
+            if tick is None or tick < 0:
+                continue
+            sample_ticks.add(tick)
+            if event_name == "round_start":
+                round_start_ticks.add(tick)
+    return sorted(sample_ticks), round_start_ticks
+
+
+def _encode_combat_stat_states(
+    states: list[tuple[int, int, int, int, int, int]],
+) -> str:
+    """Delta encode ``tick,kills,deaths,assists,round_damage,total_damage``."""
+
+    previous_tick = 0
+    tokens: list[str] = []
+    for tick, kills, deaths, assists, round_damage, total_damage in states:
+        tokens.append(
+            ".".join(
+                (
+                    _base36(tick - previous_tick),
+                    _base36(_zigzag_encode(kills)),
+                    _base36(_zigzag_encode(deaths)),
+                    _base36(_zigzag_encode(assists)),
+                    _base36(round_damage),
+                    _base36(total_damage),
+                )
+            )
+        )
+        previous_tick = tick
+    return ",".join(tokens)
+
+
+def add_combat_stats_track_to_payload(
+    voice_payload: bytes,
+    demo_path: str | Path,
+    *,
+    parser_factory: Callable[[str], Any] | None = None,
+) -> tuple[bytes, dict[str, Any]]:
+    """Append authoritative per-Pawn combat stats at payload index 19.
+
+    ``m_iDamage`` is the controller's completed-round damage and
+    ``m_flTotalRoundDamageDealt`` is the live current-round value. At a normal
+    round boundary the latter resets as the former advances; on the final
+    round the former may advance before the live value is cleared. Taking the
+    maximum of the committed value and ``round_base + live_round`` preserves
+    the controller's exact total without double-counting that terminal overlap.
+    """
+
+    try:
+        packed = json.loads(voice_payload.decode("ascii"))
+    except (UnicodeDecodeError, ValueError, TypeError) as exc:
+        raise DemoVoiceHudError("voice HUD payload is not valid compact JSON") from exc
+    packed = _pad_payload_slots(packed)
+
+    roster_xuids: set[int] = set()
+    for row in packed[3] if isinstance(packed[3], list) else []:
+        if not isinstance(row, list) or len(row) < 3:
+            continue
+        xuid = _as_positive_int(row[0])
+        team = _as_int(row[2])
+        if xuid is not None and team in (2, 3):
+            roster_xuids.add(xuid)
+    if not roster_xuids:
+        raise DemoVoiceHudError("combat stats contain no team-bound Steam IDs")
+
+    if parser_factory is None:
+        from demoparser2 import DemoParser
+
+        parser_factory = DemoParser
+    parser = parser_factory(str(demo_path))
+    sample_ticks, round_start_ticks = _combat_stat_sample_ticks(parser)
+    try:
+        rows = parser.parse_ticks(list(_COMBAT_STAT_PROPS), ticks=sample_ticks)
+    except Exception as exc:  # noqa: BLE001 - demoparser failures vary by demo
+        raise DemoVoiceHudError(
+            f"could not parse authoritative controller combat stats: {exc}"
+        ) from exc
+    if not isinstance(rows, Mapping):
+        raise DemoVoiceHudError("demoparser returned unsupported combat stat rows")
+
+    required_columns = ("tick", "steamid", *_COMBAT_STAT_PROPS)
+    columns = {name: _row_values(rows, name) for name in required_columns}
+    if any(not columns[name] for name in required_columns):
+        raise DemoVoiceHudError("controller combat stat rows are missing required fields")
+    row_count = min(len(values) for values in columns.values())
+
+    # Keep the last controller snapshot if a parser exposes duplicate rows for
+    # one player/tick. This is still network truth, merely de-duplicated.
+    snapshots: dict[tuple[int, int], tuple[int, int, int, int, int]] = {}
+    for index in range(row_count):
+        tick = _as_int(columns["tick"][index])
+        xuid = _as_positive_int(columns["steamid"][index])
+        if tick is None or tick < 0 or xuid not in roster_xuids:
+            continue
+        raw_values = []
+        valid = True
+        for prop in _COMBAT_STAT_PROPS:
+            try:
+                value = float(columns[prop][index])
+            except (TypeError, ValueError, OverflowError):
+                valid = False
+                break
+            if not math.isfinite(value):
+                valid = False
+                break
+            parsed_value = int(round(value))
+            raw_values.append(
+                parsed_value if len(raw_values) < 3 else max(0, parsed_value)
+            )
+        if valid and len(raw_values) == 5:
+            snapshots[(tick, xuid)] = (
+                raw_values[0],
+                raw_values[1],
+                raw_values[2],
+                raw_values[3],
+                raw_values[4],
+            )
+
+    if not snapshots:
+        raise DemoVoiceHudError("demo contains no usable controller combat stat snapshots")
+
+    states_by_xuid: dict[
+        int,
+        list[tuple[int, int, int, int, int, int]],
+    ] = defaultdict(list)
+    round_base_by_xuid: dict[int, int] = {}
+    previous_by_xuid: dict[int, tuple[int, int, int, int, int]] = {}
+    for (tick, xuid), raw_state in sorted(snapshots.items()):
+        kills, deaths, assists, committed_damage, round_damage = raw_state
+        if xuid not in round_base_by_xuid or tick in round_start_ticks:
+            round_base_by_xuid[xuid] = committed_damage
+        total_damage = max(
+            committed_damage,
+            round_base_by_xuid[xuid] + round_damage,
+        )
+        visible_state = (kills, deaths, assists, round_damage, total_damage)
+        if previous_by_xuid.get(xuid) == visible_state:
+            continue
+        previous_by_xuid[xuid] = visible_state
+        states_by_xuid[xuid].append((tick, *visible_state))
+
+    encoded_tracks = [
+        [str(xuid), _encode_combat_stat_states(states_by_xuid[xuid])]
+        for xuid in sorted(states_by_xuid)
+        if states_by_xuid[xuid]
+    ]
+    if not encoded_tracks:
+        raise DemoVoiceHudError("demo contains no usable controller combat stat tracks")
+    packed[COMBAT_STATS_PAYLOAD_INDEX] = [1, encoded_tracks]
+    payload = json.dumps(packed, ensure_ascii=True, separators=(",", ":")).encode("ascii")
+    return payload, {
+        "combat_stats_players": len(encoded_tracks),
+        "combat_stats_changes": sum(len(states) for states in states_by_xuid.values()),
+        "combat_stats_parse_failed": 0,
+        "payload_bytes": len(payload),
+    }
 
 
 def add_radar_track_to_payload(
@@ -4307,6 +4511,7 @@ def build_demo_voice_hud_vpk(
     input_hud_scale_percent: int = 100,
     input_audio_enabled: bool = True,
     input_audio_volume_percent: int = 100,
+    combat_stats_enabled: bool = True,
     session_console_commands: Iterable[object] | None = None,
 ) -> DemoVoiceHudBuild:
     payload, stats = build_voice_payload(demo_path, parser_factory=parser_factory)
@@ -4347,6 +4552,7 @@ def build_demo_voice_hud_vpk(
         scale_percent=input_hud_scale_percent,
         audio_enabled=input_audio_enabled,
         audio_volume_percent=input_audio_volume_percent,
+        combat_stats_enabled=combat_stats_enabled,
     )
     stats["payload_bytes"] = len(payload)
 
@@ -4439,6 +4645,27 @@ def build_demo_voice_hud_vpk(
             "radio_parse_failed": 1,
         }
 
+    combat_stats: dict[str, Any] = {
+        "combat_stats_players": 0,
+        "combat_stats_changes": 0,
+        "combat_stats_parse_failed": 0,
+    }
+    try:
+        payload, combat_stats = add_combat_stats_track_to_payload(
+            payload,
+            demo_path,
+            parser_factory=parser_factory,
+        )
+        stats["payload_bytes"] = int(combat_stats.pop("payload_bytes", len(payload)))
+    except DemoVoiceHudError:
+        # This feature has no event-derived fallback: an older parser or demo
+        # without the controller sendprops simply keeps the stat panel hidden.
+        combat_stats = {
+            "combat_stats_players": 0,
+            "combat_stats_changes": 0,
+            "combat_stats_parse_failed": 1,
+        }
+
     advanced_playback_stats: dict[str, Any] = {
         "advanced_playback_enabled": 0,
         "advanced_playback_players": 0,
@@ -4516,4 +4743,5 @@ def build_demo_voice_hud_vpk(
         **flash_blind_stats,
         **radio_stats,
         **advanced_playback_stats,
+        **combat_stats,
     )

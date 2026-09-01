@@ -279,6 +279,8 @@ export default {
   "record.warmupInputHudEnable": "启用",
   "record.warmupInputHudDisplayMode": "按键显示方式",
   "record.warmupInputAudioEnable": "虚拟按键音",
+  "record.warmupCombatStatsEnable": "实时 KDA / 伤害",
+  "record.warmupCombatStatsDesc": "显示当前观察选手的 K/D/A、本回合伤害与总伤害；关闭不影响键鼠和 TAB 复刻。",
   "record.warmupObsEnable": "启用黑场渐入渐出",
   "record.warmupObsDesc": "切换视角之间的转场效果。",
   "record.warmupObsFade": "淡入淡出",

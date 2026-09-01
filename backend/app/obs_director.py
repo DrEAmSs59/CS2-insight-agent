@@ -1859,6 +1859,9 @@ class RecordingWarmupExtras:
     input_hud_enabled: bool = True
     input_hud_display_mode: Literal["hybrid", "always", "active"] = "hybrid"
     input_audio_enabled: bool = True
+    # Presentation-only switch. The authoritative combat track remains in the
+    # demo-specific payload so this never changes truth extraction or Pawn switching.
+    combat_stats_hud_enabled: bool = True
     # Independent recording preset. Non-default values install a sky-only VPK
     # in ordinary mode, or merge the same layer into the POV package.
     skybox_id: str = "default"
@@ -3666,6 +3669,9 @@ class OBSDirector:
         input_audio_enabled_v3 = bool(
             getattr(warmup, "input_audio_enabled", True) if warmup else True
         )
+        combat_stats_hud_enabled_v3 = bool(
+            getattr(warmup, "combat_stats_hud_enabled", True) if warmup else True
+        )
         skybox_id_v3 = normalize_skybox_id(
             getattr(warmup, "skybox_id", DEFAULT_SKYBOX_ID) if warmup else DEFAULT_SKYBOX_ID
         )
@@ -3896,6 +3902,7 @@ class OBSDirector:
                                 input_hud_scale_percent=100,
                                 input_audio_enabled=input_audio_enabled_v3,
                                 input_audio_volume_percent=100,
+                                combat_stats_enabled=combat_stats_hud_enabled_v3,
                             )
                         else:
                             pov_mgr_v3.install(

@@ -314,6 +314,7 @@ def test_pov_recording_uses_shared_exit_restore_and_reports_evidence(
             input_hud_scale_percent=100,
             input_audio_enabled=True,
             input_audio_volume_percent=100,
+            combat_stats_enabled=True,
         ):
             calls.append((
                 "install",
@@ -324,6 +325,7 @@ def test_pov_recording_uses_shared_exit_restore_and_reports_evidence(
                 input_hud_scale_percent,
                 input_audio_enabled,
                 input_audio_volume_percent,
+                combat_stats_enabled,
             ))
 
         def status(self):
@@ -393,6 +395,7 @@ def test_pov_recording_uses_shared_exit_restore_and_reports_evidence(
                 input_hud_enabled=False,
                 input_hud_display_mode="active",
                 input_audio_enabled=False,
+                combat_stats_hud_enabled=False,
             ),
         )
 
@@ -402,7 +405,7 @@ def test_pov_recording_uses_shared_exit_restore_and_reports_evidence(
     assert call_names[:2] == ["manager", "install"]
     assert calls[1][1] == tmp_path / "pov.dem"
     assert calls[1][2] == "team"
-    assert calls[1][3:] == (False, "active", 100, False, 100)
+    assert calls[1][3:] == (False, "active", 100, False, 100, False)
     assert call_names.count("kill") >= 1
     assert call_names[-1] == "restore"
     restore_call = calls[-1]

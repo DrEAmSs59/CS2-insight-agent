@@ -812,16 +812,20 @@ async def execute_recording_queue(
             input_hud_enabled=bool(pov_hud_cfg.get("input_hud_enabled", True)),
             input_hud_display_mode=input_hud_display_mode,
             input_audio_enabled=bool(pov_hud_cfg.get("input_audio_enabled", True)),
+            combat_stats_hud_enabled=bool(
+                pov_hud_cfg.get("combat_stats_hud_enabled", True)
+            ),
         )
         logger.info(
             "[RecordingV3] POV HUD enabled: radar_mode=%s, teamcounter_numeric=%s, "
-            "voice_mode=%s, input_hud=%s, input_mode=%s, input_audio=%s",
+            "voice_mode=%s, input_hud=%s, input_mode=%s, input_audio=%s, combat_stats=%s",
             warmup_extras.pov_radar_mode,
             warmup_extras.pov_teamcounter_numeric,
             warmup_extras.pov_voice_mode,
             warmup_extras.input_hud_enabled,
             warmup_extras.input_hud_display_mode,
             warmup_extras.input_audio_enabled,
+            warmup_extras.combat_stats_hud_enabled,
         )
 
     saved_skybox_id = getattr(cfg, "recording_skybox", DEFAULT_SKYBOX_ID)

@@ -93,6 +93,8 @@ export const RECORD_WARMUP_DEFAULT_OPTIONS = {
   pov_teamcounter_numeric: false,
   /** POV：语音播放与左下角说话标识使用同一受众范围。 */
   pov_voice_mode: DEFAULT_POV_VOICE_MODE,
+  /** Whether to show the per-Pawn K/D/A and damage block in the recording VPK. */
+  combat_stats_hud_enabled: true,
 };
 
 /** 录制预热弹窗每次打开时的 OBS 转场推荐默认值；勾选关闭则提交 null 沿用服务器全局配置 */
@@ -175,6 +177,7 @@ export default function RecordWarmupModal({
   const [sessionInputHudEnabled, setSessionInputHudEnabled] = useState(true);
   const [sessionInputHudDisplayMode, setSessionInputHudDisplayMode] = useState("hybrid");
   const [sessionInputAudioEnabled, setSessionInputAudioEnabled] = useState(true);
+  const [sessionCombatStatsHudEnabled, setSessionCombatStatsHudEnabled] = useState(true);
   const [sessionSkybox, setSessionSkybox] = useState("default");
   const [sessionMapMaterial, setSessionMapMaterial] = useState(DEFAULT_RECORDING_MAP_MATERIAL);
   const [sessionCs2ExtraLaunchArgs, setSessionCs2ExtraLaunchArgs] = useState("");
@@ -211,6 +214,7 @@ export default function RecordWarmupModal({
     setSessionInputHudEnabled(true);
     setSessionInputHudDisplayMode("hybrid");
     setSessionInputAudioEnabled(true);
+    setSessionCombatStatsHudEnabled(o?.combat_stats_hud_enabled !== false);
     setSessionSkybox(normalizeRecordingSkyboxId(recordingSkybox));
     setSessionMapMaterial(normalizeRecordingMapMaterialId(recordingMapMaterial));
     setSessionCs2ExtraLaunchArgs(cs2ExtraLaunchArgs);
@@ -297,6 +301,7 @@ export default function RecordWarmupModal({
         input_hud_enabled: sessionInputHudEnabled,
         input_hud_display_mode: sessionInputHudDisplayMode,
         input_audio_enabled: sessionInputAudioEnabled,
+        combat_stats_hud_enabled: sessionCombatStatsHudEnabled,
         kill_fx_enabled: killFxEnabled,
         kill_fx_tick_offset: Number(killFxTickOffset) || 0,
         experimental_pov_enabled: sessionPovEnabled,
@@ -711,6 +716,24 @@ export default function RecordWarmupModal({
                 </label>
 
               </div>
+              <label className={`mt-3 flex items-start gap-2 border-t border-cs2-border/70 pt-3 ${sessionPovEnabled ? "cursor-pointer" : "cursor-not-allowed opacity-45"}`}>
+                <input
+                  type="checkbox"
+                  aria-label={t("record.warmupCombatStatsEnable")}
+                  checked={sessionCombatStatsHudEnabled}
+                  disabled={!sessionPovEnabled}
+                  onChange={(event) => setSessionCombatStatsHudEnabled(event.target.checked)}
+                  className="mt-0.5 h-3.5 w-3.5 rounded border-cs2-border accent-cs2-orange disabled:opacity-50"
+                />
+                <span className="min-w-0">
+                  <span className="block text-xs font-semibold text-cs2-text-primary">
+                    {t("record.warmupCombatStatsEnable")}
+                  </span>
+                  <span className="mt-0.5 block text-[10px] leading-relaxed text-cs2-text-muted">
+                    {t("record.warmupCombatStatsDesc")}
+                  </span>
+                </span>
+              </label>
             </div>
           </section>
 

@@ -57,6 +57,7 @@ describe("RecordWarmupModal skybox override", () => {
         input_hud_enabled: true,
         input_hud_display_mode: "hybrid",
         input_audio_enabled: true,
+        combat_stats_hud_enabled: true,
       }),
     );
   });
@@ -76,6 +77,7 @@ describe("RecordWarmupModal skybox override", () => {
     const inputModeSelect = screen.getByRole("combobox", { name: "按键显示方式" });
     fireEvent.change(inputModeSelect, { target: { value: "active" } });
     fireEvent.click(screen.getByRole("checkbox", { name: "虚拟按键音" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "实时 KDA / 伤害" }));
     fireEvent.change(voiceSelect, { target: { value: "enemy" } });
     fireEvent.click(screen.getByRole("button", { name: "开始录制" }));
 
@@ -86,6 +88,7 @@ describe("RecordWarmupModal skybox override", () => {
         input_hud_enabled: true,
         input_hud_display_mode: "active",
         input_audio_enabled: false,
+        combat_stats_hud_enabled: false,
       }),
     );
   });

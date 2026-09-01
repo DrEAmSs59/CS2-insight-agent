@@ -219,6 +219,26 @@ edges retain the exact IEEE-754 bits of the extractor's subtick `when` value.
 This reduces Panorama parse cost without discarding Pawns or coarsening input
 timing.
 
+The lower-left combat strip is sourced from
+`CCSPlayerController_ActionTrackingServices`, not reconstructed from damage
+events. Each Pawn carries sparse K/D/A, current-round damage, and match-damage
+states. `m_iDamage` supplies completed-round damage while
+`m_flTotalRoundDamageDealt` supplies the live round; the terminal overlap is
+deduplicated when the final round commits before the live value clears. K/D/A
+stays above the account balance; round and match damage occupy the unused strip
+to the balance's right. The glyphs use CS2's own `digitpanel-font` metrics
+(Stratum2 Mono, 38 px, 18 px columns) and the stock DigitPanel 0.6-second
+cubic-bezier transition. Pawn switches initialize instantly; changes for the
+same Pawn use the native per-digit roll. The complete strip is mounted under
+native `HudLowerLeft`; each rolling-number container carries the same
+`.hud-colorize-wash` class directly used by `HudMoney`, while the caption
+Labels carry the same direct wash class used by the stock health labels. This
+strip also carries the native `HudMoney` parent's `.additive` blend class. This
+preserves both the wash hue and final scene-composited luminance instead of
+tinting an ancestor composition layer or assigning a guessed text color. Team
+color, custom HUD color, and `cl_hud_color 12` observed-Pawn color therefore
+follow the same live cascade as the account balance.
+
 If a demo has no usable voice packets, the generated package keeps a
 roster-only payload so radar and kill-feedback tracks can still attach. The
 compiled Panorama `DATA` block expands to the exact compact payload size and

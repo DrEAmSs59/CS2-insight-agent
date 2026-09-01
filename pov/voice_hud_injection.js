@@ -11,7 +11,8 @@
 // fixed recording voice audience at index 13, trusted post-load session console
 // commands at index 14, exact UserCmd mouse deltas at index 15, authoritative
 // left_hand_desired switch edges at index 16, exact input-audio button edges at
-// index 17, and per-session input-HUD presentation settings at index 18].
+// index 17, per-session input-HUD presentation settings at index 18, and
+// authoritative controller K/D/A + damage state tracks at index 19].
 ;(function CS2InsightDemoVoiceHud() {
     "use strict";
 
@@ -32,6 +33,7 @@
     const encodedHandSwitchTracks = packed[16] || [];
     const encodedInputAudioEdges = packed[17] || [];
     const encodedInputPresentation = Array.isArray(packed[18]) ? packed[18] : [];
+    const encodedCombatStats = packed[19] || null;
     const sessionConsoleCommands = encodedSessionConsoleCommands.map(function (command) {
         return String(command || "").trim();
     }).filter(Boolean);
@@ -51,6 +53,9 @@
         ? Boolean(encodedInputPresentation[3])
         : true;
     const requestedInputAudioVolumePercent = Number(encodedInputPresentation[4] || 100);
+    const combatStatsHudEnabled = encodedInputPresentation.length > 5
+        ? Boolean(encodedInputPresentation[5])
+        : true;
     const inputAudioVolumePercent = [25, 50, 75, 100].indexOf(requestedInputAudioVolumePercent) >= 0
         ? requestedInputAudioVolumePercent
         : 100;
@@ -482,6 +487,49 @@
     const killFeedbackTrack = decodeKillFeedbackTrack(encodedKillFeedback);
     const killFeedbackEvents = killFeedbackTrack ? killFeedbackTrack.events : null;
 
+    function decodeCombatStats(raw) {
+        if (!Array.isArray(raw) || Number(raw[0] || 0) !== 1 || !Array.isArray(raw[1])) {
+            return null;
+        }
+        const byXuid = {};
+        raw[1].forEach(function (track) {
+            const xuid = normalizeXuid(track && track[0]);
+            if (!xuid) {
+                return;
+            }
+            let previousTick = 0;
+            const states = String(track[1] || "").split(",").filter(Boolean).map(function (token) {
+                const fields = token.split(".");
+                if (fields.length < 6) {
+                    return null;
+                }
+                previousTick += parseInt(fields[0], 36) || 0;
+                return {
+                    tick: previousTick,
+                    kills: zigzagDecode(parseInt(fields[1], 36) || 0),
+                    deaths: zigzagDecode(parseInt(fields[2], 36) || 0),
+                    assists: zigzagDecode(parseInt(fields[3], 36) || 0),
+                    roundDamage: Math.max(0, parseInt(fields[4], 36) || 0),
+                    totalDamage: Math.max(0, parseInt(fields[5], 36) || 0),
+                };
+            }).filter(Boolean);
+            if (states.length) {
+                byXuid[xuid] = states;
+            }
+        });
+        return Object.keys(byXuid).length ? { byXuid: byXuid } : null;
+    }
+
+    // Like every other truth-source lane, malformed optional data fails closed:
+    // no event-derived KDA or damage estimate is substituted in Panorama.
+    const combatStats = (function safelyDecodeCombatStats() {
+        try {
+            return decodeCombatStats(encodedCombatStats);
+        } catch (errCombatStatsDecode) {
+            return null;
+        }
+    })();
+
     function decodeFlashBlindTrack(raw) {
         if (!raw || !raw.length || raw.length < 2) {
             return null;
@@ -711,6 +759,15 @@
     let inputAudioLastTick = -1;
     let inputAudioEdgeIndex = -1;
     let mirroredScoreboardActive = false;
+    let combatStatsHud = null;
+    let combatKdaKillsPanel = null;
+    let combatKdaDeathsPanel = null;
+    let combatKdaAssistsPanel = null;
+    let combatRoundDamagePanel = null;
+    let combatTotalDamagePanel = null;
+    let combatMoneyPanel = null;
+    let combatStatsRenderedXuid = "";
+    let combatStatsRenderedTick = -1;
     let radarHud = null;
     let flashWashPanel = null;
     let flashTinnitusArmedTick = -1;
@@ -2683,6 +2740,335 @@
             return 0;
         }
         return changes[found][1];
+    }
+
+    function combatStatAt(states, tick) {
+        let low = 0;
+        let high = states.length - 1;
+        let found = -1;
+        while (low <= high) {
+            const middle = (low + high) >> 1;
+            if (states[middle].tick <= tick) {
+                found = middle;
+                low = middle + 1;
+            } else {
+                high = middle - 1;
+            }
+        }
+        return found >= 0 ? states[found] : null;
+    }
+
+    function combatStatesForXuid(xuid) {
+        if (!combatStats || !combatStats.byXuid) {
+            return null;
+        }
+        const wanted = normalizeXuid(xuid);
+        if (combatStats.byXuid[wanted]) {
+            return combatStats.byXuid[wanted];
+        }
+        const keys = Object.keys(combatStats.byXuid);
+        for (let index = 0; index < keys.length; index += 1) {
+            if (sameXuid(keys[index], wanted)) {
+                return combatStats.byXuid[keys[index]];
+            }
+        }
+        return null;
+    }
+
+    const COMBAT_DIGIT_SYMBOLS = " 0123456789";
+    const COMBAT_DIGIT_HEIGHT = 38;
+    const COMBAT_DIGIT_WIDTH = 18;
+    const COMBAT_DIGIT_DURATION_SECONDS = 0.6;
+    const COMBAT_DIGIT_TIMING = "cubic-bezier( 0.9, 0.01, 0.1, 1 )";
+
+    function styleCombatCaption(label, align) {
+        label.hittest = false;
+        // Stock health labels carry the tint class on the Label itself. The
+        // DigitPanel font class is only for rolling numerals and distorts the
+        // small caption line box when reused here.
+        label.AddClass("stratum-bold-mono");
+        label.AddClass("hud-colorize-wash");
+        label.style.color = "#FFFFFFFF";
+        label.style.fontFamily = "Stratum2 Mono, 'Arial Unicode MS'";
+        label.style.fontSize = "16px";
+        label.style.fontWeight = "bold";
+        label.style.textAlign = align || "left";
+        label.style.textShadow = "0px 0px 3px 0.0 #000000DD";
+        label.style.letterSpacing = "1px";
+        label.style.opacity = "1.0";
+    }
+
+    function createCombatDigitPanel(parent, id, x, y, digits) {
+        const panel = $.CreatePanel("Panel", parent, id);
+        panel.hittest = false;
+        panel.AddClass("digitpanel-container");
+        // Match HudMoney exactly: its wash class lives on the rolling digit
+        // container, not on an ancestor composition layer.
+        panel.AddClass("hud-colorize-wash");
+        panel.style.position = x + "px " + y + "px 0px";
+        panel.style.width = (digits * COMBAT_DIGIT_WIDTH) + "px";
+        panel.style.height = COMBAT_DIGIT_HEIGHT + "px";
+        panel.style.flowChildren = "right";
+        panel.style.overflow = "clip";
+        panel.m_nDigits = digits;
+        panel.m_columns = [];
+        panel.m_value = null;
+
+        for (let digit = 0; digit < digits; digit += 1) {
+            const column = $.CreatePanel("Panel", panel, id + "Digit" + digit);
+            column.hittest = false;
+            column.AddClass("digitpanel__digit");
+            column.style.width = COMBAT_DIGIT_WIDTH + "px";
+            column.style.flowChildren = "down";
+            column.style.transitionProperty = "transform, position";
+            column.style.transitionDuration = COMBAT_DIGIT_DURATION_SECONDS + "s";
+            column.style.transitionTimingFunction = COMBAT_DIGIT_TIMING;
+            for (let symbolIndex = 0; symbolIndex < COMBAT_DIGIT_SYMBOLS.length;
+                    symbolIndex += 1) {
+                const numeral = $.CreatePanel(
+                    "Label", column, id + "Digit" + digit + "Symbol" + symbolIndex,
+                );
+                numeral.hittest = false;
+                numeral.AddClass("digitpanel-font");
+                numeral.text = COMBAT_DIGIT_SYMBOLS.charAt(symbolIndex);
+                numeral.style.width = COMBAT_DIGIT_WIDTH + "px";
+                numeral.style.height = COMBAT_DIGIT_HEIGHT + "px";
+                numeral.style.color = "#FFFFFFFF";
+                numeral.style.fontFamily = "Stratum2 Mono, 'Arial Unicode MS'";
+                numeral.style.fontSize = "38px";
+                numeral.style.fontWeight = "bold";
+                numeral.style.textAlign = "center";
+                numeral.style.letterSpacing = "0px";
+            }
+            panel.m_columns.push(column);
+        }
+        return panel;
+    }
+
+    function setCombatDigitPanel(panel, value, instant) {
+        if (!panel || !panel.IsValid()) {
+            return;
+        }
+        const rendered = String(Math.max(0, Math.floor(Number(value) || 0)));
+        if (panel.m_value === rendered) {
+            return;
+        }
+        panel.m_value = rendered;
+        const padded = (Array(panel.m_nDigits + 1).join(" ") + rendered)
+            .slice(-panel.m_nDigits);
+        for (let digit = 0; digit < panel.m_nDigits; digit += 1) {
+            const column = panel.m_columns[digit];
+            const symbolIndex = COMBAT_DIGIT_SYMBOLS.indexOf(padded.charAt(digit));
+            if (!column || symbolIndex < 0) {
+                continue;
+            }
+            column.style.transitionDuration = instant
+                ? "0s"
+                : COMBAT_DIGIT_DURATION_SECONDS + "s";
+            const y = -symbolIndex * 100;
+            $.Schedule(0.01, function applyCombatDigitPosition() {
+                if (column && column.IsValid()) {
+                    column.style.transform = "translate3D( " + digit + "%, "
+                        + y + "%, 0px)";
+                }
+            });
+        }
+    }
+
+    function createCombatValueBlock(parent, id, x, width, digits, heading) {
+        const block = $.CreatePanel("Panel", parent, id);
+        block.hittest = false;
+        block.style.position = x + "px 0px 0px";
+        block.style.width = width + "px";
+        block.style.height = "62px";
+        block.style.flowChildren = "none";
+        block.style.overflow = "noclip";
+
+        const title = $.CreatePanel("Label", block, id + "Title");
+        title.text = heading;
+        // Panorama's rolling numerals have tall Stratum ascenders. Put the
+        // caption in its own row above the number instead of sharing the
+        // DigitPanel's visual line box.
+        title.style.position = "0px -12px 0px";
+        title.style.width = "100%";
+        title.style.height = "18px";
+        styleCombatCaption(title, "center");
+
+        const digitWidth = digits * COMBAT_DIGIT_WIDTH;
+        const value = createCombatDigitPanel(
+            block, id + "Value", Math.floor((width - digitWidth) / 2), 20, digits,
+        );
+        return { block: block, title: title, value: value };
+    }
+
+    function positionCombatStatsHud(mount) {
+        if (!combatStatsHud || !combatStatsHud.IsValid()
+                || !combatMoneyPanel || !combatMoneyPanel.IsValid()
+                || !mount || !mount.IsValid()) {
+            return;
+        }
+        let x = 0;
+        let y = 0;
+        let cursor = combatMoneyPanel;
+        let depth = 0;
+        while (cursor && cursor.IsValid() && cursor !== mount && depth < 12) {
+            x += Number(cursor.actualxoffset || 0);
+            y += Number(cursor.actualyoffset || 0);
+            cursor = cursor.GetParent();
+            depth += 1;
+        }
+        if (cursor !== mount) {
+            return;
+        }
+        const scaleX = Math.max(0.01, Number(mount.actualuiscale_x || 1));
+        const scaleY = Math.max(0.01, Number(mount.actualuiscale_y || 1));
+        // HudMoney owns a 50px stock inset before its rendered balance text.
+        // Match that numeral edge, then reserve 54px for the K/D/A row.
+        const left = Math.round(x / scaleX) + 50;
+        const top = Math.round(y / scaleY) - 54;
+        combatStatsHud.style.position = left + "px " + top + "px 0px";
+    }
+
+    function ensureCombatStatsHud() {
+        if (combatStatsHud && combatStatsHud.IsValid()) {
+            return combatStatsHud;
+        }
+        // Track the stock money panel but mount beside it. HudMoney is a flow
+        // container, so adding children would reflow the real balance.
+        const mount = findHudTraverse("HudLowerLeft");
+        combatMoneyPanel = findHudTraverse("HudMoney");
+        if (!mount || !mount.IsValid()
+                || !combatMoneyPanel || !combatMoneyPanel.IsValid()) {
+            return null;
+        }
+        combatStatsHud = mount.FindChildTraverse("CS2InsightCombatStatsHud");
+        if (combatStatsHud && combatStatsHud.IsValid()) {
+            combatKdaKillsPanel = combatStatsHud.FindChildTraverse("CS2InsightKdaKillsValue");
+            combatKdaDeathsPanel = combatStatsHud.FindChildTraverse("CS2InsightKdaDeathsValue");
+            combatKdaAssistsPanel = combatStatsHud.FindChildTraverse("CS2InsightKdaAssistsValue");
+            combatRoundDamagePanel = combatStatsHud.FindChildTraverse("CS2InsightRoundDamageValue");
+            combatTotalDamagePanel = combatStatsHud.FindChildTraverse("CS2InsightTotalDamageValue");
+            positionCombatStatsHud(mount);
+            return combatStatsHud;
+        }
+
+        combatStatsHud = $.CreatePanel("Panel", mount, "CS2InsightCombatStatsHud");
+        combatStatsHud.hittest = false;
+        // HudMoney itself is additive in the stock hud.xml. The direct wash
+        // classes below match its hue; this parent blend class also matches
+        // the final luminance/edge composition over the game scene.
+        combatStatsHud.AddClass("additive");
+        combatStatsHud.style.width = "410px";
+        // Keep the K/D/A block in the compact band immediately above the
+        // balance. A taller root pushed it into the stock chat lane at common
+        // recording resolutions even though the damage row itself was right.
+        combatStatsHud.style.height = "108px";
+        combatStatsHud.style.horizontalAlign = "left";
+        combatStatsHud.style.flowChildren = "none";
+        combatStatsHud.style.overflow = "noclip";
+        combatStatsHud.style.backgroundColor = "#00000000";
+        combatStatsHud.style.zIndex = "950";
+
+        const kda = $.CreatePanel("Panel", combatStatsHud, "CS2InsightKdaBlock");
+        kda.hittest = false;
+        kda.style.position = "0px 0px 0px";
+        kda.style.width = "132px";
+        kda.style.height = "72px";
+        kda.style.flowChildren = "none";
+        kda.style.overflow = "noclip";
+        // Use three stock-style number blocks. Panorama's native digit panel
+        // has no slash glyph, so separators would always be a visual impostor.
+        const kills = createCombatValueBlock(
+            kda, "CS2InsightKdaKills", 0, 36, 2, "K",
+        );
+        combatKdaKillsPanel = kills.value;
+        const deaths = createCombatValueBlock(
+            kda, "CS2InsightKdaDeaths", 48, 36, 2, "D",
+        );
+        combatKdaDeathsPanel = deaths.value;
+        const assists = createCombatValueBlock(
+            kda, "CS2InsightKdaAssists", 96, 36, 2, "A",
+        );
+        combatKdaAssistsPanel = assists.value;
+
+        // CS2 caps account balance at five digits, leaving a stable strip to
+        // its right. Damage lives in that native lower-left row while K/D/A
+        // remains directly above the balance.
+        const damageStrip = $.CreatePanel(
+            "Panel", combatStatsHud, "CS2InsightDamageStrip",
+        );
+        damageStrip.hittest = false;
+        // Root top is 54px above HudMoney. Caption at y=44 and digits at y=64
+        // align the rolling damage numerals with the stock balance numerals.
+        // Pull the strip into the unused money-row gap. HudLowerLeft's right
+        // edge can clip the last DMG column at 4:3 recording resolutions.
+        damageStrip.style.position = "154px 44px 0px";
+        damageStrip.style.width = "226px";
+        damageStrip.style.height = "62px";
+        damageStrip.style.flowChildren = "none";
+        damageStrip.style.overflow = "noclip";
+
+        const roundDamage = createCombatValueBlock(
+            damageStrip, "CS2InsightRoundDamage", 0, 90, 3, "R DMG",
+        );
+        combatRoundDamagePanel = roundDamage.value;
+        const totalDamage = createCombatValueBlock(
+            damageStrip, "CS2InsightTotalDamage", 88, 112, 5, "DMG",
+        );
+        combatTotalDamagePanel = totalDamage.value;
+        positionCombatStatsHud(mount);
+        combatStatsRenderedXuid = "";
+        combatStatsRenderedTick = -1;
+        return combatStatsHud;
+    }
+
+    function updateCombatStatsHud() {
+        // Schedule first so a transient root rebuild during spec_player cannot
+        // permanently stop this independent HUD lane.
+        $.Schedule(INPUT_HUD_REFRESH_SECONDS, updateCombatStatsHud);
+        if (!combatStatsHudEnabled || !combatStats || !advancedPovVisualsActive()
+                || (advancedPlayback && advancedHudHidden)) {
+            if (combatStatsHud && combatStatsHud.IsValid()) {
+                combatStatsHud.visible = false;
+            }
+            return;
+        }
+        const state = controller.GetDemoControllerState();
+        const xuid = state ? currentPovXuid(state) : "";
+        const states = combatStatesForXuid(xuid);
+        if (!state || !xuid || !states) {
+            if (combatStatsHud && combatStatsHud.IsValid()) {
+                combatStatsHud.visible = false;
+            }
+            combatStatsRenderedXuid = "";
+            combatStatsRenderedTick = -1;
+            return;
+        }
+        const tick = Number(state.nTick || 0);
+        const visibleState = combatStatAt(states, tick);
+        if (!visibleState) {
+            if (combatStatsHud && combatStatsHud.IsValid()) {
+                combatStatsHud.visible = false;
+            }
+            return;
+        }
+        const panel = ensureCombatStatsHud();
+        if (!panel) {
+            return;
+        }
+        positionCombatStatsHud(findHudTraverse("HudLowerLeft"));
+        panel.visible = true;
+        if (combatStatsRenderedXuid === xuid && combatStatsRenderedTick === tick) {
+            return;
+        }
+        const instant = combatStatsRenderedXuid !== xuid;
+        setCombatDigitPanel(combatKdaKillsPanel, visibleState.kills, true);
+        setCombatDigitPanel(combatKdaDeathsPanel, visibleState.deaths, true);
+        setCombatDigitPanel(combatKdaAssistsPanel, visibleState.assists, true);
+        setCombatDigitPanel(combatRoundDamagePanel, visibleState.roundDamage, instant);
+        setCombatDigitPanel(combatTotalDamagePanel, visibleState.totalDamage, instant);
+        combatStatsRenderedXuid = xuid;
+        combatStatsRenderedTick = tick;
     }
 
     function inputAudioEdgeIndexAtOrBefore(edges, tick) {
@@ -7361,6 +7747,9 @@
     $.Schedule(0, ensureDemoVoicesUnmuted);
     $.Schedule(0, update);
     $.Schedule(INPUT_HUD_REFRESH_SECONDS, updateInputHud);
+    if (combatStats && combatStatsHudEnabled) {
+        $.Schedule(0, updateCombatStatsHud);
+    }
     $.Schedule(0, tickTeamCounterHud);
     $.Schedule(0, updateOverheadInfoHud);
     $.Schedule(0, tickFlashBlindHud);

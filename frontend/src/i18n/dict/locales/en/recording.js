@@ -279,6 +279,8 @@ export default {
   "record.warmupInputHudEnable": "Enable",
   "record.warmupInputHudDisplayMode": "Key visibility",
   "record.warmupInputAudioEnable": "Virtual key sounds",
+  "record.warmupCombatStatsEnable": "Live KDA / damage",
+  "record.warmupCombatStatsDesc": "Shows K/D/A, round damage, and total damage for the observed player. Keyboard, mouse, and TAB replay are unaffected.",
   "record.warmupObsEnable": "Enable fade-to-black transition",
   "record.warmupObsDesc": "Transition effect between POV switches.",
   "record.warmupObsFade": "Fade",
