@@ -45,10 +45,27 @@ describe("playDemoInCs2", () => {
         teamcounter_numeric: true,
         skybox_id: "cartoon3",
         map_material_id: "waxed_reflection",
+        input_hud_enabled: true,
+        input_hud_display_mode: "active",
+        // Legacy callers may still send these, but the current product preset
+        // fixes both values at 100.
+        input_hud_scale_percent: 115,
+        input_audio_enabled: true,
+        input_audio_volume_percent: 50,
       },
     });
     expect(API.post).toHaveBeenCalledWith("/demos/7/play", {
-      pov_hud: { enabled: true, radar_mode: -1, teamcounter_numeric: true, skybox_id: "cartoon3" },
+      pov_hud: {
+        enabled: true,
+        radar_mode: -1,
+        teamcounter_numeric: true,
+        skybox_id: "cartoon3",
+        input_hud_enabled: true,
+        input_hud_display_mode: "active",
+        input_hud_scale_percent: 100,
+        input_audio_enabled: true,
+        input_audio_volume_percent: 100,
+      },
       map_material: { id: "waxed_reflection" },
     });
   });

@@ -55,6 +55,11 @@ class DemoPlaybackPovOptions:
     teamcounter_numeric: bool = False
     skybox_id: str = "default"
     map_material_id: str = DEFAULT_MAP_MATERIAL_ID
+    input_hud_enabled: bool = True
+    input_hud_display_mode: str = "hybrid"
+    input_hud_scale_percent: int = 100
+    input_audio_enabled: bool = True
+    input_audio_volume_percent: int = 100
 
 
 @dataclass
@@ -387,6 +392,11 @@ class DemoPlaybackService:
                         advanced_playback_enabled=True,
                         skybox_id=options.skybox_id,
                         map_material_id=options.map_material_id,
+                        input_hud_enabled=options.input_hud_enabled,
+                        input_hud_display_mode=options.input_hud_display_mode,
+                        input_hud_scale_percent=options.input_hud_scale_percent,
+                        input_audio_enabled=options.input_audio_enabled,
+                        input_audio_volume_percent=options.input_audio_volume_percent,
                     )
                     installed_status = pov_manager.status()
                     expected_gameinfo_sha256 = str(
@@ -450,6 +460,11 @@ class DemoPlaybackService:
                     pov_hud_enabled=bool(options.enabled),
                     recording_skybox_id=options.skybox_id,
                     recording_map_material_id=options.map_material_id,
+                    input_hud_enabled=options.input_hud_enabled,
+                    input_hud_display_mode=options.input_hud_display_mode,
+                    input_hud_scale_percent=options.input_hud_scale_percent,
+                    input_audio_enabled=options.input_audio_enabled,
+                    input_audio_volume_percent=options.input_audio_volume_percent,
                     restore=None,
                     player_config_restore=None,
                 )
@@ -468,6 +483,11 @@ class DemoPlaybackService:
                     "pov_hud_enabled": bool(options.enabled),
                     "recording_skybox_id": options.skybox_id,
                     "recording_map_material_id": options.map_material_id,
+                    "input_hud_enabled": options.input_hud_enabled,
+                    "input_hud_display_mode": options.input_hud_display_mode,
+                    "input_hud_scale_percent": options.input_hud_scale_percent,
+                    "input_audio_enabled": options.input_audio_enabled,
+                    "input_audio_volume_percent": options.input_audio_volume_percent,
                 }
             except Exception:
                 if session is not None:

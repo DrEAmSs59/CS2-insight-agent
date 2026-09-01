@@ -171,6 +171,9 @@ export function useRecordingSessionController({
             radar_mode: 0,
             teamcounter_numeric: Boolean(warmupForApi?.pov_teamcounter_numeric),
             voice_mode: normalizePovVoiceMode(warmupForApi?.pov_voice_mode),
+            input_hud_enabled: session.input_hud_enabled !== false,
+            input_hud_display_mode: session.input_hud_display_mode,
+            input_audio_enabled: session.input_audio_enabled !== false,
           }
         : undefined;
       const body = {

@@ -40,6 +40,9 @@ export function useDemoPlaybackDialog() {
   const [recordingMapMaterial, setRecordingMapMaterial] = useState(
     DEFAULT_RECORDING_MAP_MATERIAL,
   );
+  const [inputHudEnabled, setInputHudEnabled] = useState(true);
+  const [inputHudDisplayMode, setInputHudDisplayMode] = useState("hybrid");
+  const [inputAudioEnabled, setInputAudioEnabled] = useState(true);
   const [skyboxResources, setSkyboxResources] = useState([]);
   const [restoreMonitor, setRestoreMonitor] = useState(null);
   const [restorePollError, setRestorePollError] = useState("");
@@ -98,6 +101,9 @@ export function useDemoPlaybackDialog() {
     setLaunchingMode("");
     setRecordingSkybox(DEFAULT_RECORDING_SKYBOX);
     setRecordingMapMaterial(DEFAULT_RECORDING_MAP_MATERIAL);
+    setInputHudEnabled(true);
+    setInputHudDisplayMode("hybrid");
+    setInputAudioEnabled(true);
     setSkyboxResources([]);
     await runPreflight();
   }, [runPreflight]);
@@ -124,6 +130,9 @@ export function useDemoPlaybackDialog() {
           teamcounter_numeric: false,
           skybox_id: recordingSkybox,
           map_material_id: recordingMapMaterial,
+          input_hud_enabled: inputHudEnabled,
+          input_hud_display_mode: inputHudDisplayMode,
+          input_audio_enabled: inputAudioEnabled,
         },
       });
       setOpen(false);
@@ -153,7 +162,7 @@ export function useDemoPlaybackDialog() {
     } finally {
       setLaunchingMode("");
     }
-  }, [launchingMode, recordingMapMaterial, recordingSkybox, showPlayToast, t, target]);
+  }, [inputAudioEnabled, inputHudDisplayMode, inputHudEnabled, launchingMode, recordingMapMaterial, recordingSkybox, showPlayToast, t, target]);
 
   const retryRestoreStatus = useCallback(async () => {
     const sessionId = restoreMonitor?.sessionId;
@@ -181,12 +190,18 @@ export function useDemoPlaybackDialog() {
         launchingMode={launchingMode}
         recordingSkybox={recordingSkybox}
         recordingMapMaterial={recordingMapMaterial}
+        inputHudEnabled={inputHudEnabled}
+        inputHudDisplayMode={inputHudDisplayMode}
+        inputAudioEnabled={inputAudioEnabled}
         skyboxResources={skyboxResources}
         onClose={close}
         onRetry={runPreflight}
         onPlayAdvanced={() => void launch()}
         onRecordingSkyboxChange={setRecordingSkybox}
         onRecordingMapMaterialChange={setRecordingMapMaterial}
+        onInputHudEnabledChange={setInputHudEnabled}
+        onInputHudDisplayModeChange={setInputHudDisplayMode}
+        onInputAudioEnabledChange={setInputAudioEnabled}
       />
       <PlayDemoToast />
       <DemoPlaybackRestoreModal
@@ -200,7 +215,7 @@ export function useDemoPlaybackDialog() {
         }}
       />
     </>
-  ), [PlayDemoToast, blockedReason, checking, close, error, launch, launchingMode, open, recordingMapMaterial, recordingSkybox, restoreMonitor, restorePollError, retryRestoreStatus, runPreflight, skyboxResources, target?.label]);
+  ), [PlayDemoToast, blockedReason, checking, close, error, inputAudioEnabled, inputHudDisplayMode, inputHudEnabled, launch, launchingMode, open, recordingMapMaterial, recordingSkybox, restoreMonitor, restorePollError, retryRestoreStatus, runPreflight, skyboxResources, target?.label]);
 
   return { requestPlayDemo, DemoPlaybackUi };
 }

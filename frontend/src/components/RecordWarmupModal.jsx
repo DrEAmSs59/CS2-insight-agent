@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { X } from "lucide-react";
+import { Keyboard, Volume2, X } from "lucide-react";
 import {
   aspectExportHint,
   aspectHint,
@@ -160,9 +160,6 @@ export default function RecordWarmupModal({
   initObsTransEnabled = false,
   initObsTransName = "Fade",
   initObsTransDurationMs = 200,
-  initKbOverlayEnabled = false,
-  initKbOverlayTickOffset = 6,
-  initKbOverlayPosition = "bottom_center",
   initKillFxEnabled = false,
   initKillFxTickOffset = 6,
 }) {
@@ -172,12 +169,12 @@ export default function RecordWarmupModal({
   const [obsTransEnabled, setObsTransEnabled] = useState(null);  // null = use global
   const [obsTransName, setObsTransName] = useState(null);
   const [obsTransDurationMs, setObsTransDurationMs] = useState(null);
-  const [kbOverlayEnabled, setKbOverlayEnabled] = useState(false);
-  const [kbOverlayTickOffset, setKbOverlayTickOffset] = useState(6);
-  const [kbOverlayPosition, setKbOverlayPosition] = useState("bottom_center");
   const [killFxEnabled, setKillFxEnabled] = useState(false);
   const [killFxTickOffset, setKillFxTickOffset] = useState(6);
   const [sessionPovEnabled, setSessionPovEnabled] = useState(false);
+  const [sessionInputHudEnabled, setSessionInputHudEnabled] = useState(true);
+  const [sessionInputHudDisplayMode, setSessionInputHudDisplayMode] = useState("hybrid");
+  const [sessionInputAudioEnabled, setSessionInputAudioEnabled] = useState(true);
   const [sessionSkybox, setSessionSkybox] = useState("default");
   const [sessionMapMaterial, setSessionMapMaterial] = useState(DEFAULT_RECORDING_MAP_MATERIAL);
   const [sessionCs2ExtraLaunchArgs, setSessionCs2ExtraLaunchArgs] = useState("");
@@ -208,16 +205,12 @@ export default function RecordWarmupModal({
     setObsTransEnabled(!!initObsTransEnabled);
     setObsTransName(initObsTransName || "Fade");
     setObsTransDurationMs(Number(initObsTransDurationMs) || 200);
-    setKbOverlayEnabled(!!initKbOverlayEnabled);
-    setKbOverlayTickOffset(
-      Number.isFinite(Number(initKbOverlayTickOffset))
-        ? Number(initKbOverlayTickOffset)
-        : 6,
-    );
-    setKbOverlayPosition(initKbOverlayPosition || "bottom_center");
     setKillFxEnabled(!!initKillFxEnabled);
     setKillFxTickOffset(Number(initKillFxTickOffset) || 0);
     setSessionPovEnabled(!!experimentalPovEnabled);
+    setSessionInputHudEnabled(true);
+    setSessionInputHudDisplayMode("hybrid");
+    setSessionInputAudioEnabled(true);
     setSessionSkybox(normalizeRecordingSkyboxId(recordingSkybox));
     setSessionMapMaterial(normalizeRecordingMapMaterialId(recordingMapMaterial));
     setSessionCs2ExtraLaunchArgs(cs2ExtraLaunchArgs);
@@ -231,9 +224,6 @@ export default function RecordWarmupModal({
     experimentalPovEnabled,
     recordingSkybox,
     recordingMapMaterial,
-    initKbOverlayEnabled,
-    initKbOverlayTickOffset,
-    initKbOverlayPosition,
     initKillFxEnabled,
     initKillFxTickOffset,
     cs2ExtraLaunchArgs,
@@ -300,9 +290,13 @@ export default function RecordWarmupModal({
         obs_transition_enabled: obsTransEnabled,
         obs_transition_name: obsTransName,
         obs_transition_duration_ms: obsTransDurationMs,
-        kb_overlay_enabled: kbOverlayEnabled,
-        kb_overlay_tick_offset: Number(kbOverlayTickOffset) || 0,
-        kb_overlay_position: kbOverlayPosition,
+        // Retire the OBS Browser Source keyboard for new recordings. The
+        // backend fields remain for old saved requests, but this flow always
+        // selects the authoritative in-game VPK path instead.
+        kb_overlay_enabled: false,
+        input_hud_enabled: sessionInputHudEnabled,
+        input_hud_display_mode: sessionInputHudDisplayMode,
+        input_audio_enabled: sessionInputAudioEnabled,
         kill_fx_enabled: killFxEnabled,
         kill_fx_tick_offset: Number(killFxTickOffset) || 0,
         experimental_pov_enabled: sessionPovEnabled,
@@ -322,12 +316,6 @@ export default function RecordWarmupModal({
   );
   // formatResolutionSummary returns a "record.*" key when no actual resolution is set
   const resSummaryDisplay = resSummaryRaw.startsWith("record.") ? t(resSummaryRaw) : resSummaryRaw;
-
-  const KB_POSITIONS = [
-    { value: "bottom_center", labelKey: "record.warmupKbPosBottomCenter" },
-    { value: "minimap_below", labelKey: "record.warmupKbPosMinimapBelow" },
-    { value: "weapon_right",  labelKey: "record.warmupKbPosWeaponRight" },
-  ];
 
   const AR_TAGS = [
     { ar: "4:3",   sample: "1920×1440", tagKey: "record.arTag43" },
@@ -423,70 +411,8 @@ export default function RecordWarmupModal({
           </section>
 
           <section aria-labelledby="sec-overlays">
-            <SectionHeader en="Keyboard & KillFX" zh={t("record.commonSecOverlays")} />
-            <div id="sec-overlays" className="grid gap-3 xl:grid-cols-2">
-              <div className="rounded-lg border border-cs2-border bg-cs2-bg-input/40 px-3 py-2.5">
-                <h4 className="mb-2 text-sm font-semibold text-cs2-text-primary">{t("record.warmupSecKb")}</h4>
-                <label className="flex cursor-pointer items-center gap-3">
-                  <input
-                    type="checkbox"
-                    checked={kbOverlayEnabled}
-                    onChange={(e) => setKbOverlayEnabled(e.target.checked)}
-                    className="h-4 w-4 shrink-0 rounded border-cs2-border accent-cs2-orange"
-                  />
-                  <span className="text-sm text-cs2-text-primary">{t("record.warmupKbEnable")}</span>
-                </label>
-                <p className="mt-2 pl-7 text-xs leading-relaxed text-cs2-text-muted">
-                  {t("record.warmupKbDesc")}
-                </p>
-                {kbOverlayEnabled && (
-                  <div className="mt-3 pl-7 flex flex-col gap-3">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="text-xs text-cs2-text-secondary whitespace-nowrap">{t("record.warmupKbPosition")}</span>
-                      {KB_POSITIONS.map(({ value, labelKey }) => (
-                        <label key={value} className="flex items-center gap-1.5 cursor-pointer">
-                          <input
-                            type="radio"
-                            name="kb-pos-warmup"
-                            value={value}
-                            checked={kbOverlayPosition === value}
-                            onChange={() => setKbOverlayPosition(value)}
-                            className="accent-cs2-orange"
-                          />
-                          <span className="text-xs text-cs2-text-primary">{t(labelKey)}</span>
-                        </label>
-                      ))}
-                    </div>
-                    <div className="flex flex-wrap items-center gap-3">
-                      <span className="text-xs text-cs2-text-secondary whitespace-nowrap">{t("record.warmupKbSyncAdjust")}</span>
-                      <input
-                        type="number"
-                        value={kbOverlayTickOffset}
-                        onChange={(e) => {
-                          const raw = e.target.value;
-                          setKbOverlayTickOffset(raw === "" ? "" : Number(raw));
-                        }}
-                        onBlur={() => {
-                          if (kbOverlayTickOffset === "" || Number.isNaN(Number(kbOverlayTickOffset))) {
-                            setKbOverlayTickOffset(0);
-                          }
-                        }}
-                        min="-120"
-                        max="120"
-                        step="1"
-                        className="w-20 rounded border border-cs2-border bg-cs2-bg-elevated px-2 py-1 text-sm text-cs2-text-primary text-center"
-                      />
-                      <span className="text-xs text-cs2-text-muted tabular-nums">
-                        ≈ {Math.round(Math.abs(Number(kbOverlayTickOffset) || 0) / 64 * 1000)} ms{Number(kbOverlayTickOffset) > 0 ? t("record.warmupKbAhead") : Number(kbOverlayTickOffset) < 0 ? t("record.warmupKbBehind") : t("record.warmupKbNoCompensation")}
-                      </span>
-                    </div>
-                    <p className="text-xs text-cs2-text-muted leading-relaxed">
-                      {t("record.warmupKbSyncHint")}
-                    </p>
-                  </div>
-                )}
-              </div>
-
+            <SectionHeader en="KillFX" zh={t("record.commonSecOverlays")} />
+            <div id="sec-overlays" className="grid gap-3">
               <div className="rounded-lg border border-cs2-border bg-cs2-bg-input/40 px-3 py-2.5">
                 <h4 className="mb-2 text-sm font-semibold text-cs2-text-primary">{t("record.warmupSecKillFx")}</h4>
                 <label className="flex cursor-pointer items-center gap-3">
@@ -724,6 +650,69 @@ export default function RecordWarmupModal({
             onRecordingMapMaterialChange={setSessionMapMaterial}
             omitDisclaimer
           />
+
+          <section aria-labelledby="sec-input-hud">
+            <SectionHeader en="In-game input" zh={t("record.warmupSecInputHud")} />
+            <div
+              id="sec-input-hud"
+              data-testid="record-input-hud-option"
+              className={`rounded-lg border border-cs2-border bg-cs2-bg-input/40 px-3 py-3 ${sessionPovEnabled ? "" : "opacity-55"}`}
+            >
+              <div className="flex items-start gap-3">
+                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-cs2-accent/10 text-cs2-accent">
+                  <Keyboard className="h-4 w-4" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="text-[12px] font-bold text-cs2-text-primary">{t("record.warmupInputHudTitle")}</p>
+                  <p className="mt-0.5 text-[10px] leading-relaxed text-cs2-text-muted">
+                    {sessionPovEnabled ? t("record.warmupInputHudDesc") : t("record.warmupInputHudNeedsPov")}
+                  </p>
+                </div>
+                <label className={`flex shrink-0 items-center gap-2 text-xs font-semibold text-cs2-text-primary ${sessionPovEnabled ? "cursor-pointer" : "cursor-not-allowed"}`}>
+                  <input
+                    type="checkbox"
+                    aria-label={t("record.warmupInputHudEnable")}
+                    checked={sessionInputHudEnabled}
+                    disabled={!sessionPovEnabled}
+                    onChange={(event) => setSessionInputHudEnabled(event.target.checked)}
+                    className="h-4 w-4 rounded border-cs2-border accent-cs2-orange disabled:opacity-50"
+                  />
+                  {t("record.warmupInputHudEnable")}
+                </label>
+              </div>
+
+              <div className={`mt-3 grid gap-3 border-t border-cs2-border/70 pt-3 sm:grid-cols-2 ${sessionInputHudEnabled ? "" : "opacity-45"}`}>
+                <label className="text-[10px] font-semibold text-cs2-text-secondary">
+                  {t("record.warmupInputHudDisplayMode")}
+                  <select
+                    aria-label={t("record.warmupInputHudDisplayMode")}
+                    value={sessionInputHudDisplayMode}
+                    disabled={!sessionPovEnabled || !sessionInputHudEnabled}
+                    onChange={(event) => setSessionInputHudDisplayMode(event.target.value)}
+                    className="mt-1.5 w-full rounded-md border border-cs2-border bg-cs2-bg-input px-2.5 py-2 text-xs font-semibold text-cs2-text-primary outline-none focus:border-cs2-accent/60 disabled:cursor-not-allowed"
+                  >
+                    <option value="hybrid">{t("playDemo.inputHudModeHybrid")}</option>
+                    <option value="always">{t("playDemo.inputHudModeAlways")}</option>
+                    <option value="active">{t("playDemo.inputHudModeActive")}</option>
+                  </select>
+                </label>
+
+                <label className={`flex items-center gap-2 self-end rounded-md border border-cs2-border bg-cs2-bg-card px-2.5 py-2 text-xs font-semibold text-cs2-text-primary ${sessionPovEnabled && sessionInputHudEnabled ? "cursor-pointer" : "cursor-not-allowed"}`}>
+                  <input
+                    type="checkbox"
+                    aria-label={t("record.warmupInputAudioEnable")}
+                    checked={sessionInputAudioEnabled}
+                    disabled={!sessionPovEnabled || !sessionInputHudEnabled}
+                    onChange={(event) => setSessionInputAudioEnabled(event.target.checked)}
+                    className="h-3.5 w-3.5 rounded border-cs2-border accent-cs2-orange disabled:opacity-50"
+                  />
+                  <Volume2 className="h-3.5 w-3.5" />
+                  {t("record.warmupInputAudioEnable")}
+                </label>
+
+              </div>
+            </div>
+          </section>
 
           <section aria-labelledby="sec-audio">
             <SectionHeader en="Recording canvas" zh={t("record.warmupSecAudio")} />

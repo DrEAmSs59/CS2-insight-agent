@@ -25,6 +25,15 @@ export async function playDemoInCs2({ id = null, path = null, advancedPlayback =
       radar_mode: Number(playback?.radar_mode) === -1 ? -1 : 0,
       teamcounter_numeric: !!playback?.teamcounter_numeric,
       skybox_id: normalizeRecordingSkyboxId(playback?.skybox_id),
+      ...(playback?.enabled ? {
+        input_hud_enabled: playback?.input_hud_enabled !== false,
+        input_hud_display_mode: ["hybrid", "always", "active"].includes(playback?.input_hud_display_mode)
+          ? playback.input_hud_display_mode
+          : "hybrid",
+        input_hud_scale_percent: 100,
+        input_audio_enabled: playback?.input_audio_enabled !== false,
+        input_audio_volume_percent: 100,
+      } : {}),
     },
     map_material: {
       id: normalizeRecordingMapMaterialId(playback?.map_material_id),

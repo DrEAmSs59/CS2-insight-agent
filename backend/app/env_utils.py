@@ -446,7 +446,8 @@ class AppConfig(BaseModel):
     steam_cdn_assets_enabled: bool = True
     match_mode: str = "premier"   # premier / competitive
     match_count: int = 20         # 20 / 50 / 100
-    # 虚拟键盘 overlay（OBS Browser Source 实时合成）
+    # Legacy OBS Browser Source keyboard compatibility. New playback sessions
+    # use the authoritative in-game VPK input HUD configured in Advanced Playback.
     kb_overlay_enabled: bool = False
     kb_overlay_tick_offset: int = 6   # 键盘独立偏移；正=提前显示，负=延迟显示
     kb_overlay_position: str = "bottom_center"  # bottom_center | minimap_below

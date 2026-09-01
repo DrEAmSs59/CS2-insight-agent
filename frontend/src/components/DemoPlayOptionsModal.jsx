@@ -1,4 +1,4 @@
-import { AlertTriangle, ChevronLeft, ChevronRight, Cloud, Crosshair, Eye, Loader2, Package, Play, RefreshCw, ShieldAlert, Skull, Volume2, X } from "lucide-react";
+import { AlertTriangle, ChevronLeft, ChevronRight, Cloud, Crosshair, Eye, Keyboard, Loader2, Package, Play, RefreshCw, ShieldAlert, Skull, Volume2, X } from "lucide-react";
 
 import { useT } from "../i18n/useT.js";
 import {
@@ -27,12 +27,18 @@ export default function DemoPlayOptionsModal({
   launchingMode = "",
   recordingSkybox = DEFAULT_RECORDING_SKYBOX,
   recordingMapMaterial = DEFAULT_RECORDING_MAP_MATERIAL,
+  inputHudEnabled = true,
+  inputHudDisplayMode = "hybrid",
+  inputAudioEnabled = true,
   skyboxResources = [],
   onClose,
   onRetry,
   onPlayAdvanced,
   onRecordingSkyboxChange,
   onRecordingMapMaterialChange,
+  onInputHudEnabledChange,
+  onInputHudDisplayModeChange,
+  onInputAudioEnabledChange,
 }) {
   const t = useT();
   const launching = !!launchingMode;
@@ -230,6 +236,65 @@ export default function DemoPlayOptionsModal({
                   <span className="ml-auto hidden sm:inline">{t("playDemo.previewNativeDemoUi")}</span>
                   <span className="text-[13px]">⚙</span>
                 </div>
+              </div>
+            </div>
+
+            <div
+              data-testid="demo-play-input-hud-option"
+              className="rounded-lg border border-cs2-border bg-cs2-bg-input/45 px-3 py-3"
+            >
+              <div className="flex items-start gap-3">
+                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-cs2-accent/10 text-cs2-accent">
+                  <Keyboard className="h-4 w-4" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="text-[12px] font-bold text-cs2-text-primary">{t("playDemo.inputHudTitle")}</p>
+                  <p className="mt-0.5 text-[10px] leading-relaxed text-cs2-text-muted">{t("playDemo.inputHudHint")}</p>
+                </div>
+                <label className="flex shrink-0 cursor-pointer items-center gap-2 text-xs font-semibold text-cs2-text-primary">
+                  <input
+                    type="checkbox"
+                    aria-label={t("playDemo.inputHudEnable")}
+                    checked={inputHudEnabled}
+                    disabled={launching || !onInputHudEnabledChange}
+                    onChange={(event) => onInputHudEnabledChange?.(event.target.checked)}
+                    className="h-4 w-4 rounded border-cs2-border accent-cs2-accent disabled:opacity-50"
+                  />
+                  {t("playDemo.inputHudEnable")}
+                </label>
+              </div>
+
+              <div className={`mt-3 grid gap-3 border-t border-cs2-border/70 pt-3 md:grid-cols-2 ${inputHudEnabled ? "" : "opacity-45"}`}>
+                <label className="text-[10px] font-semibold text-cs2-text-secondary">
+                  {t("playDemo.inputHudDisplayMode")}
+                  <select
+                    aria-label={t("playDemo.inputHudDisplayMode")}
+                    value={inputHudDisplayMode}
+                    disabled={launching || !inputHudEnabled || !onInputHudDisplayModeChange}
+                    onChange={(event) => onInputHudDisplayModeChange?.(event.target.value)}
+                    className="mt-1.5 w-full rounded-md border border-cs2-border bg-cs2-bg-input px-2.5 py-2 text-xs font-semibold text-cs2-text-primary outline-none focus:border-cs2-accent/60 disabled:cursor-not-allowed"
+                  >
+                    <option value="hybrid">{t("playDemo.inputHudModeHybrid")}</option>
+                    <option value="always">{t("playDemo.inputHudModeAlways")}</option>
+                    <option value="active">{t("playDemo.inputHudModeActive")}</option>
+                  </select>
+                </label>
+
+                <div className="text-[10px] font-semibold text-cs2-text-secondary">
+                  <label className="flex cursor-pointer items-center gap-2">
+                    <input
+                      type="checkbox"
+                      aria-label={t("playDemo.inputAudioEnable")}
+                      checked={inputAudioEnabled}
+                      disabled={launching || !inputHudEnabled || !onInputAudioEnabledChange}
+                      onChange={(event) => onInputAudioEnabledChange?.(event.target.checked)}
+                      className="h-3.5 w-3.5 rounded border-cs2-border accent-cs2-accent disabled:opacity-50"
+                    />
+                    <Volume2 className="h-3 w-3" />
+                    {t("playDemo.inputAudioEnable")}
+                  </label>
+                </div>
+
               </div>
             </div>
 

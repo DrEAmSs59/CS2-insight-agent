@@ -13,6 +13,9 @@ describe("DemoPlayOptionsModal", () => {
     const onPlayAdvanced = vi.fn();
     const onRecordingSkyboxChange = vi.fn();
     const onRecordingMapMaterialChange = vi.fn();
+    const onInputHudEnabledChange = vi.fn();
+    const onInputHudDisplayModeChange = vi.fn();
+    const onInputAudioEnabledChange = vi.fn();
     const customSkyboxId = `custom:${"a".repeat(32)}`;
     render(
       <DemoPlayOptionsModal
@@ -28,6 +31,9 @@ describe("DemoPlayOptionsModal", () => {
         }]}
         onRecordingSkyboxChange={onRecordingSkyboxChange}
         onRecordingMapMaterialChange={onRecordingMapMaterialChange}
+        onInputHudEnabledChange={onInputHudEnabledChange}
+        onInputHudDisplayModeChange={onInputHudDisplayModeChange}
+        onInputAudioEnabledChange={onInputAudioEnabledChange}
         onPlayAdvanced={onPlayAdvanced}
         onClose={() => {}}
       />,
@@ -46,6 +52,14 @@ describe("DemoPlayOptionsModal", () => {
     expect(screen.getByText("跟随回合开")).toBeTruthy();
     expect(screen.getByText("原生 DemoUI · 进度与播放控制")).toBeTruthy();
     expect(screen.getAllByTestId("advanced-preview-player-row")).toHaveLength(10);
+    expect(screen.getByText("内置按键 + 键鼠可视化")).toBeTruthy();
+    const inputModeSelect = screen.getByRole("combobox", { name: "按键显示方式" });
+    expect(inputModeSelect.value).toBe("hybrid");
+    fireEvent.change(inputModeSelect, { target: { value: "active" } });
+    expect(onInputHudDisplayModeChange).toHaveBeenCalledWith("active");
+    expect(screen.queryByRole("slider")).toBeNull();
+    fireEvent.click(screen.getByRole("checkbox", { name: "虚拟按键音" }));
+    expect(onInputAudioEnabledChange).toHaveBeenCalledWith(false);
     const skyboxSelect = screen.getByRole("combobox", { name: "高级播放天空盒" });
     expect(skyboxSelect.value).toBe("cartoon3");
     expect(Array.from(skyboxSelect.options)
@@ -87,10 +101,12 @@ describe("DemoPlayOptionsModal", () => {
     expect(onRecordingMapMaterialChange).toHaveBeenCalledWith("default");
 
     const preview = screen.getByTestId("demo-play-preview");
+    const inputHudOption = screen.getByTestId("demo-play-input-hud-option");
     const materialOption = screen.getByTestId("demo-play-map-material-option");
     const skyboxOption = screen.getByTestId("demo-play-skybox-option");
     const warning = screen.getByTestId("demo-play-gameinfo-warning");
-    expect(preview.compareDocumentPosition(materialOption) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(preview.compareDocumentPosition(inputHudOption) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(inputHudOption.compareDocumentPosition(materialOption) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(materialOption.compareDocumentPosition(skyboxOption) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(skyboxOption.compareDocumentPosition(warning) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(screen.getByText("将临时修改 CS2 文件")).toBeTruthy();

@@ -929,6 +929,11 @@ class PovHudManager:
         advanced_playback_enabled: bool = False,
         skybox_id: str = DEFAULT_SKYBOX_ID,
         map_material_id: str = DEFAULT_MAP_MATERIAL_ID,
+        input_hud_enabled: bool = True,
+        input_hud_display_mode: str = "hybrid",
+        input_hud_scale_percent: int = 100,
+        input_audio_enabled: bool = True,
+        input_audio_volume_percent: int = 100,
     ) -> Optional[DemoVoiceHudBuild]:
         with ExitStack() as staging_stack:
             return self._install_impl(
@@ -1016,6 +1021,11 @@ class PovHudManager:
                     voice_enabled=voice_enabled,
                     voice_mode=resolved_voice_mode,
                     advanced_playback_enabled=advanced_playback_enabled,
+                    input_hud_enabled=input_hud_enabled,
+                    input_hud_display_mode=input_hud_display_mode,
+                    input_hud_scale_percent=input_hud_scale_percent,
+                    input_audio_enabled=input_audio_enabled,
+                    input_audio_volume_percent=input_audio_volume_percent,
                     session_console_commands=(
                         map_material_console_commands(selected_map_material)
                         if advanced_playback_enabled
@@ -1437,6 +1447,11 @@ class PovHudManager:
             "chroma_runtime": None,
             "chroma_official_swaps": chroma_official_swap_metadata,
             "recording_map_material_id": selected_map_material,
+            "input_hud_enabled": bool(input_hud_enabled),
+            "input_hud_display_mode": str(input_hud_display_mode),
+            "input_hud_scale_percent": int(input_hud_scale_percent),
+            "input_audio_enabled": bool(input_audio_enabled),
+            "input_audio_volume_percent": int(input_audio_volume_percent),
             "original_gameinfo_sha256": original_gameinfo_sha,
             "planned_patched_gameinfo_sha256": planned_patched_sha,
         }

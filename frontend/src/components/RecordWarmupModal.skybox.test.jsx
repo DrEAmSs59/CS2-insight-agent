@@ -37,6 +37,9 @@ describe("RecordWarmupModal skybox override", () => {
     expect(screen.queryByTestId("experimental-pov-disclaimer")).toBeNull();
     expect(screen.queryByText(/默认已预填 5 条性能\/预测 cvar/)).toBeNull();
     expect(screen.queryByText(/首片段预热/)).toBeNull();
+    expect(screen.queryByText("启用虚拟键盘 Overlay")).toBeNull();
+    expect(screen.getByText("内置按键 + 键鼠可视化")).toBeTruthy();
+    expect(screen.getByRole("checkbox", { name: "启用" }).disabled).toBe(true);
     expect(screen.getByText(/此处修改仅作用于本次录制/)).toBeTruthy();
     expect(selector.value).toBe("cartoon3");
     expect(materialSelector.value).toBe("waxed_reflection");
@@ -50,6 +53,10 @@ describe("RecordWarmupModal skybox override", () => {
         recording_skybox: "cartoon3",
         recording_map_material: "default",
         pov_voice_mode: "team",
+        kb_overlay_enabled: false,
+        input_hud_enabled: true,
+        input_hud_display_mode: "hybrid",
+        input_audio_enabled: true,
       }),
     );
   });
@@ -66,11 +73,20 @@ describe("RecordWarmupModal skybox override", () => {
     );
 
     const voiceSelect = screen.getByRole("combobox", { name: "语音控制" });
+    const inputModeSelect = screen.getByRole("combobox", { name: "按键显示方式" });
+    fireEvent.change(inputModeSelect, { target: { value: "active" } });
+    fireEvent.click(screen.getByRole("checkbox", { name: "虚拟按键音" }));
     fireEvent.change(voiceSelect, { target: { value: "enemy" } });
     fireEvent.click(screen.getByRole("button", { name: "开始录制" }));
 
     expect(onConfirm).toHaveBeenCalledWith(
-      expect.objectContaining({ experimental_pov_enabled: true, pov_voice_mode: "enemy" }),
+      expect.objectContaining({
+        experimental_pov_enabled: true,
+        pov_voice_mode: "enemy",
+        input_hud_enabled: true,
+        input_hud_display_mode: "active",
+        input_audio_enabled: false,
+      }),
     );
   });
 });

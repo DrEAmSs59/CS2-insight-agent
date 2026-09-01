@@ -43,9 +43,6 @@ ADVANCED_HOT_SWITCH_STYLE_PATHS = {
     "panorama/styles/hud/hudteamcounter-equipmentinfo.vcss_c",
     "panorama/styles/hud/hudteamcounter.vcss_c",
 }
-PAYLOAD_CAPACITY = 8_000_000
-
-
 def replace_data_block(resource: bytes, script: bytes) -> bytes:
     if len(resource) < 16:
         raise RuntimeError("compiled Panorama resource is truncated")
@@ -140,13 +137,10 @@ def main() -> None:
         raise RuntimeError("human-readable injection contains no payload markers")
     payload_start = begin + len(VOICE_DATA_BEGIN)
     empty_payload = b"[[], [], [], []]"
-    if len(empty_payload) > PAYLOAD_CAPACITY:
-        raise RuntimeError("empty payload exceeds configured capacity")
     injection = b"".join(
         (
             injection[:payload_start],
             empty_payload,
-            b" " * (PAYLOAD_CAPACITY - len(empty_payload)),
             injection[end:],
         )
     )
@@ -183,7 +177,7 @@ def main() -> None:
     print("input_audio_resources=" + ",".join(INPUT_AUDIO_RESOURCES))
     print(f"native_healthammo_style={HEALTHAMMO_STYLE_PATH}")
     print("advanced_removed_styles=" + ",".join(sorted(ADVANCED_HOT_SWITCH_STYLE_PATHS)))
-    print(f"payload_capacity={PAYLOAD_CAPACITY}")
+    print("payload_capacity=dynamic")
     print(f"panorama_source_bytes={len(combined_source)}")
     print(f"pov_vpk_bytes={POV_TEMPLATE.stat().st_size}")
     print(f"advanced_vpk_bytes={ADVANCED_PLAYBACK_TEMPLATE.stat().st_size}")

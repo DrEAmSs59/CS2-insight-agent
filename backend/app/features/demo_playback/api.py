@@ -36,6 +36,11 @@ class DemoPlaybackPovBody(BaseModel):
     radar_mode: Literal[-1, 0] = 0
     teamcounter_numeric: bool = False
     skybox_id: str = Field(default="default", max_length=64)
+    input_hud_enabled: bool = True
+    input_hud_display_mode: Literal["hybrid", "always", "active"] = "hybrid"
+    input_hud_scale_percent: int = Field(default=100, ge=75, le=125)
+    input_audio_enabled: bool = True
+    input_audio_volume_percent: Literal[25, 50, 75, 100] = 100
 
 
 class DemoPlaybackMapMaterialBody(BaseModel):
@@ -96,6 +101,11 @@ def launch_cs2_play_demo(
                 teamcounter_numeric=bool(pov.teamcounter_numeric),
                 skybox_id=skybox_id,
                 map_material_id=map_material_id,
+                input_hud_enabled=bool(pov.input_hud_enabled),
+                input_hud_display_mode=pov.input_hud_display_mode,
+                input_hud_scale_percent=int(pov.input_hud_scale_percent),
+                input_audio_enabled=bool(pov.input_audio_enabled),
+                input_audio_volume_percent=int(pov.input_audio_volume_percent),
             ),
         )
     except SkyboxVpkError as exc:

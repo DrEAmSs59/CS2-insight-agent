@@ -52,7 +52,8 @@ class DemoVoiceHudError(RuntimeError):
 # after the demo controller reports a loaded map; index 15 carries exact
 # CBaseUserCmdPB mousedx/mousedy samples for the keyboard's mouse-motion pad;
 # index 16 carries authoritative CSGOUserCmdPB.left_hand_desired edges; index
-# 17 carries exact button press/release edges for the input-audio SoundEvents.
+# 17 carries exact button press/release edges for the input-audio SoundEvents;
+# index 18 stores the per-session input-HUD presentation settings.
 RADAR_PAYLOAD_INDEX = 8
 KILL_FEEDBACK_PAYLOAD_INDEX = 9
 FLASH_BLIND_PAYLOAD_INDEX = 10
@@ -63,6 +64,7 @@ SESSION_CONSOLE_COMMANDS_PAYLOAD_INDEX = 14
 MOUSE_INPUT_PAYLOAD_INDEX = 15
 HAND_SWITCH_PAYLOAD_INDEX = 16
 INPUT_AUDIO_EDGE_PAYLOAD_INDEX = 17
+INPUT_PRESENTATION_PAYLOAD_INDEX = 18
 WEAPON_SELECT_PAYLOAD_INDEX = 6
 WEAPON_SELECT_ENTITY_INDEX_MASK = 0x3FFF
 WEAPON_SELECT_MATCH_MAX_TICKS = 4
@@ -398,7 +400,7 @@ def _normalize_map_name(raw: Any) -> str:
 
 def _pad_payload_slots(
     packed: list[Any],
-    length: int = INPUT_AUDIO_EDGE_PAYLOAD_INDEX + 1,
+    length: int = INPUT_PRESENTATION_PAYLOAD_INDEX + 1,
 ) -> list[Any]:
     if not isinstance(packed, list):
         raise DemoVoiceHudError("voice HUD payload has an unsupported shape")
@@ -3459,7 +3461,7 @@ def _identity_bound_hand_switch_tracks(
 def _identity_bound_input_audio_edges(
     report: Mapping[str, Any],
     slot_to_xuid: Mapping[int, int],
-) -> tuple[list[list[Any]], int, int]:
+) -> tuple[list[list[str]], int, int]:
     raw_edges = report.get("button_edges")
     if not isinstance(raw_edges, list):
         return [], 0, 0
@@ -3515,7 +3517,7 @@ def _identity_bound_input_audio_edges(
             )
         )
 
-    tracks: list[list[Any]] = []
+    tracks: list[list[str]] = []
     edge_count = 0
     subtick_count = 0
     for xuid, rows in by_xuid.items():
@@ -3523,12 +3525,26 @@ def _identity_bound_input_audio_edges(
         # indexes can restart in a later svc_UserCmds message at the same demo
         # tick, so preserve the report order instead of re-sorting by index.
         rows.sort(key=lambda row: (row[0], row[3]))
-        events = [row[4] for row in rows]
-        if not events:
+        if not rows:
             continue
-        edge_count += len(events)
+        previous_tick = 0
+        encoded_events: list[str] = []
+        for row in rows:
+            tick, bit, pressed, when = row[4]
+            fields = [
+                _base36(int(tick) - previous_tick),
+                _base36((int(bit) << 1) | int(bool(pressed))),
+            ]
+            if when is not None:
+                # The extractor emits f32. Store its IEEE-754 bits so compacting
+                # the JSON preserves the authoritative subtick timestamp exactly.
+                when_bits = struct.unpack("<I", struct.pack("<f", float(when)))[0]
+                fields.append(_base36(when_bits))
+            encoded_events.append(".".join(fields))
+            previous_tick = int(tick)
+        edge_count += len(rows)
         subtick_count += sum(int(row[5]) for row in rows)
-        tracks.append([str(xuid), events])
+        tracks.append([str(xuid), ",".join(encoded_events)])
     return tracks, edge_count, subtick_count
 
 
@@ -3623,6 +3639,42 @@ def add_input_tracks_to_payload(
         "input_audio_subtick_edges": audio_subtick_edges,
         **weapon_select_stats,
     }
+
+
+def add_input_presentation_to_payload(
+    voice_payload: bytes,
+    *,
+    enabled: bool,
+    display_mode: str,
+    scale_percent: int,
+    audio_enabled: bool,
+    audio_volume_percent: int,
+) -> bytes:
+    """Append validated per-session keyboard/mouse presentation settings."""
+    try:
+        packed = json.loads(voice_payload.decode("ascii"))
+    except (UnicodeDecodeError, ValueError, TypeError) as exc:
+        raise DemoVoiceHudError("voice HUD payload is not valid compact JSON") from exc
+    packed = _pad_payload_slots(packed)
+
+    mode = str(display_mode or "").strip().lower()
+    if mode not in {"hybrid", "always", "active"}:
+        raise DemoVoiceHudError(f"unsupported input HUD display mode: {display_mode}")
+    scale = int(scale_percent)
+    if scale < 75 or scale > 125:
+        raise DemoVoiceHudError("input HUD scale must be between 75 and 125 percent")
+    volume = int(audio_volume_percent)
+    if volume not in {25, 50, 75, 100}:
+        raise DemoVoiceHudError("input audio volume must be one of 25, 50, 75, or 100 percent")
+
+    packed[INPUT_PRESENTATION_PAYLOAD_INDEX] = [
+        int(bool(enabled)),
+        mode,
+        scale,
+        int(bool(audio_enabled)),
+        volume,
+    ]
+    return json.dumps(packed, ensure_ascii=True, separators=(",", ":")).encode("ascii")
 
 
 def add_radar_track_to_payload(
@@ -4172,29 +4224,72 @@ def add_advanced_playback_track_to_payload(
 
 
 def inject_voice_payload(template_vpk: bytes, payload: bytes) -> bytes:
-    """Fill the bounded data slot and rebuild the VPK with fresh CRCs."""
+    """Replace the compiled Panorama payload and rebuild the VPK with fresh CRCs.
+
+    The payload lives inside the ``DATA`` block of a compiled Panorama resource.
+    Its size varies substantially with demo length, so replacing it must also
+    update the resource header, block size, and offsets of any following blocks.
+    """
     entries = read_inline_vpk(template_vpk)
     script = entries.get(VOICE_SCRIPT_PATH)
     if script is None:
         raise DemoVoiceHudError(f"voice HUD template is missing {VOICE_SCRIPT_PATH}")
-    begin = script.find(VOICE_DATA_BEGIN)
-    end = script.find(VOICE_DATA_END, begin + len(VOICE_DATA_BEGIN))
+
+    if len(script) < 16:
+        raise DemoVoiceHudError("compiled Panorama resource is truncated")
+    total_size = struct.unpack_from("<I", script, 0)[0]
+    block_count = struct.unpack_from("<I", script, 12)[0]
+    if total_size != len(script) or block_count <= 0 or block_count > 64:
+        raise DemoVoiceHudError("compiled Panorama resource header is unsupported")
+
+    descriptors: list[tuple[int, bytes, int, int]] = []
+    for index in range(block_count):
+        descriptor = 16 + index * 12
+        if descriptor + 12 > len(script):
+            raise DemoVoiceHudError("compiled Panorama block table is truncated")
+        name = script[descriptor : descriptor + 4]
+        relative_offset, size = struct.unpack_from("<II", script, descriptor + 4)
+        start = descriptor + 4 + relative_offset
+        end = start + size
+        if start < 0 or end > len(script):
+            raise DemoVoiceHudError(
+                f"compiled Panorama block {name!r} exceeds the resource"
+            )
+        descriptors.append((descriptor, name, start, size))
+
+    data = next((item for item in descriptors if item[1] == b"DATA"), None)
+    if data is None:
+        raise DemoVoiceHudError("compiled Panorama resource has no DATA block")
+    data_descriptor, _, data_start, old_data_size = data
+    old_data_end = data_start + old_data_size
+    data_source = script[data_start:old_data_end]
+    begin = data_source.find(VOICE_DATA_BEGIN)
+    end = data_source.find(VOICE_DATA_END, begin + len(VOICE_DATA_BEGIN))
     if begin < 0 or end < 0:
         raise DemoVoiceHudError("voice HUD template data markers were not found")
     payload_start = begin + len(VOICE_DATA_BEGIN)
-    capacity = end - payload_start
-    if len(payload) > capacity:
-        raise DemoVoiceHudError(
-            f"demo voice schedule needs {len(payload)} bytes but the template holds {capacity}"
-        )
-    entries[VOICE_SCRIPT_PATH] = b"".join(
+    rebuilt_data = b"".join(
         (
-            script[:payload_start],
+            data_source[:payload_start],
             payload,
-            b" " * (capacity - len(payload)),
-            script[end:],
+            data_source[end:],
         )
     )
+    delta = len(rebuilt_data) - old_data_size
+    rebuilt_script = bytearray(
+        script[:data_start] + rebuilt_data + script[old_data_end:]
+    )
+    struct.pack_into("<I", rebuilt_script, 0, len(rebuilt_script))
+    struct.pack_into("<I", rebuilt_script, data_descriptor + 8, len(rebuilt_data))
+    for descriptor, name, start, _ in descriptors:
+        if name != b"DATA" and start >= old_data_end:
+            relative_offset = struct.unpack_from(
+                "<I", rebuilt_script, descriptor + 4
+            )[0]
+            struct.pack_into(
+                "<I", rebuilt_script, descriptor + 4, relative_offset + delta
+            )
+    entries[VOICE_SCRIPT_PATH] = bytes(rebuilt_script)
     return write_inline_vpk(entries)
 
 
@@ -4207,6 +4302,11 @@ def build_demo_voice_hud_vpk(
     voice_enabled: bool = True,
     voice_mode: str = DEFAULT_POV_VOICE_MODE,
     advanced_playback_enabled: bool = False,
+    input_hud_enabled: bool = True,
+    input_hud_display_mode: str = "hybrid",
+    input_hud_scale_percent: int = 100,
+    input_audio_enabled: bool = True,
+    input_audio_volume_percent: int = 100,
     session_console_commands: Iterable[object] | None = None,
 ) -> DemoVoiceHudBuild:
     payload, stats = build_voice_payload(demo_path, parser_factory=parser_factory)
@@ -4239,6 +4339,16 @@ def build_demo_voice_hud_vpk(
             parser_factory=parser_factory,
         )
         stats["payload_bytes"] = len(payload)
+
+    payload = add_input_presentation_to_payload(
+        payload,
+        enabled=input_hud_enabled,
+        display_mode=input_hud_display_mode,
+        scale_percent=input_hud_scale_percent,
+        audio_enabled=input_audio_enabled,
+        audio_volume_percent=input_audio_volume_percent,
+    )
+    stats["payload_bytes"] = len(payload)
 
     radar_stats: dict[str, Any] = {
         "radar_players": 0,

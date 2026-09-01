@@ -309,8 +309,22 @@ def test_pov_recording_uses_shared_exit_restore_and_reports_evidence(
             voice_mode="team",
             skybox_id="default",
             map_material_id="default",
+            input_hud_enabled=True,
+            input_hud_display_mode="hybrid",
+            input_hud_scale_percent=100,
+            input_audio_enabled=True,
+            input_audio_volume_percent=100,
         ):
-            calls.append(("install", demo_path, voice_mode))
+            calls.append((
+                "install",
+                demo_path,
+                voice_mode,
+                input_hud_enabled,
+                input_hud_display_mode,
+                input_hud_scale_percent,
+                input_audio_enabled,
+                input_audio_volume_percent,
+            ))
 
         def status(self):
             return {"original_gameinfo_sha256": f"  {'A' * 64}  "}
@@ -374,7 +388,12 @@ def test_pov_recording_uses_shared_exit_restore_and_reports_evidence(
         monkeypatch.setattr(director, "_cleanup_cs2_artifacts", lambda: None)
         return await director.execute_plan_queue(
             [request],
-            warmup=RecordingWarmupExtras(pov_hud_enabled=True),
+            warmup=RecordingWarmupExtras(
+                pov_hud_enabled=True,
+                input_hud_enabled=False,
+                input_hud_display_mode="active",
+                input_audio_enabled=False,
+            ),
         )
 
     results = asyncio.run(run())
@@ -383,6 +402,7 @@ def test_pov_recording_uses_shared_exit_restore_and_reports_evidence(
     assert call_names[:2] == ["manager", "install"]
     assert calls[1][1] == tmp_path / "pov.dem"
     assert calls[1][2] == "team"
+    assert calls[1][3:] == (False, "active", 100, False, 100)
     assert call_names.count("kill") >= 1
     assert call_names[-1] == "restore"
     restore_call = calls[-1]

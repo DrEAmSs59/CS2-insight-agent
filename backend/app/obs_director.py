@@ -1853,6 +1853,12 @@ class RecordingWarmupExtras:
     pov_voice_disabled: bool = False
     # RecordingV3 queue: enable POV HUD lifecycle (install vpk + patch gameinfo.gi)
     pov_hud_enabled: bool = False
+    # Authoritative in-game input visualization. Presentation size and audio
+    # gain are fixed product presets; only visibility policy and sound on/off
+    # are session choices.
+    input_hud_enabled: bool = True
+    input_hud_display_mode: Literal["hybrid", "always", "active"] = "hybrid"
+    input_audio_enabled: bool = True
     # Independent recording preset. Non-default values install a sky-only VPK
     # in ordinary mode, or merge the same layer into the POV package.
     skybox_id: str = "default"
@@ -3649,6 +3655,17 @@ class OBSDirector:
                 warmup and getattr(warmup, "pov_voice_disabled", False)
             ),
         )
+        input_hud_enabled_v3 = bool(
+            getattr(warmup, "input_hud_enabled", True) if warmup else True
+        )
+        input_hud_display_mode_v3 = str(
+            getattr(warmup, "input_hud_display_mode", "hybrid") if warmup else "hybrid"
+        ).strip().lower()
+        if input_hud_display_mode_v3 not in {"hybrid", "always", "active"}:
+            input_hud_display_mode_v3 = "hybrid"
+        input_audio_enabled_v3 = bool(
+            getattr(warmup, "input_audio_enabled", True) if warmup else True
+        )
         skybox_id_v3 = normalize_skybox_id(
             getattr(warmup, "skybox_id", DEFAULT_SKYBOX_ID) if warmup else DEFAULT_SKYBOX_ID
         )
@@ -3874,6 +3891,11 @@ class OBSDirector:
                                 voice_mode=pov_voice_mode_v3,
                                 skybox_id=skybox_id_v3,
                                 map_material_id=map_material_id_v3,
+                                input_hud_enabled=input_hud_enabled_v3,
+                                input_hud_display_mode=input_hud_display_mode_v3,
+                                input_hud_scale_percent=100,
+                                input_audio_enabled=input_audio_enabled_v3,
+                                input_audio_volume_percent=100,
                             )
                         else:
                             pov_mgr_v3.install(

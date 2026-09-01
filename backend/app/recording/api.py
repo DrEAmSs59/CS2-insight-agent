@@ -796,6 +796,11 @@ async def execute_recording_queue(
                 )
             ),
         )
+        input_hud_display_mode = str(
+            pov_hud_cfg.get("input_hud_display_mode", "hybrid")
+        ).strip().lower()
+        if input_hud_display_mode not in {"hybrid", "always", "active"}:
+            input_hud_display_mode = "hybrid"
         # Patch warmup extras with POV HUD settings
         warmup_extras = dataclasses.replace(
             warmup_extras,
@@ -804,12 +809,19 @@ async def execute_recording_queue(
             pov_teamcounter_numeric=bool(pov_hud_cfg.get("teamcounter_numeric", False)),
             pov_voice_mode=voice_mode,
             pov_voice_disabled=False,
+            input_hud_enabled=bool(pov_hud_cfg.get("input_hud_enabled", True)),
+            input_hud_display_mode=input_hud_display_mode,
+            input_audio_enabled=bool(pov_hud_cfg.get("input_audio_enabled", True)),
         )
         logger.info(
-            "[RecordingV3] POV HUD enabled: radar_mode=%s, teamcounter_numeric=%s, voice_mode=%s",
+            "[RecordingV3] POV HUD enabled: radar_mode=%s, teamcounter_numeric=%s, "
+            "voice_mode=%s, input_hud=%s, input_mode=%s, input_audio=%s",
             warmup_extras.pov_radar_mode,
             warmup_extras.pov_teamcounter_numeric,
             warmup_extras.pov_voice_mode,
+            warmup_extras.input_hud_enabled,
+            warmup_extras.input_hud_display_mode,
+            warmup_extras.input_audio_enabled,
         )
 
     saved_skybox_id = getattr(cfg, "recording_skybox", DEFAULT_SKYBOX_ID)

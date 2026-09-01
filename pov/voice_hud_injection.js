@@ -11,7 +11,7 @@
 // fixed recording voice audience at index 13, trusted post-load session console
 // commands at index 14, exact UserCmd mouse deltas at index 15, authoritative
 // left_hand_desired switch edges at index 16, exact input-audio button edges at
-// index 17].
+// index 17, and per-session input-HUD presentation settings at index 18].
 ;(function CS2InsightDemoVoiceHud() {
     "use strict";
 
@@ -31,12 +31,29 @@
     const encodedMouseTracks = packed[15] || [];
     const encodedHandSwitchTracks = packed[16] || [];
     const encodedInputAudioEdges = packed[17] || [];
+    const encodedInputPresentation = Array.isArray(packed[18]) ? packed[18] : [];
     const sessionConsoleCommands = encodedSessionConsoleCommands.map(function (command) {
         return String(command || "").trim();
     }).filter(Boolean);
     const recordingVoiceMode = ["all", "team", "enemy", "mute"].indexOf(encodedRecordingVoiceMode) >= 0
         ? encodedRecordingVoiceMode
         : "team";
+    const inputHudEnabled = encodedInputPresentation.length > 0
+        ? Boolean(encodedInputPresentation[0])
+        : true;
+    const requestedInputHudDisplayMode = String(encodedInputPresentation[1] || "hybrid");
+    const inputHudDisplayMode = ["hybrid", "always", "active"].indexOf(requestedInputHudDisplayMode) >= 0
+        ? requestedInputHudDisplayMode
+        : "hybrid";
+    const requestedInputHudScalePercent = Number(encodedInputPresentation[2] || 100);
+    const inputHudScalePercent = Math.max(75, Math.min(125, requestedInputHudScalePercent));
+    const inputAudioEnabled = encodedInputPresentation.length > 3
+        ? Boolean(encodedInputPresentation[3])
+        : true;
+    const requestedInputAudioVolumePercent = Number(encodedInputPresentation[4] || 100);
+    const inputAudioVolumePercent = [25, 50, 75, 100].indexOf(requestedInputAudioVolumePercent) >= 0
+        ? requestedInputAudioVolumePercent
+        : 100;
     const PLAYER_COLOR_HEX = ["#88CEF5", "#009E80", "#F1E441", "#E6802A", "#BD2C96"];
     const RADAR_MAP_SIZE = 1024;
     const POV_RADAR_SCALE = 0.4;
@@ -218,21 +235,40 @@
     });
     const inputAudioEdgesByXuid = {};
     encodedInputAudioEdges.forEach(function (encoded) {
-        if (!Array.isArray(encoded) || !Array.isArray(encoded[1])) {
+        if (!Array.isArray(encoded) || typeof encoded[1] !== "string") {
             return;
         }
-        inputAudioEdgesByXuid[String(encoded[0])] = encoded[1].map(function (edge) {
+        let previousTick = 0;
+        inputAudioEdgesByXuid[String(encoded[0])] = encoded[1].split(",").filter(Boolean).map(function (token) {
+            const fields = token.split(".");
+            const tick = previousTick + parseInt(fields[0], 36);
+            const edgeCode = parseInt(fields[1], 36);
+            previousTick = tick;
             return [
-                Number(edge[0] || 0),
-                Number(edge[1] || 0),
-                Boolean(edge[2]),
-                edge[3] === null ? null : Number(edge[3]),
+                tick,
+                edgeCode >> 1,
+                Boolean(edgeCode & 1),
+                fields.length > 2 ? float32FromBits(parseInt(fields[2], 36)) : null,
             ];
         });
     });
 
     function zigzagDecode(value) {
         return (value & 1) ? (-(value >> 1) - 1) : (value >> 1);
+    }
+
+    function float32FromBits(rawBits) {
+        const bits = Number(rawBits) >>> 0;
+        const sign = (bits >>> 31) ? -1 : 1;
+        const exponent = (bits >>> 23) & 0xff;
+        const mantissa = bits & 0x7fffff;
+        if (exponent === 0xff) {
+            return mantissa ? NaN : sign * Infinity;
+        }
+        if (exponent === 0) {
+            return sign * mantissa * Math.pow(2, -149);
+        }
+        return sign * (1 + mantissa / 0x800000) * Math.pow(2, exponent - 127);
     }
 
     function annotateContinuousStepSounds(sounds, tickRate) {
@@ -2399,6 +2435,17 @@
         return normalized.toFixed(3) + "px";
     }
 
+    function mouseCssDegrees(value) {
+        const numeric = Number(value);
+        if (!isFinite(numeric)) {
+            return "0.000deg";
+        }
+        // Keep transform values out of scientific notation for Panorama's
+        // stricter CSS parser, including near-zero atan2 round-off.
+        const normalized = Math.abs(numeric) < 0.0005 ? 0 : numeric;
+        return normalized.toFixed(3) + "deg";
+    }
+
     function panMousePathAtEdge() {
         const maximumX = MOUSE_PAD_WIDTH - MOUSE_PAD_EDGE_INSET;
         const maximumY = MOUSE_PAD_HEIGHT - MOUSE_PAD_EDGE_INSET;
@@ -2540,7 +2587,8 @@
                 + mouseCssPx(start.y) + " 0px";
             segment.style.width = mouseCssPx(distance);
             segment.style.opacity = String((0.06 + age * 0.54).toFixed(3));
-            segment.style.transform = "rotateZ(" + (Math.atan2(dy, dx) * 180 / Math.PI) + "deg)";
+            segment.style.transform = "rotateZ("
+                + mouseCssDegrees(Math.atan2(dy, dx) * 180 / Math.PI) + ")";
         });
         if (!inputMouseHeadDot || !inputMouseHeadDot.IsValid()) {
             return;
@@ -2574,6 +2622,9 @@
         inputHud.style.marginBottom = "139px";
         inputHud.style.flowChildren = "none";
         inputHud.style.zIndex = "1000";
+        const inputHudScale = (inputHudScalePercent / 100).toFixed(2);
+        inputHud.style.transformOrigin = "50% 100%";
+        inputHud.style.transform = "scale3d(" + inputHudScale + ", " + inputHudScale + ", 1)";
 
         const specs = [
             ["1", 68, 0, 36, 32, 18, 4, -1, true, 1],
@@ -2599,7 +2650,8 @@
         inputKeyPanels = specs.map(function (spec, index) {
             const panel = createInputKey(inputHud, spec, index);
             const onlyWhenActive = Boolean(spec[8]);
-            panel.visible = !onlyWhenActive;
+            panel.visible = inputHudDisplayMode === "always"
+                || (inputHudDisplayMode === "hybrid" && !onlyWhenActive);
             return {
                 panel: panel,
                 bit: spec[7],
@@ -2675,6 +2727,9 @@
             soundEvent = pressed
                 ? INPUT_AUDIO_MOUSE_RIGHT_DOWN_EVENT
                 : INPUT_AUDIO_MOUSE_RIGHT_UP_EVENT;
+        }
+        if (inputAudioVolumePercent !== 100) {
+            soundEvent += ".V" + inputAudioVolumePercent;
         }
         $.DispatchEvent("CSGOPlaySoundEffect", soundEvent, "MOUSE");
     }
@@ -2753,14 +2808,28 @@
             return;
         }
 
-        const panel = ensureInputHud();
-        panel.visible = true;
         const tick = Number(state.nTick || 0);
         const mask = inputMaskAt(changes, tick);
-        advanceInputAudio(inputAudioEdgesByXuid[xuid] || [], xuid, tick);
         // Keep this ahead of the rendered-tick short circuit. The advanced HUD
         // profile can change while a demo is paused on the same tick.
         updateMirroredScoreboard(mask);
+        if (!inputHudEnabled) {
+            if (inputHud && inputHud.IsValid()) {
+                inputHud.visible = false;
+            }
+            inputHudRenderedXuid = "";
+            inputHudRenderedTick = -1;
+            clearInputAudio();
+            return;
+        }
+
+        const panel = ensureInputHud();
+        panel.visible = true;
+        if (inputAudioEnabled) {
+            advanceInputAudio(inputAudioEdgesByXuid[xuid] || [], xuid, tick);
+        } else {
+            clearInputAudio();
+        }
         if (inputHudRenderedXuid === xuid && inputHudRenderedTick === tick) {
             return;
         }
@@ -2778,7 +2847,9 @@
                 : (key.weaponSlot > 0
                     ? weaponSlot === key.weaponSlot
                     : Boolean(mask & (1 << key.bit)));
-            key.panel.visible = !key.onlyWhenActive || active;
+            key.panel.visible = inputHudDisplayMode === "always"
+                || (inputHudDisplayMode === "hybrid" && !key.onlyWhenActive)
+                || active;
             styleKey(key.panel, active);
         });
         updateMouseMotionPad(mouseSamples, xuid, tick);

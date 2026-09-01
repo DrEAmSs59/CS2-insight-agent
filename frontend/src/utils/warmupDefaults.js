@@ -223,6 +223,9 @@ export function splitRecordWarmupConfirmPayload(payload) {
     kb_overlay_enabled,
     kb_overlay_tick_offset,
     kb_overlay_position,
+    input_hud_enabled,
+    input_hud_display_mode,
+    input_audio_enabled,
     kill_fx_enabled,
     kill_fx_tick_offset,
     ...warmupForApi
@@ -247,6 +250,11 @@ export function splitRecordWarmupConfirmPayload(payload) {
       kb_overlay_enabled: typeof kb_overlay_enabled === "boolean" ? kb_overlay_enabled : undefined,
       kb_overlay_tick_offset: typeof kb_overlay_tick_offset === "number" ? kb_overlay_tick_offset : undefined,
       kb_overlay_position: typeof kb_overlay_position === "string" ? kb_overlay_position : undefined,
+      input_hud_enabled: typeof input_hud_enabled === "boolean" ? input_hud_enabled : true,
+      input_hud_display_mode: ["hybrid", "always", "active"].includes(input_hud_display_mode)
+        ? input_hud_display_mode
+        : "hybrid",
+      input_audio_enabled: typeof input_audio_enabled === "boolean" ? input_audio_enabled : true,
       kill_fx_enabled: typeof kill_fx_enabled === "boolean" ? kill_fx_enabled : undefined,
       kill_fx_tick_offset: typeof kill_fx_tick_offset === "number" ? kill_fx_tick_offset : undefined,
     },

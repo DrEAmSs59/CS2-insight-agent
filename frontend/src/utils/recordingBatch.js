@@ -306,7 +306,7 @@ export function applySessionObsTransitionToRequests(requests, session) {
 }
 
 /**
- * 将录制前弹窗中的虚拟键盘 / 击杀特效 Overlay 参数写入各 request.options（仅本次队列，不写配置）。
+ * 将录制前弹窗中的击杀特效，以及旧请求携带的 OBS 键盘兼容参数写入 request.options。
  * @param {object[]} requests
  * @param {{ kb_overlay_enabled?: boolean, kb_overlay_tick_offset?: number, kb_overlay_position?: string, kill_fx_enabled?: boolean, kill_fx_tick_offset?: number }} session
  */

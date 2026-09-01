@@ -17,6 +17,7 @@ from app.demo_voice_hud import (
     _weapon_fire_sound_radius,
     add_advanced_playback_track_to_payload,
     add_flash_blind_track_to_payload,
+    add_input_presentation_to_payload,
     add_input_tracks_to_payload,
     add_kill_feedback_track_to_payload,
     add_radio_track_to_payload,
@@ -506,13 +507,56 @@ def test_button_edges_drive_identity_bound_input_audio_without_mask_inference():
         parser_factory=_FakeParser,
     )
 
-    assert json.loads(payload)[17] == [
-        ["111", [[10, 0, 1, 0.25], [10, 0, 0, 0.75]]],
-        ["222", [[30, 8, 1, None]]],
+    encoded_tracks = json.loads(payload)[17]
+    assert [track[0] for track in encoded_tracks] == ["111", "222"]
+
+    def decode_track(encoded):
+        previous_tick = 0
+        decoded = []
+        for token in encoded.split(","):
+            fields = token.split(".")
+            tick = previous_tick + int(fields[0], 36)
+            edge_code = int(fields[1], 36)
+            when = (
+                struct.unpack("<f", struct.pack("<I", int(fields[2], 36)))[0]
+                if len(fields) > 2
+                else None
+            )
+            decoded.append([tick, edge_code >> 1, bool(edge_code & 1), when])
+            previous_tick = tick
+        return decoded
+
+    assert decode_track(encoded_tracks[0][1]) == [
+        [10, 0, True, 0.25],
+        [10, 0, False, 0.75],
     ]
+    assert decode_track(encoded_tracks[1][1]) == [[30, 8, True, None]]
     assert stats["input_audio_edge_tracks"] == 2
     assert stats["input_audio_edges"] == 3
     assert stats["input_audio_subtick_edges"] == 2
+
+
+def test_input_presentation_payload_uses_explicit_session_settings():
+    payload = add_input_presentation_to_payload(
+        b"[[],[],[],[]]",
+        enabled=True,
+        display_mode="active",
+        scale_percent=115,
+        audio_enabled=True,
+        audio_volume_percent=50,
+    )
+
+    assert json.loads(payload)[18] == [1, "active", 115, 1, 50]
+
+    with pytest.raises(DemoVoiceHudError, match="display mode"):
+        add_input_presentation_to_payload(
+            b"[[],[],[],[]]",
+            enabled=True,
+            display_mode="guess",
+            scale_percent=100,
+            audio_enabled=True,
+            audio_volume_percent=100,
+        )
 
 
 def test_weaponselect_entity_indexes_drive_exact_number_row_pulses():
@@ -629,18 +673,42 @@ def test_inline_vpk_round_trip_preserves_entries_and_checks_crc():
         read_inline_vpk(bytes(damaged))
 
 
-def test_voice_payload_injection_is_bounded_and_rebuilds_vpk():
-    template_script = b"before" + VOICE_DATA_BEGIN + (b" " * 12) + VOICE_DATA_END + b"after"
+def test_voice_payload_injection_resizes_compiled_resource_and_rebuilds_vpk():
+    data = b"before" + VOICE_DATA_BEGIN + b"[]" + VOICE_DATA_END + b"after"
+    block_table_size = 16 + (2 * 12)
+    data_descriptor = 16
+    tail_descriptor = 28
+    tail = b"tail-block"
+    template_script = b"".join(
+        (
+            struct.pack("<4I", block_table_size + len(data) + len(tail), 0, 0, 2),
+            b"DATA",
+            struct.pack("<2I", block_table_size - (data_descriptor + 4), len(data)),
+            b"TAIL",
+            struct.pack(
+                "<2I",
+                block_table_size + len(data) - (tail_descriptor + 4),
+                len(tail),
+            ),
+            data,
+            tail,
+        )
+    )
     template = write_inline_vpk({VOICE_SCRIPT_PATH: template_script})
 
-    generated = inject_voice_payload(template, b"[[\"A\"],[]]")
+    payload = b"x" * 1_000_000
+    generated = inject_voice_payload(template, payload)
     script = read_inline_vpk(generated)[VOICE_SCRIPT_PATH]
     start = script.index(VOICE_DATA_BEGIN) + len(VOICE_DATA_BEGIN)
     end = script.index(VOICE_DATA_END)
-    assert script[start:end].rstrip() == b"[[\"A\"],[]]"
-
-    with pytest.raises(DemoVoiceHudError, match="template holds 12"):
-        inject_voice_payload(template, b"x" * 13)
+    assert script[start:end] == payload
+    assert struct.unpack_from("<I", script, 0)[0] == len(script)
+    assert struct.unpack_from("<I", script, data_descriptor + 8)[0] == (
+        len(data) - 2 + len(payload)
+    )
+    tail_relative = struct.unpack_from("<I", script, tail_descriptor + 4)[0]
+    tail_start = tail_descriptor + 4 + tail_relative
+    assert script[tail_start : tail_start + len(tail)] == tail
 
 
 def test_checked_in_voice_template_contains_only_an_empty_payload():
@@ -656,6 +724,7 @@ def test_checked_in_voice_template_contains_only_an_empty_payload():
     assert script[start:end].rstrip() == b"[[], [], [], []]"
     assert "panorama/layout/hud/hudalerts.vxml_c" in entries
     assert "soundevents/soundevents_addon.vsndevts_c" in entries
+    assert len(entries["soundevents/soundevents_addon.vsndevts_c"]) > 2_462
     assert "sounds/cs2_insight/input/keyboard-normal-01.vsnd_c" in entries
     assert "sounds/cs2_insight/input/mouse-down.vsnd_c" in entries
     assert "panorama/styles/hud/hudalerts.vcss_c" not in entries
@@ -668,7 +737,7 @@ def test_checked_in_voice_template_contains_only_an_empty_payload():
     assert b"PanoramaGameTimeJumpEvent" in alert_script
     assert b"SEEK_SETTLE_SAMPLES = 60" in alert_script
     assert b"HIDDEN_STABLE_SAMPLES = 10" in alert_script
-    assert end - start == 8_000_000
+    assert script[start:end] == b"[[], [], [], []]"
     assert b"CS2InsightDemoVoice" in script
     assert b"CS2InsightInputHud" in script
     assert b"CS2InsightRadarHud" in script
@@ -786,6 +855,11 @@ def test_checked_in_voice_template_contains_only_an_empty_payload():
     assert b"const encodedMouseTracks = packed[15] || []" in script
     assert b"const encodedHandSwitchTracks = packed[16] || []" in script
     assert b"const encodedInputAudioEdges = packed[17] || []" in script
+    assert b"function float32FromBits(rawBits)" in script
+    assert b"const encodedInputPresentation = Array.isArray(packed[18])" in script
+    assert b'inputHudDisplayMode = ["hybrid", "always", "active"]' in script
+    assert b"inputHudScalePercent / 100" in script
+    assert b'inputAudioVolumePercent !== 100' in script
     assert b"const handSwitchTracksByXuid = {}" in script
     assert b"const inputAudioEdgesByXuid = {}" in script
     assert b"const mouseTracksByXuid = {}" in script
@@ -801,9 +875,13 @@ def test_checked_in_voice_template_contains_only_an_empty_payload():
     assert b"smoothMousePath(advanceMousePath(samples || [], xuid, tick))" in script
     assert b"function mouseCssPx(value)" in script
     assert b'return normalized.toFixed(3) + "px"' in script
+    assert b"function mouseCssDegrees(value)" in script
+    assert b'return normalized.toFixed(3) + "deg"' in script
     assert b"segment.style.position = mouseCssPx(start.x)" in script
+    assert b"mouseCssDegrees(Math.atan2(dy, dx) * 180 / Math.PI)" in script
     assert b"inputMouseHeadDot.style.position = mouseCssPx(head.x - 3)" in script
     assert b'segment.style.position = start.x + "px "' not in script
+    assert b'(Math.atan2(dy, dx) * 180 / Math.PI) + "deg"' not in script
     assert b'pad.style.backgroundColor = "#00000000"' in script
     assert b'pad.style.border = "0px solid #00000000"' in script
     assert b'head.style.boxShadow = "fill #57ead780 0px 0px 5px 0px"' in script
@@ -860,8 +938,11 @@ def test_checked_in_voice_template_contains_only_an_empty_payload():
     input_update_end = script.index(b"function playerColorHex", input_update_start)
     assert b"advancedPovVisualsActive" not in script[input_update_start:input_update_end]
     assert b"onlyWhenActive" in script
-    assert b'panel.visible = !onlyWhenActive' in script
-    assert b'key.panel.visible = !key.onlyWhenActive || active' in script
+    assert b'inputHudDisplayMode === "always"' in script
+    assert b'inputHudDisplayMode === "hybrid" && !onlyWhenActive' in script
+    assert b'inputHudDisplayMode === "hybrid" && !key.onlyWhenActive' in script
+    assert b"if (!inputHudEnabled)" in script
+    assert b"if (inputAudioEnabled)" in script
     assert b'key.semanticTrack === "hand"' in script
     assert b'findHudTraverse("VisiblePlayerIDs")' in script
     assert b'GameInterfaceAPI.ConsoleCommand(commands[index])' in script
@@ -1473,6 +1554,11 @@ def test_session_console_commands_are_embedded_in_the_payload():
         template_path,
         parser_factory=_FakeParser,
         session_console_commands=commands,
+        input_hud_enabled=True,
+        input_hud_display_mode="active",
+        input_hud_scale_percent=115,
+        input_audio_enabled=False,
+        input_audio_volume_percent=50,
     )
     script = read_inline_vpk(build.vpk_bytes)[VOICE_SCRIPT_PATH]
     start = script.index(VOICE_DATA_BEGIN) + len(VOICE_DATA_BEGIN)
@@ -1480,6 +1566,7 @@ def test_session_console_commands_are_embedded_in_the_payload():
     payload = json.loads(script[start:end].rstrip())
 
     assert payload[14] == commands
+    assert payload[18] == [1, "active", 115, 0, 50]
 
 
 def test_session_console_commands_reject_command_separators():
@@ -2484,6 +2571,11 @@ def test_pov_manager_installs_generated_voice_package(monkeypatch, tmp_path: Pat
         voice_enabled=True,
         voice_mode="team",
         advanced_playback_enabled=False,
+        input_hud_enabled=True,
+        input_hud_display_mode="hybrid",
+        input_hud_scale_percent=100,
+        input_audio_enabled=True,
+        input_audio_volume_percent=100,
         session_console_commands=(),
     ):
         calls.append(
@@ -2494,6 +2586,11 @@ def test_pov_manager_installs_generated_voice_package(monkeypatch, tmp_path: Pat
                 voice_enabled,
                 voice_mode,
                 advanced_playback_enabled,
+                input_hud_enabled,
+                input_hud_display_mode,
+                input_hud_scale_percent,
+                input_audio_enabled,
+                input_audio_volume_percent,
                 tuple(session_console_commands),
             )
         )
@@ -2508,7 +2605,9 @@ def test_pov_manager_installs_generated_voice_package(monkeypatch, tmp_path: Pat
     result = manager.install(demo_path=demo)
 
     assert result is built
-    assert calls == [(demo, template, input_report, True, "team", False, ())]
+    assert calls == [
+        (demo, template, input_report, True, "team", False, True, "hybrid", 100, True, 100, ())
+    ]
     assert (csgo / "pov.vpk").read_bytes() == b"generated"
     manifest = json.loads(manager.get_manifest_path().read_text(encoding="utf-8"))
     assert manifest["demo_voice_hud_generated"] is True
@@ -2536,6 +2635,11 @@ def test_pov_manager_installs_generated_voice_package(monkeypatch, tmp_path: Pat
         True,
         "team",
         True,
+        True,
+        "hybrid",
+        100,
+        True,
+        100,
         (
             "sv_cheats 1",
             "mat_fullbright 0",

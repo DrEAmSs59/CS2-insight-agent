@@ -85,6 +85,9 @@ describe("useDemoPlaybackDialog restoration monitor", () => {
         enabled: true,
         skybox_id: customSkyboxId,
         map_material_id: "waxed_reflection",
+        input_hud_enabled: true,
+        input_hud_display_mode: "hybrid",
+        input_audio_enabled: true,
       }),
     }));
     await waitFor(() => expect(getDemoPlaybackStatus).toHaveBeenCalledWith("session-7"));

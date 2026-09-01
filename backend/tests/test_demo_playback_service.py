@@ -20,6 +20,7 @@ class _FakePovManager:
         self.advanced_playback_flags = []
         self.skybox_ids = []
         self.map_material_ids = []
+        self.input_options = []
         self.restored = 0
         self.needs_restore = False
         self.__class__.instances.append(self)
@@ -38,12 +39,26 @@ class _FakePovManager:
         advanced_playback_enabled=False,
         skybox_id="default",
         map_material_id="default",
+        input_hud_enabled=True,
+        input_hud_display_mode="hybrid",
+        input_hud_scale_percent=100,
+        input_audio_enabled=True,
+        input_audio_volume_percent=100,
     ):
         self.installed += 1
         self.installed_demo_paths.append(demo_path)
         self.advanced_playback_flags.append(bool(advanced_playback_enabled))
         self.skybox_ids.append(skybox_id)
         self.map_material_ids.append(map_material_id)
+        self.input_options.append(
+            (
+                input_hud_enabled,
+                input_hud_display_mode,
+                input_hud_scale_percent,
+                input_audio_enabled,
+                input_audio_volume_percent,
+            )
+        )
         self.needs_restore = True
 
     def restore(self):
@@ -171,6 +186,11 @@ def test_pov_playback_installs_cfg_and_restores_after_exit(monkeypatch, tmp_path
             teamcounter_numeric=True,
             skybox_id="cartoon3",
             map_material_id="waxed_reflection",
+            input_hud_enabled=True,
+            input_hud_display_mode="active",
+            input_hud_scale_percent=115,
+            input_audio_enabled=False,
+            input_audio_volume_percent=50,
         ),
     )
 
@@ -182,8 +202,13 @@ def test_pov_playback_installs_cfg_and_restores_after_exit(monkeypatch, tmp_path
     assert manager.advanced_playback_flags == [True]
     assert manager.skybox_ids == ["cartoon3"]
     assert manager.map_material_ids == ["waxed_reflection"]
+    assert manager.input_options == [(True, "active", 115, False, 50)]
     assert result["recording_skybox_id"] == "cartoon3"
     assert result["recording_map_material_id"] == "waxed_reflection"
+    assert result["input_hud_display_mode"] == "active"
+    assert result["input_hud_scale_percent"] == 115
+    assert result["input_audio_enabled"] is False
+    assert result["input_audio_volume_percent"] == 50
     assert session is not None and session.copied_cfg is not None
     cfg_text = session.copied_cfg.read_text(encoding="ascii")
     assert "demoui false" not in cfg_text

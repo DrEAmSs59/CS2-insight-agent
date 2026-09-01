@@ -56,6 +56,11 @@ def test_launch_forwards_pov_session_options(monkeypatch, tmp_path: Path):
             radar_mode=-1,
             teamcounter_numeric=True,
             skybox_id="cartoon3",
+            input_hud_enabled=True,
+            input_hud_display_mode="active",
+            input_hud_scale_percent=115,
+            input_audio_enabled=True,
+            input_audio_volume_percent=50,
         ),
         map_material=playback_api.DemoPlaybackMapMaterialBody(id="waxed_reflection"),
     )
@@ -71,6 +76,11 @@ def test_launch_forwards_pov_session_options(monkeypatch, tmp_path: Path):
         teamcounter_numeric=True,
         skybox_id="cartoon3",
         map_material_id="waxed_reflection",
+        input_hud_enabled=True,
+        input_hud_display_mode="active",
+        input_hud_scale_percent=115,
+        input_audio_enabled=True,
+        input_audio_volume_percent=50,
     )
 
 

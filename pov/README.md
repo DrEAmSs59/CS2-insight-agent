@@ -213,11 +213,19 @@ hidden rather than substituting motion inference. Radar fails closed the same
 way: if the map transform or tick samples cannot be extracted, the custom radar
 HUD stays hidden while voice continues to work.
 
+All players remain in one switchable payload. High-frequency mouse samples,
+button-mask changes, and button-audio edges use delta-tick/base36 tracks; audio
+edges retain the exact IEEE-754 bits of the extractor's subtick `when` value.
+This reduces Panorama parse cost without discarding Pawns or coarsening input
+timing.
+
 If a demo has no usable voice packets, the generated package keeps a
-roster-only payload so radar and kill-feedback tracks can still attach. If the
-dynamic build fails or the compact payload does not fit the fixed template
-slot, installation falls back to `pov_default.vpk` rather than installing a
-partial package. The direct Advanced playback exception is described above.
+roster-only payload so radar and kill-feedback tracks can still attach. The
+compiled Panorama `DATA` block expands to the exact compact payload size and
+its resource offsets and VPK CRCs are rebuilt before launch, so long demos are
+not constrained by a fixed template slot. If the dynamic build itself fails,
+installation falls back to `pov_default.vpk` rather than installing a partial
+package. The direct Advanced playback exception is described above.
 
 Every POV kill plays the stock body/headshot attacker-feedback event and the
 stock `UI.KillCard.1` confirmation layer (`kill_doof_01.vsnd`) together. The
