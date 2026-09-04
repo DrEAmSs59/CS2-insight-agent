@@ -125,30 +125,6 @@ def test_death_segment_is_tagged_as_death():
     assert marker["kind"] == "death"
 
 
-def test_kill_track_metadata_enriches_the_marker():
-    timeline = KillMarkerTimeline(TICK_RATE)
-    timeline.open_segment(_segment(
-        anchors=[1192],
-        metadata={"kill_track": [{
-            "tick": 1192,
-            "victim": "enemy1",
-            "weapon": "ak47",
-            "headshot": True,
-            "kill_index": 3,
-            "icons": ["one_tap"],
-            "banner": "triple",
-        }]},
-    ))
-    timeline.close_segment(10.0)
-
-    (marker,) = timeline.markers
-    assert marker["victim"] == "enemy1"
-    assert marker["weapon"] == "ak47"
-    assert marker["headshot"] is True
-    assert marker["icons"] == ["one_tap"]
-    assert marker["banner"] == "triple"
-
-
 def test_zero_tick_rate_yields_no_markers():
     timeline = KillMarkerTimeline(0)
     timeline.open_segment(_segment(anchors=[1192]))
@@ -184,7 +160,7 @@ def test_events_supply_victim_weapon_and_tags():
     assert marker["round"] == 7
 
 
-def test_event_enrichment_does_not_override_kill_track_values():
+def test_event_enrichment_does_not_override_existing_values():
     event = SimpleNamespace(
         tick=1192,
         victim=SimpleNamespace(name="from-event"),
@@ -205,87 +181,6 @@ def test_event_enrichment_keeps_markers_without_a_matching_event():
     (marker,) = enrich_markers_with_events([{"tick": 999, "video_sec": 1.0}], [])
 
     assert marker == {"tick": 999, "video_sec": 1.0}
-
-
-class TestCalibrationMarkers:
-    """时序自检闪白的预期成片时间，与击杀轴共用换算。"""
-
-    def test_flash_fires_earlier_by_the_overlay_offset(self):
-        # 页面比较的是加过 offset 的 tick，offset=32（0.5s）意味着闪白比 tick 本身早 0.5s。
-        timeline = KillMarkerTimeline(TICK_RATE)
-        timeline.open_segment(
-            _segment(start_tick=1000),
-            calibration_ticks=[1192],
-            overlay_offset_ticks=32,
-        )
-        timeline.close_segment(10.0)
-
-        (marker,) = timeline.calibration_markers
-        assert marker["video_sec"] == 2.5
-        assert marker["tick"] == 1192
-        assert marker["offset_ticks"] == 32
-
-    def test_zero_offset_matches_the_kill_axis_conversion(self):
-        timeline = KillMarkerTimeline(TICK_RATE)
-        timeline.open_segment(_segment(anchors=[1192], start_tick=1000), calibration_ticks=[1192])
-        timeline.close_segment(10.0)
-
-        (kill,) = timeline.markers
-        (calibration,) = timeline.calibration_markers
-        assert calibration["video_sec"] == kill["video_sec"]
-
-    def test_accumulates_across_segments_like_the_kill_axis(self):
-        timeline = KillMarkerTimeline(TICK_RATE)
-        timeline.open_segment(_segment(index=0, start_tick=1000), calibration_ticks=[1064])
-        timeline.close_segment(5.0)
-        timeline.open_segment(_segment(index=1, start_tick=5000), calibration_ticks=[5064])
-        timeline.close_segment(5.0)
-
-        assert [m["video_sec"] for m in timeline.calibration_markers] == [1.0, 6.0]
-        assert [m["segment_index"] for m in timeline.calibration_markers] == [0, 1]
-
-    def test_lead_in_and_overhead_apply(self):
-        timeline = KillMarkerTimeline(TICK_RATE)
-        timeline.open_segment(
-            _segment(start_tick=1000),
-            calibration_ticks=[1064],
-            lead_in_sec=0.4,
-            overhead_sec=0.1,
-        )
-        timeline.close_segment(10.0)
-
-        (marker,) = timeline.calibration_markers
-        assert marker["video_sec"] == 1.3
-
-    def test_flashes_past_the_recorded_window_are_dropped(self):
-        # 回合段被提前停录时，压在末尾的闪白没有进成片，留着会让配对整体错位。
-        timeline = KillMarkerTimeline(TICK_RATE)
-        timeline.open_segment(_segment(start_tick=1000), calibration_ticks=[1064, 1640])
-        timeline.close_segment(3.0)
-
-        assert [m["tick"] for m in timeline.calibration_markers] == [1064]
-
-    def test_duplicate_ticks_collapse_and_stay_sorted(self):
-        timeline = KillMarkerTimeline(TICK_RATE)
-        timeline.open_segment(_segment(start_tick=1000), calibration_ticks=[1192, 1064, 1192])
-        timeline.close_segment(10.0)
-
-        assert [m["tick"] for m in timeline.calibration_markers] == [1064, 1192]
-
-    def test_untrustworthy_segment_drops_calibration_too(self):
-        timeline = KillMarkerTimeline(TICK_RATE)
-        timeline.open_segment(_segment(start_tick=1000), calibration_ticks=[1064])
-        timeline.close_segment(10.0, keep_markers=False)
-
-        assert timeline.calibration_markers == []
-
-    def test_no_ticks_means_no_markers(self):
-        timeline = KillMarkerTimeline(TICK_RATE)
-        timeline.open_segment(_segment(anchors=[1192]))
-        timeline.close_segment(10.0)
-
-        assert timeline.calibration_markers == []
-        assert len(timeline.markers) == 1
 
 
 def _highlight_dto():

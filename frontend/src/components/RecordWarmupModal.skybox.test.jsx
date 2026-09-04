@@ -39,20 +39,42 @@ describe("RecordWarmupModal skybox override", () => {
     expect(screen.queryByText(/首片段预热/)).toBeNull();
     expect(screen.queryByText("启用虚拟键盘 Overlay")).toBeNull();
     expect(screen.getByText("内置按键 + 键鼠可视化")).toBeTruthy();
-    expect(screen.getByRole("checkbox", { name: "启用" }).disabled).toBe(true);
+    const inputModeSelector = screen.getByRole("combobox", { name: "按键显示方式" });
+    const voiceSelector = screen.getByRole("combobox", { name: "语音控制" });
+    expect(inputModeSelector.disabled).toBe(false);
+    expect(voiceSelector.disabled).toBe(false);
+    expect(inputModeSelector.value).toBe("visible");
+    expect(Array.from(inputModeSelector.options).map(({ value }) => value))
+      .toEqual(["visible", "hidden"]);
+    expect(screen.queryByText("虚拟按键音")).toBeNull();
+    expect(screen.queryByRole("checkbox", { name: "实时 KDA / 伤害" })).toBeNull();
     expect(screen.getByText(/此处修改仅作用于本次录制/)).toBeTruthy();
     expect(selector.value).toBe("cartoon3");
     expect(materialSelector.value).toBe("waxed_reflection");
     expect(screen.getByTestId("experimental-feature-card").contains(selector)).toBe(true);
+    expect(screen.getByTestId("experimental-feature-card").contains(inputModeSelector)).toBe(true);
+    expect(screen.queryByTestId("player-aliases-section")).toBeNull();
+    expect(
+      screen.getByTestId("experimental-voice-card").compareDocumentPosition(
+        screen.getByTestId("experimental-input-hud-card"),
+      ) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(
+      screen.getByTestId("experimental-input-hud-card").compareDocumentPosition(
+        screen.getByTestId("experimental-map-material-card"),
+      ) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
     fireEvent.change(selector, { target: { value: "cartoon3" } });
     fireEvent.change(materialSelector, { target: { value: "default" } });
+    fireEvent.change(voiceSelector, { target: { value: "enemy" } });
     fireEvent.click(screen.getByRole("button", { name: "开始录制" }));
 
     expect(onConfirm).toHaveBeenCalledWith(
       expect.objectContaining({
         recording_skybox: "cartoon3",
         recording_map_material: "default",
-        pov_voice_mode: "team",
+        experimental_pov_enabled: false,
+        pov_voice_mode: "enemy",
         input_hud_enabled: true,
         input_hud_display_mode: "hybrid",
         input_audio_enabled: true,
@@ -74,9 +96,8 @@ describe("RecordWarmupModal skybox override", () => {
 
     const voiceSelect = screen.getByRole("combobox", { name: "语音控制" });
     const inputModeSelect = screen.getByRole("combobox", { name: "按键显示方式" });
-    fireEvent.change(inputModeSelect, { target: { value: "active" } });
-    fireEvent.click(screen.getByRole("checkbox", { name: "虚拟按键音" }));
-    fireEvent.click(screen.getByRole("checkbox", { name: "实时 KDA / 伤害" }));
+    fireEvent.change(inputModeSelect, { target: { value: "hidden" } });
+    expect(screen.queryByRole("checkbox", { name: "实时 KDA / 伤害" })).toBeNull();
     fireEvent.change(voiceSelect, { target: { value: "enemy" } });
     fireEvent.click(screen.getByRole("button", { name: "开始录制" }));
 
@@ -84,11 +105,37 @@ describe("RecordWarmupModal skybox override", () => {
       expect.objectContaining({
         experimental_pov_enabled: true,
         pov_voice_mode: "enemy",
-        input_hud_enabled: true,
-        input_hud_display_mode: "active",
-        input_audio_enabled: false,
-        combat_stats_hud_enabled: false,
+        input_hud_enabled: false,
+        input_hud_display_mode: "hybrid",
+        input_audio_enabled: true,
+        combat_stats_hud_enabled: true,
       }),
     );
+  });
+
+  it("inherits the saved input HUD default and allows a one-session override", () => {
+    const onConfirm = vi.fn();
+    render(
+      <RecordWarmupModal
+        open
+        onClose={() => {}}
+        onConfirm={onConfirm}
+        experimentalPovEnabled
+        defaultOverrides={{
+          input_hud_enabled: false,
+          input_hud_display_mode: "active",
+        }}
+      />,
+    );
+
+    const inputModeSelect = screen.getByRole("combobox", { name: "按键显示方式" });
+    expect(inputModeSelect.value).toBe("hidden");
+    fireEvent.change(inputModeSelect, { target: { value: "visible" } });
+    fireEvent.click(screen.getByRole("button", { name: "开始录制" }));
+
+    expect(onConfirm).toHaveBeenCalledWith(expect.objectContaining({
+      input_hud_enabled: true,
+      input_hud_display_mode: "hybrid",
+    }));
   });
 });

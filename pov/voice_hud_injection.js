@@ -44,18 +44,26 @@
         ? Boolean(encodedInputPresentation[0])
         : true;
     const requestedInputHudDisplayMode = String(encodedInputPresentation[1] || "hybrid");
-    const inputHudDisplayMode = ["hybrid", "always", "active"].indexOf(requestedInputHudDisplayMode) >= 0
-        ? requestedInputHudDisplayMode
-        : "hybrid";
+    // encodedAdvancedPlayback is available at this point; the decoded
+    // advancedPlayback object is initialized later in the script.
+    const inputHudDisplayMode = encodedAdvancedPlayback
+        ? "hybrid"
+        : (["hybrid", "always", "active"].indexOf(requestedInputHudDisplayMode) >= 0
+            ? requestedInputHudDisplayMode
+            : "hybrid");
     const requestedInputHudScalePercent = Number(encodedInputPresentation[2] || 100);
     const inputHudScalePercent = Math.max(75, Math.min(125, requestedInputHudScalePercent));
     const inputAudioEnabled = encodedInputPresentation.length > 3
         ? Boolean(encodedInputPresentation[3])
         : true;
     const requestedInputAudioVolumePercent = Number(encodedInputPresentation[4] || 100);
-    const combatStatsHudEnabled = encodedInputPresentation.length > 5
-        ? Boolean(encodedInputPresentation[5])
-        : true;
+    // Temporarily disable the custom K/D/A, R DMG, and DMG block in every
+    // generated POV VPK. Keep the session setting and implementation in place
+    // so the feature can be restored without changing the payload contract.
+    // const combatStatsHudEnabled = encodedInputPresentation.length > 5
+    //     ? Boolean(encodedInputPresentation[5])
+    //     : true;
+    const combatStatsHudEnabled = false;
     const inputAudioVolumePercent = [25, 50, 75, 100].indexOf(requestedInputAudioVolumePercent) >= 0
         ? requestedInputAudioVolumePercent
         : 100;
@@ -120,12 +128,14 @@
     const STOCK_HUD_ALERT_HIDDEN_STABLE_FRAMES = 10;
     const MOUSE_TRAIL_POINT_COUNT = 24;
     const MOUSE_TRAIL_WINDOW_TICKS = 48;
-    const MOUSE_PAD_WIDTH = 108;
-    const MOUSE_PAD_HEIGHT = 78;
+    const MOUSE_PAD_WIDTH = 78;
+    const MOUSE_PAD_HEIGHT = 70;
     const MOUSE_PAD_EDGE_INSET = 6;
     const MOUSE_PATH_VISUAL_SCALE = 1.2;
     const MOUSE_PATH_MAX_VISUAL_STEP = 26;
+    const INPUT_HUD_WIDTH = 390;
     const INPUT_HUD_REFRESH_SECONDS = 0.016;
+    const INPUT_HUD_WEAPON_SELECT_HOLD_TICKS = 12;
     const INPUT_AUDIO_KEY_DOWN_EVENT = "CS2Insight.Input.Keyboard.Down";
     const INPUT_AUDIO_KEY_UP_EVENT = "CS2Insight.Input.Keyboard.Up";
     const INPUT_AUDIO_SPACE_DOWN_EVENT = "CS2Insight.Input.Space.Down";
@@ -872,6 +882,7 @@
         xray: false,
         radar: true,
         overhead: true,
+        inputHud: advancedPlayback ? true : inputHudEnabled,
     };
     // Stock-ish radar intel timings (no public convar; matched to live feel).
     const RADAR_DEATH_ICON_SECONDS = 2.0;
@@ -2425,33 +2436,38 @@
     }
 
     function styleKey(panel, active) {
-        panel.style.backgroundColor = active ? "#12cfae9c" : "#00000000";
-        panel.style.border = active ? "2px solid #d2fff8" : "1px solid #c9eef2dc";
-        panel.style.color = active ? "#ffffffff" : "#e9fbffff";
+        const inactiveBackground = panel._insightMouseButton ? "#23262D" : "#2A2D34";
+        panel.style.backgroundColor = active ? "#E07F0A" : inactiveBackground;
+        panel.style.border = active ? "1px solid #F29A32" : "1px solid #3F434D";
+        panel.style.color = active ? "#FFFFFF" : "#8A8F99";
         panel.style.boxShadow = active
-            ? "fill #19f5c455 0px 0px 8px 0px"
+            ? "fill #E07F0A8C 0px 0px 7px 0px"
             : "none";
     }
 
     function createInputKey(parent, spec, index) {
         const key = $.CreatePanel("Label", parent, "CS2InsightInputKey" + index);
-        key.text = spec[0];
+        const mouseButton = spec[0] === "M1" || spec[0] === "M2";
+        key.text = mouseButton ? "" : spec[0];
         key.hittest = false;
         key.style.position = spec[1] + "px " + spec[2] + "px 0px";
         key.style.width = spec[3] + "px";
         key.style.height = spec[4] + "px";
         key.style.fontSize = spec[5] + "px";
         key.style.fontWeight = "bold";
+        key.style.fontFamily = "Consolas";
         key.style.textAlign = "center";
         key.style.paddingTop = spec[6] + "px";
         if (spec[0] === "M1") {
-            key.style.borderRadius = "16px 3px 6px 11px";
+            key._insightMouseButton = true;
+            key.style.borderRadius = "39px 0px 0px 0px";
         } else if (spec[0] === "M2") {
-            key.style.borderRadius = "3px 16px 11px 6px";
+            key._insightMouseButton = true;
+            key.style.borderRadius = "0px 39px 0px 0px";
         } else {
-            key.style.borderRadius = "3px";
+            key.style.borderRadius = "6px";
         }
-        key.style.textShadow = "0px 1px 2px #000000ff";
+        key.style.textShadow = "none";
         styleKey(key, false);
         return key;
     }
@@ -2459,12 +2475,13 @@
     function createMouseMotionPad(parent) {
         const pad = $.CreatePanel("Panel", parent, "CS2InsightMouseMotionPad");
         pad.hittest = false;
-        pad.style.position = "276px 70px 0px";
+        pad.style.position = "276px 82px 0px";
         pad.style.width = MOUSE_PAD_WIDTH + "px";
         pad.style.height = MOUSE_PAD_HEIGHT + "px";
         pad.style.flowChildren = "none";
-        pad.style.backgroundColor = "#00000000";
+        pad.style.backgroundColor = "#23262D";
         pad.style.border = "0px solid #00000000";
+        pad.style.borderRadius = "0px 0px 24px 24px";
         pad.style.boxShadow = "none";
 
         inputMouseTrailSegments = [];
@@ -2474,7 +2491,7 @@
             segment.visible = false;
             segment.style.height = "2px";
             segment.style.transformOrigin = "0% 50%";
-            segment.style.backgroundColor = "#d6f4f0";
+            segment.style.backgroundColor = "#E07F0A";
             segment.style.borderRadius = "1px";
             segment.style.boxShadow = "none";
             inputMouseTrailSegments.push(segment);
@@ -2485,9 +2502,9 @@
         head.visible = false;
         head.style.width = "6px";
         head.style.height = "6px";
-        head.style.backgroundColor = "#effffcff";
+        head.style.backgroundColor = "#F29A32";
         head.style.borderRadius = "50%";
-        head.style.boxShadow = "fill #57ead780 0px 0px 5px 0px";
+        head.style.boxShadow = "fill #E07F0A80 0px 0px 5px 0px";
         inputMouseHeadDot = head;
         inputMousePad = pad;
         return pad;
@@ -2709,38 +2726,41 @@
 
         inputHud = $.CreatePanel("Panel", root, "CS2InsightInputHud");
         inputHud.hittest = false;
-        inputHud.style.width = "392px";
-        inputHud.style.height = "156px";
+        inputHud.style.width = INPUT_HUD_WIDTH + "px";
+        inputHud.style.height = "190px";
         inputHud.style.horizontalAlign = "center";
         inputHud.style.verticalAlign = "bottom";
+        inputHud.style.position = "0px 0px 0px";
         inputHud.style.marginBottom = "139px";
         inputHud.style.flowChildren = "none";
         inputHud.style.zIndex = "1000";
+        inputHud.style.opacity = "0.92";
         const inputHudScale = (inputHudScalePercent / 100).toFixed(2);
         inputHud.style.transformOrigin = "50% 100%";
         inputHud.style.transform = "scale3d(" + inputHudScale + ", " + inputHudScale + ", 1)";
 
         const specs = [
-            ["1", 68, 0, 36, 32, 18, 4, -1, true, 1],
-            ["2", 108, 0, 36, 32, 18, 4, -1, true, 2],
-            ["3", 148, 0, 36, 32, 18, 4, -1, true, 3],
-            ["4", 188, 0, 36, 32, 18, 4, -1, true, 4],
-            ["5", 228, 0, 36, 32, 18, 4, -1, true, 5],
-            ["W", 108, 35, 36, 32, 18, 4, 0, false, 0],
-            ["E", 148, 35, 36, 32, 18, 4, 10, false, 0],
-            ["R", 188, 35, 36, 32, 18, 4, 7, false, 0],
-            ["TAB", 8, 35, 56, 32, 13, 7, 12, false, 0],
-            ["SHIFT", 8, 70, 56, 32, 12, 7, 6, false, 0],
-            ["A", 68, 70, 36, 32, 18, 4, 1, false, 0],
-            ["S", 108, 70, 36, 32, 18, 4, 2, false, 0],
-            ["D", 148, 70, 36, 32, 18, 4, 3, false, 0],
-            ["F", 188, 70, 36, 32, 18, 4, 11, true, 0],
-            ["H", 228, 70, 36, 32, 18, 4, -1, true, 0, "hand"],
-            ["CTRL", 8, 105, 56, 32, 13, 7, 5, false, 0],
-            ["SPACE", 68, 105, 156, 32, 12, 7, 4, false, 0],
-            ["M1", 286, 23, 42, 44, 12, 14, 8, false, 0],
-            ["M2", 332, 23, 42, 44, 12, 14, 9, false, 0],
+            ["1", 66, 0, 38, 34, 18, 5, -1, false, 1],
+            ["2", 108, 0, 38, 34, 18, 5, -1, false, 2],
+            ["3", 150, 0, 38, 34, 18, 5, -1, false, 3],
+            ["4", 192, 0, 38, 34, 18, 5, -1, false, 4],
+            ["5", 234, 0, 38, 34, 18, 5, -1, true, 5],
+            ["W", 108, 38, 38, 34, 18, 5, 0, false, 0],
+            ["E", 150, 38, 38, 34, 18, 5, 10, false, 0],
+            ["R", 192, 38, 38, 34, 18, 5, 7, false, 0],
+            ["TAB", 4, 38, 58, 34, 13, 8, 12, false, 0],
+            ["SHIFT", 4, 76, 58, 34, 12, 8, 6, false, 0],
+            ["A", 66, 76, 38, 34, 18, 5, 1, false, 0],
+            ["S", 108, 76, 38, 34, 18, 5, 2, false, 0],
+            ["D", 150, 76, 38, 34, 18, 5, 3, false, 0],
+            ["F", 192, 76, 38, 34, 18, 5, 11, false, 0],
+            ["H", 234, 76, 38, 34, 18, 5, -1, true, 0, "hand"],
+            ["CTRL", 4, 114, 58, 34, 13, 8, 5, false, 0],
+            ["SPACE", 66, 114, 164, 34, 12, 8, 4, false, 0],
+            ["M1", 276, 38, 39, 44, 11, 13, 8, false, 0],
+            ["M2", 315, 38, 39, 44, 11, 13, 9, false, 0],
         ];
+        createMouseMotionPad(inputHud);
         inputKeyPanels = specs.map(function (spec, index) {
             const panel = createInputKey(inputHud, spec, index);
             const onlyWhenActive = Boolean(spec[8]);
@@ -2754,7 +2774,6 @@
                 semanticTrack: String(spec[10] || ""),
             };
         });
-        createMouseMotionPad(inputHud);
         inputHudRenderedXuid = "";
         inputHudRenderedTick = -1;
         return inputHud;
@@ -2777,6 +2796,32 @@
             return 0;
         }
         return changes[found][1];
+    }
+
+    function weaponSlotPulseAt(changes, tick) {
+        let low = 0;
+        let high = changes.length - 1;
+        let found = -1;
+        while (low <= high) {
+            const middle = (low + high) >> 1;
+            if (changes[middle][0] <= tick) {
+                found = middle;
+                low = middle + 1;
+            } else {
+                high = middle - 1;
+            }
+        }
+        for (let index = found; index >= 0; index -= 1) {
+            const age = tick - Number(changes[index][0] || 0);
+            if (age > INPUT_HUD_WEAPON_SELECT_HOLD_TICKS) {
+                break;
+            }
+            const slot = Number(changes[index][1] || 0);
+            if (slot > 0) {
+                return slot;
+            }
+        }
+        return 0;
     }
 
     function combatStatAt(states, tick) {
@@ -3236,7 +3281,10 @@
         // Keep this ahead of the rendered-tick short circuit. The advanced HUD
         // profile can change while a demo is paused on the same tick.
         updateMirroredScoreboard(mask);
-        if (!inputHudEnabled) {
+        const runtimeInputHudEnabled = advancedPlayback
+            ? (!advancedHudHidden && advancedQuickOptions.inputHud)
+            : inputHudEnabled;
+        if (!runtimeInputHudEnabled) {
             if (inputHud && inputHud.IsValid()) {
                 inputHud.visible = false;
             }
@@ -3258,7 +3306,7 @@
         }
         inputHudRenderedXuid = xuid;
         inputHudRenderedTick = tick;
-        const weaponSlot = inputMaskAt(weaponSelectTracksByXuid[xuid] || [], tick);
+        const weaponSlot = weaponSlotPulseAt(weaponSelectTracksByXuid[xuid] || [], tick);
         const handSwitchActive = Boolean(inputMaskAt(handSwitchTracksByXuid[xuid] || [], tick));
         const mouseSamples = mouseTracksByXuid[xuid] || [];
         inputKeyPanels.forEach(function (key) {
@@ -5790,6 +5838,18 @@
             return;
         }
         advancedQuickOptions[key] = !advancedQuickOptions[key];
+        if (key === "inputHud") {
+            if (!advancedQuickOptions.inputHud) {
+                if (inputHud && inputHud.IsValid()) {
+                    inputHud.visible = false;
+                }
+                inputHudRenderedXuid = "";
+                inputHudRenderedTick = -1;
+                clearInputAudio();
+            }
+            advancedRefreshQuickOptionButtons();
+            return;
+        }
         if (key === "overhead") {
             advancedNativeOverheadRestored = false;
         }
@@ -6573,6 +6633,9 @@
             "cl_spec_show_bindings 1",
             "cl_spec_stats 1",
             "r_spectator_flashbang_opacity 1",
+            // Each explicit switch to DEMO HUD starts with CS2's native X-ray
+            // enabled. DemoUI remains free to turn it off again afterwards.
+            "spec_show_xray 1",
             "cl_radar_always_centered 0",
             "cl_radar_square_always true",
             "cl_radar_rotate false",
@@ -6580,7 +6643,7 @@
             "cl_radar_scale 0.7",
             "snd_disable_radar_visualize 0",
             "cl_hud_color 0",
-            "cl_drawhud_force_teamid_overhead 0",
+            "cl_drawhud_force_teamid_overhead 1",
             "cl_teamid_overhead_mode 3",
             "cl_teamid_overhead_colors_show 0",
             "cl_teamid_overhead_fade_near_crosshair 0",
@@ -6615,9 +6678,6 @@
         }
         if (!advancedPovVisualsEnabled) {
             restoreAdvancedTeamCounterPanels();
-            if (inputHud && inputHud.IsValid()) {
-                inputHud.visible = false;
-            }
             if (radarHud && radarHud.IsValid()) {
                 radarHud.visible = false;
             }
@@ -7409,10 +7469,14 @@
         }
         if (!advancedEdgeTrigger || !advancedEdgeTrigger.IsValid()) {
             advancedEdgeTrigger = advancedCreatePanel("Panel", root, "CS2InsightAdvancedEdge");
-            advancedEdgeTrigger.style.width = "18px";
-            advancedEdgeTrigger.style.height = "100%";
+            // Match the collapsed title tab instead of claiming the complete
+            // right screen edge. This remains the only reveal target when the
+            // persistent title bar is turned off.
+            advancedEdgeTrigger.style.width = advancedChinese() ? "108px" : "148px";
+            advancedEdgeTrigger.style.height = "38px";
             advancedEdgeTrigger.style.horizontalAlign = "right";
             advancedEdgeTrigger.style.verticalAlign = "center";
+            advancedEdgeTrigger.style.marginRight = "6px";
             advancedEdgeTrigger.style.backgroundColor = "#00000000";
             advancedEdgeTrigger.style.border = "0px solid #00000000";
             advancedEdgeTrigger.style.boxShadow = "none";
@@ -7561,12 +7625,23 @@
         advancedProfileButtons.pov = pov;
         advancedProfileButtons.demo = demo;
         advancedProfileButtons.hidden = hidden;
+        advancedOptionLabels.inputHud = advancedCopy("键鼠", "INPUT");
+        const inputHudToggle = advancedCreateButton(
+            viewRow,
+            "",
+            function () { advancedToggleQuickOption("inputHud"); },
+            "76px",
+        );
+        inputHudToggle.style.height = "25px";
+        advancedOptionButtons.inputHud = inputHudToggle;
         pov.style.marginRight = "5px";
         demo.style.marginRight = "5px";
-        hidden.style.marginRight = "0px";
+        hidden.style.marginRight = "5px";
+        inputHudToggle.style.marginRight = "0px";
         advancedStyleButton(pov, advancedPovVisualsEnabled && !advancedHudHidden);
         advancedStyleButton(demo, !advancedPovVisualsEnabled && !advancedHudHidden);
         advancedStyleButton(hidden, advancedHudHidden);
+        advancedStyleButton(inputHudToggle, advancedQuickOptions.inputHud);
         [pov, demo, hidden].forEach(function (button) { button.style.height = "25px"; });
 
         const voiceRow = advancedCreatePanel("Panel", advancedMenuBody, "");

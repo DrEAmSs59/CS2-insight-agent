@@ -38,21 +38,13 @@ def test_abort_before_cs2_launch_runs_final_cleanup_and_returns_aborted(monkeypa
         "OBSRecordingController",
         FakeFinalController,
     )
-    monkeypatch.setattr(
-        env_utils,
-        "load_config",
-        lambda: SimpleNamespace(kill_fx_enabled=False),
-    )
-
     request = SimpleNamespace(
         request_id="abort-before-launch",
         demo=SimpleNamespace(
             demo_path=str(tmp_path / "not-launched.dem"),
             demo_filename="not-launched.dem",
         ),
-        options=SimpleNamespace(
-            kill_fx_enabled=False,
-        ),
+        options=SimpleNamespace(),
     )
 
     async def run():
@@ -202,21 +194,13 @@ def test_unexpected_cs2_exit_runs_recovery_cleanup_and_returns_dedicated_code(
         "OBSRecordingController",
         FakeFinalController,
     )
-    monkeypatch.setattr(
-        env_utils,
-        "load_config",
-        lambda: SimpleNamespace(kill_fx_enabled=False),
-    )
-
     request = SimpleNamespace(
         request_id="unexpected-cs2-exit",
         demo=SimpleNamespace(
             demo_path=str(tmp_path / "unexpected.dem"),
             demo_filename="unexpected.dem",
         ),
-        options=SimpleNamespace(
-            kill_fx_enabled=False,
-        ),
+        options=SimpleNamespace(),
     )
 
     async def run():
@@ -280,10 +264,20 @@ def test_unexpected_cs2_exit_runs_recovery_cleanup_and_returns_dedicated_code(
 
 
 @pytest.mark.parametrize("restore_verified", [True, False])
-def test_pov_recording_uses_shared_exit_restore_and_reports_evidence(
+@pytest.mark.parametrize(
+    ("pov_enabled", "recording_hud_enabled", "expected_combat_stats"),
+    [
+        (True, False, True),
+        (False, True, False),
+    ],
+)
+def test_recording_hud_uses_shared_exit_restore_and_reports_evidence(
     monkeypatch,
     tmp_path,
     restore_verified,
+    pov_enabled,
+    recording_hud_enabled,
+    expected_combat_stats,
 ):
     expected_sha = "a" * 64
     calls: list[tuple] = []
@@ -347,9 +341,6 @@ def test_pov_recording_uses_shared_exit_restore_and_reports_evidence(
         "OBSRecordingController",
         FakeFinalController,
     )
-    config = SimpleNamespace(kill_fx_enabled=False)
-    monkeypatch.setattr(env_utils, "load_config", lambda: config)
-
     def skip_plan_build(_request):
         raise RuntimeError("skip plan build")
 
@@ -371,9 +362,7 @@ def test_pov_recording_uses_shared_exit_restore_and_reports_evidence(
             demo_path=str(tmp_path / "pov.dem"),
             demo_filename="pov.dem",
         ),
-        options=SimpleNamespace(
-            kill_fx_enabled=False,
-        ),
+        options=SimpleNamespace(),
     )
 
     async def run():
@@ -388,11 +377,12 @@ def test_pov_recording_uses_shared_exit_restore_and_reports_evidence(
         return await director.execute_plan_queue(
             [request],
             warmup=RecordingWarmupExtras(
-                pov_hud_enabled=True,
+                pov_hud_enabled=pov_enabled,
+                recording_hud_enabled=recording_hud_enabled,
                 input_hud_enabled=False,
                 input_hud_display_mode="active",
                 input_audio_enabled=False,
-                combat_stats_hud_enabled=False,
+                combat_stats_hud_enabled=True,
             ),
         )
 
@@ -402,7 +392,14 @@ def test_pov_recording_uses_shared_exit_restore_and_reports_evidence(
     assert call_names[:2] == ["manager", "install"]
     assert calls[1][1] == tmp_path / "pov.dem"
     assert calls[1][2] == "team"
-    assert calls[1][3:] == (False, "active", 100, False, 100, False)
+    assert calls[1][3:] == (
+        False,
+        "hybrid",
+        100,
+        False,
+        100,
+        expected_combat_stats,
+    )
     assert call_names.count("kill") >= 1
     assert call_names[-1] == "restore"
     restore_call = calls[-1]
@@ -411,10 +408,16 @@ def test_pov_recording_uses_shared_exit_restore_and_reports_evidence(
     assert callable(restore_call[3]["is_running"])
 
     recovery = results[0]["recovery"]
-    assert recovery["pov_enabled"] is True
+    assert recovery["pov_enabled"] is pov_enabled
     assert recovery["pov_restore_verified"] is True
-    assert recovery["pov_restored"] is restore_verified
-    assert recovery["pov_restore_state"] == (
-        "restored" if restore_verified else "restore_failed"
-    )
-    assert recovery["pov_restore"] == restoration
+    if pov_enabled:
+        assert recovery["pov_restored"] is restore_verified
+        assert recovery["pov_restore_state"] == (
+            "restored" if restore_verified else "restore_failed"
+        )
+        assert recovery["pov_restore"] == restoration
+    else:
+        # The independent recording HUD uses the same verified cleanup path,
+        # but does not surface a misleading POV recovery warning to the UI.
+        assert recovery["pov_restored"] is True
+        assert "pov_restore_state" not in recovery

@@ -65,8 +65,6 @@ class ConfigPayload(BaseModel):
     obs_transition_enabled: Optional[bool] = None
     obs_transition_name: Optional[str] = None
     obs_transition_duration_ms: Optional[int] = None
-    kill_fx_enabled: Optional[bool] = None
-    kill_fx_tick_offset: Optional[int] = None
     experimental: Optional[ExperimentalPayload] = None
     steam_api_key: Optional[str] = None
     steam_id64: Optional[str] = None
@@ -321,7 +319,6 @@ async def update_config(payload: ConfigPayload):
             cfg.obs.obs_path,
         )
         obs = payload.obs
-        obs_fields = getattr(obs, "model_fields_set", set()) or set()
         cfg.obs.host = obs.host
         try:
             cfg.obs.port = int(obs.port)
@@ -332,9 +329,6 @@ async def update_config(payload: ConfigPayload):
             cfg.obs.password = raw_password
         if obs.obs_path is not None:
             cfg.obs.obs_path = str(obs.obs_path).strip()
-        # 设置页已下线该开关；未显式传入时保留配置文件/API 调试值。
-        if "browser_begin_frame_scheduling" in obs_fields:
-            cfg.obs.browser_begin_frame_scheduling = bool(obs.browser_begin_frame_scheduling)
         verified_connection_after = (
             cfg.obs.host,
             cfg.obs.port,
@@ -449,13 +443,6 @@ async def update_config(payload: ConfigPayload):
     if payload.obs_transition_duration_ms is not None:
         try:
             cfg.obs_transition_duration_ms = max(0, int(payload.obs_transition_duration_ms))
-        except (TypeError, ValueError):
-            pass
-    if payload.kill_fx_enabled is not None:
-        cfg.kill_fx_enabled = bool(payload.kill_fx_enabled)
-    if payload.kill_fx_tick_offset is not None:
-        try:
-            cfg.kill_fx_tick_offset = int(payload.kill_fx_tick_offset)
         except (TypeError, ValueError):
             pass
     if payload.experimental is not None and payload.experimental.pov_enabled is not None:

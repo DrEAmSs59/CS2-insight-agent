@@ -125,6 +125,9 @@ export function warmupUiOptsToPersisted(opts) {
     pov_radar_mode: 0,
     pov_teamcounter_numeric: !!opts.pov_teamcounter_numeric,
     pov_voice_mode: normalizePovVoiceMode(opts.pov_voice_mode, opts.pov_voice_disabled === true),
+    input_hud_enabled: opts.input_hud_enabled !== false,
+    input_hud_display_mode: "hybrid",
+    input_audio_enabled: opts.input_audio_enabled !== false,
     combat_stats_hud_enabled: opts.combat_stats_hud_enabled !== false,
   };
 }
@@ -226,8 +229,6 @@ export function splitRecordWarmupConfirmPayload(payload) {
     input_audio_enabled,
     combat_stats_hud_enabled,
     player_aliases_by_demo,
-    kill_fx_enabled,
-    kill_fx_tick_offset,
     ...warmupForApi
   } = src;
   return {
@@ -249,14 +250,10 @@ export function splitRecordWarmupConfirmPayload(payload) {
       obs_transition_name,
       obs_transition_duration_ms,
       input_hud_enabled: typeof input_hud_enabled === "boolean" ? input_hud_enabled : true,
-      input_hud_display_mode: ["hybrid", "always", "active"].includes(input_hud_display_mode)
-        ? input_hud_display_mode
-        : "hybrid",
+      input_hud_display_mode: "hybrid",
       input_audio_enabled: typeof input_audio_enabled === "boolean" ? input_audio_enabled : true,
       combat_stats_hud_enabled:
         typeof combat_stats_hud_enabled === "boolean" ? combat_stats_hud_enabled : true,
-      kill_fx_enabled: typeof kill_fx_enabled === "boolean" ? kill_fx_enabled : undefined,
-      kill_fx_tick_offset: typeof kill_fx_tick_offset === "number" ? kill_fx_tick_offset : undefined,
     },
   };
 }

@@ -157,8 +157,6 @@ export default function App() {
   const [obsTransitionEnabled, setObsTransitionEnabled] = useState(false);
   const [obsTransitionName, setObsTransitionName] = useState("Fade");
   const [obsTransitionDurationMs, setObsTransitionDurationMs] = useState(100);
-  const [killFxEnabled, setKillFxEnabled] = useState(false);
-  const [killFxTickOffset, setKillFxTickOffset] = useState(6);
   /** 保存或拉取配置后递增，驱动常用参数页表单重新灌入 */
   const [commonParamsRefreshKey, setCommonParamsRefreshKey] = useState(0);
   const [cs2Path, setCs2Path] = useState("");
@@ -488,12 +486,6 @@ export default function App() {
     if (typeof data.obs_transition_duration_ms === "number") {
       setObsTransitionDurationMs(data.obs_transition_duration_ms);
     }
-    if (typeof data.kill_fx_enabled === "boolean") {
-      setKillFxEnabled(data.kill_fx_enabled);
-    }
-    if (typeof data.kill_fx_tick_offset === "number") {
-      setKillFxTickOffset(data.kill_fx_tick_offset);
-    }
     if (data.experimental && typeof data.experimental.pov_enabled === "boolean") {
       setExperimentalPovEnabled(data.experimental.pov_enabled);
     }
@@ -606,8 +598,6 @@ export default function App() {
       obs_transition_enabled: !!payload?.obs_transition_enabled,
       obs_transition_name: payload?.obs_transition_name ?? "Fade",
       obs_transition_duration_ms: Number(payload?.obs_transition_duration_ms) || 100,
-      kill_fx_enabled: !!payload?.kill_fx_enabled,
-      kill_fx_tick_offset: Number.isInteger(payload?.kill_fx_tick_offset) ? payload.kill_fx_tick_offset : 6,
       recording_skybox: normalizeRecordingSkyboxId(payload?.recording_skybox),
       recording_map_material: normalizeRecordingMapMaterialId(payload?.recording_map_material),
       experimental: { pov_enabled: !!payload?.experimental_pov_enabled },
@@ -1397,8 +1387,6 @@ export default function App() {
     obsTransitionEnabled,
     obsTransitionName,
     obsTransitionDurationMs,
-    killFxEnabled,
-    killFxTickOffset,
   };
 
   const parsingShownInline =
@@ -1547,8 +1535,6 @@ export default function App() {
           initObsTransEnabled={obsTransitionEnabled}
           initObsTransName={obsTransitionName}
           initObsTransDurationMs={obsTransitionDurationMs}
-          initKillFxEnabled={killFxEnabled}
-          initKillFxTickOffset={killFxTickOffset}
         />
 
         <BatchLoadErrorModal

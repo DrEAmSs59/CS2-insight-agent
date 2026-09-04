@@ -16,7 +16,6 @@ vi.mock("../../utils/recordingBatch", () => ({
     demo: { demo_path: `/${item.id}.dem`, demo_filename: `${item.id}.dem` },
   })),
   applySessionObsTransitionToRequests: (requests) => requests,
-  applySessionKillFxToRequests: (requests) => requests,
 }));
 
 describe("recording queue player aliases", () => {
@@ -59,6 +58,15 @@ describe("recording queue player aliases", () => {
     expect(body.requests[0].player_aliases).toEqual(aliases);
     expect(body.requests[1]).not.toHaveProperty("player_aliases");
     expect(body.warmup).toEqual({ resolution_width: 1920, resolution_height: 1440 });
-    expect(body).not.toHaveProperty("pov_hud");
+    expect(body.pov_hud).toEqual({
+      enabled: false,
+      radar_mode: 0,
+      teamcounter_numeric: false,
+      voice_mode: "team",
+      input_hud_enabled: true,
+      input_hud_display_mode: "hybrid",
+      input_audio_enabled: true,
+      combat_stats_hud_enabled: true,
+    });
   });
 });

@@ -1,4 +1,4 @@
-"""PUT /api/config 的录制运行时开关回归测试。"""
+"""PUT /api/config 的录制选项回归测试。"""
 
 import asyncio
 import sys
@@ -23,43 +23,6 @@ def _round_trip(monkeypatch, payload: config_api.ConfigPayload, *, initial: AppC
     asyncio.run(config_api.update_config(payload))
     assert saved, "update_config 必须落盘"
     return saved[-1]
-
-
-def test_defaults_are_off():
-    cfg = AppConfig(obs=OBSConfig())
-
-    assert cfg.obs.browser_begin_frame_scheduling is False
-
-
-def test_begin_frame_scheduling_survives_the_round_trip(monkeypatch):
-    payload = config_api.ConfigPayload(obs=OBSConfig(browser_begin_frame_scheduling=True))
-
-    assert _round_trip(monkeypatch, payload).obs.browser_begin_frame_scheduling is True
-
-
-def test_begin_frame_scheduling_can_be_turned_back_off(monkeypatch):
-    initial = AppConfig(obs=OBSConfig(browser_begin_frame_scheduling=True))
-    payload = config_api.ConfigPayload(obs=OBSConfig(browser_begin_frame_scheduling=False))
-
-    assert _round_trip(monkeypatch, payload, initial=initial).obs.browser_begin_frame_scheduling is False
-
-
-def test_omitting_begin_frame_scheduling_from_obs_update_leaves_it_alone(monkeypatch):
-    # 设置页保存 OBS 主机/端口时不能把诊断用的锁帧开关顺手关掉。
-    initial = AppConfig(obs=OBSConfig(browser_begin_frame_scheduling=True))
-    payload = config_api.ConfigPayload(obs=OBSConfig(host="localhost", port=4455, password=""))
-
-    assert _round_trip(monkeypatch, payload, initial=initial).obs.browser_begin_frame_scheduling is True
-
-
-def test_switches_are_exposed_via_get_config(monkeypatch):
-    cfg = AppConfig(obs=OBSConfig(browser_begin_frame_scheduling=True))
-    monkeypatch.setattr(config_api, "load_config", lambda: cfg)
-    monkeypatch.setattr(config_api, "ensure_cs2_path", lambda value: value)
-
-    data = config_api.get_config()
-
-    assert data["obs"]["browser_begin_frame_scheduling"] is True
 
 
 def test_recording_skybox_is_independent_and_defaults_to_original():

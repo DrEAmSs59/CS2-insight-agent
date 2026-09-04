@@ -5,7 +5,6 @@ import { buildDtoFromQueueItem } from "../recording/buildDtoFromQueueItem";
 export function queueItemClientUid(it) {
   return it.clientClipUid || `legacy:${it.demoFilename}:${it.clipId}`;
 }
-
 /** @param {number} limit @param {T[]} items @param {(item: T) => Promise<void>} work @template T */
 export async function runWithConcurrency(limit, items, work) {
   if (!items.length) return;
@@ -302,20 +301,5 @@ export function applySessionObsTransitionToRequests(requests, session) {
   return requests.map((r) => ({
     ...r,
     options: { ...(r.options || {}), ...patch },
-  }));
-}
-
-/** 将录制前弹窗中的击杀特效参数写入 request.options。 */
-export function applySessionKillFxToRequests(requests, session) {
-  if (!Array.isArray(requests) || !requests.length || !session) return requests;
-  const hasFx = typeof session.kill_fx_enabled === "boolean";
-  if (!hasFx) return requests;
-  return requests.map((r) => ({
-    ...r,
-    options: {
-      ...(r.options || {}),
-      kill_fx_enabled: session.kill_fx_enabled,
-      ...(typeof session.kill_fx_tick_offset === "number" && { kill_fx_tick_offset: session.kill_fx_tick_offset }),
-    },
   }));
 }

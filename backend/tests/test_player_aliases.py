@@ -139,7 +139,6 @@ def test_recording_api_keeps_copy_alive_through_director_then_cleans(monkeypatch
     source = tmp_path / "match.dem"
     source.write_bytes(b"original")
     dto = request(source, {SID: "京介"})
-    dto.options.kill_fx_enabled = False
     cfg = AppConfig(cs2_path=str(tmp_path / "never-launch.exe"))
     monkeypatch.setattr(api, "load_config", lambda: cfg)
     monkeypatch.setattr(api, "ensure_cs2_path", lambda value: value)
@@ -163,12 +162,22 @@ def test_recording_api_keeps_copy_alive_through_director_then_cleans(monkeypatch
         assert path.read_bytes() == b"alias"
         assert requests[0].target_player.name == "京介"
         assert not getattr(kwargs["warmup"], "pov_hud_enabled", False)
+        assert getattr(kwargs["warmup"], "recording_hud_enabled", False)
+        assert kwargs["warmup"].pov_voice_mode == "enemy"
+        assert kwargs["warmup"].input_hud_enabled is True
         observed.append(path)
         if fail:
             raise RuntimeError("recording failed")
         return []
     monkeypatch.setattr(obs_director, "OBSDirector", Mock(return_value=Mock(execute_plan_queue=execute)))
-    body = api.QueueRecordingRequest(requests=[dto], pov_hud={"enabled": False})
+    body = api.QueueRecordingRequest(
+        requests=[dto],
+        pov_hud={
+            "enabled": False,
+            "voice_mode": "enemy",
+            "input_hud_enabled": True,
+        },
+    )
     if fail:
         with pytest.raises(HTTPException):
             asyncio.run(api.execute_recording_queue(body))

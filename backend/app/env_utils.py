@@ -306,10 +306,6 @@ class OBSConfig(BaseModel):
     obs_path: str = ""
     # OBS 配置中心"配置检查"是否通过过（WebSocket 连接成功）
     obs_config_verified: bool = False
-    # 让 OBS 驱动浏览器源出帧（--enable-begin-frame-scheduling），把叠加层的时序抖动
-    # 收成固定偏置。是进程级开关，只在冷启动时生效；KillFX 的 webm 播放可能受影响，
-    # 因此默认关闭；诊断时改配置文件或 PUT /api/config 打开。
-    browser_begin_frame_scheduling: bool = False
 
 
 class LLMConfig(BaseModel):
@@ -446,13 +442,6 @@ class AppConfig(BaseModel):
     steam_cdn_assets_enabled: bool = True
     match_mode: str = "premier"   # premier / competitive
     match_count: int = 20         # 20 / 50 / 100
-    # 击杀特效 overlay（OBS Browser Source 实时合成）
-    kill_fx_enabled: bool = False
-    kill_fx_tick_offset: int = 6      # KillFX 独立偏移；不再与键盘偏移叠加
-    # 兼容标记：旧配置中 kill_fx_tick_offset 是叠加在键盘偏移上的额外微调。
-    overlay_offsets_independent: bool = True
-
-
 def _normalize_config_defaults(cfg: AppConfig, raw: Optional[dict[str, Any]] = None) -> bool:
     changed = False
     fullscreen_re = re.compile(r"(?<!\S)-fullscreen(?!\S)", re.IGNORECASE)
@@ -490,19 +479,24 @@ def _normalize_config_defaults(cfg: AppConfig, raw: Optional[dict[str, Any]] = N
             cfg.record_inject_console_lines = _DEFAULT_RECORD_INJECT_CONSOLE_LINES
             changed = True
 
-    # 旧配置中的 KillFX offset 是相对已移除键盘 Overlay offset 的额外微调。
-    # 一次性换算为绝对 offset，升级后只保留 KillFX 的独立时间校准。
-    if isinstance(raw, dict) and not bool(raw.get("overlay_offsets_independent", False)):
-        try:
-            kb_offset = int(raw.get("kb_overlay_tick_offset", 6))
-        except (TypeError, ValueError):
-            kb_offset = 6
-        try:
-            legacy_kill_fx_extra = int(raw.get("kill_fx_tick_offset", 0))
-        except (TypeError, ValueError):
-            legacy_kill_fx_extra = 0
-        cfg.kill_fx_tick_offset = kb_offset + legacy_kill_fx_extra
-        cfg.overlay_offsets_independent = True
+    # Retired OBS Browser Source settings are intentionally not carried forward.
+    if isinstance(raw, dict) and any(
+        key in raw
+        for key in (
+            "kb_overlay_enabled",
+            "kb_overlay_tick_offset",
+            "kb_overlay_position",
+            "kill_fx_enabled",
+            "kill_fx_tick_offset",
+            "overlay_offsets_independent",
+        )
+    ):
+        changed = True
+    if (
+        isinstance(raw, dict)
+        and isinstance(raw.get("obs"), dict)
+        and "browser_begin_frame_scheduling" in raw["obs"]
+    ):
         changed = True
     return changed
 

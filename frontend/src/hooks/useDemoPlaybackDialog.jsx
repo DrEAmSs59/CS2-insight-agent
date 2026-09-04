@@ -1,5 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { hasInvalidPlayerAliases, playerAliasMaps } from "../utils/playerAliases.js";
+import {
+  hasInvalidPlayerAliases,
+  PLAYER_ALIAS_ENTRY_VISIBLE,
+  playerAliasMaps,
+} from "../utils/playerAliases.js";
 
 import DemoPlayOptionsModal from "../components/DemoPlayOptionsModal.jsx";
 import DemoPlaybackRestoreModal from "../components/DemoPlaybackRestoreModal.jsx";
@@ -41,9 +45,6 @@ export function useDemoPlaybackDialog() {
   const [recordingMapMaterial, setRecordingMapMaterial] = useState(
     DEFAULT_RECORDING_MAP_MATERIAL,
   );
-  const [inputHudEnabled, setInputHudEnabled] = useState(true);
-  const [inputHudDisplayMode, setInputHudDisplayMode] = useState("hybrid");
-  const [inputAudioEnabled, setInputAudioEnabled] = useState(true);
   const [aliasEditor, setAliasEditor] = useState({ enabled: false, drafts: {} });
   const [aliasesReady, setAliasesReady] = useState(false);
   const [skyboxResources, setSkyboxResources] = useState([]);
@@ -104,9 +105,6 @@ export function useDemoPlaybackDialog() {
     setLaunchingMode("");
     setRecordingSkybox(DEFAULT_RECORDING_SKYBOX);
     setRecordingMapMaterial(DEFAULT_RECORDING_MAP_MATERIAL);
-    setInputHudEnabled(true);
-    setInputHudDisplayMode("hybrid");
-    setInputAudioEnabled(true);
     setAliasEditor({ enabled: false, drafts: {} });
     setAliasesReady(false);
     setSkyboxResources([]);
@@ -123,7 +121,9 @@ export function useDemoPlaybackDialog() {
 
   const launch = useCallback(async () => {
     if (!target || launchingMode) return;
-    if (aliasEditor.enabled && (!aliasesReady || hasInvalidPlayerAliases(aliasEditor))) {
+    if (PLAYER_ALIAS_ENTRY_VISIBLE
+        && aliasEditor.enabled
+        && (!aliasesReady || hasInvalidPlayerAliases(aliasEditor))) {
       setError(t("playerAliases.invalid"));
       return;
     }
@@ -139,10 +139,7 @@ export function useDemoPlaybackDialog() {
           teamcounter_numeric: false,
           skybox_id: recordingSkybox,
           map_material_id: recordingMapMaterial,
-          input_hud_enabled: inputHudEnabled,
-          input_hud_display_mode: inputHudDisplayMode,
-          input_audio_enabled: inputAudioEnabled,
-          ...(playerAliasMaps(aliasEditor).playback
+          ...(PLAYER_ALIAS_ENTRY_VISIBLE && playerAliasMaps(aliasEditor).playback
             ? { player_aliases: playerAliasMaps(aliasEditor).playback }
             : {}),
         },
@@ -174,7 +171,7 @@ export function useDemoPlaybackDialog() {
     } finally {
       setLaunchingMode("");
     }
-  }, [aliasEditor, aliasesReady, inputAudioEnabled, inputHudDisplayMode, inputHudEnabled, launchingMode, recordingMapMaterial, recordingSkybox, showPlayToast, t, target]);
+  }, [aliasEditor, aliasesReady, launchingMode, recordingMapMaterial, recordingSkybox, showPlayToast, t, target]);
 
   const retryRestoreStatus = useCallback(async () => {
     const sessionId = restoreMonitor?.sessionId;
@@ -205,9 +202,6 @@ export function useDemoPlaybackDialog() {
         launchingMode={launchingMode}
         recordingSkybox={recordingSkybox}
         recordingMapMaterial={recordingMapMaterial}
-        inputHudEnabled={inputHudEnabled}
-        inputHudDisplayMode={inputHudDisplayMode}
-        inputAudioEnabled={inputAudioEnabled}
         aliasDemos={target ? [{ key: "playback", id: target.id, path: target.path, label: target.label }] : []}
         aliasEditor={aliasEditor}
         aliasesReady={aliasesReady}
@@ -219,9 +213,6 @@ export function useDemoPlaybackDialog() {
         onPlayAdvanced={() => void launch()}
         onRecordingSkyboxChange={setRecordingSkybox}
         onRecordingMapMaterialChange={setRecordingMapMaterial}
-        onInputHudEnabledChange={setInputHudEnabled}
-        onInputHudDisplayModeChange={setInputHudDisplayMode}
-        onInputAudioEnabledChange={setInputAudioEnabled}
       />
       <PlayDemoToast />
       <DemoPlaybackRestoreModal

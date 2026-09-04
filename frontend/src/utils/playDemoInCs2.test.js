@@ -61,7 +61,7 @@ describe("playDemoInCs2", () => {
         teamcounter_numeric: true,
         skybox_id: "cartoon3",
         input_hud_enabled: true,
-        input_hud_display_mode: "active",
+        input_hud_display_mode: "hybrid",
         input_hud_scale_percent: 100,
         input_audio_enabled: true,
         input_audio_volume_percent: 100,

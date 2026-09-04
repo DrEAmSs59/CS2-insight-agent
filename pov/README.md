@@ -103,8 +103,9 @@ The baked Panorama script also drives the rest of the POV HUD:
 
 Insight's direct **Advanced playback** entry additionally fills payload index
 12 with the XUID roster and a delta-tick event index. Moving the free demo
-cursor into the 18px strip at the right screen edge opens a Panorama menu; the
-panel hides again after the pointer leaves it. CS2's native DemoUI remains
+cursor over the small collapsed title-tab area at the right-center screen edge
+opens a Panorama menu, including when the persistent title bar is disabled;
+the panel hides again after the pointer leaves it. CS2's native DemoUI remains
 visible and owns the timeline and playback controls. The Insight menu has five
 sections, from top to bottom: HUD, voice, round seek, teams, and events. It
 provides:
@@ -175,7 +176,26 @@ all other Steam or user changes.
 
 For demos with a decodable `svc_UserCmds` chain, the same native Panorama
 layer renders the observed pawn's W/A/S/D, Shift (walk), Ctrl (crouch), Space
-(jump), transient R (reload), M1, and M2 inputs.
+(jump), transient R (reload), M1, and M2 inputs. The centered input HUD uses
+the compact dark-key/Insight-orange-press styling from the retired OBS overlay, while
+retaining the VPK-only 1-5, Tab, E/F/H, hand-switch, and mouse-motion data. The
+1-5 row sits in an upward-expanded panel above the original three-row keyboard,
+so it remains visible without moving those rows on screen. The mouse-motion
+panel occupies only the rounded lower body, while the
+upper section is reserved for two flush M1/M2 outlines separated by their shared
+center line. The mouse sits closer to the keyboard, has no extra outer shell or
+wheel, and keeps both button labels blank.
+The complete input HUD stays fixed at its centered anchor even while native
+bomb, round, and match banners are visible. Weapon-select payload pulses remain
+exact, but the number-row highlight is held for 12 demo ticks so Panorama cannot
+skip a one-tick selection between display refreshes. The 1-4 and F keycaps stay
+visible in hybrid mode, and all pressed keycaps use the Insight primary orange.
+Recording presets and the pre-record dialog expose this as a binary show/hide
+choice; show always resolves to the high-frequency resident `hybrid` mode.
+Advanced Demo playback always packages that mode and adds a live `INPUT`
+toggle to the in-game HUD row, so visibility can be changed without relaunching
+the Demo. Each explicit switch to `DEMO HUD` also starts with CS2's native
+X-ray enabled; DemoUI can still turn it off afterwards.
 
 The generated package also owns the complete lower-left message stream at
 payload index 11. Tactical radio uses `grenade_thrown` when available; missing

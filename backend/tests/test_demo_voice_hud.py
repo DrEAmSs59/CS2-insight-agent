@@ -922,36 +922,45 @@ def test_checked_in_voice_template_contains_only_an_empty_payload():
     assert b'fx.anchor.style.x = "0px"' not in script
     assert b'fx.anchor.style.y = "0px"' not in script
     assert b'ConsoleCommand("cl_drawhud_force_radar 0")' not in script
-    for slot, x in ((1, 68), (2, 108), (3, 148), (4, 188), (5, 228)):
-        spec = f'["{slot}", {x}, 0, 36, 32, 18, 4, -1, true, {slot}]'.encode()
+    for slot, x in ((1, 66), (2, 108), (3, 150), (4, 192), (5, 234)):
+        only_when_active = "false" if slot <= 4 else "true"
+        spec = (
+            f'["{slot}", {x}, 0, 38, 34, 18, 5, -1, '
+            f'{only_when_active}, {slot}]'
+        ).encode()
         assert spec in script
-    assert b'["E", 148, 35' in script
-    assert b'["TAB", 8, 35, 56, 32, 13, 7, 12' in script
-    assert b'["SHIFT", 8, 70' in script
-    assert b'["F", 188, 70, 36, 32, 18, 4, 11, true, 0]' in script
-    assert b'["H", 228, 70, 36, 32, 18, 4, -1, true, 0, "hand"]' in script
-    assert b'["SPACE", 68, 105' in script
-    assert b'["R", 188, 35' in script
-    assert b'["M1", 286, 23, 42, 44, 12, 14, 8' in script
-    assert b'["M2", 332, 23, 42, 44, 12, 14, 9' in script
-    assert b'key.style.borderRadius = "16px 3px 6px 11px"' in script
-    assert b'key.style.borderRadius = "3px 16px 11px 6px"' in script
-    assert b"CS2InsightMouseShell" not in script
+    assert b'["E", 150, 38' in script
+    assert b'["TAB", 4, 38, 58, 34, 13, 8, 12' in script
+    assert b'["SHIFT", 4, 76' in script
+    assert b'["F", 192, 76, 38, 34, 18, 5, 11, false, 0]' in script
+    assert b'["H", 234, 76, 38, 34, 18, 5, -1, true, 0, "hand"]' in script
+    assert b'["SPACE", 66, 114' in script
+    assert b'["R", 192, 38' in script
+    assert b'["M1", 276, 38, 39, 44, 11, 13, 8' in script
+    assert b'["M2", 315, 38, 39, 44, 11, 13, 9' in script
+    assert b'key.text = mouseButton ? "" : spec[0]' in script
+    assert b'key.style.borderRadius = "39px 0px 0px 0px"' in script
+    assert b'key.style.borderRadius = "0px 39px 0px 0px"' in script
+    assert b'key._insightMouseButton = true' in script
+    assert b"CS2InsightInputMouseShell" not in script
     assert b"CS2InsightMouseWheelWell" not in script
-    assert b'["W", 108, 35, 36, 32, 18, 4, 0, false, 0]' in script
-    assert b'["SHIFT", 8, 70, 56, 32, 12, 7, 6, false, 0]' in script
-    assert b'["CTRL", 8, 105, 56, 32, 13, 7, 5, false, 0]' in script
-    assert b'["SPACE", 68, 105, 156, 32, 12, 7, 4, false, 0]' in script
-    assert b'pad.style.position = "276px 70px 0px"' in script
-    assert b"const MOUSE_PAD_WIDTH = 108" in script
-    assert b"const MOUSE_PAD_HEIGHT = 78" in script
+    assert b"CS2InsightMouseWheel" not in script
+    assert b'["W", 108, 38, 38, 34, 18, 5, 0, false, 0]' in script
+    assert b'["SHIFT", 4, 76, 58, 34, 12, 8, 6, false, 0]' in script
+    assert b'["CTRL", 4, 114, 58, 34, 13, 8, 5, false, 0]' in script
+    assert b'["SPACE", 66, 114, 164, 34, 12, 8, 4, false, 0]' in script
+    assert b'pad.style.position = "276px 82px 0px"' in script
+    assert b"const MOUSE_PAD_WIDTH = 78" in script
+    assert b"const MOUSE_PAD_HEIGHT = 70" in script
+    assert b'pad.style.border = "0px solid #00000000"' in script
+    assert b'pad.style.borderRadius = "0px 0px 24px 24px"' in script
     assert b"const encodedMouseTracks = packed[15] || []" in script
     assert b"const encodedHandSwitchTracks = packed[16] || []" in script
     assert b"const encodedInputAudioEdges = packed[17] || []" in script
     assert b"function float32FromBits(rawBits)" in script
     assert b"const encodedInputPresentation = Array.isArray(packed[18])" in script
     assert b"const encodedCombatStats = packed[19] || null" in script
-    assert b"const combatStatsHudEnabled = encodedInputPresentation.length > 5" in script
+    assert b"const combatStatsHudEnabled = false" in script
     assert b"function decodeCombatStats(raw)" in script
     assert b"function updateCombatStatsHud()" in script
     assert b'combatStatsHud.style.backgroundColor = "#00000000"' in script
@@ -986,7 +995,11 @@ def test_checked_in_voice_template_contains_only_an_empty_payload():
     assert b"function setCombatStatsColor" not in script
     assert b"function animateCombatKda" not in script
     assert b"CS2InsightKdaIncoming" not in script
-    assert b'inputHudDisplayMode = ["hybrid", "always", "active"]' in script
+    assert b"const inputHudDisplayMode = encodedAdvancedPlayback" in script
+    assert b'? "hybrid"' in script
+    assert script.index(b"const inputHudDisplayMode = encodedAdvancedPlayback") < script.index(
+        b"const advancedPlayback = (function safelyDecodeAdvancedPlayback()"
+    )
     assert b"inputHudScalePercent / 100" in script
     assert b'inputAudioVolumePercent !== 100' in script
     assert b"const handSwitchTracksByXuid = {}" in script
@@ -1011,9 +1024,9 @@ def test_checked_in_voice_template_contains_only_an_empty_payload():
     assert b"inputMouseHeadDot.style.position = mouseCssPx(head.x - 3)" in script
     assert b'segment.style.position = start.x + "px "' not in script
     assert b'(Math.atan2(dy, dx) * 180 / Math.PI) + "deg"' not in script
-    assert b'pad.style.backgroundColor = "#00000000"' in script
+    assert b'pad.style.backgroundColor = "#23262D"' in script
     assert b'pad.style.border = "0px solid #00000000"' in script
-    assert b'head.style.boxShadow = "fill #57ead780 0px 0px 5px 0px"' in script
+    assert b'head.style.boxShadow = "fill #E07F0A80 0px 0px 5px 0px"' in script
     assert b'segment.style.boxShadow = "none"' in script
     assert b"horizontalAxis" not in script
     assert b"verticalAxis" not in script
@@ -1045,22 +1058,41 @@ def test_checked_in_voice_template_contains_only_an_empty_payload():
     )
     assert b"$.Schedule(INPUT_HUD_REFRESH_SECONDS, updateInputHud)" in script
     assert b"$.Schedule(0, updateInputHud)" not in script
-    assert b'inputHud.style.width = "392px"' in script
-    assert b'inputHud.style.height = "156px"' in script
+    assert b'inputHud.style.width = INPUT_HUD_WIDTH + "px"' in script
+    assert b'inputHud.style.height = "190px"' in script
     assert b'inputHud.style.marginBottom = "139px"' in script
     assert b'inputHud.style.flowChildren = "none"' in script
     assert b'inputHud.style.overflow = "noclip"' not in script
     assert b'inputHud.style.zIndex = "1000"' in script
+    assert b'inputHud.style.opacity = "0.92"' in script
     assert b'key.style.verticalAlign = "center"' not in script
     assert b'key.style.transform = "rotateZ(-2deg)"' not in script
     assert b'key.style.fontStyle = "italic"' not in script
-    assert b'panel.style.backgroundColor = active ? "#12cfae9c" : "#00000000"' in script
-    assert b'panel.style.border = active ? "2px solid #d2fff8" : "1px solid #c9eef2dc"' in script
-    assert b'? "fill #19f5c455 0px 0px 8px 0px"' in script
+    assert b'const inactiveBackground = panel._insightMouseButton ? "#23262D" : "#2A2D34"' in script
+    assert b'panel.style.backgroundColor = active ? "#E07F0A" : inactiveBackground' in script
+    assert b'panel.style.border = active ? "1px solid #F29A32" : "1px solid #3F434D"' in script
+    assert b'panel.style.color = active ? "#FFFFFF" : "#8A8F99"' in script
+    assert b'? "fill #E07F0A8C 0px 0px 7px 0px"' in script
     assert b': "none"' in script
-    assert b"weaponSelectTracksByXuid" in script
+    assert b'function createInputMouseShell(parent)' not in script
+    assert b'function createInputMouseDetails(parent)' not in script
+    assert script.index(b"createMouseMotionPad(inputHud);") < script.index(
+        b"inputKeyPanels = specs.map"
+    )
     input_hud_start = script.index(b"function createInputKey")
     input_hud_end = script.index(b"function combatStatAt", input_hud_start)
+    for label in (b'"1"', b'"2"', b'"3"', b'"4"', b'"5"', b'"E"', b'"F"', b'"H"', b'"TAB"'):
+        assert label in script[input_hud_start:input_hud_end]
+    assert b'inputHud.style.position = "0px 0px 0px"' in script
+    assert b"function stockHudAlertClaimsInputLane()" not in script
+    assert b"function stockHudAlertHorizontalMetrics(panel, root, rootWidth)" not in script
+    assert b"positionInputHudForStockAlert(panel)" not in script
+    assert b"panel.visible = true" in script
+    assert b"weaponSelectTracksByXuid" in script
+    assert b"const INPUT_HUD_WEAPON_SELECT_HOLD_TICKS = 12" in script
+    assert b"function weaponSlotPulseAt(changes, tick)" in script
+    assert b"age > INPUT_HUD_WEAPON_SELECT_HOLD_TICKS" in script
+    assert b"const weaponSlot = weaponSlotPulseAt(" in script
     assert b"stickyMask" not in script[input_hud_start:input_hud_end]
     assert b"transitionDuration" not in script[input_hud_start:input_hud_end]
     input_update_start = script.index(b"function updateInputHud()")
@@ -1070,7 +1102,9 @@ def test_checked_in_voice_template_contains_only_an_empty_payload():
     assert b'inputHudDisplayMode === "always"' in script
     assert b'inputHudDisplayMode === "hybrid" && !onlyWhenActive' in script
     assert b'inputHudDisplayMode === "hybrid" && !key.onlyWhenActive' in script
-    assert b"if (!inputHudEnabled)" in script
+    assert b"const runtimeInputHudEnabled = advancedPlayback" in script
+    assert b"!advancedHudHidden && advancedQuickOptions.inputHud" in script
+    assert b"if (!runtimeInputHudEnabled)" in script
     assert b"if (inputAudioEnabled)" in script
     assert b'key.semanticTrack === "hand"' in script
     assert b'findHudTraverse("VisiblePlayerIDs")' in script
@@ -1187,7 +1221,8 @@ def test_checked_in_voice_template_contains_only_an_empty_payload():
     profile_start = script.index(b"function advancedApplyPlaybackProfile(profile)")
     profile_end = script.index(b"function advancedSetVoicePolicy(policy)", profile_start)
     assert b"spec_mode" not in script[profile_start:profile_end]
-    assert b'"cl_drawhud_force_teamid_overhead 0"' in script[profile_start:profile_end]
+    assert b'"spec_show_xray 1"' in script[profile_start:profile_end]
+    assert b'"cl_drawhud_force_teamid_overhead 0"' not in script[profile_start:profile_end]
     assert b"CS2InsightAdvancedProgress" not in script
     assert b"CS2InsightAdvancedProgressSlider" not in script
     assert b"function advancedNumericEntryText(entry)" not in script
@@ -1282,8 +1317,10 @@ def test_checked_in_voice_template_contains_only_an_empty_payload():
     assert b"advancedProgressSlider.max = 1" not in script
     assert b"advancedQuickOptions.messages" not in script
     assert b'["messages", advancedCopy(' not in script
-    assert b"advancedQuickOptions.input" not in script
-    assert b'["input", advancedCopy(' not in script
+    assert b"inputHud: advancedPlayback ? true : inputHudEnabled" in script
+    assert 'advancedOptionLabels.inputHud = advancedCopy("键鼠", "INPUT")'.encode() in script
+    assert b'advancedToggleQuickOption("inputHud")' in script
+    assert b"advancedOptionButtons.inputHud = inputHudToggle" in script
     assert b'"tv_nochat 0"' in script
     assert b"advancedNativeMessagesRestored" in script
     assert b'"cl_drawhud_force_radar " + radarMode' in script
@@ -1332,8 +1369,11 @@ def test_checked_in_voice_template_contains_only_an_empty_payload():
     assert b'advancedMenu.style.verticalAlign = "center"' in script
     assert b'advancedMenu.style.marginRight = "6px"' in script
     assert b'advancedMenu.style.marginTop = "0px"' in script
-    assert b'advancedEdgeTrigger.style.height = "100%"' in script
+    assert b'advancedEdgeTrigger.style.width = advancedChinese() ? "108px" : "148px"' in script
+    assert b'advancedEdgeTrigger.style.height = "38px"' in script
     assert b'advancedEdgeTrigger.style.verticalAlign = "center"' in script
+    assert b'advancedEdgeTrigger.style.marginRight = "6px"' in script
+    assert b'advancedEdgeTrigger.style.height = "100%"' not in script
     assert b"advancedMenu.style.x =" not in script
     assert b"advancedMenu.style.y =" not in script
     assert b"function restrictPovTeamCounterEquipment()" in script
@@ -1407,6 +1447,7 @@ def test_advanced_playback_template_uses_native_hot_switchable_hud_styles():
     end = script.index(VOICE_DATA_END)
 
     assert script[start:end].rstrip() == b"[[], [], [], []]"
+    assert b"const combatStatsHudEnabled = false" in script
     assert b"Math.pow(remainingSeconds / FLASH_CERTAIN_BLIND_SECONDS, FLASH_FADE_EXPONENT)" in script
     assert b"return Math.max(0, Math.min(1, white))" in script
     assert b"const afterimage" not in script
@@ -1612,11 +1653,13 @@ def test_recording_build_keeps_pov_only_compiled_styles():
         parser_factory=_FakeParser,
     )
     entries = read_inline_vpk(build.vpk_bytes)
+    script = entries[VOICE_SCRIPT_PATH]
 
     assert "panorama/styles/hud/hudhealthammocenter.vcss_c" not in entries
     assert "panorama/styles/hud/hudradar.vcss_c" in entries
     assert "panorama/styles/hud/hudteamcounter-equipmentinfo.vcss_c" in entries
     assert "panorama/styles/hud/hudteamcounter.vcss_c" in entries
+    assert b"const combatStatsHudEnabled = false" in script
 
 
 def test_static_pov_package_resets_only_stale_match_alert_toasts():

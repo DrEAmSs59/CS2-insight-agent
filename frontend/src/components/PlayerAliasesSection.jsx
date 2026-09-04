@@ -10,7 +10,7 @@ import { useT } from "../i18n/useT.js";
 import { playerAliasError } from "../utils/playerAliases.js";
 
 /** Only the per-demo name map leaves this component; identity is never editable. */
-export default function PlayerAliasesSection({ demos = [], value, onChange, onReadyChange, disabled = false }) {
+export default function PlayerAliasesSection({ demos = [], value, onChange, onReadyChange, disabled = false, compact = false }) {
   const t = useT();
   const [rosters, setRosters] = useState({});
   const [loadError, setLoadError] = useState("");
@@ -57,10 +57,10 @@ export default function PlayerAliasesSection({ demos = [], value, onChange, onRe
       <div className="flex items-center gap-3">
         <Pencil className="h-5 w-5 shrink-0 text-cs2-accent" />
         <div className="min-w-0 flex-1">
-          <h3 className="font-bold text-cs2-text-primary">{t("playerAliases.title")}</h3>
-          <p className="mt-1 text-xs text-cs2-text-muted">{t("playerAliases.hint")}</p>
+          <h3 className={`${compact ? "text-[12px]" : ""} font-bold text-cs2-text-primary`}>{t("playerAliases.title")}</h3>
+          <p className={`${compact ? "mt-0.5 text-[10px] leading-relaxed" : "mt-1 text-xs"} text-cs2-text-muted`}>{t("playerAliases.hint")}</p>
         </div>
-        <label className="flex shrink-0 items-center gap-2 text-sm">
+        <label className={`flex shrink-0 items-center gap-2 ${compact ? "text-xs font-semibold" : "text-sm"}`}>
           <input type="checkbox" checked={enabled} disabled={disabled || !onChange} className="accent-cs2-accent"
             aria-label={t("playerAliases.enable")}
             onChange={(event) => onChange({ ...value, enabled: event.target.checked, drafts: value?.drafts || {} })} />

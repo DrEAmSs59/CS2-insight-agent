@@ -91,8 +91,7 @@ A unified match-analysis workspace: loading a demo auto-parses all players; swit
   - Observer view or POV first-person HUD (toggle radar, adjust top player count display)
   - Clean spectator view, custom FOV, hide grenade trajectories
   - **Victim POV** — After highlight or multi-kill compilations, automatically append victim perspective clips
-  - **Keyboard Overlay** — Display WASD, crouch/jump keys in OBS, with manual sync adjustment if needed
-  - **Kill FX Overlay** — OBS auto-composites transparent, audio-synced FX clips for one-taps, revenge, wallbangs, blind snipes, collaterals, multi-kills, and clutches
+  - **Built-in Keys + Input Visualization** — Display keyboard and mouse input directly inside CS2 through the recording VPK, with zero overlay latency
   - Fade in/out transitions between clips
 - **Safe Recording Solution**:
   - Controls recording via OBS and game state coordination, no injection or game hooking

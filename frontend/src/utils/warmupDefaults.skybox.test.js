@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { splitRecordWarmupConfirmPayload } from "./warmupDefaults.js";
+import { splitRecordWarmupConfirmPayload, warmupUiOptsToPersisted } from "./warmupDefaults.js";
 
 describe("recording dialog skybox override", () => {
   it("keeps the skybox in session settings instead of warmup commands", () => {
@@ -33,7 +33,7 @@ describe("recording dialog skybox override", () => {
     expect(result.warmupForApi).toEqual({ tv_nochat: true });
     expect(result.session).toMatchObject({
       input_hud_enabled: false,
-      input_hud_display_mode: "active",
+      input_hud_display_mode: "hybrid",
       input_audio_enabled: false,
       combat_stats_hud_enabled: false,
     });
@@ -46,6 +46,18 @@ describe("recording dialog skybox override", () => {
     }).session).toMatchObject({
       recording_skybox: "default",
       recording_map_material: "default",
+    });
+  });
+
+  it("persists in-game input HUD defaults for the recording preset", () => {
+    expect(warmupUiOptsToPersisted({
+      input_hud_enabled: false,
+      input_hud_display_mode: "hybrid",
+      input_audio_enabled: true,
+    })).toMatchObject({
+      input_hud_enabled: false,
+      input_hud_display_mode: "hybrid",
+      input_audio_enabled: true,
     });
   });
 });

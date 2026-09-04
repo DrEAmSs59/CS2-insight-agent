@@ -115,8 +115,6 @@ class RecordingOptions(BaseModel):
     obs_transition_enabled: Optional[bool] = None
     obs_transition_name: Optional[str] = None
     obs_transition_duration_ms: Optional[int] = None
-    kill_fx_enabled: Optional[bool] = None
-    kill_fx_tick_offset: Optional[int] = None
     # LLM 导播大纲：合并击杀簇 + 精选受害者 POV（替代纯规则/全量 K→V）
     use_ai_director: bool = False
 

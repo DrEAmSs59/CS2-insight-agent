@@ -46,7 +46,6 @@ def write_result(
         "error": result.error,
         "segments": [asdict(s) for s in result.segment_results],
         "kill_markers": result.kill_markers,
-        "calibration_markers": result.calibration_markers,
     }
     with open(out_path, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)

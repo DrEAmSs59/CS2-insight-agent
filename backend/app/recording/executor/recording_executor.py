@@ -35,48 +35,6 @@ async def _inject_voice_listen_mask(mask: int) -> None:
         raise VoiceIsolationError("voice mask injection returned false")
 
 
-def _overlay_bus(segment=None):
-    """Return the KillFX event bus and its effective tick offset."""
-    def _resolve_offset(seg, metadata_key, config_key, default, cfg=None):
-        if seg is not None:
-            v = seg.metadata.get(metadata_key)
-            if v is not None:
-                try:
-                    return int(v)
-                except (TypeError, ValueError):
-                    pass
-        if cfg is not None:
-            try:
-                return int(getattr(cfg, config_key))
-            except (AttributeError, TypeError, ValueError):
-                pass
-        return default
-
-    def _load_cfg():
-        try:
-            from ...env_utils import load_config
-            return load_config()
-        except Exception:
-            return None
-
-    def _resolved_offset(seg, cfg):
-        return _resolve_offset(
-            seg, "kill_fx_tick_offset", "kill_fx_tick_offset", 0, cfg,
-        )
-
-    try:
-        if segment is not None and segment.metadata.get("kill_track") is not None:
-            from .overlay_bus import recording_overlay_bus
-            return recording_overlay_bus, _resolved_offset(segment, _load_cfg())
-        cfg = _load_cfg()
-        if cfg is not None and cfg.kill_fx_enabled:
-            from .overlay_bus import recording_overlay_bus
-            return recording_overlay_bus, _resolved_offset(segment, cfg)
-    except Exception:
-        pass
-    return None, 0
-
-
 # Seconds seeked before each segment's start_tick to absorb spec_player / GSI-verify
 # overhead without consuming the user-configured highlight_pre_sec recording window.
 PREPARE_PREROLL_SEC: float = 5.0
@@ -394,10 +352,6 @@ class ExecutionResult:
     obs_record_directory: Optional[str] = None     # OBS output directory (from GetRecordDirectory)
     # Kill anchors converted to seconds inside the finished file (LiteCut kill axis)
     kill_markers: list[dict] = field(default_factory=list)
-    # Timing self-check: where the overlay meant to flash its calibration marker.
-    # Subtracting these from the flashes measured in the file gives the overlay's
-    # net latency, which is what decides whether an offset needs tuning at all.
-    calibration_markers: list[dict] = field(default_factory=list)
 
 
 # Max additional slot offsets to try after the demo-parsed base slot fails GSI verify.
@@ -813,7 +767,7 @@ class RecordingExecutor:
                     await asyncio.sleep(remaining_wait)
 
                 # 优先用 KP_5 静默暂停（不打开控制台），避免控制台注入期间 demo 继续跑约
-                # 300ms / 19 tick 导致 overlay 偏移。KP_5 tap 约 50ms，overshoot < 2 tick。
+                # 300ms / 19 tick 导致录制起点偏移。KP_5 tap 约 50ms，overshoot < 2 tick。
                 # 失败时降级到 console pause（仍需要 0.35s 等控制台动画关闭）。
                 _silent_ok = await demo_pause_silent_attempt()
                 if _silent_ok:
@@ -824,27 +778,9 @@ class RecordingExecutor:
                     # 等控制台关闭动画，防止 OBS 录到控制台画面
                     await asyncio.sleep(0.35)
                 logger.info("[RecordingV3] reached effective start_tick; starting OBS")
-                # ── KillFX overlay: load ────────────────────────────────────
-                _bus, _fx_tick_off = _overlay_bus(segment)
-                logger.info(
-                    "[overlay] seg=%d bus=%s kill_fx_tick_off=%s",
-                    segment.segment_index, _bus, _fx_tick_off,
-                )
-                if _bus:
-                    await _bus.broadcast({
-                        "type": "load",
-                        "segment_index": segment.segment_index,
-                        "start_tick": segment.start_tick,
-                        "end_tick": segment.end_tick,
-                        "tick_rate": plan.tick_rate,
-                        "kill_fx_offset_ticks": _fx_tick_off,
-                        "kills": segment.metadata.get("kill_track") or [],
-                    })
-
                 # ── 4. Start or Resume OBS recording ────────────────────────
                 # Hot path: StartRecord/ResumeRecord returns immediately on success.
                 # DO NOT call GetRecordStatus here — that delay would be recorded.
-                _bus_resume, _ = _overlay_bus(segment)
                 # Kill axis timestamps: obs_record_mono is video t=0 for this segment,
                 # demo_resume_mono is when playback actually resumed inside it.
                 obs_record_mono: Optional[float] = None
@@ -862,14 +798,7 @@ class RecordingExecutor:
                     await self._ctrl.start_record_safe()
                     obs_record_mono = time.monotonic()
                     obs_recording_started = True
-                    # ── kb overlay: resume 与 demo_resume 并发，消除 50ms sleep 带来的偏移 ──
-                    if _bus_resume:
-                        (resume_ok, _) = await asyncio.gather(
-                            demo_resume_silent_strict(),
-                            _bus_resume.broadcast({"type": "resume"}),
-                        )
-                    else:
-                        resume_ok = await demo_resume_silent_strict()
+                    resume_ok = await demo_resume_silent_strict()
                     demo_resume_mono = time.monotonic()
                     self._obs_on_black = False
                 else:
@@ -890,11 +819,7 @@ class RecordingExecutor:
                     # render its in-game cursor for one frame while focus and
                     # playback settle; revealing the game concurrently with the
                     # key tap made that cursor flash visible.
-                    tasks = [demo_resume_silent_strict()]
-                    if _bus_resume:
-                        tasks.append(_bus_resume.broadcast({"type": "resume"}))
-                    results_gather = await asyncio.gather(*tasks, return_exceptions=True)
-                    resume_ok = results_gather[0] if not isinstance(results_gather[0], Exception) else False
+                    resume_ok = await demo_resume_silent_strict()
                     demo_resume_mono = time.monotonic()
                     if self._fade is not None and resume_ok:
                         # The silent resume settles for 50 ms. Start revealing
@@ -1019,15 +944,6 @@ class RecordingExecutor:
                     result.recording_stopped_at = time.time()
                     final_output_path = obs_stop_path
                     await asyncio.to_thread(self._obs.disconnect)
-                    # ── recording overlay: end ──────────────────────────────
-                    _bus, _ = _overlay_bus(segment)
-                    if _bus:
-                        await _bus.broadcast({"type": "end"})
-                else:
-                    # ── recording overlay: pause ────────────────────────────
-                    _bus, _ = _overlay_bus(segment)
-                    if _bus:
-                        await _bus.broadcast({"type": "pause"})
 
                 # ── 5b. OBS pause confirmation before next segment's console ─
                 # After pause_record_safe returns "ok" or "ok_recovered", OBS is
@@ -1125,7 +1041,6 @@ class RecordingExecutor:
 
         result.output_path = final_output_path
         result.kill_markers = kill_timeline.markers
-        result.calibration_markers = kill_timeline.calibration_markers
         logger.info(
             "[RecordingV3] kill axis: %d marker(s) across %.2fs of recorded video",
             len(result.kill_markers), kill_timeline.accumulated_sec,

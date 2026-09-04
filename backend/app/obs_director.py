@@ -1853,6 +1853,8 @@ class RecordingWarmupExtras:
     pov_voice_disabled: bool = False
     # RecordingV3 queue: enable POV HUD lifecycle (install vpk + patch gameinfo.gi)
     pov_hud_enabled: bool = False
+    # Build the demo-specific in-game voice/input VPK independently of POV mode.
+    recording_hud_enabled: bool = False
     # Authoritative in-game input visualization. Presentation size and audio
     # gain are fixed product presets; only visibility policy and sound on/off
     # are session choices.
@@ -3652,6 +3654,10 @@ class OBSDirector:
 
         pov_mgr_v3: "Optional[PovHudManager]" = None
         pov_on_v3 = bool(warmup and getattr(warmup, "pov_hud_enabled", False))
+        recording_hud_on_v3 = bool(
+            pov_on_v3
+            or (warmup and getattr(warmup, "recording_hud_enabled", False))
+        )
         pov_voice_mode_v3 = normalize_pov_voice_mode(
             getattr(warmup, "pov_voice_mode", None) if warmup else None,
             legacy_voice_disabled=bool(
@@ -3661,11 +3667,9 @@ class OBSDirector:
         input_hud_enabled_v3 = bool(
             getattr(warmup, "input_hud_enabled", True) if warmup else True
         )
-        input_hud_display_mode_v3 = str(
-            getattr(warmup, "input_hud_display_mode", "hybrid") if warmup else "hybrid"
-        ).strip().lower()
-        if input_hud_display_mode_v3 not in {"hybrid", "always", "active"}:
-            input_hud_display_mode_v3 = "hybrid"
+        # Recording exposes a binary show/hide choice. A visible input HUD
+        # always uses the high-frequency resident (hybrid) presentation.
+        input_hud_display_mode_v3 = "hybrid"
         input_audio_enabled_v3 = bool(
             getattr(warmup, "input_audio_enabled", True) if warmup else True
         )
@@ -3682,26 +3686,15 @@ class OBSDirector:
             else DEFAULT_MAP_MATERIAL_ID
         )
         map_material_on_v3 = map_material_id_v3 != DEFAULT_MAP_MATERIAL_ID
-        recording_vpk_on_v3 = pov_on_v3 or skybox_on_v3 or map_material_on_v3
+        recording_vpk_on_v3 = recording_hud_on_v3 or skybox_on_v3 or map_material_on_v3
         pov_install_attempted = False
         pov_expected_gameinfo_sha256: Optional[str] = None
         pov_restoration: Optional[dict[str, Any]] = None
 
         try:
-            # ── Phase 0: 预构建 plan + 提取 overlay 轨道（CS2 启动前完成，避免进游戏后卡顿）────
-            from .env_utils import load_config as _phase0_load_cfg
-            _phase0_cfg = _phase0_load_cfg()
-
-            def _fx_on(_dto) -> bool:
-                value = getattr(_dto.options, "kill_fx_enabled", None)
-                return bool(_phase0_cfg.kill_fx_enabled) if value is None else bool(value)
-
+            # ── Phase 0: CS2 启动前预构建录制计划 ──────────────────────────
             _plan_cache: dict = {}   # {request_id: RecordingPlan}
-            _fx_any = any(_fx_on(dto) for dto in requests)
-            logger.info(
-                "[RecordingV3] Pre-building %d plans (kill_fx=%s)",
-                len(requests), _fx_any,
-            )
+            logger.info("[RecordingV3] Pre-building %d plans", len(requests))
             for dto in requests:
                 if self._abort_requested():
                     break
@@ -3710,83 +3703,7 @@ class OBSDirector:
                 except Exception as _bp_e:
                     logger.warning("[RecordingV3] pre-build plan failed %s: %s", dto.request_id, _bp_e)
 
-            if _fx_any and _plan_cache and not self._abort_requested():
-                from .features.demo_analysis.kill_track import extract_kill_track as _pre_extract_fx
-
-                async def _extract_seg_fx(_seg, _demo_path, _ctx_tags):
-                    if self._abort_requested():
-                        _seg.metadata["kill_track"] = []
-                        return
-                    try:
-                        _kills = await asyncio.to_thread(
-                            _pre_extract_fx,
-                            _demo_path,
-                            steamid=_seg.target_steamid64,
-                            player_name=_seg.target_player_name,
-                            start_tick=_seg.start_tick,
-                            end_tick=_seg.end_tick,
-                            context_tags=_ctx_tags,
-                            round_number=_seg.round,
-                        )
-                        _seg.metadata["kill_track"] = _kills
-                        logger.info(
-                            "[kill_fx] pre-extract seg=%d %d kills (ticks %d-%d)",
-                            _seg.segment_index, len(_kills), _seg.start_tick, _seg.end_tick,
-                        )
-                    except Exception as _e:
-                        logger.warning("[kill_fx] pre-extract seg=%d failed: %s", _seg.segment_index, _e)
-                        _seg.metadata["kill_track"] = []
-
-                # 收集所有需要提取的 KillFX 任务：(coroutine, args)
-                _overlay_tasks = []
-                for _dto in requests:
-                    _plan = _plan_cache.get(_dto.request_id)
-                    if not _plan:
-                        continue
-                    if _fx_on(_dto):
-                        _ctx_tags = list(getattr(_dto.source_ref, "context_tags", None) or [])
-                        for _seg in _plan.segments:
-                            # 受害者视角片段不展示目标玩家的击杀特效。
-                            if str(getattr(_seg.perspective, "value", _seg.perspective)) == "victim":
-                                continue
-                            _seg.metadata["kill_fx_tick_offset"] = getattr(
-                                _dto.options, "kill_fx_tick_offset", None,
-                            )
-                            _overlay_tasks.append((_extract_seg_fx, (_seg, _plan.demo_path, _ctx_tags)))
-
-                _BATCH = 4
-                _overlay_total = len(_overlay_tasks)
-                _overlay_done = 0
-                _task_batches = [
-                    _overlay_tasks[index: index + _BATCH]
-                    for index in range(0, len(_overlay_tasks), _BATCH)
-                ]
-                logger.info(
-                    "[kill_fx] Pre-extracting %d overlay tasks before CS2 launch",
-                    _overlay_total,
-                )
-
-                from .recording.overlay_prebuild_state import (
-                    finish as _overlay_finish,
-                    reset as _overlay_reset,
-                    start as _overlay_start,
-                    update as _overlay_update,
-                )
-                _overlay_start(_overlay_total)
-
-                for _batch_index, _batch in enumerate(_task_batches):
-                    if self._abort_requested():
-                        logger.info("[kill_fx] Pre-extraction aborted at batch %d", _batch_index)
-                        _overlay_reset()
-                        break
-                    await asyncio.gather(*[_fn(*_args) for _fn, _args in _batch])
-                    _overlay_done += len(_batch)
-                    _overlay_update(_overlay_done, _overlay_total)
-                else:
-                    _overlay_finish()
-                logger.info("[kill_fx] Pre-extraction done")
-
-            # An abort may arrive while plans/overlay tracks are being built.
+            # An abort may arrive while plans are being built.
             # Do not continue into POV installation or launch CS2 after that.
             self._check_abort()
 
@@ -3801,6 +3718,7 @@ class OBSDirector:
                         raise
                     logger.error("[RecordingV3][POV] setup failed: %s; continuing without POV HUD", _pov_e)
                     pov_on_v3 = False
+                    recording_hud_on_v3 = False
                     recording_vpk_on_v3 = False
 
             for job_idx, (demo_key, demo_requests) in enumerate(demo_groups.items()):
@@ -3835,7 +3753,7 @@ class OBSDirector:
                             demo_map_name,
                         )
                         pov_install_attempted = True
-                        if pov_on_v3:
+                        if recording_hud_on_v3:
                             pov_mgr_v3.install(
                                 map_name=demo_map_name,
                                 demo_path=demo_abs,
@@ -3847,7 +3765,9 @@ class OBSDirector:
                                 input_hud_scale_percent=100,
                                 input_audio_enabled=input_audio_enabled_v3,
                                 input_audio_volume_percent=100,
-                                combat_stats_enabled=combat_stats_hud_enabled_v3,
+                                combat_stats_enabled=(
+                                    combat_stats_hud_enabled_v3 if pov_on_v3 else False
+                                ),
                             )
                         else:
                             pov_mgr_v3.install(
@@ -3879,6 +3799,7 @@ class OBSDirector:
                             _pov_e,
                         )
                         pov_on_v3 = False
+                        recording_hud_on_v3 = False
                         self._pov_enabled = False
 
                 # ── CS2 launch ────────────────────────────────────────────────
@@ -3939,7 +3860,7 @@ class OBSDirector:
                 if warmup is not None:
                     effective_warmup_cmds = self._recording_warmup_console_lines(
                         warmup,
-                        pov_enabled=self._pov_enabled,
+                        pov_enabled=recording_hud_on_v3,
                     )
                     if map_material_on_v3:
                         effective_warmup_cmds = [
@@ -3961,6 +3882,15 @@ class OBSDirector:
                             ),
                         ]
                         effective_warmup_cmds = [*effective_warmup_cmds, *pov_cmds]
+                    elif recording_hud_on_v3 and pov_voice_mode_v3 != "mute":
+                        # Voice/input VPK mode is independent from the POV cvar
+                        # preset. Only enable the native demo voice path here;
+                        # the Panorama payload owns its selected audience mask.
+                        effective_warmup_cmds = [
+                            *effective_warmup_cmds,
+                            "voice_modenable 1",
+                            "snd_voipvolume 1",
+                        ]
                     if effective_warmup_cmds:
                         logger.info(
                             "[RecordingV3] applying warmup console commands: %d",
@@ -4050,7 +3980,7 @@ class OBSDirector:
                 for dto in demo_requests:
                     self._check_abort()
 
-                    # 优先使用预构建的 plan（已含 KillFX 数据），避免重复 build_plan
+                    # 优先使用预构建的 plan，避免重复 build_plan
                     plan = _plan_cache.get(dto.request_id)
                     if plan is None:
                         logger.info("[RecordingV3] build plan (fallback): request_id=%s type=%s",
@@ -4191,9 +4121,8 @@ class OBSDirector:
                         ],
                     })
 
-                    # 产物 JSON 是时序自检唯一的落盘出口：calibration_markers 只存在于
-                    # ExecutionResult 里，不进 clip_meta。传最终路径而不是
-                    # result.output_path，后者在上面的重命名之后已经指向不存在的文件。
+                    # 传最终路径而不是 result.output_path，后者在上面的重命名之后
+                    # 已经指向不存在的文件。
                     try:
                         write_result(result, output_path=final_output_path)
                     except Exception as exc:  # noqa: BLE001 - 诊断产物不该影响录制

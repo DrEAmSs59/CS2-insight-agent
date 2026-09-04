@@ -1,9 +1,4 @@
-"""产物 JSON 是时序自检唯一的落盘出口，两条录制路径都必须写。
-
-``calibration_markers`` 只存在于 ``ExecutionResult`` 里，不进 ``clip_meta``。V3 流水线
-(``obs_director``) 原本执行完根本不写产物 JSON，表现是"录制完全正常但没有任何东西可测"，
-而且不报错。这里把两件容易再次走丢的事钉住：V3 有调用、且传的是重命名之后的路径。
-"""
+"""两条录制路径都必须写入产物 JSON。"""
 
 import json
 import sys
@@ -28,18 +23,12 @@ def _result(**kwargs) -> ExecutionResult:
 
 
 class TestWriteResult:
-    def test_persists_the_calibration_markers(self, tmp_path):
-        result = _result(
-            calibration_markers=[{"video_sec": 1.5, "tick": 100, "offset_ticks": 6}],
-            kill_markers=[{"video_sec": 2.0}],
-        )
+    def test_persists_the_kill_markers(self, tmp_path):
+        result = _result(kill_markers=[{"video_sec": 2.0}])
 
         out = write_result(result, tmp_path)
         data = json.loads(out.read_text(encoding="utf-8"))
 
-        assert data["calibration_markers"] == [
-            {"video_sec": 1.5, "tick": 100, "offset_ticks": 6}
-        ]
         assert data["kill_markers"] == [{"video_sec": 2.0}]
 
     def test_filename_carries_the_request_id_prefix(self, tmp_path):

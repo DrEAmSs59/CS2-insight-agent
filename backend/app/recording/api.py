@@ -41,8 +41,6 @@ from .player_aliases import prepare_recording_aliases
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/recording", tags=["recording"])
 
-_KILL_FX_SOURCE = "CS2 Kill FX Overlay"
-
 # ── Lazy singleton for the shared cs2-insight.db ────────────────────────────
 _montage_db: Optional[MontageDB] = None
 
@@ -458,35 +456,6 @@ async def execute_recording(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-    # kill_track: 为击杀特效 overlay 填充窗口内的特殊击杀事件。
-    _exec_cfg = load_config()
-    _fx_req = dto.options.kill_fx_enabled
-    if _fx_req is None:
-        _fx_req = _exec_cfg.kill_fx_enabled
-    if _fx_req:
-        from ..features.demo_analysis.kill_track import extract_kill_track as _extract_fx
-        _ctx_tags = list(dto.source_ref.context_tags or [])
-        for _seg in plan.segments:
-            # 受害者视角片段不展示目标玩家的击杀特效。
-            if str(getattr(_seg.perspective, "value", _seg.perspective)) == "victim":
-                continue
-            _seg.metadata["kill_fx_tick_offset"] = dto.options.kill_fx_tick_offset
-            try:
-                _seg.metadata["kill_track"] = _extract_fx(
-                    plan.demo_path,
-                    steamid=_seg.target_steamid64,
-                    player_name=_seg.target_player_name,
-                    start_tick=_seg.start_tick,
-                    end_tick=_seg.end_tick,
-                    context_tags=_ctx_tags,
-                    round_number=_seg.round,
-                )
-            except Exception as _fx_e:
-                logger.warning(
-                    "kill_track extraction failed seg=%d: %s", _seg.segment_index, _fx_e,
-                )
-                _seg.metadata["kill_track"] = []
-
     config = load_config()
     obs_cfg = config.obs if hasattr(config, "obs") else OBSConfig()
     obs_client = OBSClient(obs_cfg)
@@ -541,19 +510,12 @@ class QueueRecordingRequest(BaseModel):
     requests: list[RecordingRequestDTO] = Field(..., min_length=1, max_length=100)
     warmup: Optional[dict] = None
     obs: Optional[dict] = None
-    pov_hud: Optional[dict] = None  # {enabled, radar_mode, teamcounter_numeric, voice_mode}
+    pov_hud: Optional[dict] = None  # POV plus independent in-game voice/input presentation choices
     skybox: Optional[dict] = None  # {id: default|built-in id|custom:<uuid hex>}
     map_material: Optional[dict] = None  # {id: default|waxed_reflection}
     # 仅本次录制队列生效，不写入 cs2-insight.config.json
     cs2_extra_launch_args: Optional[str] = None
     record_inject_console_lines: Optional[str] = None
-
-
-@router.get("/overlay-prebuild-status")
-def get_overlay_prebuild_status() -> dict:
-    """轮询录制特效数据预构建进度，供前端 loading 状态展示。"""
-    from .overlay_prebuild_state import get as _overlay_get
-    return _overlay_get()
 
 
 @router.post("/queue", response_model=list[dict])
@@ -617,44 +579,6 @@ async def execute_recording_queue(
     try:
         _pre_obs_client = OBSClient(obs_cfg)
         _pre_obs_client.connect()
-        try:
-            # Auto-setup requested overlay Browser Sources.
-            _kill_fx_requested = any(
-                (getattr(dto.options, "kill_fx_enabled", None) is True)
-                or (getattr(dto.options, "kill_fx_enabled", None) is None and cfg.kill_fx_enabled)
-                for dto in req.requests
-            )
-            if _kill_fx_requested:
-                # KillFX 必须建到录制专用场景（与 Game Capture 同场景）。
-                _scene = cfg.obs_game_scene_name
-                # 专用场景此时可能尚未创建（fade controller 在录制阶段才创建），先幂等确保存在。
-                try:
-                    if _scene not in _pre_obs_client.get_scene_names():
-                        _pre_obs_client.create_scene(_scene)
-                except Exception as _sc_e:
-                    logger.warning(
-                        "[RecordingV3] kill fx overlay: ensure scene %r failed (non-fatal): %s",
-                        _scene, _sc_e,
-                    )
-                import os as _os
-                _port = int(_os.environ.get("CS2_INSIGHT_PORT") or _os.environ.get("PORT") or 8000)
-                # 查询参数用于让已有 OBS Browser Source 刷新到新版布局。
-                _fx_url = f"http://127.0.0.1:{_port}/overlay/killfx.html?v=overlay-offset-3"
-                ok_fx = _pre_obs_client.ensure_browser_overlay_in_scene(
-                    _scene,
-                    _fx_url,
-                    source_name=_KILL_FX_SOURCE,
-                    reroute_audio=True,
-                )
-                logger.info(
-                    "[RecordingV3] kill fx overlay auto-setup: scene=%r ok=%s",
-                    _scene, ok_fx,
-                )
-        except Exception as overlay_error:
-            logger.warning(
-                "[RecordingV3] overlay auto-setup failed (non-fatal): %s",
-                overlay_error,
-            )
         try:
             _pre_obs_client.disconnect()
         except Exception:
@@ -727,10 +651,11 @@ async def execute_recording_queue(
         except Exception as e:
             logger.warning("[RecordingV3] warmup parse failed: %s", e)
 
-    if req.pov_hud and req.pov_hud.get("enabled"):
+    if req.pov_hud is not None:
         pov_hud_cfg = req.pov_hud
         if warmup_extras is None:
             warmup_extras = RecordingWarmupExtras()
+        pov_enabled = bool(pov_hud_cfg.get("enabled"))
         explicit_voice_mode = pov_hud_cfg.get("voice_mode")
         voice_mode = normalize_pov_voice_mode(
             explicit_voice_mode
@@ -751,15 +676,29 @@ async def execute_recording_queue(
         ).strip().lower()
         if input_hud_display_mode not in {"hybrid", "always", "active"}:
             input_hud_display_mode = "hybrid"
+        input_hud_enabled = bool(
+            pov_hud_cfg.get("input_hud_enabled", warmup_extras.input_hud_enabled)
+        )
+        has_independent_hud_choice = (
+            "voice_mode" in pov_hud_cfg or "input_hud_enabled" in pov_hud_cfg
+        )
+        recording_hud_enabled = bool(
+            pov_enabled
+            or (
+                has_independent_hud_choice
+                and (voice_mode != "mute" or input_hud_enabled)
+            )
+        )
         # Patch warmup extras with POV HUD settings
         warmup_extras = dataclasses.replace(
             warmup_extras,
-            pov_hud_enabled=True,
+            pov_hud_enabled=pov_enabled,
+            recording_hud_enabled=recording_hud_enabled,
             pov_radar_mode=int(pov_hud_cfg.get("radar_mode", 0)),
             pov_teamcounter_numeric=bool(pov_hud_cfg.get("teamcounter_numeric", False)),
             pov_voice_mode=voice_mode,
             pov_voice_disabled=False,
-            input_hud_enabled=bool(pov_hud_cfg.get("input_hud_enabled", True)),
+            input_hud_enabled=input_hud_enabled,
             input_hud_display_mode=input_hud_display_mode,
             input_audio_enabled=bool(pov_hud_cfg.get("input_audio_enabled", True)),
             combat_stats_hud_enabled=bool(
@@ -767,8 +706,11 @@ async def execute_recording_queue(
             ),
         )
         logger.info(
-            "[RecordingV3] POV HUD enabled: radar_mode=%s, teamcounter_numeric=%s, "
+            "[RecordingV3] in-game HUD choices: pov=%s, recording_hud=%s, "
+            "radar_mode=%s, teamcounter_numeric=%s, "
             "voice_mode=%s, input_hud=%s, input_mode=%s, input_audio=%s, combat_stats=%s",
+            warmup_extras.pov_hud_enabled,
+            warmup_extras.recording_hud_enabled,
             warmup_extras.pov_radar_mode,
             warmup_extras.pov_teamcounter_numeric,
             warmup_extras.pov_voice_mode,

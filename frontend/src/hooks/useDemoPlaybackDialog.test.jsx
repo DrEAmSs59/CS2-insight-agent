@@ -42,25 +42,19 @@ describe("useDemoPlaybackDialog restoration monitor", () => {
     API.post.mockReset();
   });
 
-  it("keeps alias input mounted while typing, submits original identity and resets next session", async () => {
+  it("keeps the player-alias entry hidden and launches without an alias payload", async () => {
     getDemoPlaybackPreflight.mockResolvedValue({ cs2_path_configured: true });
     playDemoInCs2.mockResolvedValue({ ok: true });
-    API.post.mockResolvedValue({ data: { players: [{ steamid64: "76561199032006224", name: "Etagekax", team_number: 2 }] } });
     render(<Harness />);
     fireEvent.click(screen.getByRole("button", { name: "open" }));
-    fireEvent.click(await screen.findByRole("checkbox", { name: "启用改名" }));
-    const input = await screen.findByRole("textbox", { name: "Etagekax 的自定义昵称" });
-    input.focus();
-    fireEvent.change(input, { target: { value: "京介 🦋" } });
-    expect(document.activeElement).toBe(input);
-    expect(input.value).toBe("京介 🦋");
-    fireEvent.click(screen.getByRole("button", { name: /启动高级播放 Demo/ }));
-    await waitFor(() => expect(playDemoInCs2).toHaveBeenCalledWith(expect.objectContaining({
-      advancedPlayback: expect.objectContaining({ player_aliases: { "76561199032006224": "京介 🦋" } }),
-    })));
+    const launchButton = await screen.findByRole("button", { name: /启动高级播放 Demo/ });
+    expect(screen.queryByText("自定义玩家昵称")).toBeNull();
+    expect(screen.queryByRole("checkbox", { name: "启用改名" })).toBeNull();
+    fireEvent.click(launchButton);
+    await waitFor(() => expect(playDemoInCs2).toHaveBeenCalledTimes(1));
+    expect(playDemoInCs2.mock.calls[0][0].advancedPlayback).not.toHaveProperty("player_aliases");
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
-    fireEvent.click(screen.getByRole("button", { name: "open" }));
-    expect((await screen.findByRole("checkbox", { name: "启用改名" })).checked).toBe(false);
+    expect(API.post).not.toHaveBeenCalled();
   });
 
   it("launches advanced playback directly from the preview and opens factual restoration", async () => {
@@ -99,6 +93,7 @@ describe("useDemoPlaybackDialog restoration monitor", () => {
     await screen.findByRole("button", { name: /启动高级播放 Demo/ });
     const skyboxSelect = screen.getByRole("combobox", { name: "高级播放天空盒" });
     const materialSelect = screen.getByRole("combobox", { name: "高级播放地图材质" });
+    expect(screen.queryByRole("combobox", { name: "按键显示方式" })).toBeNull();
     expect(skyboxSelect.value).toBe("cartoon3");
     expect(materialSelect.value).toBe("waxed_reflection");
     fireEvent.change(skyboxSelect, { target: { value: customSkyboxId } });
@@ -111,11 +106,11 @@ describe("useDemoPlaybackDialog restoration monitor", () => {
         enabled: true,
         skybox_id: customSkyboxId,
         map_material_id: "waxed_reflection",
-        input_hud_enabled: true,
-        input_hud_display_mode: "hybrid",
-        input_audio_enabled: true,
       }),
     }));
+    const playbackOptions = playDemoInCs2.mock.calls[0][0].advancedPlayback;
+    expect(playbackOptions).not.toHaveProperty("input_hud_enabled");
+    expect(playbackOptions).not.toHaveProperty("input_hud_display_mode");
     await waitFor(() => expect(getDemoPlaybackStatus).toHaveBeenCalledWith("session-7"));
   });
 });

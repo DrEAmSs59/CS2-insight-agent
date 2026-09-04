@@ -11,7 +11,6 @@ import {
   unexpectedCs2ExitRecoveryMessageKey,
 } from "../../utils/recordingAbort";
 import {
-  applySessionKillFxToRequests,
   applySessionObsTransitionToRequests,
   buildRecordingQueueRequestsFromQueue,
 } from "../../utils/recordingBatch";
@@ -133,28 +132,6 @@ export function useRecordingSessionController({
     setBatchRecording(true);
     setProgressText(t("common.preparingMapResources"), { loading: true });
 
-    const overlayPrebuildEnabled = session.kill_fx_enabled;
-    let overlayPollTimer = null;
-    if (overlayPrebuildEnabled) {
-      overlayPollTimer = setInterval(async () => {
-        if (recordingAbortRequestedRef.current) return;
-        try {
-          const { data: status } = await API.get("recording/overlay-prebuild-status");
-          if (recordingAbortRequestedRef.current) return;
-          if (status?.active) {
-            setProgressText(t("app.overlayPrebuildProgress", {
-              done: status.done,
-              total: status.total,
-            }), { loading: true });
-          } else if (status?.done > 0) {
-            setProgressText(t("app.overlayPrebuildReady"), { loading: true });
-          }
-        } catch {
-          // Prebuild progress is advisory; recording remains the source of truth.
-        }
-      }, 1000);
-    }
-
     let openResultsAfterRecording = false;
     try {
       let requests = buildRecordingQueueRequestsFromQueue(
@@ -169,20 +146,17 @@ export function useRecordingSessionController({
         return;
       }
       requests = applySessionObsTransitionToRequests(requests, session);
-      requests = applySessionKillFxToRequests(requests, session);
       requests = applyRecordingPlayerAliases(requests, session.player_aliases_by_demo);
-      const povHud = session.experimental_pov_enabled
-        ? {
-            enabled: true,
-            radar_mode: 0,
-            teamcounter_numeric: Boolean(warmupForApi?.pov_teamcounter_numeric),
-            voice_mode: normalizePovVoiceMode(warmupForApi?.pov_voice_mode),
-            input_hud_enabled: session.input_hud_enabled !== false,
-            input_hud_display_mode: session.input_hud_display_mode,
-            input_audio_enabled: session.input_audio_enabled !== false,
-            combat_stats_hud_enabled: session.combat_stats_hud_enabled !== false,
-          }
-        : undefined;
+      const povHud = {
+        enabled: session.experimental_pov_enabled,
+        radar_mode: 0,
+        teamcounter_numeric: Boolean(warmupForApi?.pov_teamcounter_numeric),
+        voice_mode: normalizePovVoiceMode(warmupForApi?.pov_voice_mode),
+        input_hud_enabled: session.input_hud_enabled !== false,
+        input_hud_display_mode: "hybrid",
+        input_audio_enabled: session.input_audio_enabled !== false,
+        combat_stats_hud_enabled: session.combat_stats_hud_enabled !== false,
+      };
       const body = {
         requests,
         warmup: warmupForApi,
@@ -191,7 +165,7 @@ export function useRecordingSessionController({
         record_inject_console_lines: session.record_inject_console_lines,
         skybox: { id: session.recording_skybox },
         map_material: { id: session.recording_map_material },
-        ...(povHud ? { pov_hud: povHud } : {}),
+        pov_hud: povHud,
       };
       if (!recordingAbortRequestedRef.current) {
         setProgressText(t("common.preparingMapResources"), { loading: true });
@@ -280,7 +254,6 @@ export function useRecordingSessionController({
       const toastKey = recordingAbortRequestedRef.current ? "app.abortFail" : "app.batchRecordFail";
       setProgressText(t(toastKey, { msg: detail }), { isError: true });
     } finally {
-      if (overlayPollTimer) clearInterval(overlayPollTimer);
       recordingAbortRequestedRef.current = false;
       setRecordingAbortRequested(false);
       setBatchRecording(false);

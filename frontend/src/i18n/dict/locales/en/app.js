@@ -59,8 +59,6 @@ export default {
   "app.obsConnectFail": "Cannot connect to OBS. Please ensure OBS is running and WebSocket settings are correct before recording.",
   "app.obsCheckFail": "OBS connection check failed: {msg}",
   "app.preparingRecording": "Preparing recording…",
-  "app.overlayPrebuildProgress": "Pre-building overlay event data {done}/{total}, please wait…",
-  "app.overlayPrebuildReady": "Overlay event data ready, launching CS2…",
   "app.queueNoRecordableClips": "No recordable clips in queue (unsupported types were skipped).",
   "app.recordStartFailed": "Recording failed to start",
   "app.batchRecordFail": "Batch recording failed: {msg}",
