@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { PackageOpen, Shuffle, WifiOff } from "lucide-react";
+import { Gamepad2, Loader2, PackageOpen, Rotate3D, Shuffle, WifiOff } from "lucide-react";
 import { useT } from "../../../i18n/useT.js";
 import Modal from "../../../components/ui/Modal.jsx";
 import {
@@ -284,8 +284,12 @@ export default function SkinReplacementPicker({
   sourceItem,
   locale,
   onlineAssetsEnabled,
+  inspectBusy = false,
+  inspectFeedback = null,
   onClose,
   onConfirm,
+  onInspectInGame,
+  onInspect3d,
 }) {
   const t = useT();
   const candidates = useMemo(() => listSkinCandidates(sourceItem), [sourceItem]);
@@ -343,12 +347,15 @@ export default function SkinReplacementPicker({
   };
 
   const replacementPreview = selected
-    ? { ...selected, paint_wear: wear, paint_seed: seed }
+    ? { ...selected, paint_wear: Number(wear), paint_seed: Number(seed) }
     : null;
 
   const wearValid = isValidWear(wear, selectedWearBounds.min, selectedWearBounds.max);
   const seedValid = isValidSeed(seed);
   const canConfirm = Boolean(selected) && wearValid && seedValid;
+  const canInspect3d = canConfirm
+    && onlineAssetsEnabled
+    && ["weapon", "melee"].includes(String(selected?.type || ""));
 
   const handleConfirm = () => {
     if (!canConfirm || !selected) return;
@@ -435,6 +442,27 @@ export default function SkinReplacementPicker({
             wearMin={selectedWearBounds.min}
             wearMax={selectedWearBounds.max}
           />
+          <div className="grid grid-cols-2 gap-2" data-testid="skin-picker-inspect-actions">
+            <button
+              type="button"
+              disabled={!canConfirm || inspectBusy}
+              onClick={() => onInspectInGame?.(replacementPreview)}
+              className="inline-flex h-9 min-w-0 items-center justify-center gap-1.5 rounded-[8px] border border-cs2-border bg-cs2-bg-input px-2 text-[10px] font-bold text-cs2-text-secondary transition-colors hover:border-cs2-text-muted hover:bg-cs2-bg-hover hover:text-cs2-text-primary disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              {inspectBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Gamepad2 className="h-3.5 w-3.5" />}
+              {t("analysis.cosmetics.inspectInGame")}
+            </button>
+            <button
+              type="button"
+              disabled={!canInspect3d}
+              onClick={() => onInspect3d?.(replacementPreview)}
+              className="inline-flex h-9 min-w-0 items-center justify-center gap-1.5 rounded-[8px] border border-cs2-border bg-cs2-bg-input px-2 text-[10px] font-bold text-cs2-text-secondary transition-colors hover:border-cs2-text-muted hover:bg-cs2-bg-hover hover:text-cs2-text-primary disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              <Rotate3D className="h-3.5 w-3.5" />
+              {t("analysis.cosmetics.inspect3d")}
+            </button>
+          </div>
+          {inspectFeedback ? <p role={inspectFeedback.tone === "error" ? "alert" : "status"} className={`text-[9px] leading-relaxed ${inspectFeedback.tone === "error" ? "text-rose-300" : "text-emerald-300"}`}>{inspectFeedback.text}</p> : null}
         </div>
 
         <div className="flex min-h-0 min-w-0 flex-col gap-3 overflow-hidden">

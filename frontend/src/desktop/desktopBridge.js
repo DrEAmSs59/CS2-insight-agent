@@ -47,6 +47,7 @@ export const desktopBridge = isDesktopApp
           });
       },
       writeClipboardText: (text) => writeText(String(text ?? "")),
+      launchCs2Inspect: (hex) => invoke("launch_cs2_inspect", { hex: String(hex ?? "") }),
       async showOpenDialog(options = {}) {
         const properties = Array.isArray(options.properties) ? options.properties : [];
         const selected = await open({

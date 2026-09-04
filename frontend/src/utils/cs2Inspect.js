@@ -3,95 +3,139 @@
  *  Licensed under the PolyForm Noncommercial License 1.0.0. See LICENSE in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { CS2EconomyInstance, CS2Inventory } from "@ianlucas/cs2-lib";
-import { generateInspectLink } from "@ianlucas/cs2-lib-inspect";
+import { CEconItemPreviewDataBlock } from "@ianlucas/cs2-lib-inspect/dist/Protobufs/cstrike15_gcmessages.js";
+
+const CS2_INSPECT_URL_PREFIX = "steam://rungame/730/76561202255233023/+csgo_econ_action_preview%20";
+const CS2_INSPECT_COMMAND_PREFIX = "csgo_econ_action_preview ";
+const INSPECT_HEX_PATTERN = /^[0-9a-f]+$/i;
 
 function finiteNumber(value) {
   const number = Number(value);
   return Number.isFinite(number) ? number : undefined;
 }
 
-function catalogItem(item) {
-  const id = Number(item?.catalog_id);
-  const definition = Number(item?.def_index);
-  const paintIndex = Number(item?.paint_index || 0);
-  if (!Number.isInteger(id) || id < 0 || !Number.isInteger(definition)) return null;
-  return {
-    id,
-    baseId: Number.isInteger(Number(item?.base_catalog_id)) ? Number(item.base_catalog_id) : undefined,
-    def: definition,
-    index: paintIndex,
-    type: String(item?.type || "weapon"),
-    model: String(item?.model || "") || undefined,
-    image: String(item?.image_url || "").replace(/^https:\/\/cdn\.cstrike\.app/, "") || undefined,
-    rarity: String(item?.rarity || "#ded6cc"),
-    teams: Number.isInteger(Number(item?.teams)) ? Number(item.teams) : undefined,
-    wearMin: finiteNumber(item?.wear_min),
-    wearMax: finiteNumber(item?.wear_max),
-  };
-}
-
-function stickerCatalogItem(sticker) {
-  const raw = catalogItem({
-    ...sticker,
-    def_index: sticker?.def_index ?? 1209,
-    type: "sticker",
-  });
-  // CS2EconomyInstance requires every sticker catalog row to have a category.
-  // Demo evidence only exposes the sticker kit, not Valve's marketplace
-  // category, and the category is irrelevant to preview serialization.
-  return raw ? { ...raw, type: "sticker", category: "demo" } : null;
-}
-
-/** Build Valve's self-contained CS2 preview link from evidence stored in a Demo. */
-export function buildCs2InspectLink(item) {
-  const main = catalogItem(item);
-  if (!main || item?.catalog_exact === false || item?.finish_known === false) {
-    throw new Error("The Demo item is not an exact cs2-lib catalog match.");
+function requiredInteger(value, label, { min = 0, max = 0xffffffff } = {}) {
+  const number = Number(value);
+  if (!Number.isInteger(number) || number < min || number > max) {
+    throw new Error(`${label} is outside the supported range.`);
   }
+  return number;
+}
 
-  const stickerRows = Array.isArray(item?.stickers) ? item.stickers : [];
-  const stickerItems = stickerRows.map(stickerCatalogItem).filter(Boolean);
-  const economy = new CS2EconomyInstance();
-  const language = {
-    [main.id]: { name: String(item?.name_en || item?.name_zh || item?.model || "CS2 item") },
-  };
-  stickerRows.forEach((sticker) => {
-    const id = Number(sticker?.catalog_id);
-    if (Number.isInteger(id)) {
-      language[id] = { name: String(sticker?.name_en || sticker?.name_zh || "Sticker") };
+function optionalInteger(value, { min = 0, max = 0xffffffff } = {}) {
+  const number = Number(value);
+  return Number.isInteger(number) && number >= min && number <= max ? number : undefined;
+}
+
+function floatToUint32(value) {
+  const bytes = new ArrayBuffer(4);
+  const view = new DataView(bytes);
+  view.setFloat32(0, value, true);
+  return view.getUint32(0, true);
+}
+
+function crc32(bytes) {
+  let crc = 0xffffffff;
+  for (const byte of bytes) {
+    crc ^= byte;
+    for (let bit = 0; bit < 8; bit += 1) {
+      crc = (crc >>> 1) ^ ((crc & 1) ? 0xedb88320 : 0);
     }
-  });
-  economy.load({ items: [main, ...stickerItems], language });
-
-  const attributes = { id: main.id };
-  const wear = finiteNumber(item?.paint_wear);
-  const seed = finiteNumber(item?.paint_seed);
-  if (wear !== undefined) attributes.wear = Number(wear.toFixed(6));
-  if (seed !== undefined) attributes.seed = Math.trunc(seed);
-  if (stickerItems.length) {
-    attributes.stickers = Object.fromEntries(stickerRows.flatMap((sticker, index) => {
-      const id = Number(sticker?.catalog_id);
-      if (!Number.isInteger(id)) return [];
-      const stickerData = { id };
-      const stickerWear = finiteNumber(sticker?.wear);
-      // cs2-lib models sticker scraping in 0.01 steps. Demo entity floats can
-      // contain binary noise (for example 0.905636), which its inventory
-      // validator correctly rejects unless normalized to that protocol step.
-      if (stickerWear !== undefined) stickerData.wear = Number(stickerWear.toFixed(2));
-      return [[String(sticker?.slot ?? index), stickerData]];
-    }));
   }
+  return (crc ^ 0xffffffff) >>> 0;
+}
 
-  const inventory = new CS2Inventory({ economy });
-  inventory.add(attributes);
-  const inventoryItem = inventory.getAll()[0];
-  // Demo name tags are already accepted by Valve. Assign after cs2-lib's
-  // editor-oriented validation so legacy Unicode and full-width punctuation
-  // remain byte-for-byte intact in the generated preview payload.
-  const customName = typeof item?.custom_name === "string" ? item.custom_name : "";
-  if (customName) inventoryItem.nameTag = customName;
-  return generateInspectLink(inventoryItem);
+function encodeInspectHex(attributes) {
+  const payload = CEconItemPreviewDataBlock.toBinary(attributes);
+  const encoded = new Uint8Array(payload.length + 5);
+  encoded[0] = 0;
+  encoded.set(payload, 1);
+  const crc = crc32(encoded.subarray(0, payload.length + 1));
+  const checksum = ((crc & 0xffff) ^ Math.imul(payload.length, crc)) >>> 0;
+  new DataView(encoded.buffer).setUint32(payload.length + 1, checksum, false);
+  return Array.from(encoded, (byte) => byte.toString(16).padStart(2, "0")).join("").toUpperCase();
+}
+
+function inspectSticker(sticker, fallbackSlot) {
+  const stickerId = optionalInteger(
+    sticker?.paint_index ?? sticker?.sticker_id ?? sticker?.stickerId ?? sticker?.kit_id,
+    { min: 1 },
+  );
+  if (stickerId === undefined) return null;
+  const result = {
+    slot: optionalInteger(sticker?.slot, { min: 0 }) ?? fallbackSlot,
+    stickerId,
+  };
+  const wear = finiteNumber(sticker?.wear);
+  const scale = finiteNumber(sticker?.scale);
+  const rotation = finiteNumber(sticker?.rotation);
+  const offsetX = finiteNumber(sticker?.x ?? sticker?.offset_x ?? sticker?.offset?.x);
+  const offsetY = finiteNumber(sticker?.y ?? sticker?.offset_y ?? sticker?.offset?.y);
+  if (wear !== undefined && wear >= 0 && wear <= 1) result.wear = wear;
+  if (scale !== undefined) result.scale = scale;
+  if (rotation !== undefined) result.rotation = rotation;
+  if (offsetX !== undefined) result.offsetX = offsetX;
+  if (offsetY !== undefined) result.offsetY = offsetY;
+  return result;
+}
+
+function inspectKeychain(keychain) {
+  if (!keychain) return null;
+  const stickerId = optionalInteger(
+    keychain?.definition_id ?? keychain?.definitionId ?? keychain?.paint_index ?? keychain?.sticker_id,
+    { min: 1 },
+  );
+  if (stickerId === undefined) return null;
+  const result = {
+    slot: optionalInteger(keychain?.slot, { min: 0 }) ?? 0,
+    stickerId,
+  };
+  const offsetX = finiteNumber(keychain?.x ?? keychain?.offset_x ?? keychain?.offset?.x);
+  const offsetY = finiteNumber(keychain?.y ?? keychain?.offset_y ?? keychain?.offset?.y);
+  const offsetZ = finiteNumber(keychain?.z ?? keychain?.offset_z ?? keychain?.offset?.z);
+  const pattern = optionalInteger(keychain?.seed ?? keychain?.pattern, { min: 0 });
+  if (offsetX !== undefined) result.offsetX = offsetX;
+  if (offsetY !== undefined) result.offsetY = offsetY;
+  if (offsetZ !== undefined) result.offsetZ = offsetZ;
+  if (pattern !== undefined) result.pattern = pattern;
+  return result;
+}
+
+/** Build Valve's modern self-contained CS2 preview URL directly from item fields. */
+export function buildCs2InspectLink(item) {
+  if (item?.finish_known === false) {
+    throw new Error("The Demo does not contain a trustworthy paint kit for this item.");
+  }
+  const defindex = requiredInteger(item?.def_index ?? item?.def, "def_index", { min: 1 });
+  const paintindex = requiredInteger(item?.paint_index ?? item?.index ?? 0, "paint_index");
+  const wear = finiteNumber(item?.paint_wear ?? item?.wear) ?? 0;
+  const seed = Math.trunc(finiteNumber(item?.paint_seed ?? item?.seed) ?? 0);
+  if (wear < 0 || wear > 1) throw new Error("paint_wear must be between 0 and 1.");
+  if (seed < 0 || seed > 1000) throw new Error("paint_seed must be between 0 and 1000.");
+
+  const stickers = (Array.isArray(item?.stickers) ? item.stickers : [])
+    .slice(0, 5)
+    .map(inspectSticker)
+    .filter(Boolean);
+  const keychain = inspectKeychain(item?.keychain ?? item?.keychains?.[0]);
+  const attributes = {
+    defindex,
+    paintindex,
+    paintwear: floatToUint32(wear),
+    paintseed: seed,
+    stickers,
+    keychains: keychain ? [keychain] : [],
+  };
+  if (typeof item?.custom_name === "string" && item.custom_name) {
+    attributes.customname = item.custom_name;
+  }
+  const statTrak = optionalInteger(item?.stat_trak ?? item?.stattrak, { min: 0 });
+  if (statTrak !== undefined) {
+    attributes.killeaterscoretype = 0;
+    attributes.killeatervalue = statTrak;
+    attributes.quality = 9;
+  }
+  return `${CS2_INSPECT_URL_PREFIX}${encodeInspectHex(attributes)}`;
 }
 
 export function buildCs2ViewerUrl(item) {
@@ -121,4 +165,59 @@ export function buildCs2ViewerUrl(item) {
   url.searchParams.set("bg", "0");
   url.searchParams.set("item", JSON.stringify(viewerItem));
   return url.toString();
+}
+
+export function inspectHexFromValue(value) {
+  let decoded = String(value || "").trim();
+  try {
+    decoded = decodeURIComponent(decoded);
+  } catch {
+    // Keep the original value so the validation below reports one format error.
+  }
+  const match = decoded.match(/csgo_econ_action_preview\s+([0-9a-f]+)/i);
+  const hex = String(match?.[1] || "").trim();
+  if (!hex || hex.length % 2 !== 0 || !INSPECT_HEX_PATTERN.test(hex)) {
+    throw new Error("The CS2 inspect payload is invalid.");
+  }
+  return hex.toUpperCase();
+}
+
+export function isCs2SteamInspectUrl(value) {
+  return /^steam:\/\/(?:run|rungame)\/730\//i.test(String(value || ""));
+}
+
+/** Launch CS2 with a validated self-contained preview payload. */
+export async function launchCs2Inspect(
+  item,
+  { launchInspect, openExternal, writeClipboardText } = {},
+) {
+  const inspectValue = buildCs2InspectLink(item);
+  const hex = inspectHexFromValue(inspectValue);
+  let launchError = null;
+
+  if (typeof launchInspect === "function") {
+    try {
+      await launchInspect(hex);
+      return { status: "launched", value: inspectValue };
+    } catch (error) {
+      launchError = error;
+    }
+  }
+
+  if (typeof openExternal === "function") {
+    try {
+      await openExternal(inspectValue);
+      return { status: "launched", value: inspectValue };
+    } catch (error) {
+      launchError = error;
+    }
+  }
+
+  if (typeof writeClipboardText === "function") {
+    const command = `${CS2_INSPECT_COMMAND_PREFIX}${hex}`;
+    await writeClipboardText(command);
+    return { status: "command-copied", value: command };
+  }
+
+  throw launchError || new Error("CS2 inspect launcher is unavailable.");
 }

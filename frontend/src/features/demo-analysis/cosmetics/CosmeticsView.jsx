@@ -9,7 +9,7 @@ import {
   ArrowRight,
   Check,
   ChevronLeft,
-  Copy,
+  Gamepad2,
   Gem,
   Info,
   Loader2,
@@ -21,7 +21,8 @@ import {
 } from "lucide-react";
 import { desktopBridge } from "../../../desktop/desktopBridge.js";
 import { useT } from "../../../i18n/useT.js";
-import { buildCs2InspectLink } from "../../../utils/cs2Inspect.js";
+import { launchCs2Inspect } from "../../../utils/cs2Inspect.js";
+import { launchCs2InspectOnHost } from "../../../api/cs2InspectApi.js";
 import { steamIdForPlayer } from "../../../utils/playerAppearance.js";
 import { playerIdentityKey } from "../../../utils/playerIdentity.js";
 import Modal from "../../../components/ui/Modal";
@@ -30,6 +31,11 @@ import { craftNameParts, formatCraftPipeName, imageUrlForWear, listDefaultLoadou
 import { isCustomizable, itemsForTeam, mergeLoadoutWithEvidence, slotKey, sortCosmeticsForRow, teamSlotKey } from "./cosmeticsLayout.js";
 import SkinReplacementPicker from "./SkinReplacementPicker.jsx";
 import { saveCustomSkinPlan, loadCustomSkinPlan } from "./saveCustomSkinPlan.js";
+import {
+  readWorkshopSchemes,
+  workshopSchemeSelectionCount,
+  workshopSchemeSelectionForItem,
+} from "../../cosmetics-workshop/workshopSchemeStorage.js";
 
 const SKIN_CORE_FORCED_CUSTOM_NAME = "CS2 INSIGHT AGENT";
 
@@ -193,6 +199,22 @@ function snapshotOriginalItem(item, team = null) {
       ? [scopedTeam]
       : Array.isArray(item?.observed_teams) ? [...item.observed_teams] : item?.observed_teams,
   };
+}
+
+function workshopSchemeDraft(plan, teamItems, originalBySlot) {
+  const replacements = {};
+  const originals = { ...(originalBySlot || {}) };
+  for (const team of ["ct", "t"]) {
+    for (const item of teamItems?.[team] || []) {
+      if (!isCustomizable(item)) continue;
+      const replacement = workshopSchemeSelectionForItem(plan, team, item);
+      if (!replacement) continue;
+      const key = teamSlotKey(item, team);
+      replacements[key] = replacement;
+      if (!originals[key]) originals[key] = snapshotOriginalItem(item, team);
+    }
+  }
+  return { replacements, originals };
 }
 
 /** Keep first-seen demo originals; never let a later plan overwrite them with the new skin. */
@@ -493,9 +515,11 @@ function canInspect3d(item, onlineAssetsEnabled) {
 
 function canInspectInGame(item) {
   return Boolean(
-    item?.catalog_exact !== false
-      && item?.finish_known !== false
-      && Number.isInteger(Number(item?.catalog_id)),
+    item?.finish_known !== false
+      && Number.isInteger(Number(item?.def_index))
+      && Number(item?.def_index) > 0
+      && Number.isInteger(Number(item?.paint_index ?? 0))
+      && Number(item?.paint_index ?? 0) >= 0,
   );
 }
 
@@ -698,6 +722,51 @@ function CosmeticCard({
   );
 }
 
+function WorkshopSchemePicker({ open, schemes, selectedIndex, locale, onlineAssetsEnabled, onSelect, onClose, onApply }) {
+  const t = useT();
+  const selected = schemes[selectedIndex] || null;
+  return (
+    <Modal
+      open={open}
+      onClose={onClose}
+      contained
+      title={t("analysis.cosmetics.schemePickerTitle")}
+      subtitle={t("analysis.cosmetics.schemePickerSubtitle")}
+      icon={<Gem className="h-4 w-4 text-cs2-accent" />}
+      maxWidth="max-w-5xl"
+      maxHeight="max-h-[86vh]"
+      contentClassName="min-h-0 flex-1 overflow-hidden"
+      footer={(
+        <div className="flex justify-end gap-2">
+          <Button variant="secondary" size="sm" onClick={onClose}>{t("common.cancel")}</Button>
+          <Button size="sm" data-testid="cosmetics-confirm-workshop-scheme" disabled={!selected || workshopSchemeSelectionCount(selected) < 1} onClick={onApply}><Check className="h-3.5 w-3.5" />{t("analysis.cosmetics.applySelectedWorkshopScheme")}</Button>
+        </div>
+      )}
+    >
+      <div className="grid h-full min-h-0 grid-cols-[210px_minmax(0,1fr)] overflow-hidden max-[720px]:grid-cols-1">
+        <aside className="min-h-0 overflow-y-auto border-r border-cs2-border bg-cs2-bg-input/35 p-3 max-[720px]:border-b max-[720px]:border-r-0">
+          <h3 className="text-[10px] font-black text-cs2-text-secondary">{t("analysis.cosmetics.availableWorkshopSchemes")}</h3>
+          {schemes.length ? <div className="mt-2 space-y-2">{schemes.map((plan, index) => <button key={`${plan.id || "scheme"}-${index}`} type="button" aria-pressed={selectedIndex === index} onClick={() => onSelect(index)} className={`w-full rounded-lg border p-3 text-left transition-colors ${selectedIndex === index ? "border-cs2-accent bg-cs2-accent-soft" : "border-cs2-border bg-cs2-bg-card hover:border-cs2-text-muted"}`}><span className="block truncate text-[11px] font-black text-cs2-text-primary">{plan.name || t("cosmeticsWorkshop.scheme.defaultName")}</span><span className="mt-1 block text-[9px] text-cs2-text-muted">{t("analysis.cosmetics.workshopSchemeItemCount", { count: workshopSchemeSelectionCount(plan) })}</span></button>)}</div> : <p className="mt-3 text-[10px] leading-relaxed text-cs2-text-muted">{t("analysis.cosmetics.workshopSchemeUnavailable")}</p>}
+        </aside>
+
+        <section className="min-h-0 overflow-y-auto p-4">
+          {selected ? (
+            <div>
+              <div className="mb-4"><h3 className="text-[14px] font-black text-cs2-text-primary">{selected.name || t("cosmeticsWorkshop.scheme.defaultName")}</h3><p className="mt-1 text-[9px] text-cs2-text-muted">{t("analysis.cosmetics.workshopSchemePreviewHint")}</p></div>
+              <div className="space-y-5">
+                {["ct", "t"].map((team) => {
+                  const rows = Object.entries(selected.selections?.[team] || {}).filter(([, item]) => item);
+                  return <div key={team}><h4 className={`mb-2 inline-flex rounded-md px-2.5 py-1 text-[10px] font-black uppercase ${team === "ct" ? "bg-cs2-cyan-surface text-cs2-cyan-on-surface" : "bg-cs2-amber-surface text-cs2-amber-on-surface"}`}>{t(`analysis.cosmetics.team.${team}`)}</h4>{rows.length ? <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">{rows.map(([key, item]) => <article key={key} className="min-w-0 overflow-hidden rounded-[10px] border border-cs2-border bg-cs2-bg-card"><div className="cosmetic-preview-surface aspect-[4/3]"><CosmeticImage item={item} onlineAssetsEnabled={onlineAssetsEnabled} className="h-full w-full p-2" /></div><div className="border-t border-cs2-border px-2.5 py-2"><CraftNameLines item={item} locale={locale} compact /><div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-0.5 font-mono text-[8px] text-cs2-text-muted"><span>{t("analysis.cosmetics.picker.wear")} {Number(item.paint_wear ?? 0).toFixed(6)}</span><span>{t("analysis.cosmetics.picker.seed")} {Math.round(Number(item.paint_seed ?? 0))}</span></div></div></article>)}</div> : <p className="rounded-lg border border-dashed border-cs2-border px-3 py-4 text-[10px] text-cs2-text-muted">{t("analysis.cosmetics.workshopSchemeTeamEmpty")}</p>}</div>;
+                })}
+              </div>
+            </div>
+          ) : <div className="flex h-full min-h-[300px] items-center justify-center text-[11px] text-cs2-text-muted">{t("analysis.cosmetics.workshopSchemeUnavailable")}</div>}
+        </section>
+      </div>
+    </Modal>
+  );
+}
+
 function CosmeticsTeamRow({
   team,
   items,
@@ -844,7 +913,7 @@ function DetailRow({ label, children }) {
   );
 }
 
-function ItemDetail({ item, locale, onlineAssetsEnabled, onOpen3d, onCopyInspectUrl, inspectBusy, inspectFeedback }) {
+function ItemDetail({ item, locale, onlineAssetsEnabled, onOpen3d, onInspectInGame, inspectBusy, inspectFeedback }) {
   const t = useT();
   const stickers = Array.isArray(item?.stickers) ? item.stickers : [];
   const supportsStickers = String(item?.type || "") === "weapon";
@@ -856,7 +925,6 @@ function ItemDetail({ item, locale, onlineAssetsEnabled, onOpen3d, onCopyInspect
   const wear = finiteNumber(item?.paint_wear);
   const seed = finiteNumber(item?.paint_seed);
   const finishKnown = item?.finish_known !== false;
-  const inspectCopied = inspectFeedback?.tone === "success";
   return (
     <div className="grid min-h-0 grid-cols-1 lg:grid-cols-[minmax(0,1.25fr)_minmax(280px,0.75fr)]">
       <div data-cosmetic-detail-preview className="flex flex-col items-center justify-center gap-4 border-b border-cs2-border bg-cs2-bg-page/30 p-5 lg:border-b-0 lg:border-r">
@@ -919,8 +987,8 @@ function ItemDetail({ item, locale, onlineAssetsEnabled, onOpen3d, onCopyInspect
         {!finishKnown ? <div className="mt-3 border border-amber-400/25 bg-amber-400/10 px-3 py-2 text-[10px] leading-relaxed text-amber-200">{t("analysis.cosmetics.finishUnavailable")}</div> : null}
         <WearBar wear={wear} wearMin={item?.wear_min} wearMax={item?.wear_max} />
         {description ? <p className="mt-4 whitespace-pre-line border-t border-cs2-border pt-4 text-[11px] leading-relaxed text-cs2-text-secondary">{description}</p> : null}
-        {inspectFeedback?.tone === "error" ? (
-          <div role="alert" className="mt-4 flex items-center gap-2 border border-rose-500/40 bg-rose-500/10 px-3 py-2 text-[10px] text-rose-300">
+        {inspectFeedback ? (
+          <div role={inspectFeedback.tone === "error" ? "alert" : "status"} className={`mt-4 flex items-center gap-2 border px-3 py-2 text-[10px] ${inspectFeedback.tone === "error" ? "border-rose-500/40 bg-rose-500/10 text-rose-300" : "border-emerald-500/35 bg-emerald-500/10 text-emerald-300"}`}>
             <Info className="h-3.5 w-3.5 shrink-0" />
             {inspectFeedback.text}
           </div>
@@ -930,21 +998,14 @@ function ItemDetail({ item, locale, onlineAssetsEnabled, onOpen3d, onCopyInspect
           <button
             type="button"
             disabled={!canInspectInGame(item) || inspectBusy}
-            onClick={onCopyInspectUrl}
+            onClick={onInspectInGame}
             aria-live="polite"
-            data-copied={inspectCopied ? "true" : undefined}
-            className={`inline-flex h-10 items-center justify-center gap-2 text-[11px] font-bold disabled:cursor-not-allowed disabled:opacity-35 ${
-              inspectCopied
-                ? "bg-emerald-500/15 text-emerald-300"
-                : "text-cs2-text-secondary hover:bg-cs2-bg-hover hover:text-cs2-text-primary"
-            }`}
+            className="inline-flex h-10 items-center justify-center gap-2 text-[11px] font-bold text-cs2-text-secondary hover:bg-cs2-bg-hover hover:text-cs2-text-primary disabled:cursor-not-allowed disabled:opacity-35"
           >
             {inspectBusy
               ? <Loader2 className="h-4 w-4 animate-spin" />
-              : inspectCopied
-                ? <Check className="h-4 w-4" />
-                : <Copy className="h-4 w-4" />}
-            {inspectCopied ? inspectFeedback.text : t("analysis.cosmetics.copyInspectUrl")}
+              : <Gamepad2 className="h-4 w-4" />}
+            {t("analysis.cosmetics.inspectInGame")}
           </button>
         </div>
       </div>
@@ -966,6 +1027,7 @@ export default function CosmeticsView({ workspace, selectedPlayer, locale = "zh"
   }, [name, selectedPlayerKey, workspace?.players]);
   const steamid = steamIdForPlayer(workspacePlayer) || steamIdForPlayer(selectedPlayer);
   const [detail, setDetail] = useState(null);
+  const [pickerInspectItem, setPickerInspectItem] = useState(null);
   const [hoverCard, setHoverCard] = useState(null);
   const [notice, setNotice] = useState(null);
   const [inspectBusy, setInspectBusy] = useState(false);
@@ -979,6 +1041,10 @@ export default function CosmeticsView({ workspace, selectedPlayer, locale = "zh"
   const [pickerTeam, setPickerTeam] = useState(null);
   const [saving, setSaving] = useState(false);
   const [saveResult, setSaveResult] = useState(null);
+  const [schemePickerOpen, setSchemePickerOpen] = useState(false);
+  const [workshopSchemes, setWorkshopSchemes] = useState([]);
+  const [selectedWorkshopSchemeIndex, setSelectedWorkshopSchemeIndex] = useState(0);
+  const [workshopScheme, setWorkshopScheme] = useState(null);
   const planScope = `${String(demoId ?? "")}:${String(steamid || "")}`;
   const planScopeRef = useRef(planScope);
   planScopeRef.current = planScope;
@@ -1004,9 +1070,11 @@ export default function CosmeticsView({ workspace, selectedPlayer, locale = "zh"
 
   const clearOverlays = () => {
     setDetail(null);
+    setPickerInspectItem(null);
     setHoverCard(null);
     setPickerItem(null);
     setPickerTeam(null);
+    setSchemePickerOpen(false);
   };
 
   useEffect(() => {
@@ -1023,6 +1091,10 @@ export default function CosmeticsView({ workspace, selectedPlayer, locale = "zh"
     setPickerTeam(null);
     setSaving(false);
     setSaveResult(null);
+    setSchemePickerOpen(false);
+    setWorkshopSchemes([]);
+    setSelectedWorkshopSchemeIndex(0);
+    setWorkshopScheme(null);
   }, [demoId, steamid]);
 
   useEffect(() => {
@@ -1108,27 +1180,22 @@ export default function CosmeticsView({ workspace, selectedPlayer, locale = "zh"
     if (!copied) throw clipboardError || new Error("Clipboard API unavailable");
   };
 
-  const copyInspectUrl = async (item) => {
+  const inspectInGame = async (item) => {
     setInspectBusy(true);
     setInspectFeedback(null);
-    let inspectUrl;
     try {
-      // Generate synchronously inside the click handler. Delaying this behind
-      // a dynamic import loses the transient user activation required by web
-      // clipboard APIs.
-      inspectUrl = buildCs2InspectLink(item);
+      const result = await launchCs2Inspect(item, {
+        launchInspect: launchCs2InspectOnHost,
+        openExternal: desktopBridge?.openExternal,
+        writeClipboardText: writeClipboard,
+      });
+      const messageKey = result.status === "launched"
+        ? "analysis.cosmetics.inspectLaunched"
+        : "analysis.cosmetics.inspectCommandCopied";
+      setInspectFeedback({ tone: "success", text: t(messageKey) });
     } catch (error) {
-      console.warn("Failed to generate CS2 inspect URL", error);
+      console.warn("Failed to launch CS2 inspect", error);
       setInspectFeedback({ tone: "error", text: t("analysis.cosmetics.inspectFailed") });
-      setInspectBusy(false);
-      return;
-    }
-    try {
-      await writeClipboard(inspectUrl);
-      setInspectFeedback({ tone: "success", text: t("analysis.cosmetics.inspectUrlCopied") });
-    } catch (error) {
-      console.warn("Failed to copy CS2 inspect URL", error);
-      setInspectFeedback({ tone: "error", text: t("analysis.cosmetics.inspectCopyFailed") });
     } finally {
       setInspectBusy(false);
     }
@@ -1147,6 +1214,7 @@ export default function CosmeticsView({ workspace, selectedPlayer, locale = "zh"
       return;
     }
     if (isCustomizable(item)) {
+      setInspectFeedback(null);
       setPickerItem(item);
       setPickerTeam(team);
     }
@@ -1200,8 +1268,10 @@ export default function CosmeticsView({ workspace, selectedPlayer, locale = "zh"
     setLocalReplacements((prev) => ({ ...prev, [slot]: restore }));
   };
 
-  const savePlan = async () => {
-    if (!canSavePlan) return;
+  const savePlan = async (overrides = null) => {
+    const replacementsToSave = overrides?.replacements || localReplacements;
+    const originalsToSave = overrides?.originals || originalBySlot;
+    if (!demoId || !Object.keys(replacementsToSave).length || saving) return;
     const requestedScope = planScope;
     setSaving(true);
     setNotice({ tone: "info", text: t("analysis.cosmetics.savingPlan") });
@@ -1209,8 +1279,8 @@ export default function CosmeticsView({ workspace, selectedPlayer, locale = "zh"
       const result = await saveCustomSkinPlan({
         demoId,
         steamid,
-        replacements: replacementsForApi(localReplacements),
-        originals: originalBySlot,
+        replacements: replacementsForApi(replacementsToSave),
+        originals: originalsToSave,
       });
       // A batch demo can be switched while the rewrite request is in flight.
       // Never apply demo A's late result to the reused view for demo B.
@@ -1218,12 +1288,12 @@ export default function CosmeticsView({ workspace, selectedPlayer, locale = "zh"
       const succeeded = enrichSaveResultRows(
         Array.isArray(result?.succeeded) ? result.succeeded : [],
         inventory,
-        localReplacements,
+        replacementsToSave,
       );
       const failed = enrichSaveResultRows(
         Array.isArray(result?.failed) ? result.failed : [],
         inventory,
-        localReplacements,
+        replacementsToSave,
       );
       const hasItemResults = succeeded.length > 0 || failed.length > 0;
       const failureMessage = result?.ok ? null : saveFailureMessage(result, t);
@@ -1242,7 +1312,7 @@ export default function CosmeticsView({ workspace, selectedPlayer, locale = "zh"
         const seeded = replacementsFromPlan(result?.plan, inventory) || {};
         const fromPlan = originalsFromPlan(result?.plan, inventory);
         // Prefer in-session first-seen originals over plan rows (inventory may already be the new skin).
-        const originals = mergeOriginalsPreferExisting(fromPlan, originalBySlot);
+        const originals = mergeOriginalsPreferExisting(fromPlan, originalsToSave);
         setSavedReplacements(seeded);
         setSavedOriginals(originals);
         if (failed.length > 0) {
@@ -1250,13 +1320,13 @@ export default function CosmeticsView({ workspace, selectedPlayer, locale = "zh"
           // pending so the grid refreshes immediately (switching players used to be
           // required because we dropped succeeded keys from localReplacements).
           const failedKeys = new Set(failed.map((row) => row?.slot_key).filter(Boolean));
-          setLocalReplacements((prev) => ({
+          setLocalReplacements(() => ({
             ...seeded,
-            ...Object.fromEntries(Object.entries(prev).filter(([key]) => failedKeys.has(key))),
+            ...Object.fromEntries(Object.entries(replacementsToSave).filter(([key]) => failedKeys.has(key))),
           }));
-          setOriginalBySlot((prev) => ({
+          setOriginalBySlot(() => ({
             ...originals,
-            ...Object.fromEntries(Object.entries(prev).filter(([key]) => failedKeys.has(key))),
+            ...Object.fromEntries(Object.entries(originalsToSave).filter(([key]) => failedKeys.has(key))),
           }));
           setNotice({ tone: "info", text: t("analysis.cosmetics.savePartial") });
         } else {
@@ -1281,6 +1351,24 @@ export default function CosmeticsView({ workspace, selectedPlayer, locale = "zh"
     } finally {
       if (planScopeRef.current === requestedScope) setSaving(false);
     }
+  };
+
+  const applyWorkshopScheme = () => {
+    const plan = workshopScheme;
+    if (!plan) {
+      setNotice({ tone: "error", text: t("analysis.cosmetics.workshopSchemeUnavailable") });
+      return;
+    }
+    const draft = workshopSchemeDraft(plan, { ct: ctItems, t: tItems }, originalBySlot);
+    if (!Object.keys(draft.replacements).length) {
+      setNotice({ tone: "error", text: t("analysis.cosmetics.workshopSchemeNoMatch") });
+      return;
+    }
+    clearOverlays();
+    setSchemePickerOpen(false);
+    setLocalReplacements(draft.replacements);
+    setOriginalBySlot(draft.originals);
+    void savePlan(draft);
   };
 
   const open3d = (item) => {
@@ -1310,6 +1398,10 @@ export default function CosmeticsView({ workspace, selectedPlayer, locale = "zh"
               data-testid="cosmetics-customize"
               onClick={() => {
                 clearOverlays();
+                const schemes = readWorkshopSchemes();
+                setWorkshopSchemes(schemes);
+                setSelectedWorkshopSchemeIndex(0);
+                setWorkshopScheme(schemes[0] || null);
                 setViewMode("custom");
               }}
               className="group inline-flex h-8 items-center gap-1.5 rounded-[10px] border border-cs2-accent/45 bg-cs2-accent-soft px-3 text-[10px] font-bold text-cs2-accent transition-colors hover:border-cs2-accent hover:bg-cs2-accent hover:text-white"
@@ -1326,6 +1418,23 @@ export default function CosmeticsView({ workspace, selectedPlayer, locale = "zh"
                     ? t("analysis.cosmetics.saveNeedsDemo")
                     : t("analysis.cosmetics.customizingHint")}
               </p>
+              <button
+                type="button"
+                data-testid="cosmetics-apply-workshop-scheme"
+                disabled={!demoId || saving}
+                title={t("analysis.cosmetics.selectWorkshopScheme")}
+                onClick={() => {
+                  const schemes = readWorkshopSchemes();
+                  setWorkshopSchemes(schemes);
+                  setSelectedWorkshopSchemeIndex(0);
+                  setWorkshopScheme(schemes[0] || null);
+                  setSchemePickerOpen(true);
+                }}
+                className="group inline-flex h-8 items-center gap-1.5 rounded-[10px] border border-cs2-accent/45 bg-cs2-accent-soft px-3 text-[10px] font-bold text-cs2-accent transition-colors hover:border-cs2-accent hover:bg-cs2-accent hover:text-white disabled:cursor-not-allowed disabled:opacity-45"
+              >
+                <Gem className="h-3.5 w-3.5 transition-colors group-hover:text-white" />
+                {t("analysis.cosmetics.selectWorkshopScheme")}
+              </button>
               <button
                 type="button"
                 disabled={saving}
@@ -1422,7 +1531,7 @@ export default function CosmeticsView({ workspace, selectedPlayer, locale = "zh"
             <iframe title={t("analysis.cosmetics.inspect3d")} src={viewerUrl(detail.item)} className="h-[72vh] w-full border-0 bg-transparent" allow="fullscreen" />
           </div>
         ) : detail ? (
-          <ItemDetail item={detail.item} locale={locale} onlineAssetsEnabled={onlineAssetsEnabled} onOpen3d={() => open3d(detail.item)} onCopyInspectUrl={() => void copyInspectUrl(detail.item)} inspectBusy={inspectBusy} inspectFeedback={inspectFeedback} />
+          <ItemDetail item={detail.item} locale={locale} onlineAssetsEnabled={onlineAssetsEnabled} onOpen3d={() => open3d(detail.item)} onInspectInGame={() => void inspectInGame(detail.item)} inspectBusy={inspectBusy} inspectFeedback={inspectFeedback} />
         ) : null}
       </Modal>
 
@@ -1431,11 +1540,48 @@ export default function CosmeticsView({ workspace, selectedPlayer, locale = "zh"
         sourceItem={pickerItem}
         locale={locale}
         onlineAssetsEnabled={onlineAssetsEnabled}
+        inspectBusy={inspectBusy}
+        inspectFeedback={inspectFeedback}
         onClose={() => {
           setPickerItem(null);
           setPickerTeam(null);
+          setInspectFeedback(null);
         }}
         onConfirm={confirmReplacement}
+        onInspectInGame={(item) => void inspectInGame(item)}
+        onInspect3d={(item) => setPickerInspectItem(item)}
+      />
+
+      <Modal
+        open={Boolean(pickerInspectItem)}
+        onClose={() => setPickerInspectItem(null)}
+        title={t("analysis.cosmetics.inspect3d")}
+        subtitle={pickerInspectItem ? displayName(pickerInspectItem, locale) : ""}
+        icon={<Rotate3D className="h-4 w-4 text-cs2-accent" />}
+        maxWidth="max-w-[920px]"
+        maxHeight="max-h-[88vh]"
+        contentClassName="overflow-hidden"
+        zIndex={140}
+      >
+        {pickerInspectItem ? (
+          <div className="bg-[radial-gradient(circle_at_50%_42%,rgba(255,117,24,0.10),transparent_38%),linear-gradient(180deg,#101419_0%,#080a0d_100%)]">
+            <iframe title={t("analysis.cosmetics.inspect3d")} src={viewerUrl(pickerInspectItem)} className="h-[68vh] w-full border-0 bg-transparent" allow="fullscreen" />
+          </div>
+        ) : null}
+      </Modal>
+
+      <WorkshopSchemePicker
+        open={schemePickerOpen}
+        schemes={workshopSchemes}
+        selectedIndex={selectedWorkshopSchemeIndex}
+        locale={locale}
+        onlineAssetsEnabled={onlineAssetsEnabled}
+        onSelect={(index) => {
+          setSelectedWorkshopSchemeIndex(index);
+          setWorkshopScheme(workshopSchemes[index] || null);
+        }}
+        onClose={() => setSchemePickerOpen(false)}
+        onApply={applyWorkshopScheme}
       />
 
       <Modal

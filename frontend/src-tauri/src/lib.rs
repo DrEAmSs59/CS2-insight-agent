@@ -82,6 +82,63 @@ fn read_legacy_ui_state() -> Result<Option<String>, String> {
     Ok(None)
 }
 
+fn validated_inspect_hex(value: &str) -> Result<&str, String> {
+    let hex = value.trim();
+    if hex.len() < 12
+        || hex.len() > 8192
+        || hex.len() % 2 != 0
+        || !hex.bytes().all(|byte| byte.is_ascii_hexdigit())
+    {
+        return Err("CS2 检视载荷格式无效".to_string());
+    }
+    Ok(hex)
+}
+
+#[tauri::command]
+fn launch_cs2_inspect(hex: String) -> Result<(), String> {
+    let hex = validated_inspect_hex(&hex)?;
+    let inspect_url = format!(
+        "steam://rungame/730/76561202255233023/+csgo_econ_action_preview%20{hex}"
+    );
+
+    #[cfg(windows)]
+    {
+        let mut command = Command::new("rundll32.exe");
+        command
+            .args(["url.dll,FileProtocolHandler", &inspect_url])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .creation_flags(CREATE_NO_WINDOW);
+        let status = command
+            .status()
+            .map_err(|error| format!("无法调用 Windows Steam 协议处理器：{error}"))?;
+        if !status.success() {
+            return Err(format!("Steam 协议处理器退出码：{status}"));
+        }
+        return Ok(());
+    }
+
+    #[cfg(not(windows))]
+    {
+        let _ = inspect_url;
+        Err("当前平台尚未实现 CS2 检视启动".to_string())
+    }
+}
+
+#[cfg(test)]
+mod inspect_launch_tests {
+    use super::validated_inspect_hex;
+
+    #[test]
+    fn accepts_only_bounded_even_hex_payloads() {
+        assert_eq!(validated_inspect_hex("001807209A02"), Ok("001807209A02"));
+        assert!(validated_inspect_hex("00180Z").is_err());
+        assert!(validated_inspect_hex("001807209A0").is_err());
+        assert!(validated_inspect_hex("steam://run/730").is_err());
+    }
+}
+
 #[tauri::command]
 async fn resolve_dropped_file_paths(
     window: tauri::WebviewWindow,
@@ -582,6 +639,7 @@ pub fn run() {
         .manage(BackendProcess::new())
         .invoke_handler(tauri::generate_handler![
             read_legacy_ui_state,
+            launch_cs2_inspect,
             resolve_dropped_file_paths
         ])
         .setup(|app| {

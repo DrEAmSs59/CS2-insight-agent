@@ -1,5 +1,10 @@
-import { describe, expect, test } from "vitest";
-import { buildCs2InspectLink, buildCs2ViewerUrl } from "./cs2Inspect.js";
+import { describe, expect, test, vi } from "vitest";
+import {
+  buildCs2InspectLink,
+  buildCs2ViewerUrl,
+  inspectHexFromValue,
+  launchCs2Inspect,
+} from "./cs2Inspect.js";
 
 const ITEM = {
   catalog_id: 1376,
@@ -24,8 +29,9 @@ describe("CS2 cosmetic inspect helpers", () => {
   test("generates Valve's self-contained preview URL without normalizing Unicode name tags", () => {
     const link = buildCs2InspectLink(ITEM);
 
-    expect(link).toMatch(/^steam:\/\/rungame\/730\//);
+    expect(link).toMatch(/^steam:\/\/rungame\/730\/76561202255233023\//);
     expect(link).toContain("csgo_econ_action_preview");
+    expect(inspectHexFromValue(link)).toMatch(/^[0-9A-F]+$/);
   });
 
   test("generates a preview URL for demo weapons carrying stickers", () => {
@@ -55,7 +61,7 @@ describe("CS2 cosmetic inspect helpers", () => {
       ],
     });
 
-    expect(link).toMatch(/^steam:\/\/rungame\/730\//);
+    expect(link).toMatch(/^steam:\/\/rungame\/730\/76561202255233023\//);
     expect(link).toContain("csgo_econ_action_preview");
   });
 
@@ -73,8 +79,41 @@ describe("CS2 cosmetic inspect helpers", () => {
     });
   });
 
-  test("rejects a fallback catalog match rather than inspecting the wrong finish", () => {
-    expect(() => buildCs2InspectLink({ ...ITEM, catalog_exact: false })).toThrow();
+  test("builds from direct item fields without catalog IDs and accepts seed zero", () => {
+    expect(buildCs2InspectLink({
+      def_index: 7,
+      paint_index: 282,
+      paint_wear: 0.07,
+      paint_seed: 0,
+      catalog_exact: false,
+    })).toMatch(/^steam:\/\/rungame\/730\/76561202255233023\//);
     expect(() => buildCs2InspectLink({ ...ITEM, finish_known: false })).toThrow();
+  });
+
+  test("launches a validated inspect payload through the dedicated desktop command", async () => {
+    const launchInspect = vi.fn(async () => {});
+    const openExternal = vi.fn(async () => {});
+    const writeClipboardText = vi.fn(async () => {});
+
+    await expect(launchCs2Inspect(ITEM, { launchInspect, openExternal, writeClipboardText })).resolves.toMatchObject({
+      status: "launched",
+      value: expect.stringMatching(/^steam:\/\/rungame\/730\/76561202255233023\//),
+    });
+    expect(launchInspect).toHaveBeenCalledWith(expect.stringMatching(/^[0-9A-F]+$/));
+    expect(openExternal).not.toHaveBeenCalled();
+    expect(writeClipboardText).not.toHaveBeenCalled();
+  });
+
+  test("copies a console command, never a URL, when Steam cannot be opened", async () => {
+    const openExternal = vi.fn(async () => {
+      throw new Error("Steam unavailable");
+    });
+    const writeClipboardText = vi.fn(async () => {});
+
+    await expect(launchCs2Inspect(ITEM, { openExternal, writeClipboardText })).resolves.toMatchObject({
+      status: "command-copied",
+      value: expect.stringMatching(/^csgo_econ_action_preview [0-9A-F]+$/),
+    });
+    expect(writeClipboardText).toHaveBeenCalledTimes(1);
   });
 });
