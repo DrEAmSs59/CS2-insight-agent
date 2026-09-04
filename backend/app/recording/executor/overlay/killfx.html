@@ -402,7 +402,7 @@ function loop() {
 requestAnimationFrame(loop);
 
 function connect() {
-  const wsUrl = `ws://127.0.0.1:${PORT}/ws/kb-overlay`;
+  const wsUrl = `ws://127.0.0.1:${PORT}/ws/recording-overlay`;
   const ws = new WebSocket(wsUrl);
   ws.onmessage = (event) => {
     const message = JSON.parse(event.data);

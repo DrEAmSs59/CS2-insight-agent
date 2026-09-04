@@ -16,11 +16,11 @@ def make_ws():
 
 
 def get_fresh_bus():
-    """Import a fresh KbOverlayBus class (avoids module-level singleton state)."""
+    """Import a fresh RecordingOverlayBus class (avoids singleton state)."""
     import importlib
-    import app.recording.executor.kb_overlay_bus as m
+    import app.recording.executor.overlay_bus as m
     importlib.reload(m)
-    return m.KbOverlayBus()
+    return m.RecordingOverlayBus()
 
 
 def test_register_and_broadcast():
@@ -44,8 +44,8 @@ def test_load_replayed_on_reconnect():
     bus = get_fresh_bus()
     ws1 = make_ws()
     run(bus.register(ws1))
-    load_msg = {"type": "load", "frames": [], "start_tick": 100, "end_tick": 200,
-                "tick_rate": 64, "offset_ticks": 0}
+    load_msg = {"type": "load", "kills": [], "start_tick": 100, "end_tick": 200,
+                "tick_rate": 64, "kill_fx_offset_ticks": 0}
     run(bus.broadcast(load_msg))
 
     ws2 = make_ws()

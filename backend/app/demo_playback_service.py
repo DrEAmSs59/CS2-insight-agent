@@ -10,7 +10,7 @@ import sys
 import threading
 import time
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional
 
@@ -33,6 +33,7 @@ from .pov_hud_manager import (
     _detect_chroma_demo_map_name,
     restore_pov_after_cs2_exit,
 )
+from .player_aliases import create_player_alias_copy
 from .skybox_vpk import CHROMA_SKYBOX_IDS
 
 logger = logging.getLogger(__name__)
@@ -60,6 +61,7 @@ class DemoPlaybackPovOptions:
     input_hud_scale_percent: int = 100
     input_audio_enabled: bool = True
     input_audio_volume_percent: int = 100
+    player_aliases: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass
@@ -340,16 +342,31 @@ class DemoPlaybackService:
                 # before any managed CS2 process is allowed to start.
                 player_config_snapshot = self._start_player_config_protection(cs2_path)
 
-                compat = ensure_demo_compatible(dem_path)
+                effective_demo_path = dem_path
+                if options.player_aliases:
+                    create_player_alias_copy(dem_path, copied_demo, options.player_aliases)
+                    effective_demo_path = copied_demo
+                compat = ensure_demo_compatible(effective_demo_path)
                 selected_skybox = str(options.skybox_id or "").strip().lower()
                 chroma_redirect_report = None
                 if options.enabled and selected_skybox in CHROMA_SKYBOX_IDS:
-                    demo_map_name = _detect_chroma_demo_map_name(dem_path)
-                    chroma_copy_report = prepare_chroma_demo_copy(
-                        dem_path,
-                        copied_demo,
-                        map_name=demo_map_name,
+                    demo_map_name = _detect_chroma_demo_map_name(effective_demo_path)
+                    chroma_output = (
+                        copied_demo.with_name(f"{stem}_chroma.dem")
+                        if options.player_aliases
+                        else copied_demo
                     )
+                    try:
+                        chroma_copy_report = prepare_chroma_demo_copy(
+                            effective_demo_path,
+                            chroma_output,
+                            map_name=demo_map_name,
+                        )
+                        if options.player_aliases:
+                            os.replace(chroma_output, copied_demo)
+                    finally:
+                        if options.player_aliases:
+                            chroma_output.unlink(missing_ok=True)
                     chroma_redirect_report = chroma_copy_report.manifest_report
                     chroma_handle_report = chroma_copy_report.handle_report
                     logger.info(
@@ -359,7 +376,7 @@ class DemoPlaybackService:
                         chroma_handle_report.input_sha256,
                         chroma_handle_report.output_sha256,
                     )
-                else:
+                elif not options.player_aliases:
                     shutil.copy2(dem_path, copied_demo)
                 logger.info(
                     "Direct playback compatibility ready: cached=%s outcome=%s "
@@ -388,7 +405,7 @@ class DemoPlaybackService:
                 if options.enabled:
                     pov_install_attempted = True
                     pov_manager.install(
-                        demo_path=dem_path,
+                        demo_path=copied_demo if options.player_aliases else dem_path,
                         advanced_playback_enabled=True,
                         skybox_id=options.skybox_id,
                         map_material_id=options.map_material_id,

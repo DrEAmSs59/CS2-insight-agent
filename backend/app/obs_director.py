@@ -3697,11 +3697,10 @@ class OBSDirector:
                 return bool(_phase0_cfg.kill_fx_enabled) if value is None else bool(value)
 
             _plan_cache: dict = {}   # {request_id: RecordingPlan}
-            _kb_any = any(getattr(dto.options, "kb_overlay_enabled", False) for dto in requests)
             _fx_any = any(_fx_on(dto) for dto in requests)
             logger.info(
-                "[RecordingV3] Pre-building %d plans (kb_overlay=%s kill_fx=%s)",
-                len(requests), _kb_any, _fx_any,
+                "[RecordingV3] Pre-building %d plans (kill_fx=%s)",
+                len(requests), _fx_any,
             )
             for dto in requests:
                 if self._abort_requested():
@@ -3711,36 +3710,8 @@ class OBSDirector:
                 except Exception as _bp_e:
                     logger.warning("[RecordingV3] pre-build plan failed %s: %s", dto.request_id, _bp_e)
 
-            if (_kb_any or _fx_any) and _plan_cache and not self._abort_requested():
-                from .features.demo_analysis.input_track import (
-                    extract_input_track as _pre_extract_kb,
-                    prepare_input_track_batch as _prepare_kb_batch,
-                )
+            if _fx_any and _plan_cache and not self._abort_requested():
                 from .features.demo_analysis.kill_track import extract_kill_track as _pre_extract_fx
-                _kb_prepared_by_demo: dict = {}
-
-                async def _extract_seg_pre(_seg, _demo_path):
-                    if self._abort_requested():
-                        _seg.metadata["kb_track"] = []
-                        return
-                    try:
-                        _frames = await asyncio.to_thread(
-                            _pre_extract_kb,
-                            _demo_path,
-                            steamid=_seg.target_steamid64,
-                            player_name=_seg.target_player_name,
-                            start_tick=_seg.start_tick,
-                            end_tick=_seg.end_tick,
-                            prepared=_kb_prepared_by_demo.get(_demo_path),
-                        )
-                        _seg.metadata["kb_track"] = _frames
-                        logger.info(
-                            "[kb_overlay] pre-extract seg=%d %d frames (ticks %d-%d)",
-                            _seg.segment_index, len(_frames), _seg.start_tick, _seg.end_tick,
-                        )
-                    except Exception as _e:
-                        logger.warning("[kb_overlay] pre-extract seg=%d failed: %s", _seg.segment_index, _e)
-                        _seg.metadata["kb_track"] = []
 
                 async def _extract_seg_fx(_seg, _demo_path, _ctx_tags):
                     if self._abort_requested():
@@ -3766,19 +3737,12 @@ class OBSDirector:
                         logger.warning("[kill_fx] pre-extract seg=%d failed: %s", _seg.segment_index, _e)
                         _seg.metadata["kill_track"] = []
 
-                # 收集所有需要提取的任务：(coroutine, args)
-                _kb_tasks = []
-                _kb_segments_by_demo: dict[str, list] = {}
+                # 收集所有需要提取的 KillFX 任务：(coroutine, args)
+                _overlay_tasks = []
                 for _dto in requests:
                     _plan = _plan_cache.get(_dto.request_id)
                     if not _plan:
                         continue
-                    if getattr(_dto.options, "kb_overlay_enabled", False):
-                        _kb_off_req = getattr(_dto.options, "kb_overlay_tick_offset", None)
-                        for _seg in _plan.segments:
-                            _seg.metadata["kb_tick_offset"] = _kb_off_req  # None → executor falls back to global config
-                            _kb_tasks.append((_extract_seg_pre, (_seg, _plan.demo_path)))
-                            _kb_segments_by_demo.setdefault(_plan.demo_path, []).append(_seg)
                     if _fx_on(_dto):
                         _ctx_tags = list(getattr(_dto.source_ref, "context_tags", None) or [])
                         for _seg in _plan.segments:
@@ -3788,58 +3752,39 @@ class OBSDirector:
                             _seg.metadata["kill_fx_tick_offset"] = getattr(
                                 _dto.options, "kill_fx_tick_offset", None,
                             )
-                            _kb_tasks.append((_extract_seg_fx, (_seg, _plan.demo_path, _ctx_tags)))
+                            _overlay_tasks.append((_extract_seg_fx, (_seg, _plan.demo_path, _ctx_tags)))
 
-                # Tick/event tables are parsed once per demo below.  Segment
-                # tasks only filter those shared tables and build their frames.
                 _BATCH = 4
-                _kb_total = len(_kb_tasks)
-                _kb_done = 0
-                _task_batches = []
-                for _task_fn in (_extract_seg_pre, _extract_seg_fx):
-                    _same_kind = [task for task in _kb_tasks if task[0] is _task_fn]
-                    _task_batches.extend(
-                        _same_kind[index: index + _BATCH]
-                        for index in range(0, len(_same_kind), _BATCH)
-                    )
-                logger.info("[kb_overlay] Pre-extracting %d overlay tasks before CS2 launch", _kb_total)
+                _overlay_total = len(_overlay_tasks)
+                _overlay_done = 0
+                _task_batches = [
+                    _overlay_tasks[index: index + _BATCH]
+                    for index in range(0, len(_overlay_tasks), _BATCH)
+                ]
+                logger.info(
+                    "[kill_fx] Pre-extracting %d overlay tasks before CS2 launch",
+                    _overlay_total,
+                )
 
-                from .recording.kb_prebuild_state import start as _kbp_start, update as _kbp_update, finish as _kbp_finish, reset as _kbp_reset
-                _kbp_start(_kb_total)
-
-                for _demo_path, _segments in _kb_segments_by_demo.items():
-                    if self._abort_requested():
-                        break
-                    try:
-                        _kb_prepared_by_demo[_demo_path] = await asyncio.to_thread(
-                            _prepare_kb_batch,
-                            _demo_path,
-                            [(_seg.start_tick, _seg.end_tick) for _seg in _segments],
-                        )
-                        logger.info(
-                            "[kb_overlay] prepared shared demo tables: demo=%s segments=%d",
-                            _demo_path, len(_segments),
-                        )
-                    except Exception as _prepare_e:
-                        # Preserve recording correctness if an unsupported demo
-                        # cannot use the optimized batch path.
-                        logger.warning(
-                            "[kb_overlay] shared demo preparation failed; falling back to "
-                            "per-segment extraction: demo=%s error=%s",
-                            _demo_path, _prepare_e,
-                        )
+                from .recording.overlay_prebuild_state import (
+                    finish as _overlay_finish,
+                    reset as _overlay_reset,
+                    start as _overlay_start,
+                    update as _overlay_update,
+                )
+                _overlay_start(_overlay_total)
 
                 for _batch_index, _batch in enumerate(_task_batches):
                     if self._abort_requested():
-                        logger.info("[kb_overlay] Pre-extraction aborted at batch %d", _batch_index)
-                        _kbp_reset()
+                        logger.info("[kill_fx] Pre-extraction aborted at batch %d", _batch_index)
+                        _overlay_reset()
                         break
                     await asyncio.gather(*[_fn(*_args) for _fn, _args in _batch])
-                    _kb_done += len(_batch)
-                    _kbp_update(_kb_done, _kb_total)
+                    _overlay_done += len(_batch)
+                    _overlay_update(_overlay_done, _overlay_total)
                 else:
-                    _kbp_finish()
-                logger.info("[kb_overlay] Pre-extraction done")
+                    _overlay_finish()
+                logger.info("[kill_fx] Pre-extraction done")
 
             # An abort may arrive while plans/overlay tracks are being built.
             # Do not continue into POV installation or launch CS2 after that.
@@ -4105,7 +4050,7 @@ class OBSDirector:
                 for dto in demo_requests:
                     self._check_abort()
 
-                    # 优先使用预构建的 plan（已含 kb_track 数据），避免重复 build_plan
+                    # 优先使用预构建的 plan（已含 KillFX 数据），避免重复 build_plan
                     plan = _plan_cache.get(dto.request_id)
                     if plan is None:
                         logger.info("[RecordingV3] build plan (fallback): request_id=%s type=%s",

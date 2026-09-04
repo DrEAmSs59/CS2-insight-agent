@@ -288,47 +288,6 @@ class TestCalibrationMarkers:
         assert len(timeline.markers) == 1
 
 
-class TestCalibrationGate:
-    """自检默认关闭：闪白绝不能出现在正常录制里。"""
-
-    def _plan_ticks(self, monkeypatch, cfg):
-        from app.recording.executor import recording_executor
-
-        monkeypatch.setattr("app.env_utils.load_config", lambda: cfg)
-        return recording_executor._calibration_ticks_for(
-            SimpleNamespace(start_tick=1000, end_tick=1000 + 64 * 30), TICK_RATE
-        )
-
-    def test_disabled_by_default(self, monkeypatch):
-        assert self._plan_ticks(monkeypatch, SimpleNamespace()) == []
-
-    def test_explicitly_disabled(self, monkeypatch):
-        cfg = SimpleNamespace(latency_calibration_enabled=False)
-
-        assert self._plan_ticks(monkeypatch, cfg) == []
-
-    def test_enabled_produces_spaced_ticks_inside_the_segment(self, monkeypatch):
-        cfg = SimpleNamespace(latency_calibration_enabled=True)
-
-        ticks = self._plan_ticks(monkeypatch, cfg)
-
-        assert ticks
-        assert min(ticks) > 1000
-        assert max(ticks) < 1000 + 64 * 30
-
-    def test_config_failure_never_breaks_recording(self, monkeypatch):
-        from app.recording.executor import recording_executor
-
-        def boom():
-            raise RuntimeError("config unreadable")
-
-        monkeypatch.setattr("app.env_utils.load_config", boom)
-
-        assert recording_executor._calibration_ticks_for(
-            SimpleNamespace(start_tick=0, end_tick=64 * 30), TICK_RATE
-        ) == []
-
-
 def _highlight_dto():
     from app.recording.models import RecordingRequestDTO
 

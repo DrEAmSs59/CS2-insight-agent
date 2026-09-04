@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { hasInvalidPlayerAliases, playerAliasMaps } from "../utils/playerAliases.js";
 
 import DemoPlayOptionsModal from "../components/DemoPlayOptionsModal.jsx";
 import DemoPlaybackRestoreModal from "../components/DemoPlaybackRestoreModal.jsx";
@@ -43,6 +44,8 @@ export function useDemoPlaybackDialog() {
   const [inputHudEnabled, setInputHudEnabled] = useState(true);
   const [inputHudDisplayMode, setInputHudDisplayMode] = useState("hybrid");
   const [inputAudioEnabled, setInputAudioEnabled] = useState(true);
+  const [aliasEditor, setAliasEditor] = useState({ enabled: false, drafts: {} });
+  const [aliasesReady, setAliasesReady] = useState(false);
   const [skyboxResources, setSkyboxResources] = useState([]);
   const [restoreMonitor, setRestoreMonitor] = useState(null);
   const [restorePollError, setRestorePollError] = useState("");
@@ -104,6 +107,8 @@ export function useDemoPlaybackDialog() {
     setInputHudEnabled(true);
     setInputHudDisplayMode("hybrid");
     setInputAudioEnabled(true);
+    setAliasEditor({ enabled: false, drafts: {} });
+    setAliasesReady(false);
     setSkyboxResources([]);
     await runPreflight();
   }, [runPreflight]);
@@ -118,6 +123,10 @@ export function useDemoPlaybackDialog() {
 
   const launch = useCallback(async () => {
     if (!target || launchingMode) return;
+    if (aliasEditor.enabled && (!aliasesReady || hasInvalidPlayerAliases(aliasEditor))) {
+      setError(t("playerAliases.invalid"));
+      return;
+    }
     setLaunchingMode("advanced");
     setError("");
     try {
@@ -133,6 +142,9 @@ export function useDemoPlaybackDialog() {
           input_hud_enabled: inputHudEnabled,
           input_hud_display_mode: inputHudDisplayMode,
           input_audio_enabled: inputAudioEnabled,
+          ...(playerAliasMaps(aliasEditor).playback
+            ? { player_aliases: playerAliasMaps(aliasEditor).playback }
+            : {}),
         },
       });
       setOpen(false);
@@ -162,7 +174,7 @@ export function useDemoPlaybackDialog() {
     } finally {
       setLaunchingMode("");
     }
-  }, [inputAudioEnabled, inputHudDisplayMode, inputHudEnabled, launchingMode, recordingMapMaterial, recordingSkybox, showPlayToast, t, target]);
+  }, [aliasEditor, aliasesReady, inputAudioEnabled, inputHudDisplayMode, inputHudEnabled, launchingMode, recordingMapMaterial, recordingSkybox, showPlayToast, t, target]);
 
   const retryRestoreStatus = useCallback(async () => {
     const sessionId = restoreMonitor?.sessionId;
@@ -179,7 +191,10 @@ export function useDemoPlaybackDialog() {
     }
   }, [restoreMonitor?.sessionId, t]);
 
-  const DemoPlaybackUi = useCallback(() => (
+  // Keep the component type stable while alias drafts change so focus and IME
+  // composition are not lost on each keystroke.
+  const uiRef = useRef(null);
+  uiRef.current = (
     <>
       <DemoPlayOptionsModal
         open={open}
@@ -193,6 +208,11 @@ export function useDemoPlaybackDialog() {
         inputHudEnabled={inputHudEnabled}
         inputHudDisplayMode={inputHudDisplayMode}
         inputAudioEnabled={inputAudioEnabled}
+        aliasDemos={target ? [{ key: "playback", id: target.id, path: target.path, label: target.label }] : []}
+        aliasEditor={aliasEditor}
+        aliasesReady={aliasesReady}
+        onAliasEditorChange={setAliasEditor}
+        onAliasesReadyChange={setAliasesReady}
         skyboxResources={skyboxResources}
         onClose={close}
         onRetry={runPreflight}
@@ -215,7 +235,8 @@ export function useDemoPlaybackDialog() {
         }}
       />
     </>
-  ), [PlayDemoToast, blockedReason, checking, close, error, inputAudioEnabled, inputHudDisplayMode, inputHudEnabled, launch, launchingMode, open, recordingMapMaterial, recordingSkybox, restoreMonitor, restorePollError, retryRestoreStatus, runPreflight, skyboxResources, target?.label]);
+  );
+  const DemoPlaybackUi = useCallback(() => uiRef.current, []);
 
   return { requestPlayDemo, DemoPlaybackUi };
 }

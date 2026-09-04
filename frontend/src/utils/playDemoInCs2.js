@@ -20,6 +20,9 @@ export async function getDemoPlaybackStatus(sessionId) {
 export async function playDemoInCs2({ id = null, path = null, advancedPlayback = null, povHud = null } = {}) {
   const playback = advancedPlayback || povHud;
   const body = {
+    ...(playback?.player_aliases && Object.keys(playback.player_aliases).length
+      ? { player_aliases: playback.player_aliases }
+      : {}),
     pov_hud: {
       enabled: !!playback?.enabled,
       radar_mode: Number(playback?.radar_mode) === -1 ? -1 : 0,

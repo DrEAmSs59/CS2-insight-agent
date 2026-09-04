@@ -476,11 +476,11 @@ class OBSClient:
             logger.warning("OBSClient: get_current_program_scene failed: %s", exc)
             return None
 
-    def ensure_kb_overlay_in_scene(
+    def ensure_browser_overlay_in_scene(
         self,
         scene_name: str,
         overlay_url: str,
-        source_name: str = "CS2 Keyboard Overlay",
+        source_name: str,
         *,
         reroute_audio: bool = False,
     ) -> bool:
@@ -516,17 +516,17 @@ class OBSClient:
                         "reroute_audio": bool(reroute_audio),
                         "restart_when_active": False,
                     }, overlay=True)
-                    logger.info("OBSClient: kb overlay %r already in scene %r — settings updated", source_name, scene_name)
+                    logger.info("OBSClient: overlay %r already in scene %r — settings updated", source_name, scene_name)
                 except Exception as e:
-                    logger.warning("OBSClient: kb overlay settings update failed (non-fatal): %s", e)
+                    logger.warning("OBSClient: overlay settings update failed (non-fatal): %s", e)
                 # URL 改变后 OBS Browser Source 不会自动重载，手动触发刷新
                 try:
                     req_refresh = getattr(obs_requests, "PressInputPropertiesButton", None)
                     if req_refresh is not None:
                         self._ws.call(req_refresh(inputName=source_name, propertyName="refreshnocache"))
-                        logger.info("OBSClient: kb overlay %r refreshed", source_name)
+                        logger.info("OBSClient: overlay %r refreshed", source_name)
                 except Exception as e:
-                    logger.warning("OBSClient: kb overlay refresh failed (non-fatal): %s", e)
+                    logger.warning("OBSClient: overlay refresh failed (non-fatal): %s", e)
                 return True
 
             # 检查是否全局已有同名 input（只是不在当前场景）
@@ -573,16 +573,16 @@ class OBSClient:
                         "boundsType": "OBS_BOUNDS_STRETCH",
                     })
             except Exception as te:
-                logger.warning("OBSClient: kb overlay transform failed (non-fatal): %s", te)
+                logger.warning("OBSClient: overlay transform failed (non-fatal): %s", te)
 
             logger.info(
-                "OBSClient: kb overlay Browser Source %r created in scene %r (%dx%d)",
+                "OBSClient: overlay Browser Source %r created in scene %r (%dx%d)",
                 source_name, scene_name, width, height,
             )
             return True
 
         except Exception as exc:
-            logger.warning("OBSClient: ensure_kb_overlay_in_scene failed: %s", exc)
+            logger.warning("OBSClient: ensure_browser_overlay_in_scene failed: %s", exc)
             return False
 
     def get_video_settings(self) -> dict:
@@ -706,7 +706,7 @@ class _BoundedHandshakeOBSWS(obsws):
             self.ws.connect(url, timeout=self._handshake_timeout_sec)
 
             # 握手完成后将 socket 超时改为 None（阻塞模式），避免 receive thread 在
-            # kb_track 提取等长时间操作期间因无数据而抛出 WebSocketTimeoutException
+            # 录制特效预构建等长时间操作期间因无数据而抛出 WebSocketTimeoutException
             try:
                 if self.ws.sock:
                     self.ws.sock.settimeout(None)

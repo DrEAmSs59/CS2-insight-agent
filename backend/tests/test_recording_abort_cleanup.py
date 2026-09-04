@@ -51,7 +51,6 @@ def test_abort_before_cs2_launch_runs_final_cleanup_and_returns_aborted(monkeypa
             demo_filename="not-launched.dem",
         ),
         options=SimpleNamespace(
-            kb_overlay_enabled=False,
             kill_fx_enabled=False,
         ),
     )
@@ -216,7 +215,6 @@ def test_unexpected_cs2_exit_runs_recovery_cleanup_and_returns_dedicated_code(
             demo_filename="unexpected.dem",
         ),
         options=SimpleNamespace(
-            kb_overlay_enabled=False,
             kill_fx_enabled=False,
         ),
     )
@@ -374,7 +372,6 @@ def test_pov_recording_uses_shared_exit_restore_and_reports_evidence(
             demo_filename="pov.dem",
         ),
         options=SimpleNamespace(
-            kb_overlay_enabled=False,
             kill_fx_enabled=False,
         ),
     )

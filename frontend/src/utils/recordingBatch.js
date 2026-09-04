@@ -305,25 +305,17 @@ export function applySessionObsTransitionToRequests(requests, session) {
   }));
 }
 
-/**
- * 将录制前弹窗中的击杀特效，以及旧请求携带的 OBS 键盘兼容参数写入 request.options。
- * @param {object[]} requests
- * @param {{ kb_overlay_enabled?: boolean, kb_overlay_tick_offset?: number, kb_overlay_position?: string, kill_fx_enabled?: boolean, kill_fx_tick_offset?: number }} session
- */
-export function applySessionKbOverlayToRequests(requests, session) {
+/** 将录制前弹窗中的击杀特效参数写入 request.options。 */
+export function applySessionKillFxToRequests(requests, session) {
   if (!Array.isArray(requests) || !requests.length || !session) return requests;
-  const hasKb = typeof session.kb_overlay_enabled === "boolean";
   const hasFx = typeof session.kill_fx_enabled === "boolean";
-  if (!hasKb && !hasFx) return requests;
+  if (!hasFx) return requests;
   return requests.map((r) => ({
     ...r,
     options: {
       ...(r.options || {}),
-      ...(hasKb && { kb_overlay_enabled: session.kb_overlay_enabled }),
-      ...(hasKb && typeof session.kb_overlay_tick_offset === "number" && { kb_overlay_tick_offset: session.kb_overlay_tick_offset }),
-      ...(hasKb && typeof session.kb_overlay_position === "string" && { kb_overlay_position: session.kb_overlay_position }),
-      ...(hasFx && { kill_fx_enabled: session.kill_fx_enabled }),
-      ...(hasFx && typeof session.kill_fx_tick_offset === "number" && { kill_fx_tick_offset: session.kill_fx_tick_offset }),
+      kill_fx_enabled: session.kill_fx_enabled,
+      ...(typeof session.kill_fx_tick_offset === "number" && { kill_fx_tick_offset: session.kill_fx_tick_offset }),
     },
   }));
 }

@@ -22,6 +22,7 @@ from ...demo_playback_service import (
 )
 from ...env_utils import ensure_cs2_path, load_config
 from ...map_material_vpk import MapMaterialVpkError, normalize_map_material_id
+from ...player_aliases import PlayerAliases, PlayerAliasError, player_alias_roster
 from ...pov_hud_manager import PovHudError
 from ...skybox_resources import list_skybox_resources
 from ...skybox_vpk import SkyboxVpkError, normalize_skybox_id
@@ -48,6 +49,7 @@ class DemoPlaybackMapMaterialBody(BaseModel):
 
 
 class DemoPlaybackOptionsBody(BaseModel):
+    player_aliases: PlayerAliases = Field(default_factory=dict)
     pov_hud: DemoPlaybackPovBody = Field(default_factory=DemoPlaybackPovBody)
     map_material: DemoPlaybackMapMaterialBody = Field(
         default_factory=DemoPlaybackMapMaterialBody
@@ -106,8 +108,11 @@ def launch_cs2_play_demo(
                 input_hud_scale_percent=int(pov.input_hud_scale_percent),
                 input_audio_enabled=bool(pov.input_audio_enabled),
                 input_audio_volume_percent=int(pov.input_audio_volume_percent),
+                player_aliases=dict(body.player_aliases),
             ),
         )
+    except PlayerAliasError as exc:
+        raise HTTPException(422, str(exc)) from exc
     except SkyboxVpkError as exc:
         raise HTTPException(422, str(exc)) from exc
     except MapMaterialVpkError as exc:
@@ -145,6 +150,28 @@ async def demo_playback_preflight():
         ),
         "skyboxes": await asyncio.to_thread(list_skybox_resources),
     }
+
+
+class AliasRosterBody(BaseModel):
+    id: Optional[int] = Field(default=None, gt=0)
+    path: Optional[str] = Field(default=None, max_length=32768)
+
+
+@router.post("/api/demo/alias-roster")
+async def demo_alias_roster(body: AliasRosterBody):
+    if body.id is not None:
+        row = await demo_db.get_demo_by_id(body.id)
+        if not row:
+            raise HTTPException(404, "Demo not found")
+        path = await _library_working_demo_path(row)
+    elif body.path:
+        path = await resolve_uploaded_demo_path_async(body.path)
+    else:
+        raise HTTPException(422, "缺少 Demo 路径或编号。")
+    try:
+        return {"players": await asyncio.to_thread(player_alias_roster, path)}
+    except PlayerAliasError as exc:
+        raise HTTPException(422, str(exc)) from exc
 
 
 @router.get("/api/demo/playback/status")

@@ -167,6 +167,51 @@ def test_normal_playback_uses_unique_demo_and_cleans_it(monkeypatch, tmp_path: P
     assert service._active is None
 
 
+@pytest.mark.parametrize("pov_enabled", [False, True])
+def test_alias_copy_is_used_for_playback_and_vpk_then_removed(monkeypatch, tmp_path, pov_enabled):
+    cfg, demo, _ = _paths(tmp_path)
+    process = _FakeProcess()
+    monkeypatch.setattr(playback.subprocess, "Popen", lambda *args, **kwargs: process)
+    repaired = []
+
+    def compatible(path):
+        repaired.append(path)
+        return SimpleNamespace(
+            cached=False,
+            report=SimpleNamespace(
+                outcome="clean",
+                removed_messages=0,
+                removed_win_panel_events=0,
+            ),
+        )
+
+    def copy(source, output, aliases):
+        assert source == demo and aliases == {"76561199032006224": "京介"}
+        output.write_bytes(b"aliased")
+        return output
+
+    monkeypatch.setattr(playback, "create_player_alias_copy", copy)
+    monkeypatch.setattr(playback, "ensure_demo_compatible", compatible)
+    service = playback.DemoPlaybackService()
+    service.launch(
+        demo,
+        cfg,
+        playback.DemoPlaybackPovOptions(
+            enabled=pov_enabled,
+            player_aliases={"76561199032006224": "京介"},
+        ),
+    )
+    session = service._active
+    assert session.copied_demo.read_bytes() == b"aliased"
+    assert repaired == [session.copied_demo]
+    if pov_enabled:
+        assert _FakePovManager.instances[-1].installed_demo_paths == [session.copied_demo]
+    assert demo.read_bytes() == b"demo"
+    session.started_at_monotonic = time.monotonic() - 4
+    service._monitor_session(session)
+    assert not session.copied_demo.exists()
+
+
 def test_pov_playback_installs_cfg_and_restores_after_exit(monkeypatch, tmp_path: Path):
     cfg, demo, _game_root = _paths(tmp_path)
     process = _FakeProcess()
@@ -299,6 +344,72 @@ def test_chroma_pov_playback_redirects_only_the_disposable_demo_copy(
 
     session.started_at_monotonic = time.monotonic() - 4
     service._monitor_session(session)
+
+
+def test_aliases_are_applied_before_chroma_redirect_and_vpk_install(
+    monkeypatch,
+    tmp_path: Path,
+):
+    cfg, demo, _game_root = _paths(tmp_path)
+    original = demo.read_bytes()
+    process = _FakeProcess()
+    calls = []
+
+    def fake_alias(source, destination, aliases):
+        calls.append(("alias", Path(source), Path(destination), aliases))
+        Path(destination).write_bytes(b"aliased-demo")
+        return Path(destination)
+
+    def fake_prepare(source, destination, **kwargs):
+        source = Path(source)
+        destination = Path(destination)
+        calls.append(("chroma", source, destination, source.read_bytes(), kwargs))
+        destination.write_bytes(b"aliased-and-chroma-demo")
+        return SimpleNamespace(
+            manifest_report=SimpleNamespace(rewritten_chroma_sky_references=2),
+            handle_report=SimpleNamespace(
+                fields_rewritten=28,
+                input_sha256="1" * 64,
+                output_sha256="2" * 64,
+            ),
+        )
+
+    monkeypatch.setattr(playback, "create_player_alias_copy", fake_alias)
+    monkeypatch.setattr(playback, "prepare_chroma_demo_copy", fake_prepare)
+    monkeypatch.setattr(playback, "_detect_chroma_demo_map_name", lambda _path: "de_ancient")
+    monkeypatch.setattr(playback.subprocess, "Popen", lambda *_args, **_kwargs: process)
+
+    service = playback.DemoPlaybackService()
+    service.launch(
+        demo,
+        cfg,
+        playback.DemoPlaybackPovOptions(
+            enabled=True,
+            skybox_id="chroma_blue",
+            player_aliases={"76561199032006224": "京介"},
+        ),
+    )
+
+    session = service._active
+    assert session is not None
+    assert demo.read_bytes() == original
+    assert session.copied_demo.read_bytes() == b"aliased-and-chroma-demo"
+    assert calls[0] == (
+        "alias",
+        demo,
+        session.copied_demo,
+        {"76561199032006224": "京介"},
+    )
+    assert calls[1][0] == "chroma"
+    assert calls[1][1] == session.copied_demo
+    assert calls[1][2] == session.copied_demo.with_name(f"{session.copied_demo.stem}_chroma.dem")
+    assert calls[1][3] == b"aliased-demo"
+    assert calls[1][4] == {"map_name": "de_ancient"}
+    assert _FakePovManager.instances[-1].installed_demo_paths == [session.copied_demo]
+
+    session.started_at_monotonic = time.monotonic() - 4
+    service._monitor_session(session)
+    assert not session.copied_demo.exists()
 
 
 def test_pov_playback_snapshots_and_restores_player_configs(monkeypatch, tmp_path: Path):

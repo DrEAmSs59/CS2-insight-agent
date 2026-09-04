@@ -2,6 +2,7 @@ pub mod config;
 mod entity;
 pub mod header;
 pub mod input_command;
+pub mod player_aliases;
 mod rewrite;
 pub mod verify;
 mod workflow;

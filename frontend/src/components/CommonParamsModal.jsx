@@ -188,9 +188,6 @@ export default function CommonParamsModal({
   obsTransitionEnabled: initObsTransitionEnabled = false,
   obsTransitionName: initObsTransitionName = "Fade",
   obsTransitionDurationMs: initObsTransitionDurationMs = 100,
-  kbOverlayEnabled: initKbOverlayEnabled = false,
-  kbOverlayTickOffset: initKbOverlayTickOffset = 6,
-  kbOverlayPosition: initKbOverlayPosition = "bottom_center",
   killFxEnabled: initKillFxEnabled = false,
   killFxTickOffset: initKillFxTickOffset = 6,
   configRefreshKey = 0,
@@ -230,9 +227,6 @@ export default function CommonParamsModal({
   const [obsTransEnabled, setObsTransEnabled] = useState(() => !!initObsTransitionEnabled);
   const [obsTransName, setObsTransName] = useState(() => initObsTransitionName);
   const [obsTransDurationMs, setObsTransDurationMs] = useState(() => Number(initObsTransitionDurationMs));
-  const [kbOverlayEnabled, setKbOverlayEnabled] = useState(() => !!initKbOverlayEnabled);
-  const [kbOverlayTickOffset, setKbOverlayTickOffset] = useState(() => Number(initKbOverlayTickOffset));
-  const [kbOverlayPosition, setKbOverlayPosition] = useState(() => initKbOverlayPosition || "bottom_center");
   const [killFxEnabled, setKillFxEnabled] = useState(() => !!initKillFxEnabled);
   const [killFxTickOffset, setKillFxTickOffset] = useState(() => Number(initKillFxTickOffset) || 0);
   const [povEnabled, setPovEnabled] = useState(() => !!experimentalPovEnabled);
@@ -280,9 +274,6 @@ export default function CommonParamsModal({
     setObsTransEnabled(!!initObsTransitionEnabled);
     setObsTransName(initObsTransitionName);
     setObsTransDurationMs(Number(initObsTransitionDurationMs));
-    setKbOverlayEnabled(!!initKbOverlayEnabled);
-    setKbOverlayTickOffset(Number(initKbOverlayTickOffset));
-    setKbOverlayPosition(initKbOverlayPosition || "bottom_center");
     setKillFxEnabled(!!initKillFxEnabled);
     setKillFxTickOffset(Number(initKillFxTickOffset) || 0);
     setPovEnabled(!!experimentalPovEnabled);
@@ -305,9 +296,6 @@ export default function CommonParamsModal({
     experimentalPovEnabled,
     recordingSkybox,
     recordingMapMaterial,
-    initKbOverlayEnabled,
-    initKbOverlayTickOffset,
-    initKbOverlayPosition,
     initKillFxEnabled,
     initKillFxTickOffset,
     cs2ExtraLaunchArgs,
@@ -338,9 +326,6 @@ export default function CommonParamsModal({
       obs_transition_enabled: obsTransEnabled,
       obs_transition_name: obsTransName,
       obs_transition_duration_ms: obsTransDurationMs,
-      kb_overlay_enabled: kbOverlayEnabled,
-      kb_overlay_tick_offset: Number(kbOverlayTickOffset) || 0,
-      kb_overlay_position: kbOverlayPosition,
       kill_fx_enabled: killFxEnabled,
       kill_fx_tick_offset: Number(killFxTickOffset) || 0,
       experimental_pov_enabled: povEnabled,
@@ -363,9 +348,6 @@ export default function CommonParamsModal({
     obsTransEnabled,
     obsTransName,
     obsTransDurationMs,
-    kbOverlayEnabled,
-    kbOverlayTickOffset,
-    kbOverlayPosition,
     killFxEnabled,
     killFxTickOffset,
     povEnabled,
@@ -383,9 +365,6 @@ export default function CommonParamsModal({
     obs_transition_enabled: obsTransEnabled,
     obs_transition_name: obsTransName,
     obs_transition_duration_ms: Number(obsTransDurationMs),
-    kb_overlay_enabled: kbOverlayEnabled,
-    kb_overlay_tick_offset: Number(kbOverlayTickOffset) || 0,
-    kb_overlay_position: kbOverlayPosition,
     kill_fx_enabled: killFxEnabled,
     kill_fx_tick_offset: Number(killFxTickOffset) || 0,
     experimental_pov_enabled: povEnabled,
@@ -399,9 +378,6 @@ export default function CommonParamsModal({
     obsTransEnabled,
     obsTransName,
     obsTransDurationMs,
-    kbOverlayEnabled,
-    kbOverlayTickOffset,
-    kbOverlayPosition,
     killFxEnabled,
     killFxTickOffset,
     povEnabled,
@@ -456,9 +432,6 @@ export default function CommonParamsModal({
       setObsTransEnabled(parsed.obs_transition_enabled);
       setObsTransName(parsed.obs_transition_name);
       setObsTransDurationMs(parsed.obs_transition_duration_ms);
-      setKbOverlayEnabled(parsed.kb_overlay_enabled);
-      setKbOverlayTickOffset(parsed.kb_overlay_tick_offset);
-      setKbOverlayPosition(parsed.kb_overlay_position);
       setKillFxEnabled(parsed.kill_fx_enabled);
       setKillFxTickOffset(parsed.kill_fx_tick_offset);
       setPovEnabled(parsed.experimental_pov_enabled);
@@ -494,12 +467,6 @@ export default function CommonParamsModal({
     warmupOpts.resolution_height,
   );
   const resSummaryDisplay = resSummaryRaw.startsWith("record.") ? t(resSummaryRaw) : resSummaryRaw;
-
-  const KB_POSITIONS = [
-    { value: "bottom_center", labelKey: "record.warmupKbPosBottomCenter" },
-    { value: "minimap_below", labelKey: "record.warmupKbPosMinimapBelow" },
-    { value: "weapon_right",  labelKey: "record.warmupKbPosWeaponRight" },
-  ];
 
   const AR_TAGS = [
     { ar: "4:3",   sample: "1920×1440", tagKey: "record.arTag43" },
@@ -1027,72 +994,6 @@ export default function CommonParamsModal({
                 subtitle={t("record.commonSecOverlaysSubtitle")}
                 defaultOpen
               >
-                <div className="grid gap-4 xl:grid-cols-2">
-                  <div className="rounded-lg border border-cs2-border bg-cs2-bg-input p-4">
-                    <h4 className="text-sm font-semibold text-cs2-text-primary">{t("record.commonSecKb")}</h4>
-                    <p className="mt-1 mb-3 text-xs leading-relaxed text-cs2-text-muted">
-                      {t("record.commonSecKbSubtitle")}
-                    </p>
-                    <label className="flex cursor-pointer items-center gap-3">
-                      <input
-                        type="checkbox"
-                        checked={kbOverlayEnabled}
-                        onChange={(e) => setKbOverlayEnabled(e.target.checked)}
-                        className="h-4 w-4 rounded border-cs2-border accent-cs2-orange"
-                      />
-                      <span className="text-sm text-cs2-text-primary">{t("record.warmupKbEnable")}</span>
-                    </label>
-                    <p className="mt-2 pl-7 text-xs leading-relaxed text-cs2-text-muted">
-                      {t("record.commonKbDesc")}
-                    </p>
-                    {kbOverlayEnabled && (
-                      <div className="mt-3 pl-7 flex flex-col gap-3">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <span className="text-xs text-cs2-text-secondary whitespace-nowrap">{t("record.warmupKbPosition")}</span>
-                          {KB_POSITIONS.map(({ value, labelKey }) => (
-                            <label key={value} className="flex items-center gap-1.5 cursor-pointer">
-                              <input
-                                type="radio"
-                                name="kb-pos-common"
-                                value={value}
-                                checked={kbOverlayPosition === value}
-                                onChange={() => setKbOverlayPosition(value)}
-                                className="accent-cs2-orange"
-                              />
-                              <span className="text-xs text-cs2-text-primary">{t(labelKey)}</span>
-                            </label>
-                          ))}
-                        </div>
-                        <div className="flex flex-wrap items-center gap-3">
-                          <span className="text-xs text-cs2-text-secondary whitespace-nowrap">{t("record.warmupKbSyncAdjust")}</span>
-                          <input
-                            type="number"
-                            value={kbOverlayTickOffset}
-                            onChange={(e) => {
-                              const raw = e.target.value;
-                              setKbOverlayTickOffset(raw === "" ? "" : Number(raw));
-                            }}
-                            onBlur={() => {
-                              if (kbOverlayTickOffset === "" || Number.isNaN(Number(kbOverlayTickOffset))) {
-                                setKbOverlayTickOffset(0);
-                              }
-                            }}
-                            min="-120"
-                            max="120"
-                            step="1"
-                            className="w-20 rounded border border-cs2-border bg-cs2-bg-elevated px-2 py-1 text-sm text-cs2-text-primary text-center"
-                          />
-                          <span className="text-xs text-cs2-text-muted tabular-nums">
-                            ≈ {Math.round(Math.abs(Number(kbOverlayTickOffset) || 0) / 64 * 1000)} ms{Number(kbOverlayTickOffset) > 0 ? t("record.warmupKbAhead") : Number(kbOverlayTickOffset) < 0 ? t("record.warmupKbBehind") : t("record.warmupKbNoCompensation")}
-                          </span>
-                        </div>
-                        <p className="text-xs text-cs2-text-muted leading-relaxed">
-                          {t("record.warmupKbSyncHint")}
-                        </p>
-                      </div>
-                    )}
-                  </div>
-
                   <div className="rounded-lg border border-cs2-border bg-cs2-bg-input p-4">
                     <h4 className="text-sm font-semibold text-cs2-text-primary">{t("record.warmupSecKillFx")}</h4>
                     <p className="mt-1 mb-3 text-xs leading-relaxed text-cs2-text-muted">
@@ -1132,7 +1033,7 @@ export default function CommonParamsModal({
                             className="w-20 rounded border border-cs2-border bg-cs2-bg-elevated px-2 py-1 text-sm text-cs2-text-primary text-center"
                           />
                           <span className="text-xs text-cs2-text-muted tabular-nums">
-                            ≈ {Math.round(Math.abs(Number(killFxTickOffset) || 0) / 64 * 1000)} ms{Number(killFxTickOffset) > 0 ? t("record.warmupKbAhead") : Number(killFxTickOffset) < 0 ? t("record.warmupKbBehind") : t("record.warmupKbNoCompensation")}
+                            ≈ {Math.round(Math.abs(Number(killFxTickOffset) || 0) / 64 * 1000)} ms{Number(killFxTickOffset) > 0 ? t("record.overlayAhead") : Number(killFxTickOffset) < 0 ? t("record.overlayBehind") : t("record.overlayNoCompensation")}
                           </span>
                         </div>
                         <p className="text-xs text-cs2-text-muted leading-relaxed">
@@ -1141,7 +1042,6 @@ export default function CommonParamsModal({
                       </div>
                     )}
                   </div>
-                </div>
               </WorkflowSection>
 
               <WorkflowSection

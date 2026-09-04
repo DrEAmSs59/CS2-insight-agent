@@ -92,10 +92,10 @@ const bundledDataFiles = new Set([
 ]);
 copyFiltered("data", (rel) => bundledDataFiles.has(rel.toLowerCase()));
 
-/** Open-source DEM truth-source sidecar used by every keyboard overlay. */
+/** Open-source DEM truth-source and names-only rewrite sidecars. */
 function buildAndStageDemoTools() {
   const manifest = join(repoRoot, "tools", "demo-cosmetic-rewriter", "Cargo.toml");
-  const binaries = ["demo-input-hud-track", "demo-sky-handle-rewriter"];
+  const binaries = ["demo-input-hud-track", "demo-player-aliases", "demo-sky-handle-rewriter"];
   const result = spawnSync(
     "cargo",
     [

@@ -221,13 +221,11 @@ export function splitRecordWarmupConfirmPayload(payload) {
     obs_transition_enabled,
     obs_transition_name,
     obs_transition_duration_ms,
-    kb_overlay_enabled,
-    kb_overlay_tick_offset,
-    kb_overlay_position,
     input_hud_enabled,
     input_hud_display_mode,
     input_audio_enabled,
     combat_stats_hud_enabled,
+    player_aliases_by_demo,
     kill_fx_enabled,
     kill_fx_tick_offset,
     ...warmupForApi
@@ -235,6 +233,7 @@ export function splitRecordWarmupConfirmPayload(payload) {
   return {
     warmupForApi,
     session: {
+      player_aliases_by_demo: player_aliases_by_demo || {},
       cs2_extra_launch_args:
         typeof session_cs2_extra_launch_args === "string"
           ? session_cs2_extra_launch_args
@@ -249,9 +248,6 @@ export function splitRecordWarmupConfirmPayload(payload) {
       obs_transition_enabled,
       obs_transition_name,
       obs_transition_duration_ms,
-      kb_overlay_enabled: typeof kb_overlay_enabled === "boolean" ? kb_overlay_enabled : undefined,
-      kb_overlay_tick_offset: typeof kb_overlay_tick_offset === "number" ? kb_overlay_tick_offset : undefined,
-      kb_overlay_position: typeof kb_overlay_position === "string" ? kb_overlay_position : undefined,
       input_hud_enabled: typeof input_hud_enabled === "boolean" ? input_hud_enabled : true,
       input_hud_display_mode: ["hybrid", "always", "active"].includes(input_hud_display_mode)
         ? input_hud_display_mode

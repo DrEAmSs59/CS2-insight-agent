@@ -11,6 +11,38 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from app.features.demo_playback import api as playback_api
 
 
+def test_alias_roster_resolves_library_and_path(monkeypatch, tmp_path):
+    from unittest.mock import AsyncMock
+    path = tmp_path / "sample.dem"
+    players = [{"steamid64": "76561199032006224", "name": "Etagekax", "team_number": 2}]
+    monkeypatch.setattr(playback_api.demo_db, "get_demo_by_id", AsyncMock(return_value={"id": 7}))
+    monkeypatch.setattr(playback_api, "_library_working_demo_path", AsyncMock(return_value=path))
+    monkeypatch.setattr(playback_api, "resolve_uploaded_demo_path_async", AsyncMock(return_value=path))
+    def roster(value):
+        assert value == path
+        return players
+    monkeypatch.setattr(playback_api, "player_alias_roster", roster)
+    for body in [playback_api.AliasRosterBody(id=7), playback_api.AliasRosterBody(path="sample.dem")]:
+        assert asyncio.run(playback_api.demo_alias_roster(body)) == {"players": players}
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(playback_api.demo_alias_roster(playback_api.AliasRosterBody()))
+    assert exc.value.status_code == 422
+
+
+def test_aliases_are_forwarded_even_without_pov(monkeypatch, tmp_path):
+    cfg = _configured_cs2(tmp_path)
+    demo = tmp_path / "match.dem"
+    demo.write_bytes(b"demo")
+    monkeypatch.setattr(playback_api, "load_config", lambda: cfg)
+    monkeypatch.setattr(playback_api, "ensure_cs2_path", lambda value: value)
+    def launch(path, config, options):
+        assert not options.enabled
+        assert options.player_aliases == {"76561199032006224": "京介"}
+        return {"ok": True}
+    monkeypatch.setattr(playback_api.demo_playback_service, "launch", launch)
+    playback_api.launch_cs2_play_demo(demo, playback_api.DemoPlaybackOptionsBody(player_aliases={"76561199032006224": "京介"}))
+
+
 def _configured_cs2(tmp_path: Path):
     cs2 = tmp_path / "game" / "bin" / "win64" / "cs2.exe"
     cs2.parent.mkdir(parents=True)

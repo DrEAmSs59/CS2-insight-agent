@@ -4,46 +4,39 @@ from app import env_utils
 from app.recording.executor import recording_executor
 
 
-def test_overlay_offsets_use_independent_request_values(monkeypatch):
+def test_killfx_offset_uses_request_value(monkeypatch):
     monkeypatch.setattr(
         env_utils,
         "load_config",
         lambda: SimpleNamespace(
-            kb_overlay_enabled=False,
             kill_fx_enabled=True,
-            kb_overlay_tick_offset=6,
             kill_fx_tick_offset=6,
         ),
     )
     segment = SimpleNamespace(metadata={
         "kill_track": [],
-        "kb_tick_offset": 8,
         "kill_fx_tick_offset": -3,
     })
 
-    bus, keyboard_offset, killfx_offset = recording_executor._kb_bus(segment)
+    bus, killfx_offset = recording_executor._overlay_bus(segment)
 
     assert bus is not None
-    assert keyboard_offset == 8
     assert killfx_offset == -3
 
 
-def test_overlay_offsets_fall_back_to_independent_config_values(monkeypatch):
+def test_killfx_offset_falls_back_to_config_value(monkeypatch):
     monkeypatch.setattr(
         env_utils,
         "load_config",
         lambda: SimpleNamespace(
-            kb_overlay_enabled=False,
             kill_fx_enabled=True,
-            kb_overlay_tick_offset=6,
             kill_fx_tick_offset=2,
         ),
     )
     segment = SimpleNamespace(metadata={"kill_track": []})
 
-    _, keyboard_offset, killfx_offset = recording_executor._kb_bus(segment)
+    _, killfx_offset = recording_executor._overlay_bus(segment)
 
-    assert keyboard_offset == 6
     assert killfx_offset == 2
 
 
@@ -57,7 +50,6 @@ def test_legacy_config_migrates_killfx_extra_to_independent_offset():
     changed = env_utils._normalize_config_defaults(cfg, raw)
 
     assert changed is True
-    assert cfg.kb_overlay_tick_offset == 56
     assert cfg.kill_fx_tick_offset == 53
     assert cfg.overlay_offsets_independent is True
 
@@ -72,7 +64,6 @@ def test_independent_config_offsets_are_not_combined_again():
 
     env_utils._normalize_config_defaults(cfg, raw)
 
-    assert cfg.kb_overlay_tick_offset == 56
     assert cfg.kill_fx_tick_offset == -3
 
 
@@ -82,5 +73,4 @@ def test_legacy_config_without_killfx_offset_inherits_previous_base_timing():
 
     env_utils._normalize_config_defaults(cfg, raw)
 
-    assert cfg.kb_overlay_tick_offset == 12
     assert cfg.kill_fx_tick_offset == 12

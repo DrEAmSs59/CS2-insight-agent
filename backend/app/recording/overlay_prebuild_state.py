@@ -1,7 +1,4 @@
-"""
-虚拟键盘 kb_track 预构建进度共享状态。
-由 obs_director 写入，由 recording/api.py 端点读取供前端轮询。
-"""
+"""KillFX overlay 预构建进度共享状态。"""
 from __future__ import annotations
 
 _state: dict = {
@@ -17,16 +14,16 @@ def reset() -> None:
 
 
 def start(total: int) -> None:
-    _state.update(active=True, done=0, total=total, message=f"预构建虚拟键盘数据 0/{total}")
+    _state.update(active=True, done=0, total=total, message=f"预构建击杀特效数据 0/{total}")
 
 
 def update(done: int, total: int) -> None:
-    _state.update(done=done, total=total, message=f"预构建虚拟键盘数据 {done}/{total}")
+    _state.update(done=done, total=total, message=f"预构建击杀特效数据 {done}/{total}")
 
 
 def finish() -> None:
     t = _state["total"]
-    _state.update(active=False, done=t, message=f"虚拟键盘数据预构建完成 {t}/{t}")
+    _state.update(active=False, done=t, message=f"击杀特效数据预构建完成 {t}/{t}")
 
 
 def get() -> dict:

@@ -10,7 +10,7 @@ def test_existing_killfx_source_is_routed_through_obs_audio():
     client.scene_has_source = MagicMock(return_value=True)
     client.set_input_settings = MagicMock()
 
-    assert client.ensure_kb_overlay_in_scene(
+    assert client.ensure_browser_overlay_in_scene(
         "CS2 Insight Game",
         "http://127.0.0.1:8000/overlay/killfx.html",
         source_name="CS2 Kill FX Overlay",

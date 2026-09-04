@@ -17,6 +17,8 @@ import {
   WAXED_REFLECTION_MAP_MATERIAL,
 } from "../utils/recordingMapMaterial.js";
 import Modal from "./ui/Modal.jsx";
+import PlayerAliasesSection from "./PlayerAliasesSection.jsx";
+import { hasInvalidPlayerAliases } from "../utils/playerAliases.js";
 
 export default function DemoPlayOptionsModal({
   open,
@@ -39,9 +41,15 @@ export default function DemoPlayOptionsModal({
   onInputHudEnabledChange,
   onInputHudDisplayModeChange,
   onInputAudioEnabledChange,
+  aliasDemos = [],
+  aliasEditor,
+  onAliasEditorChange,
+  aliasesReady = false,
+  onAliasesReadyChange,
 }) {
   const t = useT();
   const launching = !!launchingMode;
+  const aliasesBlocked = aliasEditor?.enabled && (!aliasesReady || hasInvalidPlayerAliases(aliasEditor));
   const selectedSkybox = normalizeRecordingSkyboxId(recordingSkybox);
   const selectedMapMaterial = normalizeRecordingMapMaterialId(recordingMapMaterial);
   const catalogBuiltinSkyboxes = sortBuiltinRecordingSkyboxes(
@@ -239,6 +247,14 @@ export default function DemoPlayOptionsModal({
               </div>
             </div>
 
+            <PlayerAliasesSection
+              demos={aliasDemos}
+              value={aliasEditor}
+              onChange={onAliasEditorChange}
+              onReadyChange={onAliasesReadyChange}
+              disabled={launching}
+            />
+
             <div
               data-testid="demo-play-input-hud-option"
               className="rounded-lg border border-cs2-border bg-cs2-bg-input/45 px-3 py-3"
@@ -409,7 +425,7 @@ export default function DemoPlayOptionsModal({
               </button>
               <button
                 type="button"
-                disabled={launching}
+                disabled={launching || aliasesBlocked}
                 onClick={onPlayAdvanced}
                 data-testid="demo-play-advanced-option"
                 className="flex items-center gap-1.5 rounded-lg bg-cs2-accent px-3 py-2 text-xs font-bold text-cs2-text-on-accent hover:bg-cs2-accent-light disabled:opacity-50"

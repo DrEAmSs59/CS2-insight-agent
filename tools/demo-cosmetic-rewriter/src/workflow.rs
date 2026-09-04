@@ -180,7 +180,7 @@ pub fn verify_demo_pair(options: VerifyOptions) -> Result<VerifyOutcome> {
     })
 }
 
-fn ensure_same_demo_metadata(original: &DemoLayout, rewritten: &DemoLayout) -> Result<()> {
+pub(crate) fn ensure_same_demo_metadata(original: &DemoLayout, rewritten: &DemoLayout) -> Result<()> {
     if original.metadata.patch_version != rewritten.metadata.patch_version
         || original.metadata.build_num != rewritten.metadata.build_num
         || original.metadata.map_name != rewritten.metadata.map_name
@@ -195,7 +195,7 @@ fn ensure_same_demo_metadata(original: &DemoLayout, rewritten: &DemoLayout) -> R
     Ok(())
 }
 
-fn resolve_new_output(path: &Path) -> Result<PathBuf> {
+pub(crate) fn resolve_new_output(path: &Path) -> Result<PathBuf> {
     if path.exists() {
         bail!("refusing to overwrite existing output {}", path.display());
     }
@@ -211,13 +211,13 @@ fn resolve_new_output(path: &Path) -> Result<PathBuf> {
     Ok(parent.join(file_name))
 }
 
-struct TempArtifact {
+pub(crate) struct TempArtifact {
     path: PathBuf,
     committed: bool,
 }
 
 impl TempArtifact {
-    fn create(final_path: &Path, stage: &str) -> Result<(Self, File)> {
+    pub(crate) fn create(final_path: &Path, stage: &str) -> Result<(Self, File)> {
         let parent = final_path.parent().expect("resolved output has parent");
         let file_name = final_path
             .file_name()
@@ -250,11 +250,11 @@ impl TempArtifact {
         bail!("could not allocate a unique temporary output name")
     }
 
-    fn path(&self) -> &Path {
+    pub(crate) fn path(&self) -> &Path {
         &self.path
     }
 
-    fn commit_to(&mut self, final_path: &Path) -> Result<()> {
+    pub(crate) fn commit_to(&mut self, final_path: &Path) -> Result<()> {
         fs::rename(&self.path, final_path).with_context(|| {
             format!(
                 "failed to atomically move {} to {}",

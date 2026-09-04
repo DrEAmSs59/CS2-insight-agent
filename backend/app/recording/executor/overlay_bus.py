@@ -6,7 +6,7 @@ import time
 logger = logging.getLogger(__name__)
 
 
-class KbOverlayBus:
+class RecordingOverlayBus:
     def __init__(self) -> None:
         self._clients: set = set()
         self._lock = asyncio.Lock()
@@ -45,10 +45,13 @@ class KbOverlayBus:
     async def broadcast(self, msg: dict) -> None:
         t = msg.get("type")
         if t == "load":
-            logger.info("[KbOverlayBus] broadcast load: %d frames, clients=%d",
-                        len(msg.get("frames") or []), len(self._clients))
+            logger.info(
+                "[RecordingOverlayBus] broadcast load: %d kills, clients=%d",
+                len(msg.get("kills") or []),
+                len(self._clients),
+            )
         else:
-            logger.info("[KbOverlayBus] broadcast %s: clients=%d", t, len(self._clients))
+            logger.info("[RecordingOverlayBus] broadcast %s: clients=%d", t, len(self._clients))
         async with self._lock:
             if t == "load":
                 self._last_load = msg
@@ -79,4 +82,4 @@ class KbOverlayBus:
                 self._clients.discard(ws)
 
 
-kb_overlay_bus = KbOverlayBus()
+recording_overlay_bus = RecordingOverlayBus()

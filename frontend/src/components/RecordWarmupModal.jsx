@@ -9,6 +9,8 @@ import {
   validateWarmupResolution,
 } from "../utils/warmupDefaults";
 import ExperimentalPovSection from "./ExperimentalPovSection";
+import PlayerAliasesSection from "./PlayerAliasesSection.jsx";
+import { hasInvalidPlayerAliases, playerAliasMaps } from "../utils/playerAliases.js";
 import Cs2LaunchConsoleFields from "./Cs2LaunchConsoleFields";
 import { POV_CONFLICT_HUD, RecordingHudCard } from "./RecordingHudCard";
 import { useT } from "../i18n/useT.js";
@@ -153,6 +155,7 @@ export default function RecordWarmupModal({
   open,
   onClose,
   onConfirm,
+  aliasDemos = [],
   defaultOverrides,
   experimentalPovEnabled = false,
   recordingSkybox = "default",
@@ -168,6 +171,9 @@ export default function RecordWarmupModal({
   const t = useT();
   const [opts, setOpts] = useState(RECORD_WARMUP_DEFAULT_OPTIONS);
   const [resolutionError, setResolutionError] = useState("");
+  const [aliasEditor, setAliasEditor] = useState({ enabled: false, drafts: {} });
+  const [aliasesReady, setAliasesReady] = useState(false);
+  const aliasesBlocked = aliasEditor.enabled && (!aliasesReady || hasInvalidPlayerAliases(aliasEditor));
   const [obsTransEnabled, setObsTransEnabled] = useState(null);  // null = use global
   const [obsTransName, setObsTransName] = useState(null);
   const [obsTransDurationMs, setObsTransDurationMs] = useState(null);
@@ -184,6 +190,8 @@ export default function RecordWarmupModal({
   const [sessionRecordInjectConsoleLines, setSessionRecordInjectConsoleLines] = useState("");
 
   useEffect(() => {
+    setAliasEditor({ enabled: false, drafts: {} });
+    setAliasesReady(false);
     if (!open) return;
     const base = { ...RECORD_WARMUP_DEFAULT_OPTIONS };
     const o = defaultOverrides;
@@ -248,6 +256,7 @@ export default function RecordWarmupModal({
   }, []);
 
   const handleSubmit = () => {
+    if (aliasesBlocked) return;
     const vr = validateWarmupResolution(opts);
     if (!vr.ok) {
       setResolutionError(t(vr.messageKey, vr.messageParams));
@@ -289,15 +298,12 @@ export default function RecordWarmupModal({
     });
 
     onConfirm({
+        player_aliases_by_demo: playerAliasMaps(aliasEditor),
         ...apiShape,
         console_cmds,
         obs_transition_enabled: obsTransEnabled,
         obs_transition_name: obsTransName,
         obs_transition_duration_ms: obsTransDurationMs,
-        // Retire the OBS Browser Source keyboard for new recordings. The
-        // backend fields remain for old saved requests, but this flow always
-        // selects the authoritative in-game VPK path instead.
-        kb_overlay_enabled: false,
         input_hud_enabled: sessionInputHudEnabled,
         input_hud_display_mode: sessionInputHudDisplayMode,
         input_audio_enabled: sessionInputAudioEnabled,
@@ -454,7 +460,7 @@ export default function RecordWarmupModal({
                         className="w-20 rounded border border-cs2-border bg-cs2-bg-elevated px-2 py-1 text-sm text-cs2-text-primary text-center"
                       />
                       <span className="text-xs text-cs2-text-muted tabular-nums">
-                        ≈ {Math.round(Math.abs(Number(killFxTickOffset) || 0) / 64 * 1000)} ms{Number(killFxTickOffset) > 0 ? t("record.warmupKbAhead") : Number(killFxTickOffset) < 0 ? t("record.warmupKbBehind") : t("record.warmupKbNoCompensation")}
+                        ≈ {Math.round(Math.abs(Number(killFxTickOffset) || 0) / 64 * 1000)} ms{Number(killFxTickOffset) > 0 ? t("record.overlayAhead") : Number(killFxTickOffset) < 0 ? t("record.overlayBehind") : t("record.overlayNoCompensation")}
                       </span>
                     </div>
                     <p className="text-xs text-cs2-text-muted leading-relaxed">
@@ -641,6 +647,8 @@ export default function RecordWarmupModal({
           </div>
 
           <div className="min-w-0 space-y-4">
+          <PlayerAliasesSection demos={aliasDemos} value={aliasEditor} onChange={setAliasEditor} onReadyChange={setAliasesReady} />
+
           <ExperimentalPovSection
             visible={open}
             experimentalPovEnabled={sessionPovEnabled}
@@ -872,7 +880,7 @@ export default function RecordWarmupModal({
             <button
               type="button"
               onClick={handleSubmit}
-              disabled={Boolean(resolutionError)}
+              disabled={Boolean(resolutionError) || aliasesBlocked}
               className="rounded-lg bg-cs2-accent px-4 py-2 text-sm font-extrabold text-cs2-text-on-accent hover:bg-cs2-accent-light disabled:cursor-not-allowed disabled:opacity-45"
             >
               {t("record.warmupBtnStart")}

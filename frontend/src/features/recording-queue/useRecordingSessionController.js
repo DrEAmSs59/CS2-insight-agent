@@ -11,12 +11,13 @@ import {
   unexpectedCs2ExitRecoveryMessageKey,
 } from "../../utils/recordingAbort";
 import {
-  applySessionKbOverlayToRequests,
+  applySessionKillFxToRequests,
   applySessionObsTransitionToRequests,
   buildRecordingQueueRequestsFromQueue,
 } from "../../utils/recordingBatch";
 import { splitRecordWarmupConfirmPayload } from "../../utils/warmupDefaults";
 import { normalizePovVoiceMode } from "../../utils/povVoiceMode.js";
+import { applyRecordingPlayerAliases, recordingAliasDemoTargets } from "../../utils/playerAliases.js";
 
 /** Owns one recording session from preflight through recovery and result reporting. */
 export function useRecordingSessionController({
@@ -42,6 +43,7 @@ export function useRecordingSessionController({
     povRecoveryNeeded: false,
   });
   const [recordWarmupOpen, setRecordWarmupOpen] = useState(false);
+  const [recordingAliasDemos, setRecordingAliasDemos] = useState([]);
   const [warmupIntent, setWarmupIntent] = useState(null);
   const [configBackupStatus, setConfigBackupStatus] = useState(null);
   const [configBackupLoading, setConfigBackupLoading] = useState(false);
@@ -104,10 +106,13 @@ export function useRecordingSessionController({
       return;
     }
     setQueueDrawerOpen(false);
+    setRecordingAliasDemos(recordingAliasDemoTargets(buildRecordingQueueRequestsFromQueue(
+      queue, useRecordingQueue.getState().globalPacing, uploadedDemos, parsedMatches, demoLibraryItems,
+    )));
     setWarmupIntent("batch");
     setRecordWarmupOpen(true);
     setProgressText("");
-  }, [configBackupStatus, obsConfig, queue.length, setProgressText, setQueueDrawerOpen, t]);
+  }, [configBackupStatus, obsConfig, queue, uploadedDemos, parsedMatches, demoLibraryItems, setProgressText, setQueueDrawerOpen, t]);
 
   const handleWarmupConfirm = useCallback(async (warmupPayload) => {
     const intent = warmupIntent;
@@ -128,13 +133,13 @@ export function useRecordingSessionController({
     setBatchRecording(true);
     setProgressText(t("common.preparingMapResources"), { loading: true });
 
-    const overlayPrebuildEnabled = session.kb_overlay_enabled || session.kill_fx_enabled;
+    const overlayPrebuildEnabled = session.kill_fx_enabled;
     let overlayPollTimer = null;
     if (overlayPrebuildEnabled) {
       overlayPollTimer = setInterval(async () => {
         if (recordingAbortRequestedRef.current) return;
         try {
-          const { data: status } = await API.get("recording/kb-prebuild-status");
+          const { data: status } = await API.get("recording/overlay-prebuild-status");
           if (recordingAbortRequestedRef.current) return;
           if (status?.active) {
             setProgressText(t("app.overlayPrebuildProgress", {
@@ -164,7 +169,8 @@ export function useRecordingSessionController({
         return;
       }
       requests = applySessionObsTransitionToRequests(requests, session);
-      requests = applySessionKbOverlayToRequests(requests, session);
+      requests = applySessionKillFxToRequests(requests, session);
+      requests = applyRecordingPlayerAliases(requests, session.player_aliases_by_demo);
       const povHud = session.experimental_pov_enabled
         ? {
             enabled: true,
@@ -381,6 +387,7 @@ export function useRecordingSessionController({
     recordingBlockedCode,
     recordingRecoveryPrompt,
     recordWarmupOpen,
+    recordingAliasDemos,
     configBackupStatus,
     configBackupLoading,
     refreshConfigBackupStatus,

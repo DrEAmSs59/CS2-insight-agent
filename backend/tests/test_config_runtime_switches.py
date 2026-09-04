@@ -1,8 +1,4 @@
-"""PUT /api/config 是逐字段赋值的白名单，漏接的字段会被静默丢弃而不是报错。
-
-锁帧与时序自检仍走配置文件 / API（设置页已下线），这里守的是"显式写入还在、
-省略不覆盖"两件事。
-"""
+"""PUT /api/config 的录制运行时开关回归测试。"""
 
 import asyncio
 import sys
@@ -33,7 +29,6 @@ def test_defaults_are_off():
     cfg = AppConfig(obs=OBSConfig())
 
     assert cfg.obs.browser_begin_frame_scheduling is False
-    assert cfg.latency_calibration_enabled is False
 
 
 def test_begin_frame_scheduling_survives_the_round_trip(monkeypatch):
@@ -57,30 +52,14 @@ def test_omitting_begin_frame_scheduling_from_obs_update_leaves_it_alone(monkeyp
     assert _round_trip(monkeypatch, payload, initial=initial).obs.browser_begin_frame_scheduling is True
 
 
-def test_latency_calibration_survives_the_round_trip(monkeypatch):
-    payload = config_api.ConfigPayload(latency_calibration_enabled=True)
-
-    assert _round_trip(monkeypatch, payload).latency_calibration_enabled is True
-
-
-def test_omitting_latency_calibration_leaves_it_alone(monkeypatch):
-    # 别的设置页保存时不带这个字段，不能把诊断开关顺手关掉。
-    initial = AppConfig(obs=OBSConfig(), latency_calibration_enabled=True)
-    payload = config_api.ConfigPayload(cs2_path="C:/games/cs2.exe")
-
-    assert _round_trip(monkeypatch, payload, initial=initial).latency_calibration_enabled is True
-
-
 def test_switches_are_exposed_via_get_config(monkeypatch):
-    # 调试仍靠 GET / 配置文件读写；被 model_dump 漏掉就无法再打开。
-    cfg = AppConfig(obs=OBSConfig(browser_begin_frame_scheduling=True), latency_calibration_enabled=True)
+    cfg = AppConfig(obs=OBSConfig(browser_begin_frame_scheduling=True))
     monkeypatch.setattr(config_api, "load_config", lambda: cfg)
     monkeypatch.setattr(config_api, "ensure_cs2_path", lambda value: value)
 
     data = config_api.get_config()
 
     assert data["obs"]["browser_begin_frame_scheduling"] is True
-    assert data["latency_calibration_enabled"] is True
 
 
 def test_recording_skybox_is_independent_and_defaults_to_original():

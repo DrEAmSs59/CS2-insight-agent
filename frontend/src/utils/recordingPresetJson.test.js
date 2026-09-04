@@ -10,9 +10,6 @@ const preset = {
   obs_transition_enabled: true,
   obs_transition_name: "Fade",
   obs_transition_duration_ms: 200,
-  kb_overlay_enabled: false,
-  kb_overlay_tick_offset: 6,
-  kb_overlay_position: "bottom_center",
   kill_fx_enabled: true,
   kill_fx_tick_offset: 6,
   experimental_pov_enabled: false,
@@ -48,8 +45,22 @@ describe("recording preset share JSON", () => {
 
   test("defaults a missing version-1 KillFX fine-tune to the keyboard offset", () => {
     const { kill_fx_tick_offset: _removed, ...legacyPreset } = preset;
-    const file = { ...buildRecordingPresetFile(legacyPreset), version: 1 };
+    const file = { ...buildRecordingPresetFile({ ...legacyPreset, kb_overlay_tick_offset: 6 }), version: 1 };
     expect(parseRecordingPresetFile(file, RECORD_WARMUP_DEFAULT_OPTIONS).kill_fx_tick_offset).toBe(6);
+  });
+
+  test("ignores retired OBS keyboard fields in legacy presets", () => {
+    const file = {
+      ...buildRecordingPresetFile({
+        ...preset,
+        kb_overlay_enabled: true,
+        kb_overlay_tick_offset: 12,
+        kb_overlay_position: "weapon_right",
+      }),
+      version: 4,
+    };
+    expect(parseRecordingPresetFile(file, RECORD_WARMUP_DEFAULT_OPTIONS))
+      .toEqual(preset);
   });
 
   test("defaults legacy presets to the original map sky", () => {

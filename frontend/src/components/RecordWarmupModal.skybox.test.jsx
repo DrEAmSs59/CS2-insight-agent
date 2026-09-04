@@ -53,7 +53,6 @@ describe("RecordWarmupModal skybox override", () => {
         recording_skybox: "cartoon3",
         recording_map_material: "default",
         pov_voice_mode: "team",
-        kb_overlay_enabled: false,
         input_hud_enabled: true,
         input_hud_display_mode: "hybrid",
         input_audio_enabled: true,

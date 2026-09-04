@@ -1,5 +1,9 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import API from "../api/api.js";
+import { TextEncoder } from "node:util";
+globalThis.TextEncoder ||= TextEncoder;
+vi.mock("../api/api.js", () => ({ default: { post: vi.fn() } }));
 
 vi.mock("../utils/playDemoInCs2.js", () => ({
   getDemoPlaybackPreflight: vi.fn(),
@@ -35,6 +39,28 @@ describe("useDemoPlaybackDialog restoration monitor", () => {
     getDemoPlaybackPreflight.mockReset();
     getDemoPlaybackStatus.mockReset();
     playDemoInCs2.mockReset();
+    API.post.mockReset();
+  });
+
+  it("keeps alias input mounted while typing, submits original identity and resets next session", async () => {
+    getDemoPlaybackPreflight.mockResolvedValue({ cs2_path_configured: true });
+    playDemoInCs2.mockResolvedValue({ ok: true });
+    API.post.mockResolvedValue({ data: { players: [{ steamid64: "76561199032006224", name: "Etagekax", team_number: 2 }] } });
+    render(<Harness />);
+    fireEvent.click(screen.getByRole("button", { name: "open" }));
+    fireEvent.click(await screen.findByRole("checkbox", { name: "启用改名" }));
+    const input = await screen.findByRole("textbox", { name: "Etagekax 的自定义昵称" });
+    input.focus();
+    fireEvent.change(input, { target: { value: "京介 🦋" } });
+    expect(document.activeElement).toBe(input);
+    expect(input.value).toBe("京介 🦋");
+    fireEvent.click(screen.getByRole("button", { name: /启动高级播放 Demo/ }));
+    await waitFor(() => expect(playDemoInCs2).toHaveBeenCalledWith(expect.objectContaining({
+      advancedPlayback: expect.objectContaining({ player_aliases: { "76561199032006224": "京介 🦋" } }),
+    })));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    fireEvent.click(screen.getByRole("button", { name: "open" }));
+    expect((await screen.findByRole("checkbox", { name: "启用改名" })).checked).toBe(false);
   });
 
   it("launches advanced playback directly from the preview and opens factual restoration", async () => {

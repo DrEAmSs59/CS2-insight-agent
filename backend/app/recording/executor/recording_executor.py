@@ -35,16 +35,8 @@ async def _inject_voice_listen_mask(mask: int) -> None:
         raise VoiceIsolationError("voice mask injection returned false")
 
 
-def _kb_bus(segment=None):
-    """Return (bus, keyboard_tick_offset, kill_fx_tick_offset).
-
-    Priority: if the segment carries kb_track data (injected by the queue handler
-    when dto.options.kb_overlay_enabled=True) or kill_track data, activate the bus.
-    Otherwise fall back to the global AppConfig flag.
-
-    Both independent offsets prefer per-request values stashed on
-    segment.metadata and fall back to persisted config.
-    """
+def _overlay_bus(segment=None):
+    """Return the KillFX event bus and its effective tick offset."""
     def _resolve_offset(seg, metadata_key, config_key, default, cfg=None):
         if seg is not None:
             v = seg.metadata.get(metadata_key)
@@ -67,53 +59,22 @@ def _kb_bus(segment=None):
         except Exception:
             return None
 
-    def _resolved_offsets(seg, cfg):
-        keyboard = _resolve_offset(
-            seg, "kb_tick_offset", "kb_overlay_tick_offset", 0, cfg,
-        )
-        kill_fx = _resolve_offset(
+    def _resolved_offset(seg, cfg):
+        return _resolve_offset(
             seg, "kill_fx_tick_offset", "kill_fx_tick_offset", 0, cfg,
         )
-        return keyboard, kill_fx
 
     try:
-        if segment is not None and (
-            segment.metadata.get("kb_track") is not None
-            or segment.metadata.get("kill_track") is not None
-        ):
-            from .kb_overlay_bus import kb_overlay_bus
-            keyboard, kill_fx = _resolved_offsets(segment, _load_cfg())
-            return kb_overlay_bus, keyboard, kill_fx
+        if segment is not None and segment.metadata.get("kill_track") is not None:
+            from .overlay_bus import recording_overlay_bus
+            return recording_overlay_bus, _resolved_offset(segment, _load_cfg())
         cfg = _load_cfg()
-        if cfg is not None and (cfg.kb_overlay_enabled or cfg.kill_fx_enabled):
-            from .kb_overlay_bus import kb_overlay_bus
-            keyboard, kill_fx = _resolved_offsets(segment, cfg)
-            return kb_overlay_bus, keyboard, kill_fx
+        if cfg is not None and cfg.kill_fx_enabled:
+            from .overlay_bus import recording_overlay_bus
+            return recording_overlay_bus, _resolved_offset(segment, cfg)
     except Exception:
         pass
-    return None, 0, 0
-
-def _calibration_ticks_for(segment: Any, tick_rate: float) -> list[int]:
-    """时序自检开启时，本段要打的校准闪白 tick；关闭时返回空列表。
-
-    默认关闭：闪白会在成片角落留下一块不透明方块，不能出现在正常录制里。
-    """
-    try:
-        from ...env_utils import load_config
-
-        cfg = load_config()
-        if not bool(getattr(cfg, "latency_calibration_enabled", False)):
-            return []
-        from ..diagnostics.onset_probe import plan_calibration_ticks
-
-        return plan_calibration_ticks(
-            start_tick=int(segment.start_tick),
-            end_tick=int(segment.end_tick),
-            tick_rate=float(tick_rate),
-        )
-    except Exception:  # noqa: BLE001 - 自检不该影响录制
-        logger.debug("calibration tick planning failed", exc_info=True)
-        return []
+    return None, 0
 
 
 # Seconds seeked before each segment's start_tick to absorb spec_player / GSI-verify
@@ -863,25 +824,12 @@ class RecordingExecutor:
                     # 等控制台关闭动画，防止 OBS 录到控制台画面
                     await asyncio.sleep(0.35)
                 logger.info("[RecordingV3] reached effective start_tick; starting OBS")
-                # ── kb overlay: load ────────────────────────────────────────
-                _kb_frames = segment.metadata.get("kb_track")
+                # ── KillFX overlay: load ────────────────────────────────────
+                _bus, _fx_tick_off = _overlay_bus(segment)
                 logger.info(
-                    "[kb_overlay] seg=%d metadata keys=%s kb_track_len=%s",
-                    segment.segment_index,
-                    list(segment.metadata.keys()),
-                    len(_kb_frames) if _kb_frames is not None else "None(key missing)",
+                    "[overlay] seg=%d bus=%s kill_fx_tick_off=%s",
+                    segment.segment_index, _bus, _fx_tick_off,
                 )
-                _bus, _kb_tick_off, _fx_tick_off = _kb_bus(segment)
-                logger.info(
-                    "[overlay] seg=%d bus=%s kb_tick_off=%s kill_fx_tick_off=%s",
-                    segment.segment_index, _bus, _kb_tick_off, _fx_tick_off,
-                )
-                _calibration_ticks = _calibration_ticks_for(segment, plan.tick_rate)
-                if _calibration_ticks:
-                    logger.warning(
-                        "[overlay] seg=%d latency calibration ON: %d flash(es) will appear in the recording",
-                        segment.segment_index, len(_calibration_ticks),
-                    )
                 if _bus:
                     await _bus.broadcast({
                         "type": "load",
@@ -889,17 +837,14 @@ class RecordingExecutor:
                         "start_tick": segment.start_tick,
                         "end_tick": segment.end_tick,
                         "tick_rate": plan.tick_rate,
-                        "offset_ticks": _kb_tick_off,
                         "kill_fx_offset_ticks": _fx_tick_off,
-                        "frames": _kb_frames or [],
                         "kills": segment.metadata.get("kill_track") or [],
-                        "calibration_ticks": _calibration_ticks,
                     })
 
                 # ── 4. Start or Resume OBS recording ────────────────────────
                 # Hot path: StartRecord/ResumeRecord returns immediately on success.
                 # DO NOT call GetRecordStatus here — that delay would be recorded.
-                _bus_resume, _, _ = _kb_bus(segment)
+                _bus_resume, _ = _overlay_bus(segment)
                 # Kill axis timestamps: obs_record_mono is video t=0 for this segment,
                 # demo_resume_mono is when playback actually resumed inside it.
                 obs_record_mono: Optional[float] = None
@@ -965,8 +910,6 @@ class RecordingExecutor:
                 segment_record_t0 = obs_record_mono if obs_record_mono is not None else time.monotonic()
                 kill_timeline.open_segment(
                     segment,
-                    calibration_ticks=_calibration_ticks,
-                    overlay_offset_ticks=_kb_tick_off,
                     overhead_sec=record_overhead_sec,
                     lead_in_sec=(
                         demo_resume_mono - obs_record_mono
@@ -1076,13 +1019,13 @@ class RecordingExecutor:
                     result.recording_stopped_at = time.time()
                     final_output_path = obs_stop_path
                     await asyncio.to_thread(self._obs.disconnect)
-                    # ── kb overlay: end ─────────────────────────────────────
-                    _bus, _, _ = _kb_bus(segment)
+                    # ── recording overlay: end ──────────────────────────────
+                    _bus, _ = _overlay_bus(segment)
                     if _bus:
                         await _bus.broadcast({"type": "end"})
                 else:
-                    # ── kb overlay: pause ───────────────────────────────────
-                    _bus, _, _ = _kb_bus(segment)
+                    # ── recording overlay: pause ────────────────────────────
+                    _bus, _ = _overlay_bus(segment)
                     if _bus:
                         await _bus.broadcast({"type": "pause"})
 

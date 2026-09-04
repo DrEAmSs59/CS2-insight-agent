@@ -157,9 +157,6 @@ export default function App() {
   const [obsTransitionEnabled, setObsTransitionEnabled] = useState(false);
   const [obsTransitionName, setObsTransitionName] = useState("Fade");
   const [obsTransitionDurationMs, setObsTransitionDurationMs] = useState(100);
-  const [kbOverlayEnabled, setKbOverlayEnabled] = useState(false);
-  const [kbOverlayTickOffset, setKbOverlayTickOffset] = useState(6);
-  const [kbOverlayPosition, setKbOverlayPosition] = useState("bottom_center");
   const [killFxEnabled, setKillFxEnabled] = useState(false);
   const [killFxTickOffset, setKillFxTickOffset] = useState(6);
   /** 保存或拉取配置后递增，驱动常用参数页表单重新灌入 */
@@ -282,6 +279,7 @@ export default function App() {
     recordingBlockedCode,
     recordingRecoveryPrompt,
     recordWarmupOpen,
+    recordingAliasDemos,
     configBackupStatus,
     configBackupLoading,
     refreshConfigBackupStatus,
@@ -490,15 +488,6 @@ export default function App() {
     if (typeof data.obs_transition_duration_ms === "number") {
       setObsTransitionDurationMs(data.obs_transition_duration_ms);
     }
-    if (typeof data.kb_overlay_enabled === "boolean") {
-      setKbOverlayEnabled(data.kb_overlay_enabled);
-    }
-    if (typeof data.kb_overlay_tick_offset === "number") {
-      setKbOverlayTickOffset(data.kb_overlay_tick_offset);
-    }
-    if (typeof data.kb_overlay_position === "string") {
-      setKbOverlayPosition(data.kb_overlay_position);
-    }
     if (typeof data.kill_fx_enabled === "boolean") {
       setKillFxEnabled(data.kill_fx_enabled);
     }
@@ -617,9 +606,6 @@ export default function App() {
       obs_transition_enabled: !!payload?.obs_transition_enabled,
       obs_transition_name: payload?.obs_transition_name ?? "Fade",
       obs_transition_duration_ms: Number(payload?.obs_transition_duration_ms) || 100,
-      kb_overlay_enabled: !!payload?.kb_overlay_enabled,
-      kb_overlay_tick_offset: Number.isInteger(payload?.kb_overlay_tick_offset) ? payload.kb_overlay_tick_offset : 6,
-      kb_overlay_position: ["bottom_center", "minimap_below", "weapon_right"].includes(payload?.kb_overlay_position) ? payload.kb_overlay_position : "bottom_center",
       kill_fx_enabled: !!payload?.kill_fx_enabled,
       kill_fx_tick_offset: Number.isInteger(payload?.kill_fx_tick_offset) ? payload.kill_fx_tick_offset : 6,
       recording_skybox: normalizeRecordingSkyboxId(payload?.recording_skybox),
@@ -1411,9 +1397,6 @@ export default function App() {
     obsTransitionEnabled,
     obsTransitionName,
     obsTransitionDurationMs,
-    kbOverlayEnabled,
-    kbOverlayTickOffset,
-    kbOverlayPosition,
     killFxEnabled,
     killFxTickOffset,
   };
@@ -1552,6 +1535,7 @@ export default function App() {
 
         <RecordWarmupModal
           open={recordWarmupOpen}
+          aliasDemos={recordingAliasDemos}
           onClose={dismissWarmup}
           onConfirm={handleWarmupConfirm}
           defaultOverrides={savedRecordWarmupDefaults ?? undefined}
@@ -1563,9 +1547,6 @@ export default function App() {
           initObsTransEnabled={obsTransitionEnabled}
           initObsTransName={obsTransitionName}
           initObsTransDurationMs={obsTransitionDurationMs}
-          initKbOverlayEnabled={kbOverlayEnabled}
-          initKbOverlayTickOffset={kbOverlayTickOffset}
-          initKbOverlayPosition={kbOverlayPosition}
           initKillFxEnabled={killFxEnabled}
           initKillFxTickOffset={killFxTickOffset}
         />

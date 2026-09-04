@@ -65,9 +65,6 @@ class ConfigPayload(BaseModel):
     obs_transition_enabled: Optional[bool] = None
     obs_transition_name: Optional[str] = None
     obs_transition_duration_ms: Optional[int] = None
-    kb_overlay_enabled: Optional[bool] = None
-    kb_overlay_tick_offset: Optional[int] = None
-    kb_overlay_position: Optional[str] = None
     kill_fx_enabled: Optional[bool] = None
     kill_fx_tick_offset: Optional[int] = None
     experimental: Optional[ExperimentalPayload] = None
@@ -78,7 +75,6 @@ class ConfigPayload(BaseModel):
     match_count: Optional[int] = None
     update_check_frequency: Optional[str] = None
     last_update_check_at: Optional[str] = None
-    latency_calibration_enabled: Optional[bool] = None
 
 
 @router.get("/api/config")
@@ -375,8 +371,6 @@ async def update_config(payload: ConfigPayload):
         cfg.ai_mode = payload.ai_mode
     if payload.obs_agent_auto_prepare is not None:
         cfg.obs_agent_auto_prepare = bool(payload.obs_agent_auto_prepare)
-    if payload.latency_calibration_enabled is not None:
-        cfg.latency_calibration_enabled = bool(payload.latency_calibration_enabled)
     if payload.locale is not None and payload.locale in ("zh", "en", "auto"):
         cfg.locale = payload.locale
     if payload.expected_parse_players is not None:
@@ -457,16 +451,6 @@ async def update_config(payload: ConfigPayload):
             cfg.obs_transition_duration_ms = max(0, int(payload.obs_transition_duration_ms))
         except (TypeError, ValueError):
             pass
-    if payload.kb_overlay_enabled is not None:
-        cfg.kb_overlay_enabled = bool(payload.kb_overlay_enabled)
-    if payload.kb_overlay_tick_offset is not None:
-        try:
-            cfg.kb_overlay_tick_offset = int(payload.kb_overlay_tick_offset)
-        except (TypeError, ValueError):
-            pass
-    if payload.kb_overlay_position is not None:
-        if str(payload.kb_overlay_position) in ("bottom_center", "minimap_below", "weapon_right"):
-            cfg.kb_overlay_position = str(payload.kb_overlay_position)
     if payload.kill_fx_enabled is not None:
         cfg.kill_fx_enabled = bool(payload.kill_fx_enabled)
     if payload.kill_fx_tick_offset is not None:

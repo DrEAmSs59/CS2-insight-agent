@@ -55,10 +55,10 @@ def test_killfx_page_uses_one_main_player_and_compact_badges():
     assert ": (msg.offset_ticks || 0)" in html
 
 
-def test_executor_broadcasts_independent_overlay_offsets():
+def test_executor_broadcasts_only_the_killfx_offset():
     executor = Path(__file__).parents[1] / "app" / "recording" / "executor" / "recording_executor.py"
     source = executor.read_text(encoding="utf-8")
 
-    assert '"offset_ticks": _kb_tick_off' in source
     assert '"kill_fx_offset_ticks": _fx_tick_off' in source
+    assert "_kb_tick_off" not in source
     assert '"kill_fx_extra_offset_ticks"' not in source

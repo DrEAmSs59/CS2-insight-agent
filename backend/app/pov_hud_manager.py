@@ -946,6 +946,12 @@ class PovHudManager:
                 advanced_playback_enabled=advanced_playback_enabled,
                 skybox_id=skybox_id,
                 map_material_id=map_material_id,
+                input_hud_enabled=input_hud_enabled,
+                input_hud_display_mode=input_hud_display_mode,
+                input_hud_scale_percent=input_hud_scale_percent,
+                input_audio_enabled=input_audio_enabled,
+                input_audio_volume_percent=input_audio_volume_percent,
+                combat_stats_enabled=combat_stats_enabled,
                 staging_stack=staging_stack,
             )
 
@@ -960,6 +966,12 @@ class PovHudManager:
         advanced_playback_enabled: bool = False,
         skybox_id: str = DEFAULT_SKYBOX_ID,
         map_material_id: str = DEFAULT_MAP_MATERIAL_ID,
+        input_hud_enabled: bool = True,
+        input_hud_display_mode: str = "hybrid",
+        input_hud_scale_percent: int = 100,
+        input_audio_enabled: bool = True,
+        input_audio_volume_percent: int = 100,
+        combat_stats_enabled: bool = True,
         staging_stack: ExitStack,
     ) -> Optional[DemoVoiceHudBuild]:
         if sys.platform != "win32":

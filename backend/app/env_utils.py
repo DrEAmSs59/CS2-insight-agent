@@ -446,19 +446,11 @@ class AppConfig(BaseModel):
     steam_cdn_assets_enabled: bool = True
     match_mode: str = "premier"   # premier / competitive
     match_count: int = 20         # 20 / 50 / 100
-    # Legacy OBS Browser Source keyboard compatibility. New playback sessions
-    # use the authoritative in-game VPK input HUD configured in Advanced Playback.
-    kb_overlay_enabled: bool = False
-    kb_overlay_tick_offset: int = 6   # 键盘独立偏移；正=提前显示，负=延迟显示
-    kb_overlay_position: str = "bottom_center"  # bottom_center | minimap_below
     # 击杀特效 overlay（OBS Browser Source 实时合成）
     kill_fx_enabled: bool = False
     kill_fx_tick_offset: int = 6      # KillFX 独立偏移；不再与键盘偏移叠加
     # 兼容标记：旧配置中 kill_fx_tick_offset 是叠加在键盘偏移上的额外微调。
     overlay_offsets_independent: bool = True
-    # 时序自检：录制时让键盘 overlay 在角落打一串校准闪白，用来回读叠加层的真实延迟。
-    # 成片里会多出一块不透明方块，只在诊断时开（配置文件 / API，设置页已下线）。
-    latency_calibration_enabled: bool = False
 
 
 def _normalize_config_defaults(cfg: AppConfig, raw: Optional[dict[str, Any]] = None) -> bool:
@@ -498,13 +490,13 @@ def _normalize_config_defaults(cfg: AppConfig, raw: Optional[dict[str, Any]] = N
             cfg.record_inject_console_lines = _DEFAULT_RECORD_INJECT_CONSOLE_LINES
             changed = True
 
-    # 旧配置中的 KillFX offset 是相对 kb_overlay_tick_offset 的额外微调。
-    # 一次性换算为绝对 offset，升级后两个 Overlay 的时间校准互不影响。
+    # 旧配置中的 KillFX offset 是相对已移除键盘 Overlay offset 的额外微调。
+    # 一次性换算为绝对 offset，升级后只保留 KillFX 的独立时间校准。
     if isinstance(raw, dict) and not bool(raw.get("overlay_offsets_independent", False)):
         try:
-            kb_offset = int(raw.get("kb_overlay_tick_offset", cfg.kb_overlay_tick_offset))
+            kb_offset = int(raw.get("kb_overlay_tick_offset", 6))
         except (TypeError, ValueError):
-            kb_offset = int(cfg.kb_overlay_tick_offset)
+            kb_offset = 6
         try:
             legacy_kill_fx_extra = int(raw.get("kill_fx_tick_offset", 0))
         except (TypeError, ValueError):
