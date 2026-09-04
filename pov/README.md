@@ -134,6 +134,9 @@ provides:
   Insight's reconstructed feed and DEMO HUD uses CS2's native feed and lifetime.
 - DEMO HUD restores CS2's native square, non-rotating spectator radar (including
   its CT/T colors and 1-5 player numbers) instead of drawing Insight markers.
+- DEMO HUD also treats CS2's native DemoUI X-ray switch as the single source of
+  truth for both player outlines and overhead player markers. POV HUD retains
+  its separate deterministic player-ID behavior.
 - Event filters with five fixed visible rows and pagination embedded in the
   filter row; the content-sized menu preserves equal top and bottom padding
 - A deterministic right-center initial position and a freely draggable title

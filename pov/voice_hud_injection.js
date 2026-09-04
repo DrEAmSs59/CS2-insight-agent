@@ -840,6 +840,7 @@
     let advancedNativeMessagesRestored = false;
     let advancedNativeRadarRestored = false;
     let advancedNativeOverheadRestored = false;
+    let advancedNativeXrayOverheadEnabled = null;
     let advancedEdgeRevealArmed = true;
     let advancedRoundIntervals = advancedPlayback && advancedPlayback.rounds
         ? advancedPlayback.rounds.slice()
@@ -1832,6 +1833,38 @@
         } catch (err) {}
     }
 
+    function nativeDemoXrayEnabled() {
+        try {
+            if (GameInterfaceAPI.GetSettingString) {
+                const setting = String(
+                    GameInterfaceAPI.GetSettingString("spec_show_xray") || "",
+                ).trim().toLowerCase();
+                if (setting) {
+                    return setting !== "0" && setting !== "false";
+                }
+            }
+            if (GameInterfaceAPI.GetSettingFloat) {
+                return Number(GameInterfaceAPI.GetSettingFloat("spec_show_xray")) !== 0;
+            }
+        } catch (errSetting) {}
+        return Boolean(advancedQuickOptions.xray);
+    }
+
+    function syncNativeDemoXrayOverhead(enabled) {
+        if (advancedNativeXrayOverheadEnabled === enabled) {
+            return;
+        }
+        advancedNativeXrayOverheadEnabled = enabled;
+        try {
+            // DemoUI owns spec_show_xray. Mirror that native switch onto the
+            // player-ID force mode so its X-ray button controls both outlines
+            // and overhead markers even after POV HUD previously forced them.
+            GameInterfaceAPI.ConsoleCommand(
+                "cl_drawhud_force_teamid_overhead " + (enabled ? 1 : -1),
+            );
+        } catch (errCommand) {}
+    }
+
     function setNativePlayerEconomy(playerPanel, money) {
         if (!playerPanel || !playerPanel.FindChildrenWithClassTraverse) {
             return;
@@ -1941,6 +1974,12 @@
     function updateOverheadInfoHud() {
         const state = controller.GetDemoControllerState();
         if (!advancedPovVisualsActive()) {
+            const nativeXrayEnabled = !advancedHudHidden && nativeDemoXrayEnabled();
+            if (!advancedHudHidden) {
+                syncNativeDemoXrayOverhead(nativeXrayEnabled);
+            } else {
+                advancedNativeXrayOverheadEnabled = null;
+            }
             const nativeIds = findHudTraverse("VisiblePlayerIDs");
             if (nativeIds && nativeIds.IsValid() && nativeIds.FindChildrenWithClassTraverse) {
                 const nativePanels = nativeIds.FindChildrenWithClassTraverse("playerid") || [];
@@ -1952,21 +1991,19 @@
                             // 10 Hz prevented native DEMO HUD details from being
                             // populated and left only the player name visible.
                             restoreNativePlayerEconomy(panel);
-                            setPlayerOverheadContentVisible(panel, true);
                         }
-                        if (!advancedQuickOptions.overhead) {
-                            setPlayerOverheadContentVisible(panel, false);
-                        }
+                        // CS2's DemoUI writes spec_show_xray. Keep the native
+                        // player-ID content on that same source of truth.
+                        setPlayerOverheadContentVisible(panel, nativeXrayEnabled);
                     }
                 });
-                if (advancedQuickOptions.overhead) {
-                    advancedNativeOverheadRestored = true;
-                }
+                advancedNativeOverheadRestored = true;
             }
             $.Schedule(0.1, updateOverheadInfoHud);
             return;
         }
         advancedNativeOverheadRestored = false;
+        advancedNativeXrayOverheadEnabled = null;
         if (advancedPlayback && !advancedQuickOptions.overhead) {
             const nativeIds = findHudTraverse("VisiblePlayerIDs");
             if (nativeIds && nativeIds.IsValid() && nativeIds.FindChildrenWithClassTraverse) {
@@ -5715,14 +5752,19 @@
     }
 
     function advancedApplyQuickOptions() {
-        const overheadMode = !advancedHudHidden && advancedQuickOptions.overhead
-            ? 1
-            : -1;
+        const demoXrayEnabled = !advancedHudHidden && !advancedPovVisualsEnabled
+            ? nativeDemoXrayEnabled()
+            : false;
+        const overheadEnabled = !advancedHudHidden && (
+            advancedPovVisualsEnabled
+                ? advancedQuickOptions.overhead
+                : demoXrayEnabled
+        );
+        const overheadMode = overheadEnabled ? 1 : -1;
         const radarMode = !advancedHudHidden && advancedQuickOptions.radar
             ? 0
             : -1;
         const commands = [
-            "spec_show_xray " + (advancedQuickOptions.xray ? 1 : 0),
             "cl_drawhud_force_radar " + radarMode,
             "cl_drawhud_force_teamid_overhead " + overheadMode,
             // Messages are profile-owned: reconstructed in POV HUD, native in
@@ -5730,6 +5772,13 @@
             // resume its own lifetime/animation without another user switch.
             "tv_nochat 0",
         ];
+        // In DEMO HUD, CS2's own DemoUI is the sole owner of spec_show_xray.
+        // POV HUD keeps its deterministic session option.
+        if (advancedPovVisualsEnabled) {
+            commands.unshift("spec_show_xray " + (advancedQuickOptions.xray ? 1 : 0));
+        } else if (!advancedHudHidden) {
+            advancedNativeXrayOverheadEnabled = demoXrayEnabled;
+        }
         for (let index = 0; index < commands.length; index += 1) {
             try { GameInterfaceAPI.ConsoleCommand(commands[index]); } catch (errCommand) {}
         }
@@ -6531,7 +6580,7 @@
             "cl_radar_scale 0.7",
             "snd_disable_radar_visualize 0",
             "cl_hud_color 0",
-            "cl_drawhud_force_teamid_overhead 1",
+            "cl_drawhud_force_teamid_overhead 0",
             "cl_teamid_overhead_mode 3",
             "cl_teamid_overhead_colors_show 0",
             "cl_teamid_overhead_fade_near_crosshair 0",

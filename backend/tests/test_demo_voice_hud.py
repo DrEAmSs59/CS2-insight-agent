@@ -1085,6 +1085,12 @@ def test_checked_in_voice_template_contains_only_an_empty_payload():
     assert b'firstChildWithClass(playerPanel, "playerid__name")' in script
     assert b'playerPanel.BHasClass("playerid--team-ct")' in script
     assert b'setPlayerOverheadContentVisible(playerPanel, visible)' in script
+    assert b'GameInterfaceAPI.GetSettingString("spec_show_xray")' in script
+    assert b'GameInterfaceAPI.GetSettingFloat("spec_show_xray")' in script
+    assert b"function syncNativeDemoXrayOverhead(enabled)" in script
+    assert b'"cl_drawhud_force_teamid_overhead " + (enabled ? 1 : -1)' in script
+    assert b"const nativeXrayEnabled = !advancedHudHidden && nativeDemoXrayEnabled()" in script
+    assert b"setPlayerOverheadContentVisible(panel, nativeXrayEnabled)" in script
     assert b'label.text = text' in script
     assert b'playerPanel.SetHasClass("money", active)' in script
     assert b'playerPanel.SetHasClass("normal-health", false)' in script
@@ -1181,6 +1187,7 @@ def test_checked_in_voice_template_contains_only_an_empty_payload():
     profile_start = script.index(b"function advancedApplyPlaybackProfile(profile)")
     profile_end = script.index(b"function advancedSetVoicePolicy(policy)", profile_start)
     assert b"spec_mode" not in script[profile_start:profile_end]
+    assert b'"cl_drawhud_force_teamid_overhead 0"' in script[profile_start:profile_end]
     assert b"CS2InsightAdvancedProgress" not in script
     assert b"CS2InsightAdvancedProgressSlider" not in script
     assert b"function advancedNumericEntryText(entry)" not in script
