@@ -1,3 +1,8 @@
+// ---------------------------------------------------------------------------------------------
+// Copyright (c) unicbm. All rights reserved.
+// Licensed under the PolyForm Noncommercial License 1.0.0. See LICENSE in the project root for license information.
+// ---------------------------------------------------------------------------------------------
+
 use anyhow::{Context, Result};
 use clap::Parser;
 use demo_cosmetic_rewriter::{player_aliases::rewrite_player_aliases, WORKER_STACK_SIZE};

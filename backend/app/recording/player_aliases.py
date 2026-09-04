@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------------------------------
+# Copyright (c) unicbm. All rights reserved.
+# Licensed under the PolyForm Noncommercial License 1.0.0. See LICENSE in the project root for license information.
+# ---------------------------------------------------------------------------------------------
+
 """Apply each demo's alias map once, before any VPK or recording plan is built."""
 from pathlib import Path
 

@@ -1,3 +1,8 @@
+// ---------------------------------------------------------------------------------------------
+// Copyright (c) unicbm. All rights reserved.
+// Licensed under the PolyForm Noncommercial License 1.0.0. See LICENSE in the project root for license information.
+// ---------------------------------------------------------------------------------------------
+
 //! Names-only offline rewrite. Identity numbers, entity handles and gameplay stay intact.
 use anyhow::{bail, Context as _, Result};
 use serde::Serialize;

@@ -1,4 +1,8 @@
 <!-- kv3 encoding:text:version{e21c7f3c-8a33-41c5-9977-a76d3a32aa0d} format:generic:version{7412167c-06e9-4698-aff2-e63eb59037e7} -->
+// ---------------------------------------------------------------------------------------------
+// Copyright (c) unicbm. All rights reserved.
+// Licensed under the PolyForm Noncommercial License 1.0.0. See LICENSE in the project root for license information.
+// ---------------------------------------------------------------------------------------------
 {
     "CS2Insight.Input.Keyboard.Down" =
     {

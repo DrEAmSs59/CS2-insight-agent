@@ -1,3 +1,8 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) unicbm. All rights reserved.
+ *  Licensed under the PolyForm Noncommercial License 1.0.0. See LICENSE in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
 export function playerAliasError(name) {
   if (!name.trim()) return "";
   if (/[\p{Cc}\p{Cs}]/u.test(name)) return "playerAliases.controlError";

@@ -1,3 +1,8 @@
+# ---------------------------------------------------------------------------------------------
+# Copyright (c) unicbm. All rights reserved.
+# Licensed under the PolyForm Noncommercial License 1.0.0. See LICENSE in the project root for license information.
+# ---------------------------------------------------------------------------------------------
+
 """Exact CS2 input tracks extracted from DEM ``svc_UserCmds`` messages.
 
 The bundled Rust extractor owns protobuf/codegen-delta decoding and emits
