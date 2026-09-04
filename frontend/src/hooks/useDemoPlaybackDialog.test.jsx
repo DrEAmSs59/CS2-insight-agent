@@ -95,7 +95,7 @@ describe("useDemoPlaybackDialog restoration monitor", () => {
     const materialSelect = screen.getByRole("combobox", { name: "高级播放地图材质" });
     expect(screen.queryByRole("combobox", { name: "按键显示方式" })).toBeNull();
     expect(skyboxSelect.value).toBe("cartoon3");
-    expect(materialSelect.value).toBe("waxed_reflection");
+    expect(materialSelect.value).toBe("default");
     fireEvent.change(skyboxSelect, { target: { value: customSkyboxId } });
     fireEvent.click(screen.getByRole("button", { name: /启动高级播放 Demo/ }));
 
@@ -105,12 +105,41 @@ describe("useDemoPlaybackDialog restoration monitor", () => {
       advancedPlayback: expect.objectContaining({
         enabled: true,
         skybox_id: customSkyboxId,
-        map_material_id: "waxed_reflection",
+        map_material_id: "default",
       }),
     }));
     const playbackOptions = playDemoInCs2.mock.calls[0][0].advancedPlayback;
     expect(playbackOptions).not.toHaveProperty("input_hud_enabled");
     expect(playbackOptions).not.toHaveProperty("input_hud_display_mode");
     await waitFor(() => expect(getDemoPlaybackStatus).toHaveBeenCalledWith("session-7"));
+  });
+
+  it("starts with original map material even when the recording preset uses rain", async () => {
+    getDemoPlaybackPreflight.mockResolvedValue({
+      cs2_path_configured: true,
+      cs2_running: false,
+      playback_active: false,
+      recording_skybox: "cartoon3",
+      recording_map_material: "rain_puddles",
+      skyboxes: [],
+    });
+    playDemoInCs2.mockResolvedValue({});
+
+    render(<Harness />);
+    fireEvent.click(screen.getByRole("button", { name: "open" }));
+    await screen.findByRole("button", { name: /启动高级播放 Demo/ });
+
+    const skyboxSelect = screen.getByRole("combobox", { name: "高级播放天空盒" });
+    expect(skyboxSelect.value).toBe("cartoon3");
+    expect(skyboxSelect.disabled).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: /启动高级播放 Demo/ }));
+
+    await waitFor(() => expect(playDemoInCs2).toHaveBeenCalledWith(expect.objectContaining({
+      advancedPlayback: expect.objectContaining({
+        skybox_id: "cartoon3",
+        map_material_id: "default",
+        weather_effect_id: "default",
+      }),
+    })));
   });
 });

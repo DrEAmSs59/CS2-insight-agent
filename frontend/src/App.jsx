@@ -25,7 +25,13 @@ import {
 import {
   DEFAULT_RECORDING_MAP_MATERIAL,
   normalizeRecordingMapMaterialId,
+  RAIN_PUDDLES_MAP_MATERIAL,
 } from "./utils/recordingMapMaterial.js";
+import {
+  DEFAULT_RECORDING_WEATHER_EFFECT,
+  normalizeRecordingWeatherEffectId,
+  RAIN_RECORDING_WEATHER_EFFECT,
+} from "./utils/recordingWeatherEffect.js";
 import { useDemoAnalysisWorkflows } from "./features/demo-analysis/useDemoAnalysisWorkflows";
 import { useDemoLibraryController } from "./features/demo-library/useDemoLibraryController";
 import { useClipQueueActions } from "./features/recording-queue/useClipQueueActions";
@@ -148,6 +154,9 @@ export default function App() {
   const [recordingSkybox, setRecordingSkybox] = useState("default");
   const [recordingMapMaterial, setRecordingMapMaterial] = useState(
     DEFAULT_RECORDING_MAP_MATERIAL,
+  );
+  const [recordingWeatherEffect, setRecordingWeatherEffect] = useState(
+    DEFAULT_RECORDING_WEATHER_EFFECT,
   );
   useEffect(() => {
     const resetRecordingSkybox = () => setRecordingSkybox("default");
@@ -493,7 +502,22 @@ export default function App() {
       setRecordingSkybox(normalizeRecordingSkyboxId(data.recording_skybox));
     }
     if (typeof data.recording_map_material === "string") {
-      setRecordingMapMaterial(normalizeRecordingMapMaterialId(data.recording_map_material));
+      const legacyRain = data.recording_map_material.trim().toLowerCase()
+        === RAIN_PUDDLES_MAP_MATERIAL;
+      setRecordingMapMaterial(
+        legacyRain
+          ? DEFAULT_RECORDING_MAP_MATERIAL
+          : normalizeRecordingMapMaterialId(data.recording_map_material),
+      );
+      setRecordingWeatherEffect(
+        legacyRain
+          ? RAIN_RECORDING_WEATHER_EFFECT
+          : normalizeRecordingWeatherEffectId(data.recording_weather_effect),
+      );
+    } else if (typeof data.recording_weather_effect === "string") {
+      setRecordingWeatherEffect(
+        normalizeRecordingWeatherEffectId(data.recording_weather_effect),
+      );
     }
     const savedPacing =
       data.recording_global_pacing &&
@@ -600,6 +624,7 @@ export default function App() {
       obs_transition_duration_ms: Number(payload?.obs_transition_duration_ms) || 100,
       recording_skybox: normalizeRecordingSkyboxId(payload?.recording_skybox),
       recording_map_material: normalizeRecordingMapMaterialId(payload?.recording_map_material),
+      recording_weather_effect: normalizeRecordingWeatherEffectId(payload?.recording_weather_effect),
       experimental: { pov_enabled: !!payload?.experimental_pov_enabled },
     };
     try {
@@ -1291,6 +1316,7 @@ export default function App() {
     experimentalPovEnabled,
     recordingSkybox,
     recordingMapMaterial,
+    recordingWeatherEffect,
     hasDemos,
     parsing,
     handleUpload,
@@ -1530,6 +1556,7 @@ export default function App() {
           experimentalPovEnabled={experimentalPovEnabled}
           recordingSkybox={recordingSkybox}
           recordingMapMaterial={recordingMapMaterial}
+          recordingWeatherEffect={recordingWeatherEffect}
           cs2ExtraLaunchArgs={cs2ExtraLaunchArgs}
           recordInjectConsoleLines={recordInjectConsoleLines}
           initObsTransEnabled={obsTransitionEnabled}

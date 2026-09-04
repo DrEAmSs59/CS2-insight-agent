@@ -1,5 +1,6 @@
 import { normalizeRecordingSkyboxId } from "./recordingSkybox.js";
 import { normalizeRecordingMapMaterialId } from "./recordingMapMaterial.js";
+import { normalizeRecordingWeatherEffectId } from "./recordingWeatherEffect.js";
 import { normalizePovVoiceMode } from "./povVoiceMode.js";
 
 function gcdInt(a, b) {
@@ -221,6 +222,7 @@ export function splitRecordWarmupConfirmPayload(payload) {
     experimental_pov_enabled,
     recording_skybox,
     recording_map_material,
+    recording_weather_effect,
     obs_transition_enabled,
     obs_transition_name,
     obs_transition_duration_ms,
@@ -246,6 +248,7 @@ export function splitRecordWarmupConfirmPayload(payload) {
       experimental_pov_enabled: !!experimental_pov_enabled,
       recording_skybox: normalizeRecordingSkyboxId(recording_skybox),
       recording_map_material: normalizeRecordingMapMaterialId(recording_map_material),
+      recording_weather_effect: normalizeRecordingWeatherEffectId(recording_weather_effect),
       obs_transition_enabled,
       obs_transition_name,
       obs_transition_duration_ms,

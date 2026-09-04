@@ -16,6 +16,10 @@ import {
   DEFAULT_RECORDING_MAP_MATERIAL,
   normalizeRecordingMapMaterialId,
 } from "../utils/recordingMapMaterial.js";
+import {
+  DEFAULT_RECORDING_WEATHER_EFFECT,
+  normalizeRecordingWeatherEffectId,
+} from "../utils/recordingWeatherEffect.js";
 
 function blockedReasonFromPreflight(data) {
   if (!data?.cs2_path_configured) return "path";
@@ -44,6 +48,9 @@ export function useDemoPlaybackDialog() {
   const [recordingSkybox, setRecordingSkybox] = useState(DEFAULT_RECORDING_SKYBOX);
   const [recordingMapMaterial, setRecordingMapMaterial] = useState(
     DEFAULT_RECORDING_MAP_MATERIAL,
+  );
+  const [recordingWeatherEffect, setRecordingWeatherEffect] = useState(
+    DEFAULT_RECORDING_WEATHER_EFFECT,
   );
   const [aliasEditor, setAliasEditor] = useState({ enabled: false, drafts: {} });
   const [aliasesReady, setAliasesReady] = useState(false);
@@ -89,7 +96,10 @@ export function useDemoPlaybackDialog() {
       const data = await getDemoPlaybackPreflight();
       setBlockedReason(blockedReasonFromPreflight(data));
       setRecordingSkybox(normalizeRecordingSkyboxId(data?.recording_skybox));
-      setRecordingMapMaterial(normalizeRecordingMapMaterialId(data?.recording_map_material));
+      // Advanced playback is session-scoped. Always enter with the original
+      // map material instead of inheriting the last recording preset.
+      setRecordingMapMaterial(DEFAULT_RECORDING_MAP_MATERIAL);
+      setRecordingWeatherEffect(DEFAULT_RECORDING_WEATHER_EFFECT);
       setSkyboxResources(Array.isArray(data?.skyboxes) ? data.skyboxes : []);
     } catch (preflightError) {
       // The launch endpoint remains authoritative; keep the choices available if preflight itself fails.
@@ -105,6 +115,7 @@ export function useDemoPlaybackDialog() {
     setLaunchingMode("");
     setRecordingSkybox(DEFAULT_RECORDING_SKYBOX);
     setRecordingMapMaterial(DEFAULT_RECORDING_MAP_MATERIAL);
+    setRecordingWeatherEffect(DEFAULT_RECORDING_WEATHER_EFFECT);
     setAliasEditor({ enabled: false, drafts: {} });
     setAliasesReady(false);
     setSkyboxResources([]);
@@ -118,6 +129,16 @@ export function useDemoPlaybackDialog() {
     setBlockedReason("");
     setError("");
   }, [launchingMode]);
+
+  const changeRecordingMapMaterial = useCallback((value) => {
+    const nextMapMaterial = normalizeRecordingMapMaterialId(value);
+    setRecordingMapMaterial(nextMapMaterial);
+  }, []);
+
+  const changeRecordingWeatherEffect = useCallback((value) => {
+    const nextWeatherEffect = normalizeRecordingWeatherEffectId(value);
+    setRecordingWeatherEffect(nextWeatherEffect);
+  }, []);
 
   const launch = useCallback(async () => {
     if (!target || launchingMode) return;
@@ -139,6 +160,7 @@ export function useDemoPlaybackDialog() {
           teamcounter_numeric: false,
           skybox_id: recordingSkybox,
           map_material_id: recordingMapMaterial,
+          weather_effect_id: recordingWeatherEffect,
           ...(PLAYER_ALIAS_ENTRY_VISIBLE && playerAliasMaps(aliasEditor).playback
             ? { player_aliases: playerAliasMaps(aliasEditor).playback }
             : {}),
@@ -171,7 +193,7 @@ export function useDemoPlaybackDialog() {
     } finally {
       setLaunchingMode("");
     }
-  }, [aliasEditor, aliasesReady, launchingMode, recordingMapMaterial, recordingSkybox, showPlayToast, t, target]);
+  }, [aliasEditor, aliasesReady, launchingMode, recordingMapMaterial, recordingSkybox, recordingWeatherEffect, showPlayToast, t, target]);
 
   const retryRestoreStatus = useCallback(async () => {
     const sessionId = restoreMonitor?.sessionId;
@@ -202,6 +224,7 @@ export function useDemoPlaybackDialog() {
         launchingMode={launchingMode}
         recordingSkybox={recordingSkybox}
         recordingMapMaterial={recordingMapMaterial}
+        recordingWeatherEffect={recordingWeatherEffect}
         aliasDemos={target ? [{ key: "playback", id: target.id, path: target.path, label: target.label }] : []}
         aliasEditor={aliasEditor}
         aliasesReady={aliasesReady}
@@ -212,7 +235,8 @@ export function useDemoPlaybackDialog() {
         onRetry={runPreflight}
         onPlayAdvanced={() => void launch()}
         onRecordingSkyboxChange={setRecordingSkybox}
-        onRecordingMapMaterialChange={setRecordingMapMaterial}
+        onRecordingMapMaterialChange={changeRecordingMapMaterial}
+        onRecordingWeatherEffectChange={changeRecordingWeatherEffect}
       />
       <PlayDemoToast />
       <DemoPlaybackRestoreModal

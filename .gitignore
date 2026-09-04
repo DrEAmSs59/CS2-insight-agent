@@ -58,6 +58,11 @@ debug_demoparser.py
 debug_demo_max_tick.py
 debug_demoparser2.py
 debug_parse_demo.py
+
+# Local weather-effects research inputs and third-party development tools.
+# These are workstation-only and must not be published to GitHub.
+/MAP/
+/tools/vendor/
 # Local reverse-engineering probe; the tracked copy is hidden locally with
 # skip-worktree so workstation-only NetSetConVar diagnostics are not committed.
 tools/demo-cosmetic-rewriter/src/bin/demo-netmessage-audit.rs

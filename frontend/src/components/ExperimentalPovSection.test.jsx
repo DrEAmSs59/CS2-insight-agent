@@ -212,6 +212,37 @@ describe("ExperimentalPovSection POV recovery", () => {
     expect(screen.getByRole("combobox", { name: "录制天空盒" }).value).toBe(customId);
   });
 
+  it("allows a recording skybox override while rain defaults to Train overcast", () => {
+    API.get.mockReturnValue(new Promise(() => {}));
+    const onSkyboxChange = vi.fn();
+    const onMapMaterialChange = vi.fn();
+    const onWeatherEffectChange = vi.fn();
+    render(
+      <ExperimentalPovSection
+        visible
+        experimentalPovEnabled={false}
+        onExperimentalPovChange={() => {}}
+        recordingSkybox="cartoon3"
+        onRecordingSkyboxChange={onSkyboxChange}
+        recordingMapMaterial="default"
+        onRecordingMapMaterialChange={onMapMaterialChange}
+        recordingWeatherEffect="rain"
+        onRecordingWeatherEffectChange={onWeatherEffectChange}
+      />,
+    );
+
+    const skyboxSelect = screen.getByRole("combobox", { name: "录制天空盒" });
+    expect(skyboxSelect.value).toBe("cartoon3");
+    expect(skyboxSelect.disabled).toBe(false);
+    expect(screen.getAllByText(/默认使用 Train 阴天天空/).length).toBeGreaterThan(0);
+
+    expect(screen.getByRole("combobox", { name: "录制地图材质" }).disabled).toBe(true);
+    expect(screen.getByRole("combobox", { name: "录制天气效果" }).disabled).toBe(false);
+    expect(onSkyboxChange).not.toHaveBeenCalled();
+    expect(onWeatherEffectChange).not.toHaveBeenCalled();
+    expect(onMapMaterialChange).not.toHaveBeenCalled();
+  });
+
   it("does not add a second experimental background when embedded in the preset", () => {
     API.get.mockReturnValue(new Promise(() => {}));
     render(

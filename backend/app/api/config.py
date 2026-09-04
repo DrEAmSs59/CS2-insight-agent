@@ -28,9 +28,10 @@ from ..env_utils import (
     resolve_config_path,
     save_config,
 )
-from ..update_info import build_update_payload, resolve_local_version_info
-from ..skybox_vpk import SkyboxVpkError, normalize_skybox_id
 from ..map_material_vpk import MapMaterialVpkError, normalize_map_material_id
+from ..skybox_vpk import SkyboxVpkError, normalize_skybox_id
+from ..weather_effects import WeatherEffectError, normalize_weather_effect_id
+from ..update_info import build_update_payload, resolve_local_version_info
 
 router = APIRouter(tags=["config"])
 
@@ -58,6 +59,7 @@ class ConfigPayload(BaseModel):
     default_record_warmup: Optional[dict[str, Any]] = None
     recording_skybox: Optional[str] = None
     recording_map_material: Optional[str] = None
+    recording_weather_effect: Optional[str] = None
     cs2_extra_launch_args: Optional[str] = None
     cs2_extra_launch_args_user_configured: Optional[bool] = None
     record_inject_console_lines: Optional[str] = None
@@ -408,6 +410,19 @@ async def update_config(payload: ConfigPayload):
         except MapMaterialVpkError as exc:
             raise HTTPException(422, str(exc)) from exc
         cfg.recording_map_material = map_material_id
+    if payload.recording_weather_effect is not None:
+        try:
+            weather_effect_id = normalize_weather_effect_id(
+                payload.recording_weather_effect
+            )
+        except WeatherEffectError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        cfg.recording_weather_effect = weather_effect_id
+    if (
+        str(getattr(cfg, "recording_map_material", "default")) != "default"
+        and str(getattr(cfg, "recording_weather_effect", "default")) != "default"
+    ):
+        raise HTTPException(422, "打蜡与天气效果不能同时启用。")
     if payload.cs2_extra_launch_args is not None:
         next_launch_args = str(payload.cs2_extra_launch_args)
         if payload.cs2_extra_launch_args_user_configured is not None:

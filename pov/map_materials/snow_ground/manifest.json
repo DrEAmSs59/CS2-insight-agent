@@ -1,0 +1,72 @@
+{
+  "schema_version": 1,
+  "id": "snow_ground",
+  "display_name": {
+    "zh": "Dust2 室外地表积雪（实验）",
+    "en": "Dust2 outdoor ground snow (experimental)"
+  },
+  "lighting_commands": [],
+  "maps": {
+    "de_dust2": [
+      {
+        "target": "materials/de_dust/hr_dust/hr_dust_blend_asphalt_06.vmat_c",
+        "catalog": "_cs2_insight_catalog/map_materials/snow_ground/de_dust2/0000.vmat_c",
+        "sha256": "d6b6e1c4e28fed881a749c69774c367569c3b729801aacad0b9dbe54a270f9b4"
+      },
+      {
+        "target": "materials/de_dust/hr_dust/hr_dust_blend_asphalt_07.vmat_c",
+        "catalog": "_cs2_insight_catalog/map_materials/snow_ground/de_dust2/0001.vmat_c",
+        "sha256": "d6b6e1c4e28fed881a749c69774c367569c3b729801aacad0b9dbe54a270f9b4"
+      },
+      {
+        "target": "materials/de_dust/hr_dust/hr_dust_blend_groundrough01-groundsweeds01.vmat_c",
+        "catalog": "_cs2_insight_catalog/map_materials/snow_ground/de_dust2/0002.vmat_c",
+        "sha256": "d6b6e1c4e28fed881a749c69774c367569c3b729801aacad0b9dbe54a270f9b4"
+      },
+      {
+        "target": "materials/de_dust/hr_dust/hr_dust_sand_02.vmat_c",
+        "catalog": "_cs2_insight_catalog/map_materials/snow_ground/de_dust2/0003.vmat_c",
+        "sha256": "d6b6e1c4e28fed881a749c69774c367569c3b729801aacad0b9dbe54a270f9b4"
+      }
+    ]
+  },
+  "shared_entries": [],
+  "source": {
+    "package": "pak01_dir.vpk",
+    "donor": "materials/ground/snow01_expensive.vmat_c",
+    "donor_size": 3408,
+    "donor_sha256": "d6b6e1c4e28fed881a749c69774c367569c3b729801aacad0b9dbe54a270f9b4"
+  },
+  "selection": {
+    "method": "material paths cross-checked against classified Dust2 NAV sky exposure",
+    "policy": "zero classified indoor samples; shared indoor/outdoor materials excluded",
+    "region_manifest": "pov/weather_effects/regions/de_dust2.json",
+    "targets": [
+      {
+        "path": "materials/de_dust/hr_dust/hr_dust_blend_asphalt_06.vmat_c",
+        "classified_outdoor_area": 43700.0,
+        "classified_indoor_area": 0.0
+      },
+      {
+        "path": "materials/de_dust/hr_dust/hr_dust_blend_asphalt_07.vmat_c",
+        "classified_outdoor_area": 19307.0,
+        "classified_indoor_area": 0.0
+      },
+      {
+        "path": "materials/de_dust/hr_dust/hr_dust_blend_groundrough01-groundsweeds01.vmat_c",
+        "classified_outdoor_area": 576.0,
+        "classified_indoor_area": 0.0
+      },
+      {
+        "path": "materials/de_dust/hr_dust/hr_dust_sand_02.vmat_c",
+        "classified_outdoor_area": 408490.0,
+        "classified_indoor_area": 0.0
+      }
+    ]
+  },
+  "map_count": 1,
+  "material_count": 4,
+  "entry_count": 4,
+  "catalog_bytes": 13818,
+  "catalog_sha256": "095cbf0f480e794a880c7ec05a46ad41fc0dcac1b35a33aac3f232f3542855b6"
+}

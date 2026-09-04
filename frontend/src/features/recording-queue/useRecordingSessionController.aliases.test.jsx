@@ -49,6 +49,8 @@ describe("recording queue player aliases", () => {
     await act(async () => {
       await result.current.handleWarmupConfirm({
         experimental_pov_enabled: false,
+        recording_map_material: "default",
+        recording_weather_effect: "rain",
         player_aliases_by_demo: { "/demo-a.dem": aliases },
         resolution_width: 1920,
         resolution_height: 1440,
@@ -58,6 +60,8 @@ describe("recording queue player aliases", () => {
     expect(body.requests[0].player_aliases).toEqual(aliases);
     expect(body.requests[1]).not.toHaveProperty("player_aliases");
     expect(body.warmup).toEqual({ resolution_width: 1920, resolution_height: 1440 });
+    expect(body.map_material).toEqual({ id: "default" });
+    expect(body.weather).toEqual({ id: "rain" });
     expect(body.pov_hud).toEqual({
       enabled: false,
       radar_mode: 0,

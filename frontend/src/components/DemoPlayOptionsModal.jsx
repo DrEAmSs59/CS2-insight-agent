@@ -1,4 +1,4 @@
-import { AlertTriangle, ChevronLeft, ChevronRight, Cloud, Crosshair, Eye, Loader2, Package, Play, RefreshCw, ShieldAlert, Skull, Volume2, X } from "lucide-react";
+import { AlertTriangle, ChevronLeft, ChevronRight, Cloud, CloudRain, Crosshair, Eye, Loader2, Package, Play, RefreshCw, ShieldAlert, Skull, Volume2, X } from "lucide-react";
 
 import { useT } from "../i18n/useT.js";
 import {
@@ -16,6 +16,11 @@ import {
   normalizeRecordingMapMaterialId,
   WAXED_REFLECTION_MAP_MATERIAL,
 } from "../utils/recordingMapMaterial.js";
+import {
+  DEFAULT_RECORDING_WEATHER_EFFECT,
+  normalizeRecordingWeatherEffectId,
+  RAIN_RECORDING_WEATHER_EFFECT,
+} from "../utils/recordingWeatherEffect.js";
 import Modal from "./ui/Modal.jsx";
 import PlayerAliasesSection from "./PlayerAliasesSection.jsx";
 import { hasInvalidPlayerAliases, PLAYER_ALIAS_ENTRY_VISIBLE } from "../utils/playerAliases.js";
@@ -29,12 +34,14 @@ export default function DemoPlayOptionsModal({
   launchingMode = "",
   recordingSkybox = DEFAULT_RECORDING_SKYBOX,
   recordingMapMaterial = DEFAULT_RECORDING_MAP_MATERIAL,
+  recordingWeatherEffect = DEFAULT_RECORDING_WEATHER_EFFECT,
   skyboxResources = [],
   onClose,
   onRetry,
   onPlayAdvanced,
   onRecordingSkyboxChange,
   onRecordingMapMaterialChange,
+  onRecordingWeatherEffectChange,
   aliasDemos = [],
   aliasEditor,
   onAliasEditorChange,
@@ -48,6 +55,9 @@ export default function DemoPlayOptionsModal({
     && (!aliasesReady || hasInvalidPlayerAliases(aliasEditor));
   const selectedSkybox = normalizeRecordingSkyboxId(recordingSkybox);
   const selectedMapMaterial = normalizeRecordingMapMaterialId(recordingMapMaterial);
+  const selectedWeatherEffect = normalizeRecordingWeatherEffectId(recordingWeatherEffect);
+  const rainSelected = selectedWeatherEffect === RAIN_RECORDING_WEATHER_EFFECT;
+  const effectiveSkybox = selectedSkybox;
   const catalogBuiltinSkyboxes = sortBuiltinRecordingSkyboxes(
     Array.isArray(skyboxResources)
       ? skyboxResources.filter((item) => item?.source === "builtin" && item?.available)
@@ -63,8 +73,8 @@ export default function DemoPlayOptionsModal({
   const customSkyboxes = Array.isArray(skyboxResources)
     ? skyboxResources.filter((item) => item?.source === "custom" && item?.available)
     : [];
-  const selectedCustomAvailable = customSkyboxes.some((item) => item.id === selectedSkybox);
-  const selectedSkyboxPreview = recordingSkyboxPreviewUrl(selectedSkybox, skyboxResources);
+  const selectedCustomAvailable = customSkyboxes.some((item) => item.id === effectiveSkybox);
+  const selectedSkyboxPreview = recordingSkyboxPreviewUrl(effectiveSkybox, skyboxResources);
   const blockedMessage = blockedReason === "path"
     ? t("playDemo.cs2PathMissing")
     : blockedReason === "busy"
@@ -269,12 +279,43 @@ export default function DemoPlayOptionsModal({
               <select
                 aria-label={t("playDemo.mapMaterialSelectLabel")}
                 value={selectedMapMaterial}
-                disabled={launching || !onRecordingMapMaterialChange}
-                onChange={(event) => onRecordingMapMaterialChange?.(event.target.value)}
+                disabled={launching || rainSelected || !onRecordingMapMaterialChange}
+                onChange={(event) => {
+                  const nextMaterial = normalizeRecordingMapMaterialId(event.target.value);
+                  onRecordingMapMaterialChange?.(nextMaterial);
+                }}
                 className="min-w-44 max-w-[48%] rounded-md border border-cs2-border bg-cs2-bg-input px-2.5 py-2 text-xs font-semibold text-cs2-text-primary outline-none focus:border-cs2-accent/60 disabled:opacity-50"
               >
                 <option value={DEFAULT_RECORDING_MAP_MATERIAL}>{t("record.mapMaterialDefault")}</option>
                 <option value={WAXED_REFLECTION_MAP_MATERIAL}>{t("record.mapMaterialWaxedReflection")}</option>
+              </select>
+            </div>
+
+            <div
+              data-testid="demo-play-weather-effect-option"
+              className="flex items-center gap-3 rounded-lg border border-cs2-border bg-cs2-bg-input/45 px-3 py-2.5"
+            >
+              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-cs2-accent/10 text-cs2-accent">
+                <CloudRain className="h-4 w-4" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="text-[12px] font-bold text-cs2-text-primary">{t("playDemo.weatherEffectTitle")}</p>
+                <p className="mt-0.5 text-[10px] leading-relaxed text-cs2-text-muted">{t("playDemo.weatherEffectHint")}</p>
+              </div>
+              <select
+                aria-label={t("playDemo.weatherEffectSelectLabel")}
+                value={selectedWeatherEffect}
+                disabled={launching
+                  || selectedMapMaterial !== DEFAULT_RECORDING_MAP_MATERIAL
+                  || !onRecordingWeatherEffectChange}
+                onChange={(event) => {
+                  const nextWeather = normalizeRecordingWeatherEffectId(event.target.value);
+                  onRecordingWeatherEffectChange?.(nextWeather);
+                }}
+                className="min-w-44 max-w-[48%] rounded-md border border-cs2-border bg-cs2-bg-input px-2.5 py-2 text-xs font-semibold text-cs2-text-primary outline-none focus:border-cs2-accent/60 disabled:opacity-50"
+              >
+                <option value={DEFAULT_RECORDING_WEATHER_EFFECT}>{t("record.weatherEffectDefault")}</option>
+                <option value={RAIN_RECORDING_WEATHER_EFFECT}>{t("record.weatherEffectRain")}</option>
               </select>
             </div>
 
@@ -288,9 +329,9 @@ export default function DemoPlayOptionsModal({
                   src={selectedSkyboxPreview}
                   alt={t("settings.skyboxPreviewAlt", {
                     name: recordingSkyboxDisplayName(
-                      selectedSkybox,
+                      effectiveSkybox,
                       (Array.isArray(skyboxResources)
-                        ? skyboxResources.find((item) => item?.id === selectedSkybox)?.display_name
+                        ? skyboxResources.find((item) => item?.id === effectiveSkybox)?.display_name
                         : ""),
                       t,
                     ),
@@ -304,16 +345,20 @@ export default function DemoPlayOptionsModal({
               )}
               <div className="min-w-0 flex-1">
                 <p className="text-[12px] font-bold text-cs2-text-primary">{t("playDemo.skyboxTitle")}</p>
-                <p className="mt-0.5 text-[10px] leading-relaxed text-cs2-text-muted">{t("playDemo.skyboxHint")}</p>
+                <p className="mt-0.5 text-[10px] leading-relaxed text-cs2-text-muted">
+                  {t(rainSelected ? "playDemo.skyboxRainSelectable" : "playDemo.skyboxHint")}
+                </p>
               </div>
               <select
                 aria-label={t("playDemo.skyboxSelectLabel")}
-                value={selectedSkybox}
+                value={effectiveSkybox}
                 disabled={launching || !onRecordingSkyboxChange}
                 onChange={(event) => onRecordingSkyboxChange?.(event.target.value)}
                 className="min-w-44 max-w-[48%] rounded-md border border-cs2-border bg-cs2-bg-input px-2.5 py-2 text-xs font-semibold text-cs2-text-primary outline-none focus:border-cs2-accent/60 disabled:opacity-50"
               >
-                <option value={DEFAULT_RECORDING_SKYBOX}>{t("record.skyboxDefault")}</option>
+                <option value={DEFAULT_RECORDING_SKYBOX}>
+                  {t(rainSelected ? "record.skyboxRainDefault" : "record.skyboxDefault")}
+                </option>
                 <optgroup label={t("record.skyboxSolidColorOptions")}>
                   {solidColorSkyboxes.map((item) => (
                     <option key={item.id} value={item.id}>
@@ -335,8 +380,8 @@ export default function DemoPlayOptionsModal({
                     ))}
                   </optgroup>
                 ) : null}
-                {isCustomRecordingSkyboxId(selectedSkybox) && !selectedCustomAvailable ? (
-                  <option value={selectedSkybox} disabled>{t("record.skyboxMissingCustom")}</option>
+                {isCustomRecordingSkyboxId(effectiveSkybox) && !selectedCustomAvailable ? (
+                  <option value={effectiveSkybox} disabled>{t("record.skyboxMissingCustom")}</option>
                 ) : null}
               </select>
             </div>

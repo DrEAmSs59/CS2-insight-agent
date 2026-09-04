@@ -86,7 +86,7 @@ fn validated_inspect_hex(value: &str) -> Result<&str, String> {
     let hex = value.trim();
     if hex.len() < 12
         || hex.len() > 8192
-        || hex.len() % 2 != 0
+        || !hex.len().is_multiple_of(2)
         || !hex.bytes().all(|byte| byte.is_ascii_hexdigit())
     {
         return Err("CS2 检视载荷格式无效".to_string());
@@ -97,9 +97,8 @@ fn validated_inspect_hex(value: &str) -> Result<&str, String> {
 #[tauri::command]
 fn launch_cs2_inspect(hex: String) -> Result<(), String> {
     let hex = validated_inspect_hex(&hex)?;
-    let inspect_url = format!(
-        "steam://rungame/730/76561202255233023/+csgo_econ_action_preview%20{hex}"
-    );
+    let inspect_url =
+        format!("steam://rungame/730/76561202255233023/+csgo_econ_action_preview%20{hex}");
 
     #[cfg(windows)]
     {
@@ -116,7 +115,7 @@ fn launch_cs2_inspect(hex: String) -> Result<(), String> {
         if !status.success() {
             return Err(format!("Steam 协议处理器退出码：{status}"));
         }
-        return Ok(());
+        Ok(())
     }
 
     #[cfg(not(windows))]

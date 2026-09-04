@@ -1,5 +1,6 @@
 export const DEFAULT_RECORDING_MAP_MATERIAL = "default";
 export const WAXED_REFLECTION_MAP_MATERIAL = "waxed_reflection";
+export const RAIN_PUDDLES_MAP_MATERIAL = "rain_puddles";
 
 export const RECORDING_MAP_MATERIAL_OPTIONS = Object.freeze([
   DEFAULT_RECORDING_MAP_MATERIAL,

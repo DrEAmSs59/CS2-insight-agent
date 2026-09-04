@@ -1870,6 +1870,9 @@ class RecordingWarmupExtras:
     # Independent recording map-material preset. Non-default values merge only
     # the current demo map's verified material entries into the temporary VPK.
     map_material_id: str = "default"
+    # Independent weather category. Rain may provide a bundled default sky,
+    # while an explicitly selected skybox remains the final override.
+    weather_effect_id: str = "default"
 
 
 # CS2 视频设置「宽高比」下拉与 setting.aspectratiomode 枚举（社区常用映射）。
@@ -3632,6 +3635,10 @@ class OBSDirector:
             normalize_skybox_id,
             normalize_skybox_map_name,
         )
+        from .weather_effects import (
+            DEFAULT_WEATHER_EFFECT_ID,
+            normalize_weather_effect_id,
+        )
 
         logger.info("[RecordingV3] execute_plan_queue: %d requests", len(requests))
 
@@ -3686,7 +3693,14 @@ class OBSDirector:
             else DEFAULT_MAP_MATERIAL_ID
         )
         map_material_on_v3 = map_material_id_v3 != DEFAULT_MAP_MATERIAL_ID
-        recording_vpk_on_v3 = recording_hud_on_v3 or skybox_on_v3 or map_material_on_v3
+        weather_effect_id_v3 = normalize_weather_effect_id(
+            getattr(warmup, "weather_effect_id", DEFAULT_WEATHER_EFFECT_ID)
+            if warmup
+            else DEFAULT_WEATHER_EFFECT_ID
+        )
+        weather_on_v3 = weather_effect_id_v3 != DEFAULT_WEATHER_EFFECT_ID
+        visual_layer_on_v3 = skybox_on_v3 or map_material_on_v3 or weather_on_v3
+        recording_vpk_on_v3 = recording_hud_on_v3 or visual_layer_on_v3
         pov_install_attempted = False
         pov_expected_gameinfo_sha256: Optional[str] = None
         pov_restoration: Optional[dict[str, Any]] = None
@@ -3714,7 +3728,7 @@ class OBSDirector:
                     _app_cfg = _load_cfg()
                     pov_mgr_v3 = PovHudManager(_app_cfg)
                 except PovHudError as _pov_e:
-                    if skybox_on_v3 or map_material_on_v3:
+                    if visual_layer_on_v3:
                         raise
                     logger.error("[RecordingV3][POV] setup failed: %s; continuing without POV HUD", _pov_e)
                     pov_on_v3 = False
@@ -3734,7 +3748,7 @@ class OBSDirector:
                         demo_map_name = str(
                             getattr(demo_requests[0].demo, "map_name", "") or ""
                         ).strip()
-                        if skybox_id_v3 in CHROMA_SKYBOX_IDS:
+                        if visual_layer_on_v3:
                             detected_demo_map = _detect_chroma_demo_map_name(demo_abs)
                             declared_demo_map = normalize_skybox_map_name(demo_map_name)
                             if declared_demo_map and declared_demo_map != detected_demo_map:
@@ -3745,10 +3759,11 @@ class OBSDirector:
                             demo_map_name = detected_demo_map
                         logger.info(
                             "[RecordingV3][VPK] build and install package for %s "
-                            "(pov=%s map_material=%s skybox=%s map=%s)",
+                            "(pov=%s map_material=%s weather=%s skybox=%s map=%s)",
                             demo_name,
                             pov_on_v3,
                             map_material_id_v3,
+                            weather_effect_id_v3,
                             skybox_id_v3,
                             demo_map_name,
                         )
@@ -3760,6 +3775,7 @@ class OBSDirector:
                                 voice_mode=pov_voice_mode_v3,
                                 skybox_id=skybox_id_v3,
                                 map_material_id=map_material_id_v3,
+                                weather_effect_id=weather_effect_id_v3,
                                 input_hud_enabled=input_hud_enabled_v3,
                                 input_hud_display_mode=input_hud_display_mode_v3,
                                 input_hud_scale_percent=100,
@@ -3774,6 +3790,7 @@ class OBSDirector:
                                 map_name=demo_map_name,
                                 skybox_id=skybox_id_v3,
                                 map_material_id=map_material_id_v3,
+                                weather_effect_id=weather_effect_id_v3,
                             )
                         installed_status = pov_mgr_v3.status()
                         pov_expected_gameinfo_sha256 = str(
@@ -3785,7 +3802,7 @@ class OBSDirector:
                             )
                         self._pov_enabled = pov_on_v3
                     except PovHudError as _pov_e:
-                        if skybox_on_v3 or map_material_on_v3:
+                        if visual_layer_on_v3:
                             logger.error(
                                 "[RecordingV3][VISUAL] install failed for %s: %s",
                                 demo_name,
@@ -4089,6 +4106,7 @@ class OBSDirector:
                         "pov_hud_enabled": pov_on_v3,
                         "recording_skybox": skybox_id_v3,
                         "recording_map_material": map_material_id_v3,
+                        "recording_weather_effect": weather_effect_id_v3,
                         "recording_perspective": (
                             "pov_hud" if pov_on_v3
                             else "player_follow" if (dto.target_player and dto.target_player.name)
@@ -4271,6 +4289,16 @@ class OBSDirector:
                     {
                         "recording_map_material_id": map_material_id_v3,
                         "recording_map_material_enabled": True,
+                        "recording_vpk_enabled": True,
+                        "recording_vpk_restore_verified": pov_restore_checked,
+                        "recording_vpk_restored": pov_restore_ok,
+                    }
+                )
+            if weather_on_v3:
+                recovery.update(
+                    {
+                        "recording_weather_effect_id": weather_effect_id_v3,
+                        "recording_weather_effect_enabled": True,
                         "recording_vpk_enabled": True,
                         "recording_vpk_restore_verified": pov_restore_checked,
                         "recording_vpk_restored": pov_restore_ok,

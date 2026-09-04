@@ -32,10 +32,17 @@ from ..skybox_vpk import DEFAULT_SKYBOX_ID, SkyboxVpkError, normalize_skybox_id
 from ..map_material_vpk import (
     DEFAULT_MAP_MATERIAL_ID,
     MapMaterialVpkError,
+    RAIN_PUDDLES_MAP_MATERIAL_ID,
     normalize_map_material_id,
 )
 from ..player_aliases import PlayerAliasError
 from ..pov_constants import normalize_pov_voice_mode
+from ..weather_effects import (
+    DEFAULT_WEATHER_EFFECT_ID,
+    RAIN_WEATHER_EFFECT_ID,
+    WeatherEffectError,
+    normalize_weather_effect_id,
+)
 from .player_aliases import prepare_recording_aliases
 
 logger = logging.getLogger(__name__)
@@ -513,6 +520,7 @@ class QueueRecordingRequest(BaseModel):
     pov_hud: Optional[dict] = None  # POV plus independent in-game voice/input presentation choices
     skybox: Optional[dict] = None  # {id: default|built-in id|custom:<uuid hex>}
     map_material: Optional[dict] = None  # {id: default|waxed_reflection}
+    weather: Optional[dict] = None  # {id: default|rain}; future weather ids extend here
     # 仅本次录制队列生效，不写入 cs2-insight.config.json
     cs2_extra_launch_args: Optional[str] = None
     record_inject_console_lines: Optional[str] = None
@@ -751,15 +759,54 @@ async def execute_recording_queue(
         recording_map_material_id = normalize_map_material_id(raw_map_material_id)
     except MapMaterialVpkError as exc:
         raise HTTPException(422, str(exc)) from exc
-    if recording_map_material_id != DEFAULT_MAP_MATERIAL_ID:
+
+    saved_weather_effect_id = getattr(
+        cfg, "recording_weather_effect", DEFAULT_WEATHER_EFFECT_ID
+    )
+    raw_weather_effect_id = (
+        req.weather.get("id", saved_weather_effect_id)
+        if isinstance(req.weather, dict)
+        else saved_weather_effect_id
+    )
+    try:
+        recording_weather_effect_id = normalize_weather_effect_id(
+            raw_weather_effect_id
+        )
+    except WeatherEffectError as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+    # Compatibility for presets saved before rain became an independent
+    # weather category.
+    if recording_map_material_id == RAIN_PUDDLES_MAP_MATERIAL_ID:
+        if recording_weather_effect_id not in {
+            DEFAULT_WEATHER_EFFECT_ID,
+            RAIN_WEATHER_EFFECT_ID,
+        }:
+            raise HTTPException(422, "雨天不能与另一种天气效果同时启用。")
+        recording_map_material_id = DEFAULT_MAP_MATERIAL_ID
+        recording_weather_effect_id = RAIN_WEATHER_EFFECT_ID
+
+    if (
+        recording_map_material_id != DEFAULT_MAP_MATERIAL_ID
+        and recording_weather_effect_id != DEFAULT_WEATHER_EFFECT_ID
+    ):
+        raise HTTPException(422, "打蜡与天气效果不能同时启用。")
+
+    if (
+        recording_map_material_id != DEFAULT_MAP_MATERIAL_ID
+        or recording_weather_effect_id != DEFAULT_WEATHER_EFFECT_ID
+    ):
         if warmup_extras is None:
             warmup_extras = RecordingWarmupExtras()
         warmup_extras = dataclasses.replace(
             warmup_extras,
             map_material_id=recording_map_material_id,
+            weather_effect_id=recording_weather_effect_id,
         )
         logger.info(
-            "[RecordingV3] map material enabled: %s", recording_map_material_id
+            "[RecordingV3] visual effects enabled: map_material=%s weather=%s",
+            recording_map_material_id,
+            recording_weather_effect_id,
         )
 
     global _queue_abort_event

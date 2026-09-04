@@ -2803,6 +2803,11 @@ def test_pov_manager_installs_generated_voice_package(monkeypatch, tmp_path: Pat
         "compose_recording_map_material_vpk",
         lambda *, base_vpk_bytes, **_kwargs: base_vpk_bytes,
     )
+    monkeypatch.setattr(
+        pov_hud_manager,
+        "_detect_chroma_demo_map_name",
+        lambda _demo_path: "de_dust2",
+    )
     advanced_result = manager.install(
         demo_path=demo,
         advanced_playback_enabled=True,

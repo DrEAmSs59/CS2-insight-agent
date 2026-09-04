@@ -301,6 +301,7 @@ def test_recording_hud_uses_shared_exit_restore_and_reports_evidence(
             voice_mode="team",
             skybox_id="default",
             map_material_id="default",
+            weather_effect_id="default",
             input_hud_enabled=True,
             input_hud_display_mode="hybrid",
             input_hud_scale_percent=100,

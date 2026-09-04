@@ -23,6 +23,10 @@ import {
   DEFAULT_RECORDING_MAP_MATERIAL,
   normalizeRecordingMapMaterialId,
 } from "../utils/recordingMapMaterial.js";
+import {
+  DEFAULT_RECORDING_WEATHER_EFFECT,
+  normalizeRecordingWeatherEffectId,
+} from "../utils/recordingWeatherEffect.js";
 import { DEFAULT_POV_VOICE_MODE, normalizePovVoiceMode } from "../utils/povVoiceMode.js";
 
 /** 拼装随观战选项变化的 cvar（顺序与后端一致）；固定 cvar 见 record_inject_console_lines 配置 */
@@ -170,6 +174,7 @@ export default function RecordWarmupModal({
   experimentalPovEnabled = false,
   recordingSkybox = "default",
   recordingMapMaterial = DEFAULT_RECORDING_MAP_MATERIAL,
+  recordingWeatherEffect = DEFAULT_RECORDING_WEATHER_EFFECT,
   cs2ExtraLaunchArgs = "",
   recordInjectConsoleLines = "",
   initObsTransEnabled = false,
@@ -194,6 +199,9 @@ export default function RecordWarmupModal({
   const [sessionCombatStatsHudEnabled, setSessionCombatStatsHudEnabled] = useState(true);
   const [sessionSkybox, setSessionSkybox] = useState("default");
   const [sessionMapMaterial, setSessionMapMaterial] = useState(DEFAULT_RECORDING_MAP_MATERIAL);
+  const [sessionWeatherEffect, setSessionWeatherEffect] = useState(
+    DEFAULT_RECORDING_WEATHER_EFFECT,
+  );
   const [sessionCs2ExtraLaunchArgs, setSessionCs2ExtraLaunchArgs] = useState("");
   const [sessionRecordInjectConsoleLines, setSessionRecordInjectConsoleLines] = useState("");
 
@@ -231,6 +239,7 @@ export default function RecordWarmupModal({
     setSessionCombatStatsHudEnabled(o?.combat_stats_hud_enabled !== false);
     setSessionSkybox(normalizeRecordingSkyboxId(recordingSkybox));
     setSessionMapMaterial(normalizeRecordingMapMaterialId(recordingMapMaterial));
+    setSessionWeatherEffect(normalizeRecordingWeatherEffectId(recordingWeatherEffect));
     setSessionCs2ExtraLaunchArgs(cs2ExtraLaunchArgs);
     setSessionRecordInjectConsoleLines(recordInjectConsoleLines);
   }, [
@@ -242,6 +251,7 @@ export default function RecordWarmupModal({
     experimentalPovEnabled,
     recordingSkybox,
     recordingMapMaterial,
+    recordingWeatherEffect,
     cs2ExtraLaunchArgs,
     recordInjectConsoleLines,
   ]);
@@ -315,6 +325,7 @@ export default function RecordWarmupModal({
         experimental_pov_enabled: sessionPovEnabled,
         recording_skybox: normalizeRecordingSkyboxId(sessionSkybox),
         recording_map_material: normalizeRecordingMapMaterialId(sessionMapMaterial),
+        recording_weather_effect: normalizeRecordingWeatherEffectId(sessionWeatherEffect),
         session_cs2_extra_launch_args: sessionCs2ExtraLaunchArgs,
         session_record_inject_console_lines: sessionRecordInjectConsoleLines,
       });
@@ -628,6 +639,8 @@ export default function RecordWarmupModal({
             onRecordingSkyboxChange={setSessionSkybox}
             recordingMapMaterial={sessionMapMaterial}
             onRecordingMapMaterialChange={setSessionMapMaterial}
+            recordingWeatherEffect={sessionWeatherEffect}
+            onRecordingWeatherEffectChange={setSessionWeatherEffect}
             contentAfterVoice={PLAYER_ALIAS_ENTRY_VISIBLE ? (
               <PlayerAliasesSection
                 demos={aliasDemos}

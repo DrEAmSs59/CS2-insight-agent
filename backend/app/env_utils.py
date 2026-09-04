@@ -413,6 +413,8 @@ class AppConfig(BaseModel):
     recording_skybox: str = "default"
     # 录制/高级播放地图材质预设；default 保持原地图，waxed_reflection 临时覆盖。
     recording_map_material: str = "default"
+    # 录制天气效果；与天空盒独立，非 default 时不能与打蜡地图材质同时启用。
+    recording_weather_effect: str = "default"
     # 录制启动 cs2.exe 时附加的命令行参数（shlex 分词后追加在内置参数与 +exec 之前）
     cs2_extra_launch_args: str = _DEFAULT_CS2_EXTRA_LAUNCH_ARGS
     # False 表示仍沿用程序默认启动项；True 表示用户已手动编辑过该字段，

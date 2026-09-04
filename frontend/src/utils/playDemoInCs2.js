@@ -1,7 +1,15 @@
 import API from "../api/api.js";
 import { messageFromApiCode, parseApiDetail } from "./apiErrorMessages.js";
 import { normalizeRecordingSkyboxId } from "./recordingSkybox.js";
-import { normalizeRecordingMapMaterialId } from "./recordingMapMaterial.js";
+import {
+  DEFAULT_RECORDING_MAP_MATERIAL,
+  normalizeRecordingMapMaterialId,
+  RAIN_PUDDLES_MAP_MATERIAL,
+} from "./recordingMapMaterial.js";
+import {
+  normalizeRecordingWeatherEffectId,
+  RAIN_RECORDING_WEATHER_EFFECT,
+} from "./recordingWeatherEffect.js";
 
 export async function getDemoPlaybackPreflight() {
   const { data } = await API.get("/demo/playback/preflight");
@@ -19,6 +27,14 @@ export async function getDemoPlaybackStatus(sessionId) {
  */
 export async function playDemoInCs2({ id = null, path = null, advancedPlayback = null, povHud = null } = {}) {
   const playback = advancedPlayback || povHud;
+  const legacyRainMaterial = String(playback?.map_material_id || "").trim().toLowerCase()
+    === RAIN_PUDDLES_MAP_MATERIAL;
+  const mapMaterialId = legacyRainMaterial
+    ? DEFAULT_RECORDING_MAP_MATERIAL
+    : normalizeRecordingMapMaterialId(playback?.map_material_id);
+  const weatherEffectId = legacyRainMaterial
+    ? RAIN_RECORDING_WEATHER_EFFECT
+    : normalizeRecordingWeatherEffectId(playback?.weather_effect_id);
   const body = {
     ...(playback?.player_aliases && Object.keys(playback.player_aliases).length
       ? { player_aliases: playback.player_aliases }
@@ -37,7 +53,10 @@ export async function playDemoInCs2({ id = null, path = null, advancedPlayback =
       } : {}),
     },
     map_material: {
-      id: normalizeRecordingMapMaterialId(playback?.map_material_id),
+      id: mapMaterialId,
+    },
+    weather_effect: {
+      id: weatherEffectId,
     },
   };
   const demoId = id != null && String(id).trim() !== "" ? Number(id) : null;

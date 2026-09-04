@@ -16,6 +16,10 @@ import {
 import { useT } from "../i18n/useT.js";
 import { normalizeRecordingSkyboxId } from "../utils/recordingSkybox.js";
 import { normalizeRecordingMapMaterialId } from "../utils/recordingMapMaterial.js";
+import {
+  DEFAULT_RECORDING_WEATHER_EFFECT,
+  normalizeRecordingWeatherEffectId,
+} from "../utils/recordingWeatherEffect.js";
 import { normalizePovVoiceMode } from "../utils/povVoiceMode.js";
 import {
   buildRecordingPresetFile,
@@ -195,6 +199,7 @@ export default function CommonParamsModal({
   experimentalPovEnabled = false,
   recordingSkybox = "default",
   recordingMapMaterial = "default",
+  recordingWeatherEffect = DEFAULT_RECORDING_WEATHER_EFFECT,
   cs2ExtraLaunchArgs = "",
   recordInjectConsoleLines = "",
   obsTransitionEnabled: initObsTransitionEnabled = false,
@@ -241,6 +246,9 @@ export default function CommonParamsModal({
   const [mapMaterialId, setMapMaterialId] = useState(
     () => normalizeRecordingMapMaterialId(recordingMapMaterial),
   );
+  const [weatherEffectId, setWeatherEffectId] = useState(
+    () => normalizeRecordingWeatherEffectId(recordingWeatherEffect),
+  );
   const [localCs2ExtraLaunchArgs, setLocalCs2ExtraLaunchArgs] = useState(cs2ExtraLaunchArgs);
   const [localRecordInjectLines, setLocalRecordInjectLines] = useState(recordInjectConsoleLines);
   const [saveState, setSaveState] = useState("idle");
@@ -284,6 +292,7 @@ export default function CommonParamsModal({
     setPovEnabled(!!experimentalPovEnabled);
     setSkyboxId(normalizeRecordingSkyboxId(recordingSkybox));
     setMapMaterialId(normalizeRecordingMapMaterialId(recordingMapMaterial));
+    setWeatherEffectId(normalizeRecordingWeatherEffectId(recordingWeatherEffect));
     setLocalCs2ExtraLaunchArgs(cs2ExtraLaunchArgs);
     setLocalRecordInjectLines(recordInjectConsoleLines);
     setWarmupResolutionError("");
@@ -301,6 +310,7 @@ export default function CommonParamsModal({
     experimentalPovEnabled,
     recordingSkybox,
     recordingMapMaterial,
+    recordingWeatherEffect,
     cs2ExtraLaunchArgs,
     recordInjectConsoleLines,
   ]);
@@ -332,6 +342,7 @@ export default function CommonParamsModal({
       experimental_pov_enabled: povEnabled,
       recording_skybox: skyboxId,
       recording_map_material: mapMaterialId,
+      recording_weather_effect: weatherEffectId,
     });
     setSaveState(result?.ok ? "saved" : "error");
     if (!result?.ok && result?.error) setSaveError(String(result.error));
@@ -352,6 +363,7 @@ export default function CommonParamsModal({
     povEnabled,
     skyboxId,
     mapMaterialId,
+    weatherEffectId,
   ]);
 
   const saveDisabled = !configReady || saveState === "saving" || batchRecording;
@@ -367,6 +379,7 @@ export default function CommonParamsModal({
     experimental_pov_enabled: povEnabled,
     recording_skybox: skyboxId,
     recording_map_material: mapMaterialId,
+    recording_weather_effect: weatherEffectId,
   }), [
     presetPacing,
     warmupOpts,
@@ -378,6 +391,7 @@ export default function CommonParamsModal({
     povEnabled,
     skyboxId,
     mapMaterialId,
+    weatherEffectId,
   ]);
 
   const handleExportPreset = useCallback(() => {
@@ -430,6 +444,7 @@ export default function CommonParamsModal({
       setPovEnabled(parsed.experimental_pov_enabled);
       setSkyboxId(parsed.recording_skybox);
       setMapMaterialId(parsed.recording_map_material);
+      setWeatherEffectId(parsed.recording_weather_effect);
       setWarmupResolutionError("");
       setSaveError("");
       setSaveState("idle");
@@ -815,6 +830,8 @@ export default function CommonParamsModal({
                 onRecordingSkyboxChange={setSkyboxId}
                 recordingMapMaterial={mapMaterialId}
                 onRecordingMapMaterialChange={setMapMaterialId}
+                recordingWeatherEffect={weatherEffectId}
+                onRecordingWeatherEffectChange={setWeatherEffectId}
                 omitEyebrow
                 omitDisclaimer
                 embedded

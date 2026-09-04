@@ -50,6 +50,7 @@ def test_recording_map_material_defaults_to_original():
     cfg = AppConfig(obs=OBSConfig())
 
     assert cfg.recording_map_material == "default"
+    assert cfg.recording_weather_effect == "default"
 
 
 def test_recording_map_material_survives_the_round_trip(monkeypatch):
@@ -60,6 +61,23 @@ def test_recording_map_material_survives_the_round_trip(monkeypatch):
 
 def test_unknown_recording_map_material_is_rejected(monkeypatch):
     payload = config_api.ConfigPayload(recording_map_material="chrome")
+
+    with pytest.raises(HTTPException) as exc_info:
+        _round_trip(monkeypatch, payload)
+    assert exc_info.value.status_code == 422
+
+
+def test_recording_weather_effect_survives_the_round_trip(monkeypatch):
+    payload = config_api.ConfigPayload(recording_weather_effect="rain")
+
+    assert _round_trip(monkeypatch, payload).recording_weather_effect == "rain"
+
+
+def test_recording_weather_effect_conflicts_with_waxed_material(monkeypatch):
+    payload = config_api.ConfigPayload(
+        recording_map_material="waxed_reflection",
+        recording_weather_effect="rain",
+    )
 
     with pytest.raises(HTTPException) as exc_info:
         _round_trip(monkeypatch, payload)

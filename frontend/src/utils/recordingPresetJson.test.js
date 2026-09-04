@@ -13,6 +13,7 @@ const preset = {
   experimental_pov_enabled: false,
   recording_skybox: "cartoon3",
   recording_map_material: "waxed_reflection",
+  recording_weather_effect: "default",
 };
 
 describe("recording preset share JSON", () => {

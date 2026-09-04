@@ -277,6 +277,57 @@ def test_non_chroma_demo_keeps_static_fallback_when_voice_build_fails(
     assert manager.restore()["verified"] is True
 
 
+def test_visual_demo_falls_back_to_demo_map_detection_when_radar_map_is_missing(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    manager, pov_dir, csgo, _gameinfo = _manager_fixture(monkeypatch, tmp_path)
+    demo = tmp_path / "inferno-without-radar-map.dem"
+    demo.write_bytes(b"demo")
+    (pov_dir / "pov_default.vpk").write_bytes(
+        write_inline_vpk({"panorama/static.txt": b"static"})
+    )
+    (pov_dir / "pov_advanced_playback_template.vpk").write_bytes(b"template")
+    (pov_dir / "map_materials").mkdir()
+    monkeypatch.setattr(
+        pov_hud_manager,
+        "build_demo_voice_hud_vpk",
+        lambda *_args, **_kwargs: _fake_voice_build(""),
+    )
+    detected_paths: list[Path] = []
+
+    def detect_map(path):
+        detected_paths.append(Path(path))
+        return "de_inferno"
+
+    monkeypatch.setattr(pov_hud_manager, "_detect_chroma_demo_map_name", detect_map)
+
+    def compose_material(**kwargs):
+        assert kwargs["map_name"] == "de_inferno"
+        entries = read_inline_vpk(kwargs["base_vpk_bytes"])
+        entries["materials/test/inferno-wet.vmat_c"] = b"wet"
+        return write_inline_vpk(entries)
+
+    monkeypatch.setattr(
+        pov_hud_manager,
+        "compose_recording_map_material_vpk",
+        compose_material,
+    )
+
+    manager.install(
+        demo_path=demo,
+        advanced_playback_enabled=True,
+        map_material_id="waxed_reflection",
+    )
+
+    assert detected_paths == [demo]
+    assert manager._read_manifest()["demo_map_name_used"] == "de_inferno"
+    assert read_inline_vpk((csgo / "pov.vpk").read_bytes())[
+        "materials/test/inferno-wet.vmat_c"
+    ] == b"wet"
+    assert manager.restore()["verified"] is True
+
+
 def test_ancient_uses_transactional_official_child_swap_and_restores(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

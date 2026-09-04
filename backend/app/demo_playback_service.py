@@ -62,6 +62,7 @@ class DemoPlaybackPovOptions:
     input_audio_enabled: bool = True
     input_audio_volume_percent: int = 100
     player_aliases: dict[str, str] = field(default_factory=dict)
+    weather_effect_id: str = "default"
 
 
 @dataclass
@@ -414,6 +415,7 @@ class DemoPlaybackService:
                         input_hud_scale_percent=options.input_hud_scale_percent,
                         input_audio_enabled=options.input_audio_enabled,
                         input_audio_volume_percent=options.input_audio_volume_percent,
+                        weather_effect_id=options.weather_effect_id,
                     )
                     installed_status = pov_manager.status()
                     expected_gameinfo_sha256 = str(
@@ -482,6 +484,7 @@ class DemoPlaybackService:
                     input_hud_scale_percent=options.input_hud_scale_percent,
                     input_audio_enabled=options.input_audio_enabled,
                     input_audio_volume_percent=options.input_audio_volume_percent,
+                    weather_effect_id=options.weather_effect_id,
                     restore=None,
                     player_config_restore=None,
                 )
@@ -505,6 +508,7 @@ class DemoPlaybackService:
                     "input_hud_scale_percent": options.input_hud_scale_percent,
                     "input_audio_enabled": options.input_audio_enabled,
                     "input_audio_volume_percent": options.input_audio_volume_percent,
+                    "weather_effect_id": options.weather_effect_id,
                 }
             except Exception:
                 if session is not None:

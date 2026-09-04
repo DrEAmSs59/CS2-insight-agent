@@ -1,12 +1,20 @@
 import { isRecordingSkyboxId } from "./recordingSkybox.js";
 import {
+  DEFAULT_RECORDING_MAP_MATERIAL,
   isRecordingMapMaterialId,
   normalizeRecordingMapMaterialId,
+  RAIN_PUDDLES_MAP_MATERIAL,
 } from "./recordingMapMaterial.js";
+import {
+  DEFAULT_RECORDING_WEATHER_EFFECT,
+  isRecordingWeatherEffectId,
+  normalizeRecordingWeatherEffectId,
+  RAIN_RECORDING_WEATHER_EFFECT,
+} from "./recordingWeatherEffect.js";
 import { isPovVoiceMode, normalizePovVoiceMode } from "./povVoiceMode.js";
 
 export const RECORDING_PRESET_FORMAT = "cs2-insight-recording-preset";
-export const RECORDING_PRESET_VERSION = 6;
+export const RECORDING_PRESET_VERSION = 7;
 export const RECORDING_PRESET_MAX_BYTES = 256 * 1024;
 
 const isObject = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
@@ -116,7 +124,7 @@ export function buildRecordingPresetFile(preset, exportedAt = new Date().toISOSt
 export function parseRecordingPresetFile(value, warmupDefaults) {
   if (!isObject(value)) invalid("root", "type");
   if (value.format !== RECORDING_PRESET_FORMAT) invalid("format", "format");
-  if (![1, 2, 3, 4, 5, RECORDING_PRESET_VERSION].includes(value.version)) invalid("version", "version");
+  if (![1, 2, 3, 4, 5, 6, RECORDING_PRESET_VERSION].includes(value.version)) invalid("version", "version");
   if (!isObject(value.preset)) invalid("preset", "type");
 
   const p = value.preset;
@@ -135,15 +143,36 @@ export function parseRecordingPresetFile(value, warmupDefaults) {
     recording_map_material: Object.hasOwn(p, "recording_map_material")
       ? requireString(p.recording_map_material, "recording_map_material", 64)
       : "default",
+    recording_weather_effect: Object.hasOwn(p, "recording_weather_effect")
+      ? requireString(p.recording_weather_effect, "recording_weather_effect", 64)
+      : DEFAULT_RECORDING_WEATHER_EFFECT,
   };
   if (!isRecordingSkyboxId(result.recording_skybox)) {
     invalid("recording_skybox", "range");
   }
+  const legacyRainMaterial = result.recording_map_material.trim().toLowerCase()
+    === RAIN_PUDDLES_MAP_MATERIAL;
+  if (legacyRainMaterial) {
+    result.recording_map_material = DEFAULT_RECORDING_MAP_MATERIAL;
+    result.recording_weather_effect = RAIN_RECORDING_WEATHER_EFFECT;
+  }
   if (!isRecordingMapMaterialId(result.recording_map_material)) {
     invalid("recording_map_material", "range");
+  }
+  if (!isRecordingWeatherEffectId(result.recording_weather_effect)) {
+    invalid("recording_weather_effect", "range");
   }
   result.recording_map_material = normalizeRecordingMapMaterialId(
     result.recording_map_material,
   );
+  result.recording_weather_effect = normalizeRecordingWeatherEffectId(
+    result.recording_weather_effect,
+  );
+  if (
+    result.recording_map_material !== DEFAULT_RECORDING_MAP_MATERIAL
+    && result.recording_weather_effect !== DEFAULT_RECORDING_WEATHER_EFFECT
+  ) {
+    invalid("recording_weather_effect", "conflict");
+  }
   return result;
 }

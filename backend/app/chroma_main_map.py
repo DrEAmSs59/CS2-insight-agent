@@ -38,7 +38,11 @@ _ALLOWED_PROFILE_STATUSES = frozenset(
     }
 )
 _ALLOWED_REPLACEMENT_KINDS = frozenset(
-    {"main_entity_lump", "main_worldnode_scene_filter"}
+    {
+        "main_entity_lump",
+        "main_worldnode_scene_filter",
+        "main_worldnode_static_model",
+    }
 )
 _COPY_CHUNK_SIZE = 8 * 1024 * 1024
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
@@ -288,6 +292,13 @@ def _parse_profile(
         ):
             raise ChromaMainMapError(
                 f"main_worldnode_scene_filter path is not a WorldNode: {entry_path}"
+            )
+        if kind == "main_worldnode_static_model" and not (
+            entry_path.startswith(f"{required_entry_prefix}worldnodes/")
+            and entry_path.endswith(".vmdl_c")
+        ):
+            raise ChromaMainMapError(
+                f"main_worldnode_static_model path is not a WorldNode model: {entry_path}"
             )
         if entry_path in seen_entries:
             raise ChromaMainMapError(f"duplicate replacement entry: {entry_path}")

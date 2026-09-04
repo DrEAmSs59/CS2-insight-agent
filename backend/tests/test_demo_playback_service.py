@@ -21,6 +21,7 @@ class _FakePovManager:
         self.skybox_ids = []
         self.map_material_ids = []
         self.input_options = []
+        self.weather_effect_ids = []
         self.restored = 0
         self.needs_restore = False
         self.__class__.instances.append(self)
@@ -44,6 +45,7 @@ class _FakePovManager:
         input_hud_scale_percent=100,
         input_audio_enabled=True,
         input_audio_volume_percent=100,
+        weather_effect_id="default",
     ):
         self.installed += 1
         self.installed_demo_paths.append(demo_path)
@@ -59,6 +61,7 @@ class _FakePovManager:
                 input_audio_volume_percent,
             )
         )
+        self.weather_effect_ids.append(weather_effect_id)
         self.needs_restore = True
 
     def restore(self):
@@ -236,6 +239,7 @@ def test_pov_playback_installs_cfg_and_restores_after_exit(monkeypatch, tmp_path
             input_hud_scale_percent=115,
             input_audio_enabled=False,
             input_audio_volume_percent=50,
+            weather_effect_id="snow",
         ),
     )
 
@@ -254,6 +258,8 @@ def test_pov_playback_installs_cfg_and_restores_after_exit(monkeypatch, tmp_path
     assert result["input_hud_scale_percent"] == 115
     assert result["input_audio_enabled"] is False
     assert result["input_audio_volume_percent"] == 50
+    assert manager.weather_effect_ids == ["snow"]
+    assert result["weather_effect_id"] == "snow"
     assert session is not None and session.copied_cfg is not None
     cfg_text = session.copied_cfg.read_text(encoding="ascii")
     assert "demoui false" not in cfg_text

@@ -165,6 +165,7 @@ export function useRecordingSessionController({
         record_inject_console_lines: session.record_inject_console_lines,
         skybox: { id: session.recording_skybox },
         map_material: { id: session.recording_map_material },
+        weather: { id: session.recording_weather_effect },
         pov_hud: povHud,
       };
       if (!recordingAbortRequestedRef.current) {

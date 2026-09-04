@@ -3,6 +3,7 @@ import API from "../api/api";
 import { useSkyboxResources } from "../api/skyboxResources";
 import { useT } from "../i18n/useT.js";
 import {
+  DEFAULT_RECORDING_SKYBOX,
   normalizeRecordingSkyboxId,
   isCustomRecordingSkyboxId,
   partitionBuiltinRecordingSkyboxes,
@@ -17,6 +18,11 @@ import {
   normalizeRecordingMapMaterialId,
   WAXED_REFLECTION_MAP_MATERIAL,
 } from "../utils/recordingMapMaterial.js";
+import {
+  DEFAULT_RECORDING_WEATHER_EFFECT,
+  normalizeRecordingWeatherEffectId,
+  RAIN_RECORDING_WEATHER_EFFECT,
+} from "../utils/recordingWeatherEffect.js";
 
 /**
  * 实验性 POV：与常用参数 / 录制前观战弹窗共用；勾选写入 experimental.pov_enabled。
@@ -38,6 +44,8 @@ export default function ExperimentalPovSection({
   onRecordingSkyboxChange,
   recordingMapMaterial = DEFAULT_RECORDING_MAP_MATERIAL,
   onRecordingMapMaterialChange,
+  recordingWeatherEffect = DEFAULT_RECORDING_WEATHER_EFFECT,
+  onRecordingWeatherEffectChange,
   contentAfterVoice = null,
   omitEyebrow = false,
   omitDisclaimer = false,
@@ -72,12 +80,15 @@ export default function ExperimentalPovSection({
     [skyboxResources],
   );
   const selectedSkyboxId = normalizeRecordingSkyboxId(recordingSkybox);
-  const selectedCustomSkyboxAvailable = customSkyboxOptions.some(
-    (item) => item.id === selectedSkyboxId,
-  );
-  const selectedSkyboxPreview = recordingSkyboxPreviewUrl(selectedSkyboxId, skyboxResources);
   const selectedMapMaterial = normalizeRecordingMapMaterialId(recordingMapMaterial);
+  const selectedWeatherEffect = normalizeRecordingWeatherEffectId(recordingWeatherEffect);
   const inputHudSelection = inputHudEnabled ? "visible" : "hidden";
+  const rainSelected = selectedWeatherEffect === RAIN_RECORDING_WEATHER_EFFECT;
+  const effectiveSkyboxId = selectedSkyboxId;
+  const selectedCustomSkyboxAvailable = customSkyboxOptions.some(
+    (item) => item.id === effectiveSkyboxId,
+  );
+  const selectedSkyboxPreview = recordingSkyboxPreviewUrl(effectiveSkyboxId, skyboxResources);
 
   const loadPovStatus = useCallback(async () => {
     setPovStatusLoading(true);
@@ -335,8 +346,11 @@ export default function ExperimentalPovSection({
             <select
               aria-label={t("record.mapMaterialSelectLabel")}
               value={selectedMapMaterial}
-              disabled={checkboxDisabled}
-              onChange={(event) => onRecordingMapMaterialChange(event.target.value)}
+              disabled={checkboxDisabled || rainSelected}
+              onChange={(event) => {
+                const nextMaterial = normalizeRecordingMapMaterialId(event.target.value);
+                onRecordingMapMaterialChange(nextMaterial);
+              }}
               className="mt-2 w-full rounded border border-cs2-border bg-cs2-bg-input px-2 py-1.5 text-xs text-cs2-text-primary outline-none focus:border-cs2-accent/50 disabled:opacity-40"
             >
               <option value={DEFAULT_RECORDING_MAP_MATERIAL}>
@@ -358,6 +372,47 @@ export default function ExperimentalPovSection({
         </div>
       ) : null}
 
+      {onRecordingWeatherEffectChange ? (
+        <div
+          className="mt-4 border-t border-amber-500/20 pt-4"
+          data-testid="experimental-weather-effect-card"
+        >
+          <label className="block text-[11px] text-cs2-text-secondary">
+            <span className="block font-semibold text-cs2-text-primary">
+              {t("record.weatherEffectTitle")}
+            </span>
+            <span className="mt-1 block text-[10px] leading-relaxed text-cs2-text-muted">
+              {t("record.weatherEffectSubtitle")}
+            </span>
+            <select
+              aria-label={t("record.weatherEffectSelectLabel")}
+              value={selectedWeatherEffect}
+              disabled={checkboxDisabled || selectedMapMaterial !== DEFAULT_RECORDING_MAP_MATERIAL}
+              onChange={(event) => {
+                const nextWeather = normalizeRecordingWeatherEffectId(event.target.value);
+                onRecordingWeatherEffectChange(nextWeather);
+              }}
+              className="mt-2 w-full rounded border border-cs2-border bg-cs2-bg-input px-2 py-1.5 text-xs text-cs2-text-primary outline-none focus:border-cs2-accent/50 disabled:opacity-40"
+            >
+              <option value={DEFAULT_RECORDING_WEATHER_EFFECT}>
+                {t("record.weatherEffectDefault")}
+              </option>
+              <option value={RAIN_RECORDING_WEATHER_EFFECT}>
+                {t("record.weatherEffectRain")}
+              </option>
+            </select>
+          </label>
+          <p className="mt-2 text-[10px] leading-relaxed text-cs2-text-muted">
+            {t("record.weatherEffectRainSupportedMaps")}
+          </p>
+          {rainSelected ? (
+            <p className="mt-2 text-[10px] leading-relaxed text-cs2-amber-on-surface">
+              {t("record.weatherEffectRainOutcome")}
+            </p>
+          ) : null}
+        </div>
+      ) : null}
+
       {onRecordingSkyboxChange ? (
         <div
           className="mt-4 border-t border-amber-500/20 pt-4"
@@ -368,16 +423,18 @@ export default function ExperimentalPovSection({
               {t("record.skyboxTitle")}
             </span>
             <span className="mt-1 block text-[10px] leading-relaxed text-cs2-text-muted">
-              {t("record.skyboxSubtitle")}
+              {t(rainSelected ? "record.skyboxRainSelectable" : "record.skyboxSubtitle")}
             </span>
             <select
               aria-label={t("record.skyboxSelectLabel")}
-              value={selectedSkyboxId}
+              value={effectiveSkyboxId}
               disabled={checkboxDisabled}
               onChange={(event) => onRecordingSkyboxChange(event.target.value)}
               className="mt-2 w-full rounded border border-cs2-border bg-cs2-bg-input px-2 py-1.5 text-xs text-cs2-text-primary outline-none focus:border-cs2-accent/50 disabled:opacity-40"
             >
-              <option value="default">{t("record.skyboxDefault")}</option>
+              <option value={DEFAULT_RECORDING_SKYBOX}>
+                {t(rainSelected ? "record.skyboxRainDefault" : "record.skyboxDefault")}
+              </option>
               <optgroup label={t("record.skyboxSolidColorOptions")}>
                 {solidColorSkyboxOptions.map((item) => (
                   <option key={item.id} value={item.id}>
@@ -399,8 +456,8 @@ export default function ExperimentalPovSection({
                   ))}
                 </optgroup>
               ) : null}
-              {isCustomRecordingSkyboxId(selectedSkyboxId) && !selectedCustomSkyboxAvailable ? (
-                <option value={selectedSkyboxId} disabled>
+              {isCustomRecordingSkyboxId(effectiveSkyboxId) && !selectedCustomSkyboxAvailable ? (
+                <option value={effectiveSkyboxId} disabled>
                   {t("record.skyboxMissingCustom")}
                 </option>
               ) : null}
@@ -411,8 +468,8 @@ export default function ExperimentalPovSection({
                 src={selectedSkyboxPreview}
                 alt={t("settings.skyboxPreviewAlt", {
                   name: recordingSkyboxDisplayName(
-                    selectedSkyboxId,
-                    skyboxResources.find((item) => item.id === selectedSkyboxId)?.display_name,
+                    effectiveSkyboxId,
+                    skyboxResources.find((item) => item.id === effectiveSkyboxId)?.display_name,
                     t,
                   ),
                 })}
@@ -428,7 +485,7 @@ export default function ExperimentalPovSection({
           <p className="mt-2 text-[10px] leading-relaxed text-cs2-text-muted">
             {t("record.skyboxSupportedMaps")}
           </p>
-          {selectedSkyboxId !== "default" ? (
+          {effectiveSkyboxId !== DEFAULT_RECORDING_SKYBOX ? (
             <p className="mt-2 text-[10px] leading-relaxed text-cs2-amber-on-surface">
               {t("record.skyboxOutcome")}
             </p>

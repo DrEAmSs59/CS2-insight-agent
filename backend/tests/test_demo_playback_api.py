@@ -95,6 +95,7 @@ def test_launch_forwards_pov_session_options(monkeypatch, tmp_path: Path):
             input_audio_volume_percent=50,
         ),
         map_material=playback_api.DemoPlaybackMapMaterialBody(id="waxed_reflection"),
+        weather_effect=playback_api.DemoPlaybackWeatherEffectBody(id="default"),
     )
 
     result = playback_api.launch_cs2_play_demo(demo, body)
@@ -113,6 +114,7 @@ def test_launch_forwards_pov_session_options(monkeypatch, tmp_path: Path):
         input_hud_scale_percent=115,
         input_audio_enabled=True,
         input_audio_volume_percent=50,
+        weather_effect_id="default",
     )
 
 
@@ -133,6 +135,64 @@ def test_launch_rejects_unavailable_skybox(monkeypatch, tmp_path: Path):
     assert "unsupported recording skybox" in str(exc_info.value.detail)
 
 
+def test_legacy_rain_puddles_maps_to_validated_rain_weather(
+    monkeypatch, tmp_path: Path
+):
+    cfg = _configured_cs2(tmp_path)
+    demo = tmp_path / "match.dem"
+    demo.write_bytes(b"demo")
+    captured = {}
+    monkeypatch.setattr(playback_api, "load_config", lambda: cfg)
+    monkeypatch.setattr(playback_api, "ensure_cs2_path", lambda value: value)
+    monkeypatch.setattr(
+        playback_api.demo_playback_service,
+        "launch",
+        lambda _path, _config, options: captured.update(options=options) or {"ok": True},
+    )
+
+    playback_api.launch_cs2_play_demo(
+        demo,
+        playback_api.DemoPlaybackOptionsBody(
+            pov_hud=playback_api.DemoPlaybackPovBody(
+                enabled=True,
+                skybox_id="cartoon3",
+            ),
+            map_material=playback_api.DemoPlaybackMapMaterialBody(id="rain_puddles"),
+        ),
+    )
+
+    assert captured["options"].skybox_id == "cartoon3"
+    assert captured["options"].map_material_id == "default"
+    assert captured["options"].weather_effect_id == "rain"
+
+
+def test_legacy_rain_puddles_rejects_a_separate_weather_choice(monkeypatch, tmp_path: Path):
+    cfg = _configured_cs2(tmp_path)
+    demo = tmp_path / "match.dem"
+    demo.write_bytes(b"demo")
+    captured = {}
+    monkeypatch.setattr(playback_api, "load_config", lambda: cfg)
+    monkeypatch.setattr(playback_api, "ensure_cs2_path", lambda value: value)
+    monkeypatch.setattr(
+        playback_api.demo_playback_service,
+        "launch",
+        lambda _path, _config, options: captured.update(options=options) or {"ok": True},
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        playback_api.launch_cs2_play_demo(
+            demo,
+            playback_api.DemoPlaybackOptionsBody(
+                pov_hud=playback_api.DemoPlaybackPovBody(enabled=True),
+                map_material=playback_api.DemoPlaybackMapMaterialBody(id="rain_puddles"),
+                weather_effect=playback_api.DemoPlaybackWeatherEffectBody(id="snow"),
+            ),
+        )
+
+    assert exc_info.value.status_code == 422
+    assert "天气效果" in str(exc_info.value.detail)
+
+
 def test_launch_rejects_unknown_map_material(monkeypatch, tmp_path: Path):
     cfg = _configured_cs2(tmp_path)
     demo = tmp_path / "match.dem"
@@ -149,6 +209,24 @@ def test_launch_rejects_unknown_map_material(monkeypatch, tmp_path: Path):
 
     assert exc_info.value.status_code == 422
     assert "unsupported recording map material" in str(exc_info.value.detail)
+
+
+def test_launch_rejects_unknown_weather_effect(monkeypatch, tmp_path: Path):
+    cfg = _configured_cs2(tmp_path)
+    demo = tmp_path / "match.dem"
+    demo.write_bytes(b"demo")
+    monkeypatch.setattr(playback_api, "load_config", lambda: cfg)
+    monkeypatch.setattr(playback_api, "ensure_cs2_path", lambda value: value)
+
+    body = playback_api.DemoPlaybackOptionsBody(
+        pov_hud=playback_api.DemoPlaybackPovBody(enabled=True),
+        weather_effect=playback_api.DemoPlaybackWeatherEffectBody(id="blizzard"),
+    )
+    with pytest.raises(HTTPException) as exc_info:
+        playback_api.launch_cs2_play_demo(demo, body)
+
+    assert exc_info.value.status_code == 422
+    assert "unsupported weather effect" in str(exc_info.value.detail)
 
 
 def test_preflight_delegates_to_playback_service(monkeypatch, tmp_path: Path):
@@ -169,8 +247,31 @@ def test_preflight_delegates_to_playback_service(monkeypatch, tmp_path: Path):
         "cs2_running": True,
         "recording_skybox": "default",
         "recording_map_material": "default",
+        "recording_weather_effect": "default",
         "skyboxes": [{"id": "cartoon3"}],
     }
+
+
+def test_preflight_reports_bundled_rain_weather_for_rain_puddles(
+    monkeypatch, tmp_path: Path
+):
+    cfg = _configured_cs2(tmp_path)
+    cfg.recording_skybox = "cartoon3"
+    cfg.recording_map_material = "rain_puddles"
+    monkeypatch.setattr(playback_api, "load_config", lambda: cfg)
+    monkeypatch.setattr(playback_api, "ensure_cs2_path", lambda value: value)
+    monkeypatch.setattr(
+        playback_api.demo_playback_service,
+        "preflight",
+        lambda _config: {"ok": True},
+    )
+    monkeypatch.setattr(playback_api, "list_skybox_resources", lambda: [])
+
+    result = asyncio.run(playback_api.demo_playback_preflight())
+
+    assert result["recording_skybox"] == "cartoon3"
+    assert result["recording_map_material"] == "default"
+    assert result["recording_weather_effect"] == "rain"
 
 
 def test_playback_status_returns_measured_session_report(monkeypatch):

@@ -26,6 +26,8 @@ from .chroma_skybox_child import (
 )
 from .chroma_main_map import (
     CHROMA_MAIN_MAP_MANIFEST_SCHEMA_VERSION,
+    ChromaMainMapError,
+    build_chroma_main_map_vpk,
 )
 from .cs2_config_backup import is_cs2_running
 from .demo_voice_hud import (
@@ -44,9 +46,15 @@ from .input_command import InputCommandError, load_input_report
 from .map_material_vpk import (
     DEFAULT_MAP_MATERIAL_ID,
     MapMaterialVpkError,
+    RAIN_PUDDLES_MAP_MATERIAL_ID,
     compose_recording_map_material_vpk,
     map_material_console_commands,
     normalize_map_material_id,
+)
+from .map_sun_vpk import (
+    MAP_SUN_SUPPRESSION_MAPS,
+    MapSunVpkError,
+    compose_map_sun_suppression_vpk,
 )
 from .pov_constants import DEFAULT_POV_VOICE_MODE, normalize_pov_voice_mode
 from .skybox_vpk import (
@@ -57,6 +65,18 @@ from .skybox_vpk import (
     compose_recording_skybox_vpk,
     normalize_skybox_id,
     normalize_skybox_map_name,
+)
+from .weather_effects import (
+    DEFAULT_WEATHER_EFFECT_ID,
+    RAIN_WEATHER_EFFECT_ID,
+    SNOW_WEATHER_EFFECT_ID,
+    WeatherEffectError,
+    normalize_weather_effect_id,
+)
+from .weather_particle_vpk import (
+    TRAIN_SNOW_PROBE_MAP,
+    WeatherParticleVpkError,
+    build_train_snow_particle_override_vpk,
 )
 
 logger = logging.getLogger(__name__)
@@ -422,11 +442,15 @@ def _chroma_child_main_patch_required(
 
 
 def _detect_chroma_demo_map_name(demo_path: str | Path) -> str:
-    """Detect a map from the header, then authoritative terminal SpawnGroups."""
+    """Detect a Demo map from the header, then authoritative terminal SpawnGroups.
+
+    The historical name is retained for compatibility, but the detector is
+    shared by every map-specific visual preset, including rain and puddles.
+    """
 
     path = Path(demo_path).expanduser()
     if not path.is_file():
-        raise PovHudError(f"无法读取蓝/绿幕 Demo 地图：Demo 文件不存在 {path}。")
+        raise PovHudError(f"无法识别 Demo 地图：Demo 文件不存在 {path}。")
     header_error = ""
     try:
         from demoparser2 import DemoParser
@@ -451,7 +475,7 @@ def _detect_chroma_demo_map_name(demo_path: str | Path) -> str:
         )
     except (OSError, ValueError) as exc:
         raise PovHudError(
-            "无法从 Demo 头或 SpawnGroups 确认蓝/绿幕地图："
+            "无法从 Demo 头或 SpawnGroups 确认地图："
             f"header={header_error or 'unknown'}; SpawnGroups={exc}"
         ) from exc
     if not _CHROMA_MAP_NAME_RE.fullmatch(detected):
@@ -618,6 +642,9 @@ class PovHudManager:
 
     def get_chroma_main_map_assets_dir(self) -> Path:
         return self.get_project_pov_dir() / "chroma_main_maps"
+
+    def get_weather_effect_assets_dir(self, effect_id: str) -> Path:
+        return self.get_project_pov_dir() / "weather_effects" / effect_id
 
     def get_reference_default_gameinfo_path(self) -> Path:
         return self.get_project_pov_dir() / "gameinfo.gi.default"
@@ -935,6 +962,7 @@ class PovHudManager:
         input_audio_enabled: bool = True,
         input_audio_volume_percent: int = 100,
         combat_stats_enabled: bool = True,
+        weather_effect_id: str = DEFAULT_WEATHER_EFFECT_ID,
     ) -> Optional[DemoVoiceHudBuild]:
         with ExitStack() as staging_stack:
             return self._install_impl(
@@ -952,6 +980,7 @@ class PovHudManager:
                 input_audio_enabled=input_audio_enabled,
                 input_audio_volume_percent=input_audio_volume_percent,
                 combat_stats_enabled=combat_stats_enabled,
+                weather_effect_id=weather_effect_id,
                 staging_stack=staging_stack,
             )
 
@@ -972,6 +1001,7 @@ class PovHudManager:
         input_audio_enabled: bool = True,
         input_audio_volume_percent: int = 100,
         combat_stats_enabled: bool = True,
+        weather_effect_id: str = DEFAULT_WEATHER_EFFECT_ID,
         staging_stack: ExitStack,
     ) -> Optional[DemoVoiceHudBuild]:
         if sys.platform != "win32":
@@ -991,10 +1021,35 @@ class PovHudManager:
             selected_map_material = normalize_map_material_id(map_material_id)
         except MapMaterialVpkError as exc:
             raise PovHudError(str(exc)) from exc
+        try:
+            selected_weather = normalize_weather_effect_id(weather_effect_id)
+        except WeatherEffectError as exc:
+            raise PovHudError(str(exc)) from exc
+        if selected_map_material == RAIN_PUDDLES_MAP_MATERIAL_ID:
+            if selected_weather not in (
+                DEFAULT_WEATHER_EFFECT_ID,
+                RAIN_WEATHER_EFFECT_ID,
+            ):
+                raise PovHudError("全局雨天地图适配不能与另一种天气粒子同时启用。")
+            # Compatibility for clients/presets from before rain became an
+            # independent weather category.
+            selected_map_material = DEFAULT_MAP_MATERIAL_ID
+            selected_weather = RAIN_WEATHER_EFFECT_ID
+        if (
+            selected_map_material != DEFAULT_MAP_MATERIAL_ID
+            and selected_weather != DEFAULT_WEATHER_EFFECT_ID
+        ):
+            raise PovHudError("打蜡与天气效果不能同时启用。")
+        effective_map_material = (
+            RAIN_PUDDLES_MAP_MATERIAL_ID
+            if selected_weather == RAIN_WEATHER_EFFECT_ID
+            else selected_map_material
+        )
 
         needs_pov_source = demo_path is not None or (
             selected_skybox == DEFAULT_SKYBOX_ID
             and selected_map_material == DEFAULT_MAP_MATERIAL_ID
+            and selected_weather == DEFAULT_WEATHER_EFFECT_ID
         )
         pov_src: Optional[Path] = None
         if needs_pov_source:
@@ -1088,9 +1143,14 @@ class PovHudManager:
             if demo_path is not None and voice_build is not None
             else ""
         )
+        visual_layer_enabled = (
+            selected_map_material != DEFAULT_MAP_MATERIAL_ID
+            or selected_skybox != DEFAULT_SKYBOX_ID
+            or selected_weather != DEFAULT_WEATHER_EFFECT_ID
+        )
         if (
             demo_path is not None
-            and selected_skybox in CHROMA_SKYBOX_IDS
+            and visual_layer_enabled
             and not detected_map_name
         ):
             detected_map_name = _detect_chroma_demo_map_name(demo_path)
@@ -1105,15 +1165,11 @@ class PovHudManager:
                 f"{explicit_map_name} != {detected_map_name}。"
             )
         effective_map_name = explicit_map_name or detected_map_name
-        visual_layer_enabled = (
-            selected_map_material != DEFAULT_MAP_MATERIAL_ID
-            or selected_skybox != DEFAULT_SKYBOX_ID
-        )
         if demo_path is not None and package_bytes is None and visual_layer_enabled:
             if pov_src is None:
                 raise PovHudError("未找到 POV HUD 资源文件，请确认 pov 目录下资源完整。")
             package_bytes = pov_src.read_bytes()
-        if selected_map_material != DEFAULT_MAP_MATERIAL_ID:
+        if effective_map_material != DEFAULT_MAP_MATERIAL_ID:
             map_material_assets_dir = self.get_map_material_assets_dir()
             if not map_material_assets_dir.is_dir():
                 raise PovHudError(f"未找到地图材质资源目录：{map_material_assets_dir}")
@@ -1121,7 +1177,7 @@ class PovHudManager:
                 package_bytes = compose_recording_map_material_vpk(
                     assets_dir=map_material_assets_dir,
                     base_vpk_bytes=package_bytes,
-                    material_id=selected_map_material,
+                    material_id=effective_map_material,
                     map_name=effective_map_name,
                 )
             except (OSError, MapMaterialVpkError) as exc:
@@ -1130,6 +1186,9 @@ class PovHudManager:
         chroma_main_metadata: Optional[dict[str, Any]] = None
         chroma_outer_metadata: Optional[dict[str, Any]] = None
         chroma_official_swap_metadata: Optional[dict[str, Any]] = None
+        map_sun_suppression_metadata: Optional[dict[str, Any]] = None
+        weather_main_metadata: Optional[dict[str, Any]] = None
+        weather_particle_metadata: Optional[dict[str, Any]] = None
         staged_chroma_swap_files: dict[str, VerifiedFileSource] = {}
         staged_chroma_original_identities: dict[str, tuple[int, str]] = {}
         staged_package_path: Optional[Path] = None
@@ -1159,6 +1218,25 @@ class PovHudManager:
                 )
             except (OSError, SkyboxVpkError) as exc:
                 raise PovHudError(f"天空盒 VPK 生成失败：{exc}") from exc
+        suppress_map_visual_sun = (
+            effective_map_name in MAP_SUN_SUPPRESSION_MAPS
+            and selected_skybox not in CHROMA_SKYBOX_IDS
+            and (
+                selected_skybox != DEFAULT_SKYBOX_ID
+                or selected_weather == RAIN_WEATHER_EFFECT_ID
+            )
+        )
+        if suppress_map_visual_sun:
+            try:
+                sun_build = compose_map_sun_suppression_vpk(
+                    csgo_dir=self.get_csgo_dir(),
+                    map_name=effective_map_name,
+                    base_vpk_bytes=package_bytes,
+                )
+                package_bytes = sun_build.vpk_bytes
+                map_sun_suppression_metadata = sun_build.metadata
+            except (OSError, ValueError, TypeError, MapSunVpkError) as exc:
+                raise PovHudError(f"地图可见太阳移除 VPK 生成失败：{exc}") from exc
         if selected_skybox in CHROMA_SKYBOX_IDS:
             child_assets_dir = self.get_chroma_child_assets_dir()
             child_manifest_path = child_assets_dir / "manifest.json"
@@ -1283,6 +1361,119 @@ class PovHudManager:
             ) as exc:
                 raise PovHudError(f"蓝/绿幕运行 VPK 生成失败：{exc}") from exc
 
+        if selected_weather != DEFAULT_WEATHER_EFFECT_ID:
+            if not effective_map_name:
+                raise PovHudError("无法确认 Demo 地图，不能安全应用天气效果。")
+            if (
+                selected_weather == SNOW_WEATHER_EFFECT_ID
+                and effective_map_name == TRAIN_SNOW_PROBE_MAP
+            ):
+                try:
+                    particle_build = build_train_snow_particle_override_vpk(
+                        csgo_dir=self.get_csgo_dir(),
+                        map_name=effective_map_name,
+                        base_vpk_bytes=package_bytes,
+                    )
+                    package_bytes = particle_build.vpk_bytes
+                    weather_particle_metadata = {
+                        **particle_build.metadata,
+                        "effect_id": selected_weather,
+                        "official_visual_resources_only": True,
+                    }
+                except (OSError, ValueError, TypeError, WeatherParticleVpkError) as exc:
+                    raise PovHudError(f"Train 雨转雪粒子 VPK 生成失败：{exc}") from exc
+            else:
+                weather_assets_dir = self.get_weather_effect_assets_dir(selected_weather)
+                weather_manifest_path = weather_assets_dir / "manifest.json"
+                if not weather_manifest_path.is_file():
+                    raise PovHudError(f"未找到天气效果资源目录：{weather_assets_dir}")
+                try:
+                    weather_manifest = _read_json_manifest(
+                        weather_manifest_path,
+                        label="天气效果目录",
+                    )
+                    staging_dir = _enter_chroma_staging_dir(
+                        staging_stack,
+                        csgo_dir=self.get_csgo_dir(),
+                    )
+                    staged_weather_path = (
+                        staging_dir / "runtime" / "maps" / f"{effective_map_name}.vpk"
+                    )
+                    staged_weather_path.parent.mkdir(parents=True, exist_ok=True)
+                    weather_build = build_chroma_main_map_vpk(
+                        csgo_dir=self.get_csgo_dir(),
+                        payload_root=weather_assets_dir,
+                        output_path=staged_weather_path,
+                        manifest=weather_manifest,
+                        map_name=effective_map_name,
+                        require_in_game_confirmed=True,
+                    )
+                    weather_output = weather_build.metadata.get("output")
+                    if not isinstance(weather_output, Mapping):
+                        raise ChromaMainMapError(
+                            "verified weather build has no output metadata"
+                        )
+                    if weather_build.logical_path in staged_chroma_swap_files:
+                        raise ChromaMainMapError(
+                            "weather VPK conflicts with another temporary official VPK swap"
+                        )
+                    staged_chroma_swap_files[weather_build.logical_path] = VerifiedFileSource(
+                        path=weather_build.output_path,
+                        size=int(weather_output.get("size", -1)),
+                        sha256=str(weather_output.get("sha256") or ""),
+                    )
+                    staged_chroma_original_identities[weather_build.logical_path] = (
+                        _verified_vpk_identity(weather_build.metadata, field="source")
+                    )
+                    weather_profile = (weather_manifest.get("maps") or {}).get(
+                        effective_map_name, {}
+                    )
+                    spatial_puddles = (
+                        weather_profile.get("spatial_puddles", {})
+                        if isinstance(weather_profile, Mapping)
+                        else {}
+                    )
+                    has_custom_visual_geometry = bool(
+                        isinstance(spatial_puddles, Mapping)
+                        and int(spatial_puddles.get("instance_count") or 0) > 0
+                    )
+                    weather_main_metadata = {
+                        **weather_build.metadata,
+                        "effect_id": selected_weather,
+                        "original_map_runtime": True,
+                        "workshop_map_required": False,
+                        "official_visual_resources_only": not has_custom_visual_geometry,
+                    }
+                except (
+                    OSError,
+                    ValueError,
+                    TypeError,
+                    ChromaMainMapError,
+                ) as exc:
+                    raise PovHudError(f"天气效果运行 VPK 生成失败：{exc}") from exc
+
+        if staged_chroma_swap_files:
+            chroma_official_swap_metadata = {
+                "schema_version": 1,
+                "route": _CHROMA_OFFICIAL_SWAP_ROUTE,
+                "files": [
+                    {
+                        "logical_path": logical_path,
+                        "original_size": staged_chroma_original_identities[
+                            logical_path
+                        ][0],
+                        "original_sha256": staged_chroma_original_identities[
+                            logical_path
+                        ][1],
+                        "installed_size": source.size,
+                        "installed_sha256": source.sha256,
+                    }
+                    for logical_path, source in sorted(
+                        staged_chroma_swap_files.items()
+                    )
+                ],
+            }
+
         gi_path = self.get_gameinfo_path()
         if not gi_path.is_file():
             raise PovHudError("未找到 gameinfo.gi，请确认 CS2 路径是否正确。")
@@ -1363,6 +1554,8 @@ class PovHudManager:
 
         if voice_build is not None:
             source_basename = voice_template.name
+        elif selected_weather != DEFAULT_WEATHER_EFFECT_ID and demo_path is None:
+            source_basename = f"weather_effect:{selected_weather}"
         elif selected_map_material != DEFAULT_MAP_MATERIAL_ID and demo_path is None:
             source_basename = f"map_material:{selected_map_material}"
         elif selected_skybox != DEFAULT_SKYBOX_ID and demo_path is None:
@@ -1374,7 +1567,13 @@ class PovHudManager:
         else:
             source_basename = pov_src.name if pov_src is not None else ""
 
-        if selected_map_material != DEFAULT_MAP_MATERIAL_ID:
+        if selected_weather != DEFAULT_WEATHER_EFFECT_ID:
+            feature = (
+                "experimental_pov_with_weather"
+                if demo_path is not None
+                else "recording_weather"
+            )
+        elif selected_map_material != DEFAULT_MAP_MATERIAL_ID:
             if demo_path is not None and selected_skybox != DEFAULT_SKYBOX_ID:
                 feature = "experimental_pov_with_map_material_and_skybox"
             elif demo_path is not None:
@@ -1462,6 +1661,7 @@ class PovHudManager:
             ),
             "demo_map_name_used": effective_map_name,
             "recording_skybox_id": selected_skybox,
+            "map_sun_suppression": map_sun_suppression_metadata,
             "chroma_child_skybox": chroma_child_metadata,
             "chroma_main_map": chroma_main_metadata,
             "chroma_outer_vpk": chroma_outer_metadata,
@@ -1474,6 +1674,9 @@ class PovHudManager:
             "input_audio_enabled": bool(input_audio_enabled),
             "input_audio_volume_percent": int(input_audio_volume_percent),
             "combat_stats_enabled": bool(combat_stats_enabled),
+            "weather_effect_id": selected_weather,
+            "weather_main_map": weather_main_metadata,
+            "weather_particle_override": weather_particle_metadata,
             "original_gameinfo_sha256": original_gameinfo_sha,
             "planned_patched_gameinfo_sha256": planned_patched_sha,
         }
