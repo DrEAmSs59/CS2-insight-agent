@@ -52,7 +52,7 @@ export default {
   "playDemo.previewInputHudOn": "INPUT ON",
   "playDemo.inputAudioEnable": "Virtual key sounds",
   "playDemo.mapMaterialTitle": "Map material",
-  "playDemo.mapMaterialHint": "Choose the map material for this advanced playback session. Recording presets are unchanged.",
+  "playDemo.mapMaterialHint": "Choose the map material or rain effect for this advanced playback session. Recording presets are unchanged.",
   "playDemo.mapMaterialSelectLabel": "Advanced playback map material",
   "playDemo.weatherEffectTitle": "Weather effect",
   "playDemo.weatherEffectHint": "Weather and map material are mutually exclusive. Skybox remains independent; rain uses Train's overcast sky by default.",

@@ -51,6 +51,15 @@ describe("RecordWarmupModal skybox override", () => {
     expect(screen.getByText(/此处修改仅作用于本次录制/)).toBeTruthy();
     expect(selector.value).toBe("cartoon3");
     expect(materialSelector.value).toBe("waxed_reflection");
+    expect(Array.from(materialSelector.options).map(({ value, textContent }) => ({
+      value,
+      label: textContent,
+    }))).toEqual([
+      { value: "default", label: "原始地图材质（不替换）" },
+      { value: "waxed_reflection", label: "打蜡反光倒影" },
+      { value: "rain", label: "下雨（武器带水滴）" },
+    ]);
+    expect(screen.queryByRole("combobox", { name: "录制天气效果" })).toBeNull();
     expect(screen.getByTestId("experimental-feature-card").contains(selector)).toBe(true);
     expect(screen.getByTestId("experimental-feature-card").contains(inputModeSelector)).toBe(true);
     expect(screen.queryByTestId("player-aliases-section")).toBeNull();
@@ -73,6 +82,7 @@ describe("RecordWarmupModal skybox override", () => {
       expect.objectContaining({
         recording_skybox: "cartoon3",
         recording_map_material: "default",
+        recording_weather_effect: "default",
         experimental_pov_enabled: false,
         pov_voice_mode: "enemy",
         input_hud_enabled: true,

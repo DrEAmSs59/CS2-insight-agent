@@ -92,29 +92,31 @@ describe("DemoPlayOptionsModal", () => {
     expect(onRecordingSkyboxChange).toHaveBeenCalledWith(customSkyboxId);
     const materialSelect = screen.getByRole("combobox", { name: "高级播放地图材质" });
     expect(materialSelect.value).toBe("waxed_reflection");
-    expect(Array.from(materialSelect.options).map(({ value }) => value)).toEqual([
-      "default",
-      "waxed_reflection",
+    expect(Array.from(materialSelect.options).map(({ value, textContent }) => ({
+      value,
+      label: textContent,
+    }))).toEqual([
+      { value: "default", label: "原始地图材质（不替换）" },
+      { value: "waxed_reflection", label: "打蜡反光倒影" },
+      { value: "rain", label: "下雨（武器带水滴）" },
     ]);
-    const weatherSelect = screen.getByRole("combobox", { name: "高级播放天气效果" });
-    expect(Array.from(weatherSelect.options).map(({ value }) => value)).toEqual([
-      "default",
-      "rain",
-    ]);
-    expect(weatherSelect.disabled).toBe(true);
+    expect(screen.queryByRole("combobox", { name: "高级播放天气效果" })).toBeNull();
     expect(screen.queryByText(/地表积雪/)).toBeNull();
     fireEvent.change(materialSelect, { target: { value: "default" } });
     expect(onRecordingMapMaterialChange).toHaveBeenCalledWith("default");
+    expect(onRecordingWeatherEffectChange).toHaveBeenCalledWith("default");
+    fireEvent.change(materialSelect, { target: { value: "rain" } });
+    expect(onRecordingMapMaterialChange).toHaveBeenCalledWith("default");
+    expect(onRecordingWeatherEffectChange).toHaveBeenCalledWith("rain");
 
     const preview = screen.getByTestId("demo-play-preview");
     expect(screen.queryByTestId("demo-play-input-hud-option")).toBeNull();
     const materialOption = screen.getByTestId("demo-play-map-material-option");
-    const weatherOption = screen.getByTestId("demo-play-weather-effect-option");
     const skyboxOption = screen.getByTestId("demo-play-skybox-option");
     const warning = screen.getByTestId("demo-play-gameinfo-warning");
     expect(preview.compareDocumentPosition(materialOption) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(materialOption.compareDocumentPosition(weatherOption) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(weatherOption.compareDocumentPosition(skyboxOption) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(materialOption.compareDocumentPosition(skyboxOption) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.queryByTestId("demo-play-weather-effect-option")).toBeNull();
     expect(skyboxOption.compareDocumentPosition(warning) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(screen.getByText("将临时修改 CS2 文件")).toBeTruthy();
     expect(screen.queryByRole("button", { name: /普通播放/ })).toBeNull();
@@ -163,8 +165,10 @@ describe("DemoPlayOptionsModal", () => {
     expect(skyboxSelect.disabled).toBe(false);
     expect(screen.getAllByText(/默认使用 Train 阴天天空/).length).toBeGreaterThan(0);
 
-    expect(screen.getByRole("combobox", { name: "高级播放地图材质" }).disabled).toBe(true);
-    expect(screen.getByRole("combobox", { name: "高级播放天气效果" }).disabled).toBe(false);
+    const materialSelect = screen.getByRole("combobox", { name: "高级播放地图材质" });
+    expect(materialSelect.value).toBe("rain");
+    expect(materialSelect.disabled).toBe(false);
+    expect(screen.queryByRole("combobox", { name: "高级播放天气效果" })).toBeNull();
     expect(onRecordingSkyboxChange).not.toHaveBeenCalled();
     expect(onRecordingWeatherEffectChange).not.toHaveBeenCalled();
     expect(onRecordingMapMaterialChange).not.toHaveBeenCalled();

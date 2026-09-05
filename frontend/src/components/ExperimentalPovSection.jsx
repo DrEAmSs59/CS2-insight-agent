@@ -16,12 +16,17 @@ import { normalizePovVoiceMode, POV_VOICE_MODES } from "../utils/povVoiceMode.js
 import {
   DEFAULT_RECORDING_MAP_MATERIAL,
   normalizeRecordingMapMaterialId,
-  WAXED_REFLECTION_MAP_MATERIAL,
 } from "../utils/recordingMapMaterial.js";
+import {
+  DEFAULT_RECORDING_MAP_APPEARANCE,
+  RAIN_RECORDING_MAP_APPEARANCE,
+  WAXED_RECORDING_MAP_APPEARANCE,
+  recordingMapAppearanceId,
+  splitRecordingMapAppearance,
+} from "../utils/recordingMapAppearance.js";
 import {
   DEFAULT_RECORDING_WEATHER_EFFECT,
   normalizeRecordingWeatherEffectId,
-  RAIN_RECORDING_WEATHER_EFFECT,
 } from "../utils/recordingWeatherEffect.js";
 
 /**
@@ -82,8 +87,16 @@ export default function ExperimentalPovSection({
   const selectedSkyboxId = normalizeRecordingSkyboxId(recordingSkybox);
   const selectedMapMaterial = normalizeRecordingMapMaterialId(recordingMapMaterial);
   const selectedWeatherEffect = normalizeRecordingWeatherEffectId(recordingWeatherEffect);
+  const selectedMapAppearance = recordingMapAppearanceId(
+    selectedMapMaterial,
+    selectedWeatherEffect,
+  );
   const inputHudSelection = inputHudEnabled ? "visible" : "hidden";
-  const rainSelected = selectedWeatherEffect === RAIN_RECORDING_WEATHER_EFFECT;
+  const rainSelected = selectedMapAppearance === RAIN_RECORDING_MAP_APPEARANCE;
+  const waxedSelected = selectedMapAppearance === WAXED_RECORDING_MAP_APPEARANCE;
+  const canChangeMapAppearance = Boolean(
+    onRecordingMapMaterialChange || onRecordingWeatherEffectChange,
+  );
   const effectiveSkyboxId = selectedSkyboxId;
   const selectedCustomSkyboxAvailable = customSkyboxOptions.some(
     (item) => item.id === effectiveSkyboxId,
@@ -331,7 +344,7 @@ export default function ExperimentalPovSection({
         </div>
       ) : null}
 
-      {onRecordingMapMaterialChange ? (
+      {canChangeMapAppearance ? (
         <div
           className="mt-4 border-t border-amber-500/20 pt-4"
           data-testid="experimental-map-material-card"
@@ -345,70 +358,45 @@ export default function ExperimentalPovSection({
             </span>
             <select
               aria-label={t("record.mapMaterialSelectLabel")}
-              value={selectedMapMaterial}
-              disabled={checkboxDisabled || rainSelected}
+              value={selectedMapAppearance}
+              disabled={checkboxDisabled}
               onChange={(event) => {
-                const nextMaterial = normalizeRecordingMapMaterialId(event.target.value);
-                onRecordingMapMaterialChange(nextMaterial);
+                const nextAppearance = splitRecordingMapAppearance(event.target.value);
+                onRecordingMapMaterialChange?.(nextAppearance.mapMaterial);
+                onRecordingWeatherEffectChange?.(nextAppearance.weatherEffect);
               }}
               className="mt-2 w-full rounded border border-cs2-border bg-cs2-bg-input px-2 py-1.5 text-xs text-cs2-text-primary outline-none focus:border-cs2-accent/50 disabled:opacity-40"
             >
-              <option value={DEFAULT_RECORDING_MAP_MATERIAL}>
+              <option value={DEFAULT_RECORDING_MAP_APPEARANCE}>
                 {t("record.mapMaterialDefault")}
               </option>
-              <option value={WAXED_REFLECTION_MAP_MATERIAL}>
+              <option value={WAXED_RECORDING_MAP_APPEARANCE}>
                 {t("record.mapMaterialWaxedReflection")}
               </option>
-            </select>
-          </label>
-          <p className="mt-2 text-[10px] leading-relaxed text-cs2-text-muted">
-            {t("record.mapMaterialSupportedMaps")}
-          </p>
-          {selectedMapMaterial !== DEFAULT_RECORDING_MAP_MATERIAL ? (
-            <p className="mt-2 text-[10px] leading-relaxed text-cs2-amber-on-surface">
-              {t("record.mapMaterialOutcome")}
-            </p>
-          ) : null}
-        </div>
-      ) : null}
-
-      {onRecordingWeatherEffectChange ? (
-        <div
-          className="mt-4 border-t border-amber-500/20 pt-4"
-          data-testid="experimental-weather-effect-card"
-        >
-          <label className="block text-[11px] text-cs2-text-secondary">
-            <span className="block font-semibold text-cs2-text-primary">
-              {t("record.weatherEffectTitle")}
-            </span>
-            <span className="mt-1 block text-[10px] leading-relaxed text-cs2-text-muted">
-              {t("record.weatherEffectSubtitle")}
-            </span>
-            <select
-              aria-label={t("record.weatherEffectSelectLabel")}
-              value={selectedWeatherEffect}
-              disabled={checkboxDisabled || selectedMapMaterial !== DEFAULT_RECORDING_MAP_MATERIAL}
-              onChange={(event) => {
-                const nextWeather = normalizeRecordingWeatherEffectId(event.target.value);
-                onRecordingWeatherEffectChange(nextWeather);
-              }}
-              className="mt-2 w-full rounded border border-cs2-border bg-cs2-bg-input px-2 py-1.5 text-xs text-cs2-text-primary outline-none focus:border-cs2-accent/50 disabled:opacity-40"
-            >
-              <option value={DEFAULT_RECORDING_WEATHER_EFFECT}>
-                {t("record.weatherEffectDefault")}
-              </option>
-              <option value={RAIN_RECORDING_WEATHER_EFFECT}>
+              <option value={RAIN_RECORDING_MAP_APPEARANCE}>
                 {t("record.weatherEffectRain")}
               </option>
             </select>
           </label>
-          <p className="mt-2 text-[10px] leading-relaxed text-cs2-text-muted">
-            {t("record.weatherEffectRainSupportedMaps")}
-          </p>
+          {waxedSelected ? (
+            <>
+              <p className="mt-2 text-[10px] leading-relaxed text-cs2-text-muted">
+                {t("record.mapMaterialSupportedMaps")}
+              </p>
+              <p className="mt-2 text-[10px] leading-relaxed text-cs2-amber-on-surface">
+                {t("record.mapMaterialOutcome")}
+              </p>
+            </>
+          ) : null}
           {rainSelected ? (
-            <p className="mt-2 text-[10px] leading-relaxed text-cs2-amber-on-surface">
-              {t("record.weatherEffectRainOutcome")}
-            </p>
+            <>
+              <p className="mt-2 text-[10px] leading-relaxed text-cs2-text-muted">
+                {t("record.weatherEffectRainSupportedMaps")}
+              </p>
+              <p className="mt-2 text-[10px] leading-relaxed text-cs2-amber-on-surface">
+                {t("record.weatherEffectRainOutcome")}
+              </p>
+            </>
           ) : null}
         </div>
       ) : null}

@@ -1,4 +1,4 @@
-import { AlertTriangle, ChevronLeft, ChevronRight, Cloud, CloudRain, Crosshair, Eye, Loader2, Package, Play, RefreshCw, ShieldAlert, Skull, Volume2, X } from "lucide-react";
+import { AlertTriangle, ChevronLeft, ChevronRight, Cloud, Crosshair, Eye, Loader2, Package, Play, RefreshCw, ShieldAlert, Skull, Volume2, X } from "lucide-react";
 
 import { useT } from "../i18n/useT.js";
 import {
@@ -14,12 +14,17 @@ import {
 import {
   DEFAULT_RECORDING_MAP_MATERIAL,
   normalizeRecordingMapMaterialId,
-  WAXED_REFLECTION_MAP_MATERIAL,
 } from "../utils/recordingMapMaterial.js";
+import {
+  DEFAULT_RECORDING_MAP_APPEARANCE,
+  RAIN_RECORDING_MAP_APPEARANCE,
+  WAXED_RECORDING_MAP_APPEARANCE,
+  recordingMapAppearanceId,
+  splitRecordingMapAppearance,
+} from "../utils/recordingMapAppearance.js";
 import {
   DEFAULT_RECORDING_WEATHER_EFFECT,
   normalizeRecordingWeatherEffectId,
-  RAIN_RECORDING_WEATHER_EFFECT,
 } from "../utils/recordingWeatherEffect.js";
 import Modal from "./ui/Modal.jsx";
 import PlayerAliasesSection from "./PlayerAliasesSection.jsx";
@@ -56,7 +61,14 @@ export default function DemoPlayOptionsModal({
   const selectedSkybox = normalizeRecordingSkyboxId(recordingSkybox);
   const selectedMapMaterial = normalizeRecordingMapMaterialId(recordingMapMaterial);
   const selectedWeatherEffect = normalizeRecordingWeatherEffectId(recordingWeatherEffect);
-  const rainSelected = selectedWeatherEffect === RAIN_RECORDING_WEATHER_EFFECT;
+  const selectedMapAppearance = recordingMapAppearanceId(
+    selectedMapMaterial,
+    selectedWeatherEffect,
+  );
+  const rainSelected = selectedMapAppearance === RAIN_RECORDING_MAP_APPEARANCE;
+  const canChangeMapAppearance = Boolean(
+    onRecordingMapMaterialChange || onRecordingWeatherEffectChange,
+  );
   const effectiveSkybox = selectedSkybox;
   const catalogBuiltinSkyboxes = sortBuiltinRecordingSkyboxes(
     Array.isArray(skyboxResources)
@@ -278,44 +290,18 @@ export default function DemoPlayOptionsModal({
               </div>
               <select
                 aria-label={t("playDemo.mapMaterialSelectLabel")}
-                value={selectedMapMaterial}
-                disabled={launching || rainSelected || !onRecordingMapMaterialChange}
+                value={selectedMapAppearance}
+                disabled={launching || !canChangeMapAppearance}
                 onChange={(event) => {
-                  const nextMaterial = normalizeRecordingMapMaterialId(event.target.value);
-                  onRecordingMapMaterialChange?.(nextMaterial);
+                  const nextAppearance = splitRecordingMapAppearance(event.target.value);
+                  onRecordingMapMaterialChange?.(nextAppearance.mapMaterial);
+                  onRecordingWeatherEffectChange?.(nextAppearance.weatherEffect);
                 }}
                 className="min-w-44 max-w-[48%] rounded-md border border-cs2-border bg-cs2-bg-input px-2.5 py-2 text-xs font-semibold text-cs2-text-primary outline-none focus:border-cs2-accent/60 disabled:opacity-50"
               >
-                <option value={DEFAULT_RECORDING_MAP_MATERIAL}>{t("record.mapMaterialDefault")}</option>
-                <option value={WAXED_REFLECTION_MAP_MATERIAL}>{t("record.mapMaterialWaxedReflection")}</option>
-              </select>
-            </div>
-
-            <div
-              data-testid="demo-play-weather-effect-option"
-              className="flex items-center gap-3 rounded-lg border border-cs2-border bg-cs2-bg-input/45 px-3 py-2.5"
-            >
-              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-cs2-accent/10 text-cs2-accent">
-                <CloudRain className="h-4 w-4" />
-              </div>
-              <div className="min-w-0 flex-1">
-                <p className="text-[12px] font-bold text-cs2-text-primary">{t("playDemo.weatherEffectTitle")}</p>
-                <p className="mt-0.5 text-[10px] leading-relaxed text-cs2-text-muted">{t("playDemo.weatherEffectHint")}</p>
-              </div>
-              <select
-                aria-label={t("playDemo.weatherEffectSelectLabel")}
-                value={selectedWeatherEffect}
-                disabled={launching
-                  || selectedMapMaterial !== DEFAULT_RECORDING_MAP_MATERIAL
-                  || !onRecordingWeatherEffectChange}
-                onChange={(event) => {
-                  const nextWeather = normalizeRecordingWeatherEffectId(event.target.value);
-                  onRecordingWeatherEffectChange?.(nextWeather);
-                }}
-                className="min-w-44 max-w-[48%] rounded-md border border-cs2-border bg-cs2-bg-input px-2.5 py-2 text-xs font-semibold text-cs2-text-primary outline-none focus:border-cs2-accent/60 disabled:opacity-50"
-              >
-                <option value={DEFAULT_RECORDING_WEATHER_EFFECT}>{t("record.weatherEffectDefault")}</option>
-                <option value={RAIN_RECORDING_WEATHER_EFFECT}>{t("record.weatherEffectRain")}</option>
+                <option value={DEFAULT_RECORDING_MAP_APPEARANCE}>{t("record.mapMaterialDefault")}</option>
+                <option value={WAXED_RECORDING_MAP_APPEARANCE}>{t("record.mapMaterialWaxedReflection")}</option>
+                <option value={RAIN_RECORDING_MAP_APPEARANCE}>{t("record.weatherEffectRain")}</option>
               </select>
             </div>
 

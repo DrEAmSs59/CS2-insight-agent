@@ -52,7 +52,7 @@ export default {
   "playDemo.previewInputHudOn": "键鼠开",
   "playDemo.inputAudioEnable": "虚拟按键音",
   "playDemo.mapMaterialTitle": "地图材质",
-  "playDemo.mapMaterialHint": "选择本次高级播放使用的地图材质，位于预览与天空盒之间，不会修改录制预设。",
+  "playDemo.mapMaterialHint": "选择本次高级播放使用的地图材质或下雨效果，位于预览与天空盒之间，不会修改录制预设。",
   "playDemo.mapMaterialSelectLabel": "高级播放地图材质",
   "playDemo.weatherEffectTitle": "天气效果",
   "playDemo.weatherEffectHint": "雨天与地图材质互斥；天空盒仍可单独选择，未选择时默认使用 Train 阴天天空。",

@@ -236,11 +236,25 @@ describe("ExperimentalPovSection POV recovery", () => {
     expect(skyboxSelect.disabled).toBe(false);
     expect(screen.getAllByText(/默认使用 Train 阴天天空/).length).toBeGreaterThan(0);
 
-    expect(screen.getByRole("combobox", { name: "录制地图材质" }).disabled).toBe(true);
-    expect(screen.getByRole("combobox", { name: "录制天气效果" }).disabled).toBe(false);
+    const materialSelect = screen.getByRole("combobox", { name: "录制地图材质" });
+    expect(materialSelect.value).toBe("rain");
+    expect(materialSelect.disabled).toBe(false);
+    expect(Array.from(materialSelect.options).map(({ value, textContent }) => ({
+      value,
+      label: textContent,
+    }))).toEqual([
+      { value: "default", label: "原始地图材质（不替换）" },
+      { value: "waxed_reflection", label: "打蜡反光倒影" },
+      { value: "rain", label: "下雨（武器带水滴）" },
+    ]);
+    expect(screen.queryByRole("combobox", { name: "录制天气效果" })).toBeNull();
     expect(onSkyboxChange).not.toHaveBeenCalled();
     expect(onWeatherEffectChange).not.toHaveBeenCalled();
     expect(onMapMaterialChange).not.toHaveBeenCalled();
+
+    fireEvent.change(materialSelect, { target: { value: "waxed_reflection" } });
+    expect(onMapMaterialChange).toHaveBeenCalledWith("waxed_reflection");
+    expect(onWeatherEffectChange).toHaveBeenCalledWith("default");
   });
 
   it("does not add a second experimental background when embedded in the preset", () => {
