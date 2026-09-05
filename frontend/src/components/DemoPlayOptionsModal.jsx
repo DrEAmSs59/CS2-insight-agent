@@ -20,7 +20,7 @@ import {
   RAIN_RECORDING_MAP_APPEARANCE,
   WAXED_RECORDING_MAP_APPEARANCE,
   recordingMapAppearanceId,
-  splitRecordingMapAppearance,
+  applyRecordingMapAppearanceSelection,
 } from "../utils/recordingMapAppearance.js";
 import {
   DEFAULT_RECORDING_WEATHER_EFFECT,
@@ -293,9 +293,11 @@ export default function DemoPlayOptionsModal({
                 value={selectedMapAppearance}
                 disabled={launching || !canChangeMapAppearance}
                 onChange={(event) => {
-                  const nextAppearance = splitRecordingMapAppearance(event.target.value);
-                  onRecordingMapMaterialChange?.(nextAppearance.mapMaterial);
-                  onRecordingWeatherEffectChange?.(nextAppearance.weatherEffect);
+                  applyRecordingMapAppearanceSelection(event.target.value, {
+                    onRecordingMapMaterialChange,
+                    onRecordingWeatherEffectChange,
+                    onRecordingSkyboxChange,
+                  });
                 }}
                 className="min-w-44 max-w-[48%] rounded-md border border-cs2-border bg-cs2-bg-input px-2.5 py-2 text-xs font-semibold text-cs2-text-primary outline-none focus:border-cs2-accent/60 disabled:opacity-50"
               >

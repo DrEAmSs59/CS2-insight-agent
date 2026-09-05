@@ -411,7 +411,7 @@ export default {
   "record.weatherEffectDefault": "原始天气（不替换）",
   "record.weatherEffectRain": "下雨（武器带水滴）",
   "record.weatherEffectRainSupportedMaps": "下雨支持 Dust II、Mirage、Cache、Inferno、Anubis、Ancient 和 Nuke。",
-  "record.weatherEffectRainOutcome": "已启用下雨：默认使用 Train 阴天天空；如果另选天空盒，则使用所选天空盒，同时保留降雨和该地图已验收的湿润地面/水洼方案。",
+  "record.weatherEffectRainOutcome": "已启用下雨：默认使用 Train 阴天天空和 Train 环境后处理，并把地图编译太阳亮度减半、保留阴影。如果另选天空盒，则使用所选天空盒，同时保留降雨、Train 调色、减半后的太阳和该地图已验收的湿润地面/水洼方案。",
   "record.skyboxTitle": "天空盒替换",
   "record.skyboxSubtitle": "与 POV HUD 同属实验性功能，但可独立选择；普通录制和 POV 录制都会使用这里选择的天空。",
   "record.skyboxRainSelectable": "下雨时默认使用 Train 阴天天空；也可以选择其他天空盒覆盖这个默认天空。",

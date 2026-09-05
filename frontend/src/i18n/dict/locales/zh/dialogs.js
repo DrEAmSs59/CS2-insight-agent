@@ -55,7 +55,7 @@ export default {
   "playDemo.mapMaterialHint": "选择本次高级播放使用的地图材质或下雨效果，位于预览与天空盒之间，不会修改录制预设。",
   "playDemo.mapMaterialSelectLabel": "高级播放地图材质",
   "playDemo.weatherEffectTitle": "天气效果",
-  "playDemo.weatherEffectHint": "雨天与地图材质互斥；天空盒仍可单独选择，未选择时默认使用 Train 阴天天空。",
+  "playDemo.weatherEffectHint": "雨天默认使用 Train 阴天天空、Train 环境后处理，以及减半后的编译太阳（保留阴影）；天空盒仍可单独选择。",
   "playDemo.weatherEffectSelectLabel": "高级播放天气效果",
   "playDemo.weatherTitle": "天气粒子",
   "playDemo.weatherHint": "实验路线：仅用于 de_train Demo，保留 Train 原生降雨实体并把 rain_volume 解析为官方 snow 粒子。",

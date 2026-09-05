@@ -22,6 +22,8 @@ from app.weather_effects import (
     WEATHER_EFFECT_IDS,
     WeatherEffectError,
     normalize_weather_effect_id,
+    visual_layer_console_commands,
+    weather_effect_console_commands,
 )
 from app.weather_particle_vpk import (
     OFFICIAL_SNOW_PARTICLE_PATH,
@@ -53,6 +55,23 @@ def test_weather_ids_include_global_rain() -> None:
         normalize_weather_effect_id("sandstorm")
 
 
+def test_rain_overcast_lighting_does_not_use_light_environment_commands() -> None:
+    assert weather_effect_console_commands("rain") == ()
+    assert weather_effect_console_commands("default") == ()
+    assert weather_effect_console_commands("snow") == ()
+    assert visual_layer_console_commands(
+        map_material_id="default",
+        weather_effect_id="rain",
+    ) == ()
+    merged = visual_layer_console_commands(
+        map_material_id="waxed_reflection",
+        weather_effect_id="default",
+    )
+    assert merged.count("sv_cheats 1") == 1
+    assert "r_directlighting 0" in merged
+    assert "ent_fire light_environment" not in "\n".join(merged)
+
+
 def test_bundled_dust2_rain_profile_tracks_dynamic_object_contact_gate() -> None:
     project_root = Path(__file__).resolve().parents[2]
     manifest = json.loads(
@@ -67,13 +86,13 @@ def test_bundled_dust2_rain_profile_tracks_dynamic_object_contact_gate() -> None
         == "validated"
     )
     replacement = profile["loose_outer_replacements"][0]
-    assert replacement["payload_size"] == 64230
+    assert replacement["payload_size"] == 64234
     assert replacement["payload_sha256"] == (
-        "7ba8509c17914323a47bf04cc69dd2a7f8a6ddb9add04680a6ada73a9f40fe52"
+        "083318c8abf764d2294932b5b0d0975a85ad6e091ae12e201ef79ee0aa246e07"
     )
-    assert profile["main_source"]["expected_output_size"] == 262532553
+    assert profile["main_source"]["expected_output_size"] == 262532557
     assert profile["main_source"]["expected_output_sha256"] == (
-        "da5cc054e760d0d29f20dd0d1c94ca3df98bea642553b7467aa7f8bfc4714fc5"
+        "142e29290a9409211fcb38bc06927de0d231d8e095a1338d80cea2d5d3100840"
     )
     region = _load_optional_build_json(
         project_root

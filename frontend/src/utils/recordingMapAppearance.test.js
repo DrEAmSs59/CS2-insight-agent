@@ -1,9 +1,10 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   DEFAULT_RECORDING_MAP_APPEARANCE,
   RAIN_RECORDING_MAP_APPEARANCE,
   WAXED_RECORDING_MAP_APPEARANCE,
+  applyRecordingMapAppearanceSelection,
   recordingMapAppearanceId,
   splitRecordingMapAppearance,
 } from "./recordingMapAppearance.js";
@@ -22,6 +23,30 @@ describe("recordingMapAppearance", () => {
       mapMaterial: "default",
       weatherEffect: "rain",
     });
+  });
+
+  it("selecting rain resets the skybox to Train overcast while leaving other appearances alone", () => {
+    const onRecordingMapMaterialChange = vi.fn();
+    const onRecordingWeatherEffectChange = vi.fn();
+    const onRecordingSkyboxChange = vi.fn();
+    const handlers = {
+      onRecordingMapMaterialChange,
+      onRecordingWeatherEffectChange,
+      onRecordingSkyboxChange,
+    };
+
+    applyRecordingMapAppearanceSelection(RAIN_RECORDING_MAP_APPEARANCE, handlers);
+    expect(onRecordingMapMaterialChange).toHaveBeenCalledWith("default");
+    expect(onRecordingWeatherEffectChange).toHaveBeenCalledWith("rain");
+    expect(onRecordingSkyboxChange).toHaveBeenCalledWith("default");
+
+    onRecordingMapMaterialChange.mockClear();
+    onRecordingWeatherEffectChange.mockClear();
+    onRecordingSkyboxChange.mockClear();
+    applyRecordingMapAppearanceSelection(WAXED_RECORDING_MAP_APPEARANCE, handlers);
+    expect(onRecordingMapMaterialChange).toHaveBeenCalledWith("waxed_reflection");
+    expect(onRecordingWeatherEffectChange).toHaveBeenCalledWith("default");
+    expect(onRecordingSkyboxChange).not.toHaveBeenCalled();
   });
 
   it("prefers rain when both stored fields are present and falls back to original", () => {

@@ -48,8 +48,11 @@ from .map_material_vpk import (
     MapMaterialVpkError,
     RAIN_PUDDLES_MAP_MATERIAL_ID,
     compose_recording_map_material_vpk,
-    map_material_console_commands,
     normalize_map_material_id,
+)
+from .map_postprocess_vpk import (
+    MapPostprocessVpkError,
+    compose_train_environment_postprocess_vpk,
 )
 from .map_sun_vpk import (
     MAP_SUN_SUPPRESSION_MAPS,
@@ -72,6 +75,7 @@ from .weather_effects import (
     SNOW_WEATHER_EFFECT_ID,
     WeatherEffectError,
     normalize_weather_effect_id,
+    visual_layer_console_commands,
 )
 from .weather_particle_vpk import (
     TRAIN_SNOW_PROBE_MAP,
@@ -1095,10 +1099,9 @@ class PovHudManager:
                     input_audio_enabled=input_audio_enabled,
                     input_audio_volume_percent=input_audio_volume_percent,
                     combat_stats_enabled=combat_stats_enabled,
-                    session_console_commands=(
-                        map_material_console_commands(selected_map_material)
-                        if advanced_playback_enabled
-                        else ()
+                    session_console_commands=visual_layer_console_commands(
+                        map_material_id=selected_map_material,
+                        weather_effect_id=selected_weather,
                     ),
                 )
                 logger.info(
@@ -1187,6 +1190,7 @@ class PovHudManager:
         chroma_outer_metadata: Optional[dict[str, Any]] = None
         chroma_official_swap_metadata: Optional[dict[str, Any]] = None
         map_sun_suppression_metadata: Optional[dict[str, Any]] = None
+        weather_postprocess_metadata: Optional[dict[str, Any]] = None
         weather_main_metadata: Optional[dict[str, Any]] = None
         weather_particle_metadata: Optional[dict[str, Any]] = None
         staged_chroma_swap_files: dict[str, VerifiedFileSource] = {}
@@ -1237,6 +1241,17 @@ class PovHudManager:
                 map_sun_suppression_metadata = sun_build.metadata
             except (OSError, ValueError, TypeError, MapSunVpkError) as exc:
                 raise PovHudError(f"地图可见太阳移除 VPK 生成失败：{exc}") from exc
+        if selected_weather == RAIN_WEATHER_EFFECT_ID:
+            try:
+                post_build = compose_train_environment_postprocess_vpk(
+                    csgo_dir=self.get_csgo_dir(),
+                    map_name=effective_map_name,
+                    base_vpk_bytes=package_bytes,
+                )
+                package_bytes = post_build.vpk_bytes
+                weather_postprocess_metadata = post_build.metadata
+            except (OSError, ValueError, TypeError, MapPostprocessVpkError) as exc:
+                raise PovHudError(f"雨天 Train 环境后处理 VPK 生成失败：{exc}") from exc
         if selected_skybox in CHROMA_SKYBOX_IDS:
             child_assets_dir = self.get_chroma_child_assets_dir()
             child_manifest_path = child_assets_dir / "manifest.json"
@@ -1675,6 +1690,7 @@ class PovHudManager:
             "input_audio_volume_percent": int(input_audio_volume_percent),
             "combat_stats_enabled": bool(combat_stats_enabled),
             "weather_effect_id": selected_weather,
+            "weather_postprocess": weather_postprocess_metadata,
             "weather_main_map": weather_main_metadata,
             "weather_particle_override": weather_particle_metadata,
             "original_gameinfo_sha256": original_gameinfo_sha,

@@ -3,6 +3,7 @@ import {
   normalizeRecordingMapMaterialId,
   WAXED_REFLECTION_MAP_MATERIAL,
 } from "./recordingMapMaterial.js";
+import { DEFAULT_RECORDING_SKYBOX } from "./recordingSkybox.js";
 import {
   DEFAULT_RECORDING_WEATHER_EFFECT,
   normalizeRecordingWeatherEffectId,
@@ -46,4 +47,14 @@ export function splitRecordingMapAppearance(value) {
     mapMaterial: DEFAULT_RECORDING_MAP_MATERIAL,
     weatherEffect: DEFAULT_RECORDING_WEATHER_EFFECT,
   };
+}
+
+export function applyRecordingMapAppearanceSelection(value, handlers = {}) {
+  const next = splitRecordingMapAppearance(value);
+  handlers.onRecordingMapMaterialChange?.(next.mapMaterial);
+  handlers.onRecordingWeatherEffectChange?.(next.weatherEffect);
+  if (next.weatherEffect === RAIN_RECORDING_WEATHER_EFFECT) {
+    handlers.onRecordingSkyboxChange?.(DEFAULT_RECORDING_SKYBOX);
+  }
+  return next;
 }

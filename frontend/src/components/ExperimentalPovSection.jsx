@@ -22,7 +22,7 @@ import {
   RAIN_RECORDING_MAP_APPEARANCE,
   WAXED_RECORDING_MAP_APPEARANCE,
   recordingMapAppearanceId,
-  splitRecordingMapAppearance,
+  applyRecordingMapAppearanceSelection,
 } from "../utils/recordingMapAppearance.js";
 import {
   DEFAULT_RECORDING_WEATHER_EFFECT,
@@ -361,9 +361,11 @@ export default function ExperimentalPovSection({
               value={selectedMapAppearance}
               disabled={checkboxDisabled}
               onChange={(event) => {
-                const nextAppearance = splitRecordingMapAppearance(event.target.value);
-                onRecordingMapMaterialChange?.(nextAppearance.mapMaterial);
-                onRecordingWeatherEffectChange?.(nextAppearance.weatherEffect);
+                applyRecordingMapAppearanceSelection(event.target.value, {
+                  onRecordingMapMaterialChange,
+                  onRecordingWeatherEffectChange,
+                  onRecordingSkyboxChange,
+                });
               }}
               className="mt-2 w-full rounded border border-cs2-border bg-cs2-bg-input px-2 py-1.5 text-xs text-cs2-text-primary outline-none focus:border-cs2-accent/50 disabled:opacity-40"
             >

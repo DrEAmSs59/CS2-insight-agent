@@ -8,8 +8,8 @@
         "source_package_relative_path": "maps/de_dust2.vpk",
         "source_package_size": 262476433,
         "source_package_sha256": "51d6bb432b6553bfae6c38219a527c5de2464a2b107080f2b8be7d8427ebb885",
-        "expected_output_size": 262532553,
-        "expected_output_sha256": "da5cc054e760d0d29f20dd0d1c94ca3df98bea642553b7467aa7f8bfc4714fc5",
+        "expected_output_size": 262532557,
+        "expected_output_sha256": "142e29290a9409211fcb38bc06927de0d231d8e095a1338d80cea2d5d3100840",
         "expected_output_entry_count": 632,
         "output_logical_path": "maps/de_dust2.vpk"
       },
@@ -25,9 +25,9 @@
           "original_sha256": "515efdfc1e452b3d7052c5ffb1801a05e23b2395fb90586ff2dc9d14ae7ef80a",
           "original_crc32": "d8aecbc3",
           "payload_relative_path": "de_dust2/default_ents.vents_c",
-          "payload_size": 64230,
-          "payload_sha256": "7ba8509c17914323a47bf04cc69dd2a7f8a6ddb9add04680a6ada73a9f40fe52",
-          "payload_crc32": "93c276a5"
+          "payload_size": 64234,
+          "payload_sha256": "083318c8abf764d2294932b5b0d0975a85ad6e091ae12e201ef79ee0aa246e07",
+          "payload_crc32": "af72d974"
         }
       ],
       "in_game_evidence": {
@@ -508,7 +508,7 @@
         "source_package_size": 178972399,
         "source_package_sha256": "dc8f0d125014b00218582d0ab9a2f684638fa17054924fba34d07c2ef479e268",
         "expected_output_size": 179235820,
-        "expected_output_sha256": "b47ac255c507b693ab2fdb23b898169da087c2743eaf1e58a00228fec0c78373",
+        "expected_output_sha256": "d88a6a7a67484215116408e61ae05ced3b5d4847881679e8f17bd13138e6e35b",
         "expected_output_entry_count": 757,
         "output_logical_path": "maps/de_mirage.vpk"
       },
@@ -525,8 +525,8 @@
           "original_crc32": "d9a423c9",
           "payload_relative_path": "de_mirage/default_ents.vents_c",
           "payload_size": 111063,
-          "payload_sha256": "bc98b05c5d4f881e0ae15bc9d5746d9fff27a125102d3e8d4a8102fdc6fcdd0c",
-          "payload_crc32": "25cf6878"
+          "payload_sha256": "5593407ed2c9574b2cf1579f9a03a9727532bc8b4c0a870ff6dabdf07c112f2b",
+          "payload_crc32": "4ef988f7"
         },
         {
           "kind": "main_worldnode_static_model",
@@ -1782,8 +1782,8 @@
         "source_package_relative_path": "maps/de_cache.vpk",
         "source_package_size": 312857716,
         "source_package_sha256": "75c7b1eefa5e878797f7777e55761e72fc95df122a919eb1d64116b2b44ff80f",
-        "expected_output_size": 312944512,
-        "expected_output_sha256": "065064652054a9c25466533e75bb0c1a8592035444060306ae1728e40ccc8b30",
+        "expected_output_size": 312944510,
+        "expected_output_sha256": "47447360e82f33fb2d869cee85cafe033cc2b846312ae34d7f77b7a8ced55e75",
         "expected_output_entry_count": 852,
         "output_logical_path": "maps/de_cache.vpk"
       },
@@ -1799,9 +1799,9 @@
           "original_sha256": "d622a470cf3ebefbe2f626f0709d48a333caf1680d4c731246479bb11b4d3b21",
           "original_crc32": "f599146a",
           "payload_relative_path": "de_cache/default_ents.vents_c",
-          "payload_size": 96250,
-          "payload_sha256": "765856a48022eb113d31b8b69d0bf7a5786a3c0856c3028ff7bf10c2695b7466",
-          "payload_crc32": "919b301d"
+          "payload_size": 96248,
+          "payload_sha256": "9ad3f0dcfd8186f2a8c450ceae4c37280a4d419c88c0d5815c117ba5561e0888",
+          "payload_crc32": "aeb18a39"
         }
       ],
       "in_game_evidence": {
@@ -1915,8 +1915,8 @@
         "source_package_relative_path": "maps/de_inferno.vpk",
         "source_package_size": 453401552,
         "source_package_sha256": "bfe3d8a996feb43962b11a51acd76068fd001f793fa750f7df5cf7d9d23a9d89",
-        "expected_output_size": 453748163,
-        "expected_output_sha256": "9dba7c3f866cee8f5126a24eae6a400b93752200cd2680fcc53064be48302498",
+        "expected_output_size": 453748193,
+        "expected_output_sha256": "13ed64ab87602f6ccb4dd591d2308efd501086f76092b3bd7f2184a3565f4dd5",
         "expected_output_entry_count": 1011,
         "output_logical_path": "maps/de_inferno.vpk"
       },
@@ -1932,9 +1932,9 @@
           "original_sha256": "e497d347ee4dbabf3c453d938fb6c45a529c444b4aef93d415dea279b621997c",
           "original_crc32": "e3da72ea",
           "payload_relative_path": "de_inferno/default_ents.vents_c",
-          "payload_size": 131102,
-          "payload_sha256": "b3af5668eb081e92d00a8af5df1899adbf0127031be040beb5b924136ec72f88",
-          "payload_crc32": "15ea7a08"
+          "payload_size": 131132,
+          "payload_sha256": "bfb2ad709b190b307fcf7e55702a2e30a14456ecc4a94f83820e9643325fcf8b",
+          "payload_crc32": "2deca023"
         },
         {
           "kind": "main_worldnode_static_model",
@@ -2958,8 +2958,8 @@
         "source_package_relative_path": "maps/de_anubis.vpk",
         "source_package_size": 269890099,
         "source_package_sha256": "bca91cee11592c65c2869c599769232f29335458376ed90431a013b58c938e07",
-        "expected_output_size": 270086854,
-        "expected_output_sha256": "d7a937395ec72370c55da22007aff861926f6a23814d9a4708565f1612455ef3",
+        "expected_output_size": 270086862,
+        "expected_output_sha256": "03a3f9b9c066988fa6014ea07ea9f9fb1a1a51eac477a4e10ad88e765661be01",
         "expected_output_entry_count": 650,
         "output_logical_path": "maps/de_anubis.vpk"
       },
@@ -2975,9 +2975,9 @@
           "original_sha256": "0bec69113fd5ca9a7366f0ebd05523d4c0ffebcaf759cd52fdd010e222352f66",
           "original_crc32": "92bf6e65",
           "payload_relative_path": "de_anubis/default_ents.vents_c",
-          "payload_size": 79382,
-          "payload_sha256": "5c78406a49d75a8633bcc575a682fbd145a23df358d87805f58ed17907654270",
-          "payload_crc32": "f19f2e4f"
+          "payload_size": 79390,
+          "payload_sha256": "e2c1a1bb49df8df33551b8b4a0ddde6563bd923bee772e94dd16d2c55d0eec84",
+          "payload_crc32": "cb346f39"
         },
         {
           "kind": "main_worldnode_static_model",
@@ -4394,7 +4394,7 @@
         "source_package_size": 405423836,
         "source_package_sha256": "db67fb7c45e4a92a87473dc8d9dae0b5ead6887e282ecd7d98076f5c01af0d26",
         "expected_output_size": 405491851,
-        "expected_output_sha256": "88a442fb18024c7f684ce6b3fb0ebf76d35f3186d3a4dcb496e97092de9b56d8",
+        "expected_output_sha256": "aeab9678f0e9d23d7bfd3bbbfbef35a51b97b0c742d0e4cd022f09179c5c2f2e",
         "expected_output_entry_count": 497,
         "output_logical_path": "maps/de_ancient.vpk"
       },
@@ -4411,8 +4411,8 @@
           "original_crc32": "dd9d397f",
           "payload_relative_path": "de_ancient/default_ents.vents_c",
           "payload_size": 79933,
-          "payload_sha256": "c7f16c0774596498e47f2b24b1214c5fcbb777f66f56f519ac61444c8c4144a8",
-          "payload_crc32": "cf26e4f1"
+          "payload_sha256": "705f362c08726d3b6331c60c0843af0445b127608171cfe127b4a3839d8d5bf6",
+          "payload_crc32": "8a55c7c2"
         }
       ],
       "in_game_evidence": {
@@ -4667,8 +4667,8 @@
         "source_package_relative_path": "maps/de_nuke.vpk",
         "source_package_size": 252941035,
         "source_package_sha256": "616286bdfba283f8026cb719321e4c2d0986f04ce925cb13b0ff7ff913c33007",
-        "expected_output_size": 253033820,
-        "expected_output_sha256": "4328ba1252205155513ff74b05fae132bedd7574f266801eff22ce02d18be32f",
+        "expected_output_size": 253033817,
+        "expected_output_sha256": "d49188fdb204e0e59ee7c576b33f497816e9b57aedbc053bf215ac838228541c",
         "expected_output_entry_count": 921,
         "output_logical_path": "maps/de_nuke.vpk"
       },
@@ -4684,9 +4684,9 @@
           "original_sha256": "557075dbbde5509280347b1dede63ad91e02fbe0d5f41f902579efc786a80780",
           "original_crc32": "9d228ef5",
           "payload_relative_path": "de_nuke/default_ents.vents_c",
-          "payload_size": 100643,
-          "payload_sha256": "2ce04c17005139a838e0fcc77d81d4abe6f061844d47f62e8064c0cbb16fd4e8",
-          "payload_crc32": "428fdc4f"
+          "payload_size": 100640,
+          "payload_sha256": "431fbd26f7db8c7971313398444413875065f6d192f1974d4db156400bacaa08",
+          "payload_crc32": "079ecebe"
         }
       ],
       "in_game_evidence": {

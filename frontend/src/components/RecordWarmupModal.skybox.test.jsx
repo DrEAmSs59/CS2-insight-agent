@@ -93,6 +93,69 @@ describe("RecordWarmupModal skybox override", () => {
     );
   });
 
+  it("selecting rain for this recording defaults the skybox to Train overcast", () => {
+    const onConfirm = vi.fn();
+    render(
+      <RecordWarmupModal
+        open
+        onClose={() => {}}
+        onConfirm={onConfirm}
+        recordingSkybox="cartoon3"
+        recordingMapMaterial="waxed_reflection"
+      />,
+    );
+
+    fireEvent.change(screen.getByRole("combobox", { name: "录制地图材质" }), {
+      target: { value: "rain" },
+    });
+    expect(screen.getByRole("combobox", { name: "录制天空盒" }).value).toBe("default");
+    expect(screen.getByRole("option", { name: "默认（Train 阴天）" }).selected).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "开始录制" }));
+    expect(onConfirm).toHaveBeenCalledWith(
+      expect.objectContaining({
+        recording_skybox: "default",
+        recording_map_material: "default",
+        recording_weather_effect: "rain",
+      }),
+    );
+
+    fireEvent.change(screen.getByRole("combobox", { name: "录制天空盒" }), {
+      target: { value: "cartoon3" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "开始录制" }));
+    expect(onConfirm).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        recording_skybox: "cartoon3",
+        recording_map_material: "default",
+        recording_weather_effect: "rain",
+      }),
+    );
+  });
+
+  it("keeps a previously chosen skybox when rain is already selected", () => {
+    const onConfirm = vi.fn();
+    render(
+      <RecordWarmupModal
+        open
+        onClose={() => {}}
+        onConfirm={onConfirm}
+        recordingSkybox="cartoon3"
+        recordingMapMaterial="default"
+        recordingWeatherEffect="rain"
+      />,
+    );
+
+    expect(screen.getByRole("combobox", { name: "录制天空盒" }).value).toBe("cartoon3");
+    fireEvent.click(screen.getByRole("button", { name: "开始录制" }));
+    expect(onConfirm).toHaveBeenCalledWith(
+      expect.objectContaining({
+        recording_skybox: "cartoon3",
+        recording_map_material: "default",
+        recording_weather_effect: "rain",
+      }),
+    );
+  });
+
   it("submits the selected POV voice audience for this recording", () => {
     const onConfirm = vi.fn();
     render(

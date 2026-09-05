@@ -108,6 +108,7 @@ describe("DemoPlayOptionsModal", () => {
     fireEvent.change(materialSelect, { target: { value: "rain" } });
     expect(onRecordingMapMaterialChange).toHaveBeenCalledWith("default");
     expect(onRecordingWeatherEffectChange).toHaveBeenCalledWith("rain");
+    expect(onRecordingSkyboxChange).toHaveBeenCalledWith("default");
 
     const preview = screen.getByTestId("demo-play-preview");
     expect(screen.queryByTestId("demo-play-input-hud-option")).toBeNull();

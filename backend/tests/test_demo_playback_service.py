@@ -299,6 +299,35 @@ def test_pov_playback_installs_cfg_and_restores_after_exit(monkeypatch, tmp_path
     assert rechecked["restore"]["verified"] is False
 
 
+def test_rain_playback_cfg_does_not_fire_light_environment_commands(
+    monkeypatch,
+    tmp_path: Path,
+):
+    cfg, demo, _game_root = _paths(tmp_path)
+    process = _FakeProcess()
+    monkeypatch.setattr(playback.subprocess, "Popen", lambda *_args, **_kwargs: process)
+    service = playback.DemoPlaybackService()
+    result = service.launch(
+        demo,
+        cfg,
+        playback.DemoPlaybackPovOptions(
+            enabled=True,
+            weather_effect_id="rain",
+        ),
+    )
+
+    session = service._active
+    assert result["weather_effect_id"] == "rain"
+    assert session is not None and session.copied_cfg is not None
+    cfg_text = session.copied_cfg.read_text(encoding="ascii")
+    assert "r_directlighting 0" not in cfg_text
+    assert "r_rendersun 0" not in cfg_text
+    assert "ent_fire light_environment" not in cfg_text
+
+    session.started_at_monotonic = time.monotonic() - 4
+    service._monitor_session(session)
+
+
 def test_chroma_pov_playback_redirects_only_the_disposable_demo_copy(
     monkeypatch,
     tmp_path: Path,

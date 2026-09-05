@@ -55,7 +55,7 @@ export default {
   "playDemo.mapMaterialHint": "Choose the map material or rain effect for this advanced playback session. Recording presets are unchanged.",
   "playDemo.mapMaterialSelectLabel": "Advanced playback map material",
   "playDemo.weatherEffectTitle": "Weather effect",
-  "playDemo.weatherEffectHint": "Weather and map material are mutually exclusive. Skybox remains independent; rain uses Train's overcast sky by default.",
+  "playDemo.weatherEffectHint": "Rain uses Train's overcast sky, Train's environment post-process, and a half-strength compiled sun (shadows remain) by default. Skybox remains independently selectable.",
   "playDemo.weatherEffectSelectLabel": "Advanced playback weather effect",
   "playDemo.weatherTitle": "Weather particles",
   "playDemo.weatherHint": "Experimental de_train-only route: keep Train's native precipitation entities and resolve rain_volume to CS2's official snow particle.",

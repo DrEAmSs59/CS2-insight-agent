@@ -255,6 +255,37 @@ describe("ExperimentalPovSection POV recovery", () => {
     fireEvent.change(materialSelect, { target: { value: "waxed_reflection" } });
     expect(onMapMaterialChange).toHaveBeenCalledWith("waxed_reflection");
     expect(onWeatherEffectChange).toHaveBeenCalledWith("default");
+    expect(onSkyboxChange).not.toHaveBeenCalled();
+  });
+
+  it("selecting rain switches the skybox to Train overcast and still allows a manual override", () => {
+    API.get.mockReturnValue(new Promise(() => {}));
+    const onSkyboxChange = vi.fn();
+    const onMapMaterialChange = vi.fn();
+    const onWeatherEffectChange = vi.fn();
+    render(
+      <ExperimentalPovSection
+        visible
+        experimentalPovEnabled={false}
+        onExperimentalPovChange={() => {}}
+        recordingSkybox="cartoon3"
+        onRecordingSkyboxChange={onSkyboxChange}
+        recordingMapMaterial="waxed_reflection"
+        onRecordingMapMaterialChange={onMapMaterialChange}
+        recordingWeatherEffect="default"
+        onRecordingWeatherEffectChange={onWeatherEffectChange}
+      />,
+    );
+
+    const materialSelect = screen.getByRole("combobox", { name: "录制地图材质" });
+    fireEvent.change(materialSelect, { target: { value: "rain" } });
+    expect(onMapMaterialChange).toHaveBeenCalledWith("default");
+    expect(onWeatherEffectChange).toHaveBeenCalledWith("rain");
+    expect(onSkyboxChange).toHaveBeenCalledWith("default");
+
+    const skyboxSelect = screen.getByRole("combobox", { name: "录制天空盒" });
+    fireEvent.change(skyboxSelect, { target: { value: "cartoon4" } });
+    expect(onSkyboxChange).toHaveBeenCalledWith("cartoon4");
   });
 
   it("does not add a second experimental background when embedded in the preset", () => {

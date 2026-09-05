@@ -3626,7 +3626,6 @@ class OBSDirector:
         from .pov_constants import POV_CORE_FORCED_COMMANDS, pov_tail_commands
         from .map_material_vpk import (
             DEFAULT_MAP_MATERIAL_ID,
-            map_material_console_commands,
             normalize_map_material_id,
         )
         from .skybox_vpk import (
@@ -3638,6 +3637,7 @@ class OBSDirector:
         from .weather_effects import (
             DEFAULT_WEATHER_EFFECT_ID,
             normalize_weather_effect_id,
+            visual_layer_console_commands,
         )
 
         logger.info("[RecordingV3] execute_plan_queue: %d requests", len(requests))
@@ -3879,10 +3879,14 @@ class OBSDirector:
                         warmup,
                         pov_enabled=recording_hud_on_v3,
                     )
-                    if map_material_on_v3:
+                    visual_cmds = visual_layer_console_commands(
+                        map_material_id=map_material_id_v3,
+                        weather_effect_id=weather_effect_id_v3,
+                    )
+                    if visual_cmds:
                         effective_warmup_cmds = [
                             *effective_warmup_cmds,
-                            *map_material_console_commands(map_material_id_v3),
+                            *visual_cmds,
                         ]
                     effective_warmup_cmds = [
                         *effective_warmup_cmds,

@@ -22,10 +22,8 @@ from .cs2_config_backup import (
 )
 from .chroma_demo_copy import prepare_chroma_demo_copy
 from .demo_compat_service import ensure_demo_compatible
-from .map_material_vpk import (
-    DEFAULT_MAP_MATERIAL_ID,
-    map_material_console_commands,
-)
+from .map_material_vpk import DEFAULT_MAP_MATERIAL_ID
+from .weather_effects import visual_layer_console_commands
 from .pov_constants import POV_CORE_FORCED_COMMANDS, pov_tail_commands
 from .pov_hud_manager import (
     PovHudError,
@@ -173,7 +171,10 @@ class DemoPlaybackService:
             "sv_cheats 1",
             *(
                 command
-                for command in map_material_console_commands(options.map_material_id)
+                for command in visual_layer_console_commands(
+                    map_material_id=options.map_material_id,
+                    weather_effect_id=options.weather_effect_id,
+                )
                 if command != "sv_cheats 1"
             ),
             *POV_CORE_FORCED_COMMANDS,

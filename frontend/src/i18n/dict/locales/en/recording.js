@@ -411,7 +411,7 @@ export default {
   "record.weatherEffectDefault": "Original weather (no replacement)",
   "record.weatherEffectRain": "Rain (water drops on weapons)",
   "record.weatherEffectRainSupportedMaps": "Rain supports Dust II, Mirage, Cache, Inferno, Anubis, Ancient, and Nuke.",
-  "record.weatherEffectRainOutcome": "Rain enabled: Train's overcast sky is used by default. Selecting another skybox overrides that sky while keeping rain and the map's accepted wet-ground/puddle treatment.",
+  "record.weatherEffectRainOutcome": "Rain enabled: Train's overcast sky and Train's environment post-process are used by default, and the map's compiled sun is dimmed to about half strength with shadows kept. Selecting another skybox overrides that sky while keeping rain, the Train grade, the dimmer sun, and the map's accepted wet-ground/puddle treatment.",
   "record.skyboxTitle": "Skybox replacement",
   "record.skyboxSubtitle": "Experimental alongside POV HUD, but selected independently. It applies to both normal and POV recording.",
   "record.skyboxRainSelectable": "Rain uses Train's overcast sky by default; choose another skybox to override that default.",
