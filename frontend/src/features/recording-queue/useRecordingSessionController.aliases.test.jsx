@@ -69,7 +69,7 @@ describe("recording queue player aliases", () => {
       voice_mode: "team",
       input_hud_enabled: true,
       input_hud_display_mode: "hybrid",
-      input_audio_enabled: true,
+      input_audio_enabled: false,
       combat_stats_hud_enabled: true,
     });
   });

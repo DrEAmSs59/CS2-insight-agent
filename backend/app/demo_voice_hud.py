@@ -4509,7 +4509,7 @@ def build_demo_voice_hud_vpk(
     input_hud_enabled: bool = True,
     input_hud_display_mode: str = "hybrid",
     input_hud_scale_percent: int = 100,
-    input_audio_enabled: bool = True,
+    input_audio_enabled: bool = False,
     input_audio_volume_percent: int = 100,
     combat_stats_enabled: bool = True,
     session_console_commands: Iterable[object] | None = None,

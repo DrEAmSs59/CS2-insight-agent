@@ -2756,7 +2756,7 @@ def test_pov_manager_installs_generated_voice_package(monkeypatch, tmp_path: Pat
         input_hud_enabled=True,
         input_hud_display_mode="hybrid",
         input_hud_scale_percent=100,
-        input_audio_enabled=True,
+        input_audio_enabled=False,
         input_audio_volume_percent=100,
         combat_stats_enabled=True,
         session_console_commands=(),
@@ -2790,7 +2790,7 @@ def test_pov_manager_installs_generated_voice_package(monkeypatch, tmp_path: Pat
 
     assert result is built
     assert calls == [
-        (demo, template, input_report, True, "team", False, True, "hybrid", 100, True, 100, True, ())
+        (demo, template, input_report, True, "team", False, True, "hybrid", 100, False, 100, True, ())
     ]
     assert (csgo / "pov.vpk").read_bytes() == b"generated"
     manifest = json.loads(manager.get_manifest_path().read_text(encoding="utf-8"))
@@ -2827,7 +2827,7 @@ def test_pov_manager_installs_generated_voice_package(monkeypatch, tmp_path: Pat
         True,
         "hybrid",
         100,
-            True,
+            False,
             100,
             True,
             (

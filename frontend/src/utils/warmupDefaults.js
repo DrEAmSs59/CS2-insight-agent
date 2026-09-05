@@ -128,7 +128,7 @@ export function warmupUiOptsToPersisted(opts) {
     pov_voice_mode: normalizePovVoiceMode(opts.pov_voice_mode, opts.pov_voice_disabled === true),
     input_hud_enabled: opts.input_hud_enabled !== false,
     input_hud_display_mode: "hybrid",
-    input_audio_enabled: opts.input_audio_enabled !== false,
+    input_audio_enabled: opts.input_audio_enabled === true,
     combat_stats_hud_enabled: opts.combat_stats_hud_enabled !== false,
   };
 }
@@ -254,7 +254,7 @@ export function splitRecordWarmupConfirmPayload(payload) {
       obs_transition_duration_ms,
       input_hud_enabled: typeof input_hud_enabled === "boolean" ? input_hud_enabled : true,
       input_hud_display_mode: "hybrid",
-      input_audio_enabled: typeof input_audio_enabled === "boolean" ? input_audio_enabled : true,
+      input_audio_enabled: typeof input_audio_enabled === "boolean" ? input_audio_enabled : false,
       combat_stats_hud_enabled:
         typeof combat_stats_hud_enabled === "boolean" ? combat_stats_hud_enabled : true,
     },

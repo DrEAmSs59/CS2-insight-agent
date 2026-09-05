@@ -74,7 +74,7 @@ describe("playDemoInCs2", () => {
     });
   });
 
-  it("treats rain and puddles as one bundled playback preset", async () => {
+  it("keeps virtual key sounds off when advanced playback enables the input HUD", async () => {
     API.post.mockResolvedValue({ data: { ok: true } });
     await playDemoInCs2({
       id: 8,
@@ -92,7 +92,7 @@ describe("playDemoInCs2", () => {
         input_hud_enabled: true,
         input_hud_display_mode: "hybrid",
         input_hud_scale_percent: 100,
-        input_audio_enabled: true,
+        input_audio_enabled: false,
         input_audio_volume_percent: 100,
       },
       map_material: { id: "default" },

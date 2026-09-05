@@ -708,7 +708,7 @@ async def execute_recording_queue(
             pov_voice_disabled=False,
             input_hud_enabled=input_hud_enabled,
             input_hud_display_mode=input_hud_display_mode,
-            input_audio_enabled=bool(pov_hud_cfg.get("input_audio_enabled", True)),
+            input_audio_enabled=bool(pov_hud_cfg.get("input_audio_enabled", False)),
             combat_stats_hud_enabled=bool(
                 pov_hud_cfg.get("combat_stats_hud_enabled", True)
             ),

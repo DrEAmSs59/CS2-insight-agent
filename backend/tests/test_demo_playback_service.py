@@ -43,7 +43,7 @@ class _FakePovManager:
         input_hud_enabled=True,
         input_hud_display_mode="hybrid",
         input_hud_scale_percent=100,
-        input_audio_enabled=True,
+        input_audio_enabled=False,
         input_audio_volume_percent=100,
         weather_effect_id="default",
     ):

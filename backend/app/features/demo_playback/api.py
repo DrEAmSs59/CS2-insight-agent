@@ -50,7 +50,7 @@ class DemoPlaybackPovBody(BaseModel):
     input_hud_enabled: bool = True
     input_hud_display_mode: Literal["hybrid", "always", "active"] = "hybrid"
     input_hud_scale_percent: int = Field(default=100, ge=75, le=125)
-    input_audio_enabled: bool = True
+    input_audio_enabled: bool = False
     input_audio_volume_percent: Literal[25, 50, 75, 100] = 100
 
 

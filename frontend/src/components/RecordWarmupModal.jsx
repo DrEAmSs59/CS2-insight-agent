@@ -107,8 +107,8 @@ export const RECORD_WARMUP_DEFAULT_OPTIONS = {
   input_hud_enabled: true,
   /** Visibility policy for the in-game keyboard/mouse HUD. */
   input_hud_display_mode: "hybrid",
-  /** Preserved while its editor is temporarily hidden. */
-  input_audio_enabled: true,
+  /** Preserved while its editor is temporarily hidden; default off. */
+  input_audio_enabled: false,
   /** Whether to show the per-Pawn K/D/A and damage block in the recording VPK. */
   combat_stats_hud_enabled: true,
 };
@@ -195,7 +195,7 @@ export default function RecordWarmupModal({
   const [sessionPovEnabled, setSessionPovEnabled] = useState(false);
   const [sessionInputHudEnabled, setSessionInputHudEnabled] = useState(true);
   const [sessionInputHudDisplayMode, setSessionInputHudDisplayMode] = useState("hybrid");
-  const [sessionInputAudioEnabled, setSessionInputAudioEnabled] = useState(true);
+  const [sessionInputAudioEnabled, setSessionInputAudioEnabled] = useState(false);
   const [sessionCombatStatsHudEnabled, setSessionCombatStatsHudEnabled] = useState(true);
   const [sessionSkybox, setSessionSkybox] = useState("default");
   const [sessionMapMaterial, setSessionMapMaterial] = useState(DEFAULT_RECORDING_MAP_MATERIAL);
@@ -235,7 +235,7 @@ export default function RecordWarmupModal({
     setSessionPovEnabled(!!experimentalPovEnabled);
     setSessionInputHudEnabled(o?.input_hud_enabled !== false);
     setSessionInputHudDisplayMode("hybrid");
-    setSessionInputAudioEnabled(o?.input_audio_enabled !== false);
+    setSessionInputAudioEnabled(false);
     setSessionCombatStatsHudEnabled(o?.combat_stats_hud_enabled !== false);
     setSessionSkybox(normalizeRecordingSkyboxId(recordingSkybox));
     setSessionMapMaterial(normalizeRecordingMapMaterialId(recordingMapMaterial));

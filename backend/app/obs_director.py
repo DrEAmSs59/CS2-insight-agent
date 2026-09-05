@@ -1860,7 +1860,7 @@ class RecordingWarmupExtras:
     # are session choices.
     input_hud_enabled: bool = True
     input_hud_display_mode: Literal["hybrid", "always", "active"] = "hybrid"
-    input_audio_enabled: bool = True
+    input_audio_enabled: bool = False
     # Presentation-only switch. The authoritative combat track remains in the
     # demo-specific payload so this never changes truth extraction or Pawn switching.
     combat_stats_hud_enabled: bool = True
@@ -3678,7 +3678,7 @@ class OBSDirector:
         # always uses the high-frequency resident (hybrid) presentation.
         input_hud_display_mode_v3 = "hybrid"
         input_audio_enabled_v3 = bool(
-            getattr(warmup, "input_audio_enabled", True) if warmup else True
+            getattr(warmup, "input_audio_enabled", False) if warmup else False
         )
         combat_stats_hud_enabled_v3 = bool(
             getattr(warmup, "combat_stats_hud_enabled", True) if warmup else True
