@@ -3773,6 +3773,7 @@ class OBSDirector:
                                 map_name=demo_map_name,
                                 demo_path=demo_abs,
                                 voice_mode=pov_voice_mode_v3,
+                                pov_visuals_enabled=pov_on_v3,
                                 skybox_id=skybox_id_v3,
                                 map_material_id=map_material_id_v3,
                                 weather_effect_id=weather_effect_id_v3,

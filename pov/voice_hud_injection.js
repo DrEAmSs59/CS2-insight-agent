@@ -12,7 +12,8 @@
 // commands at index 14, exact UserCmd mouse deltas at index 15, authoritative
 // left_hand_desired switch edges at index 16, exact input-audio button edges at
 // index 17, per-session input-HUD presentation settings at index 18, and
-// authoritative controller K/D/A + damage state tracks at index 19].
+// authoritative controller K/D/A + damage state tracks at index 19, and the
+// explicit recording POV-visuals switch at index 20].
 ;(function CS2InsightDemoVoiceHud() {
     "use strict";
 
@@ -34,6 +35,12 @@
     const encodedInputAudioEdges = packed[17] || [];
     const encodedInputPresentation = Array.isArray(packed[18]) ? packed[18] : [];
     const encodedCombatStats = packed[19] || null;
+    // Old payloads predate auxiliary recording overlays and were always POV.
+    // Defaulting to true preserves those packages while new normal recordings
+    // explicitly send false and retain CS2's native spectator HUD.
+    const recordingPovVisualsEnabled = packed.length > 20
+        ? Boolean(packed[20])
+        : true;
     const sessionConsoleCommands = encodedSessionConsoleCommands.map(function (command) {
         return String(command || "").trim();
     }).filter(Boolean);
@@ -6578,7 +6585,12 @@
         // container selection: show HudHealthAmmoCenter (with CS2's CT/T logo)
         // and hide the demo-only Steam-avatar card. This changes only root
         // visibility; health fill, wash, gradients, and colors remain native.
-        if (advancedPlayback && advancedHudHidden) {
+        if (!advancedPlayback) {
+            advancedApplyNativeSpectatorHud(!recordingPovVisualsEnabled);
+            $.Schedule(0.25, guardSpectatorHudProfile);
+            return;
+        }
+        if (advancedHudHidden) {
             const healthAmmo = findHudTraverse("HudHealthAmmoCenter")
                 || findHudTraverse("CSGOHudHealthAmmoCenter");
             advancedSetPanelRuntimeVisible(healthAmmo, false);
@@ -6589,9 +6601,7 @@
             $.Schedule(0.25, guardSpectatorHudProfile);
             return;
         }
-        const demoSpectatorHudEnabled = Boolean(
-            advancedPlayback && !advancedPovVisualsEnabled
-        );
+        const demoSpectatorHudEnabled = !advancedPovVisualsEnabled;
         advancedApplyNativeSpectatorHud(demoSpectatorHudEnabled);
         $.Schedule(0.25, guardSpectatorHudProfile);
     }
@@ -7874,18 +7884,21 @@
     if (combatStats && combatStatsHudEnabled) {
         $.Schedule(0, updateCombatStatsHud);
     }
-    $.Schedule(0, tickTeamCounterHud);
-    $.Schedule(0, updateOverheadInfoHud);
-    $.Schedule(0, tickFlashBlindHud);
+    const povHudFeaturesEnabled = Boolean(recordingPovVisualsEnabled || advancedPlayback);
+    if (povHudFeaturesEnabled) {
+        $.Schedule(0, tickTeamCounterHud);
+        $.Schedule(0, updateOverheadInfoHud);
+        $.Schedule(0, tickFlashBlindHud);
+    }
     $.Schedule(0, watchDemoTimeJumps);
     suppressNativeLowerLeft();
-    if (radarTrack) {
+    if (povHudFeaturesEnabled && radarTrack) {
         $.Schedule(0, updateRadarHud);
     }
-    if (killFeedbackEvents) {
+    if (povHudFeaturesEnabled && killFeedbackEvents) {
         $.Schedule(0, updateKillFeedback);
     }
-    if (radioTrack || killFeedbackTrack) {
+    if (radioTrack || (povHudFeaturesEnabled && killFeedbackTrack)) {
         $.Schedule(0, updateRadioHud);
     }
     $.Schedule(0, guardSpectatorHudProfile);

@@ -960,6 +960,11 @@ def test_checked_in_voice_template_contains_only_an_empty_payload():
     assert b"function float32FromBits(rawBits)" in script
     assert b"const encodedInputPresentation = Array.isArray(packed[18])" in script
     assert b"const encodedCombatStats = packed[19] || null" in script
+    assert b"const recordingPovVisualsEnabled = packed.length > 20" in script
+    assert b"advancedApplyNativeSpectatorHud(!recordingPovVisualsEnabled)" in script
+    assert b"const povHudFeaturesEnabled = Boolean(recordingPovVisualsEnabled || advancedPlayback)" in script
+    assert b"if (povHudFeaturesEnabled && radarTrack)" in script
+    assert b"if (povHudFeaturesEnabled && killFeedbackEvents)" in script
     assert b"const combatStatsHudEnabled = false" in script
     assert b"function decodeCombatStats(raw)" in script
     assert b"function updateCombatStatsHud()" in script
@@ -1419,7 +1424,7 @@ def test_checked_in_voice_template_contains_only_an_empty_payload():
     assert b"advancedPovVisualsActive" not in script[voice_update_start:voice_update_end]
     assert b'speaker.panel.AddClass("Hidden")' not in script[profile_start:profile_end]
     assert b"reward: Math.max(0, parseInt(fields[3], 36) || 0)" in script
-    assert b"if (radioTrack || killFeedbackTrack)" in script
+    assert b"if (radioTrack || (povHudFeaturesEnabled && killFeedbackTrack))" in script
     assert b'join("<br>")' not in script
     assert "﹫".encode() in script
     assert b"Stratum2 Bold" not in script
@@ -1739,6 +1744,7 @@ def test_session_console_commands_are_embedded_in_the_payload():
         input_audio_enabled=False,
         input_audio_volume_percent=50,
         combat_stats_enabled=False,
+        pov_visuals_enabled=False,
     )
     script = read_inline_vpk(build.vpk_bytes)[VOICE_SCRIPT_PATH]
     start = script.index(VOICE_DATA_BEGIN) + len(VOICE_DATA_BEGIN)
@@ -1747,6 +1753,7 @@ def test_session_console_commands_are_embedded_in_the_payload():
 
     assert payload[14] == commands
     assert payload[18] == [1, "active", 115, 0, 50, 0]
+    assert payload[20] == 0
 
 
 def test_session_console_commands_reject_command_separators():
@@ -2751,6 +2758,7 @@ def test_pov_manager_installs_generated_voice_package(monkeypatch, tmp_path: Pat
         voice_enabled=True,
         voice_mode="team",
         advanced_playback_enabled=False,
+        pov_visuals_enabled=True,
         input_hud_enabled=True,
         input_hud_display_mode="hybrid",
         input_hud_scale_percent=100,
@@ -2767,6 +2775,7 @@ def test_pov_manager_installs_generated_voice_package(monkeypatch, tmp_path: Pat
                 voice_enabled,
                 voice_mode,
                 advanced_playback_enabled,
+                pov_visuals_enabled,
                 input_hud_enabled,
                 input_hud_display_mode,
                 input_hud_scale_percent,
@@ -2788,13 +2797,33 @@ def test_pov_manager_installs_generated_voice_package(monkeypatch, tmp_path: Pat
 
     assert result is built
     assert calls == [
-        (demo, template, input_report, True, "team", False, True, "hybrid", 100, False, 100, True, ())
+        (demo, template, input_report, True, "team", False, True, True, "hybrid", 100, False, 100, True, ())
     ]
     assert (csgo / "pov.vpk").read_bytes() == b"generated"
     manifest = json.loads(manager.get_manifest_path().read_text(encoding="utf-8"))
     assert manifest["demo_voice_hud_generated"] is True
     assert manifest["demo_voice_hud"]["speakers"] == 2
     assert manifest["demo_voice_hud"]["voice_mode"] == "team"
+
+    native_result = manager.install(demo_path=demo, pov_visuals_enabled=False)
+
+    assert native_result is built
+    assert calls[-1] == (
+        demo,
+        advanced_template,
+        input_report,
+        True,
+        "team",
+        False,
+        False,
+        True,
+        "hybrid",
+        100,
+        False,
+        100,
+        True,
+        (),
+    )
 
     map_materials_dir = pov_dir / "map_materials"
     map_materials_dir.mkdir()
@@ -2821,6 +2850,7 @@ def test_pov_manager_installs_generated_voice_package(monkeypatch, tmp_path: Pat
         input_report,
         True,
         "team",
+        True,
         True,
         True,
         "hybrid",

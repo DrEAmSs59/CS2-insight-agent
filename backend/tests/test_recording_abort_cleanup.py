@@ -299,6 +299,7 @@ def test_recording_hud_uses_shared_exit_restore_and_reports_evidence(
             map_name=None,
             demo_path=None,
             voice_mode="team",
+            pov_visuals_enabled=True,
             skybox_id="default",
             map_material_id="default",
             weather_effect_id="default",
@@ -313,6 +314,7 @@ def test_recording_hud_uses_shared_exit_restore_and_reports_evidence(
                 "install",
                 demo_path,
                 voice_mode,
+                pov_visuals_enabled,
                 input_hud_enabled,
                 input_hud_display_mode,
                 input_hud_scale_percent,
@@ -394,6 +396,7 @@ def test_recording_hud_uses_shared_exit_restore_and_reports_evidence(
     assert calls[1][1] == tmp_path / "pov.dem"
     assert calls[1][2] == "team"
     assert calls[1][3:] == (
+        pov_enabled,
         False,
         "hybrid",
         100,
