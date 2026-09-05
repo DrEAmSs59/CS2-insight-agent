@@ -48,7 +48,7 @@ export async function playDemoInCs2({ id = null, path = null, advancedPlayback =
         input_hud_enabled: true,
         input_hud_display_mode: "hybrid",
         input_hud_scale_percent: 100,
-        input_audio_enabled: playback?.input_audio_enabled !== false,
+        input_audio_enabled: playback?.input_audio_enabled === true,
         input_audio_volume_percent: 100,
       } : {}),
     },

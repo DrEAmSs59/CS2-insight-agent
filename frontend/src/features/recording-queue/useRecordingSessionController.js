@@ -154,7 +154,7 @@ export function useRecordingSessionController({
         voice_mode: normalizePovVoiceMode(warmupForApi?.pov_voice_mode),
         input_hud_enabled: session.input_hud_enabled !== false,
         input_hud_display_mode: "hybrid",
-        input_audio_enabled: session.input_audio_enabled !== false,
+        input_audio_enabled: session.input_audio_enabled === true,
         combat_stats_hud_enabled: session.combat_stats_hud_enabled !== false,
       };
       const body = {

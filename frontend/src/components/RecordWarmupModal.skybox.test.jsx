@@ -87,7 +87,7 @@ describe("RecordWarmupModal skybox override", () => {
         pov_voice_mode: "enemy",
         input_hud_enabled: true,
         input_hud_display_mode: "hybrid",
-        input_audio_enabled: true,
+        input_audio_enabled: false,
         combat_stats_hud_enabled: true,
       }),
     );
@@ -180,7 +180,7 @@ describe("RecordWarmupModal skybox override", () => {
         pov_voice_mode: "enemy",
         input_hud_enabled: false,
         input_hud_display_mode: "hybrid",
-        input_audio_enabled: true,
+        input_audio_enabled: false,
         combat_stats_hud_enabled: true,
       }),
     );
@@ -197,6 +197,7 @@ describe("RecordWarmupModal skybox override", () => {
         defaultOverrides={{
           input_hud_enabled: false,
           input_hud_display_mode: "active",
+          input_audio_enabled: true,
         }}
       />,
     );
@@ -209,6 +210,7 @@ describe("RecordWarmupModal skybox override", () => {
     expect(onConfirm).toHaveBeenCalledWith(expect.objectContaining({
       input_hud_enabled: true,
       input_hud_display_mode: "hybrid",
+      input_audio_enabled: false,
     }));
   });
 });

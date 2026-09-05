@@ -11,6 +11,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from app.features.demo_playback import api as playback_api
 
 
+def test_playback_pov_defaults_virtual_key_sounds_off():
+    body = playback_api.DemoPlaybackPovBody(enabled=True)
+    assert body.input_hud_enabled is True
+    assert body.input_audio_enabled is False
+
+
 def test_alias_roster_resolves_library_and_path(monkeypatch, tmp_path):
     from unittest.mock import AsyncMock
     path = tmp_path / "sample.dem"
@@ -164,6 +170,8 @@ def test_legacy_rain_puddles_maps_to_validated_rain_weather(
     assert captured["options"].skybox_id == "cartoon3"
     assert captured["options"].map_material_id == "default"
     assert captured["options"].weather_effect_id == "rain"
+    assert captured["options"].input_hud_enabled is True
+    assert captured["options"].input_audio_enabled is False
 
 
 def test_legacy_rain_puddles_rejects_a_separate_weather_choice(monkeypatch, tmp_path: Path):

@@ -27,6 +27,12 @@ def _director(inject_lines: str) -> OBSDirector:
     return OBSDirector(OBSConfig(), "", record_inject_console_lines=inject_lines)
 
 
+def test_recording_warmup_defaults_virtual_key_sounds_off():
+    warmup = RecordingWarmupExtras()
+    assert warmup.input_hud_enabled is True
+    assert warmup.input_audio_enabled is False
+
+
 def test_no_fixed_cvars_when_inject_lines_empty():
     director = _director("")
     lines = director._recording_warmup_console_lines(RecordingWarmupExtras())
