@@ -16,7 +16,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Iterable, Optional, Sequence
+from typing import Any, Iterable, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -35,22 +35,6 @@ def _enum_text(value: Any) -> str:
     return str(getattr(value, "value", value) or "")
 
 
-def _kill_track_index(segment: Any) -> dict[int, dict]:
-    """segment.metadata['kill_track'] 按 tick 建索引（KillFX 开启时才有）。"""
-    metadata = getattr(segment, "metadata", None) or {}
-    track = metadata.get("kill_track")
-    if not isinstance(track, list):
-        return {}
-    index: dict[int, dict] = {}
-    for entry in track:
-        if not isinstance(entry, dict):
-            continue
-        tick = _coerce_int(entry.get("tick"))
-        if tick is not None:
-            index[tick] = entry
-    return index
-
-
 class KillMarkerTimeline:
     """按录制顺序累计各段时长，产出成片内的击杀轴。
 
@@ -64,21 +48,11 @@ class KillMarkerTimeline:
         self._accumulated_sec: float = 0.0
         self._open: Optional[dict] = None
         self._markers: list[dict] = []
-        self._calibration: list[dict] = []
 
     @property
     def markers(self) -> list[dict]:
         """已完成段的击杀轴，按成片时间升序。"""
         return sorted(self._markers, key=lambda m: m["video_sec"])
-
-    @property
-    def calibration_markers(self) -> list[dict]:
-        """时序自检闪白的预期成片时间，按成片时间升序。
-
-        与击杀轴共用同一套换算，所以"成片里量到的闪白时刻减去这里的预期值"就是叠加层
-        从总线到写进文件的净延迟，不含任何重新推导带来的误差。
-        """
-        return sorted(self._calibration, key=lambda m: m["video_sec"])
 
     @property
     def accumulated_sec(self) -> float:
@@ -90,24 +64,18 @@ class KillMarkerTimeline:
         *,
         overhead_sec: float = 0.0,
         lead_in_sec: float = 0.0,
-        calibration_ticks: Sequence[int] = (),
-        overlay_offset_ticks: int = 0,
     ) -> None:
         """标记该段开始录制。
 
         ``overhead_sec``: demo 已越过 ``start_tick`` 的秒数（spec 准备超时被吃掉的窗口）。
         ``lead_in_sec``: OBS 开始录制到 demo 恢复播放之间录进文件的静帧时长；恢复分支
         还包含淡入，忽略它会让标记整体偏早。
-        ``calibration_ticks`` / ``overlay_offset_ticks``: 时序自检用，与下发给叠加层的
-        ``load`` 消息保持一致。
         """
         self._open = {
             "segment": segment,
             "video_start_sec": self._accumulated_sec,
             "overhead_sec": max(0.0, float(overhead_sec or 0.0)),
             "lead_in_sec": max(0.0, float(lead_in_sec or 0.0)),
-            "calibration_ticks": [t for t in (_coerce_int(x) for x in calibration_ticks) if t is not None],
-            "overlay_offset_ticks": _coerce_int(overlay_offset_ticks) or 0,
         }
 
     def discard_segment(self) -> None:
@@ -135,17 +103,6 @@ class KillMarkerTimeline:
                     recorded_sec=duration,
                 )
             )
-            self._calibration.extend(
-                self._build_calibration_markers(
-                    pending["segment"],
-                    ticks=pending["calibration_ticks"],
-                    overlay_offset_ticks=pending["overlay_offset_ticks"],
-                    video_start_sec=pending["video_start_sec"],
-                    overhead_sec=pending["overhead_sec"],
-                    lead_in_sec=pending["lead_in_sec"],
-                    recorded_sec=duration,
-                )
-            )
         self._accumulated_sec += duration
 
     def _video_sec(
@@ -167,46 +124,6 @@ class KillMarkerTimeline:
             return None
         return round(max(0.0, min(offset_sec, recorded_sec)) + video_start_sec, 3)
 
-    def _build_calibration_markers(
-        self,
-        segment: Any,
-        *,
-        ticks: Sequence[int],
-        overlay_offset_ticks: int,
-        video_start_sec: float,
-        overhead_sec: float,
-        lead_in_sec: float,
-        recorded_sec: float,
-    ) -> Iterable[dict]:
-        start_tick = _coerce_int(getattr(segment, "start_tick", None))
-        if not ticks or start_tick is None:
-            return []
-        segment_index = _coerce_int(getattr(segment, "segment_index", None))
-
-        out: list[dict] = []
-        for tick in sorted(set(ticks)):
-            # 页面比较的是加过 offset 的 tick，所以闪白实际发生在 demo 走到
-            # ``tick - offset`` 的时候；用这个 tick 换算才是"页面打算闪白"的成片时刻。
-            video_sec = self._video_sec(
-                tick - overlay_offset_ticks,
-                start_tick=start_tick,
-                video_start_sec=video_start_sec,
-                overhead_sec=overhead_sec,
-                lead_in_sec=lead_in_sec,
-                recorded_sec=recorded_sec,
-            )
-            if video_sec is None:
-                continue
-            marker: dict = {
-                "video_sec": video_sec,
-                "tick": tick,
-                "offset_ticks": overlay_offset_ticks,
-            }
-            if segment_index is not None:
-                marker["segment_index"] = segment_index
-            out.append(marker)
-        return out
-
     def _build_markers(
         self,
         segment: Any,
@@ -226,7 +143,6 @@ class KillMarkerTimeline:
         # 受害者 POV 段回放的是同一次击杀，但镜头在被杀方——单独标注，避免击杀轴
         # 把同一个击杀在成片里出现两次误读成两次击杀。
         kind = "death" if source_type == "death" else "kill"
-        track_index = _kill_track_index(segment)
         segment_index = _coerce_int(getattr(segment, "segment_index", None))
         round_number = _coerce_int(getattr(segment, "round", None))
 
@@ -255,12 +171,6 @@ class KillMarkerTimeline:
                 marker["segment_index"] = segment_index
             if round_number is not None:
                 marker["round"] = round_number
-            enrich = track_index.get(anchor)
-            if enrich:
-                for key in ("victim", "weapon", "headshot", "kill_index", "icons", "banner"):
-                    value = enrich.get(key)
-                    if value not in (None, "", [], {}):
-                        marker[key] = value
             out.append(marker)
         return out
 

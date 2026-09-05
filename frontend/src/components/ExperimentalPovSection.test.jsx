@@ -84,8 +84,102 @@ describe("ExperimentalPovSection POV recovery", () => {
     expect(featureCard.contains(skyboxCard)).toBe(true);
     expect(povCard.className).not.toContain("bg-");
     expect(skyboxCard.className).not.toContain("bg-");
+    const optionGroups = Array.from(selector.querySelectorAll("optgroup"));
+    expect(optionGroups.map(({ label }) => label)).toEqual([
+      "纯色天空盒",
+      "Insight 内置天空盒",
+    ]);
+    expect(Array.from(optionGroups[0].querySelectorAll("option")).map((option) => ({
+      value: option.value,
+      label: option.textContent,
+    }))).toEqual([
+      { value: "chroma_blue", label: "蓝色" },
+      { value: "chroma_green", label: "绿色" },
+    ]);
+    expect(Array.from(optionGroups[1].querySelectorAll("option"))
+      .every(({ value }) => value.startsWith("cartoon"))).toBe(true);
     fireEvent.change(selector, { target: { value: "cartoon4" } });
     expect(onSkyboxChange).toHaveBeenCalledWith("cartoon4");
+  });
+
+  it("places the in-game input selector above map material and supports hiding it", () => {
+    API.get.mockReturnValue(new Promise(() => {}));
+    const onInputHudEnabledChange = vi.fn();
+    const onInputHudDisplayModeChange = vi.fn();
+    render(
+      <ExperimentalPovSection
+        visible
+        experimentalPovEnabled
+        onExperimentalPovChange={() => {}}
+        inputHudEnabled
+        inputHudDisplayMode="hybrid"
+        onInputHudEnabledChange={onInputHudEnabledChange}
+        onInputHudDisplayModeChange={onInputHudDisplayModeChange}
+        recordingMapMaterial="default"
+        onRecordingMapMaterialChange={() => {}}
+      />,
+    );
+
+    const inputCard = screen.getByTestId("experimental-input-hud-card");
+    const materialCard = screen.getByTestId("experimental-map-material-card");
+    const selector = screen.getByRole("combobox", { name: "按键显示方式" });
+    expect(inputCard.compareDocumentPosition(materialCard) & Node.DOCUMENT_POSITION_FOLLOWING)
+      .toBeTruthy();
+    expect(Array.from(selector.options).map(({ value }) => value))
+      .toEqual(["visible", "hidden"]);
+    expect(screen.queryByText("虚拟按键音")).toBeNull();
+
+    fireEvent.change(selector, { target: { value: "hidden" } });
+    expect(onInputHudEnabledChange).toHaveBeenCalledWith(false);
+    fireEvent.change(selector, { target: { value: "visible" } });
+    expect(onInputHudEnabledChange).toHaveBeenCalledWith(true);
+    expect(onInputHudDisplayModeChange).toHaveBeenCalledWith("hybrid");
+  });
+
+  it("keeps voice, aliases, input, material and skybox selectable below a disabled POV", () => {
+    API.get.mockReturnValue(new Promise(() => {}));
+    const onVoiceChange = vi.fn();
+    const onInputModeChange = vi.fn();
+    render(
+      <ExperimentalPovSection
+        visible
+        experimentalPovEnabled={false}
+        onExperimentalPovChange={() => {}}
+        povVoiceMode="team"
+        onPovVoiceModeChange={onVoiceChange}
+        inputHudEnabled
+        inputHudDisplayMode="hybrid"
+        onInputHudEnabledChange={() => {}}
+        onInputHudDisplayModeChange={onInputModeChange}
+        recordingMapMaterial="default"
+        onRecordingMapMaterialChange={() => {}}
+        recordingSkybox="default"
+        onRecordingSkyboxChange={() => {}}
+        contentAfterVoice={<div data-testid="aliases-slot">aliases</div>}
+      />,
+    );
+
+    const povCard = screen.getByTestId("experimental-pov-card");
+    const voiceCard = screen.getByTestId("experimental-voice-card");
+    const aliasesCard = screen.getByTestId("experimental-after-voice-content");
+    const inputCard = screen.getByTestId("experimental-input-hud-card");
+    const materialCard = screen.getByTestId("experimental-map-material-card");
+    const skyboxCard = screen.getByTestId("experimental-skybox-card");
+    const voiceSelect = screen.getByRole("combobox", { name: "语音控制" });
+    const inputSelect = screen.getByRole("combobox", { name: "按键显示方式" });
+
+    expect(voiceSelect.disabled).toBe(false);
+    expect(inputSelect.disabled).toBe(false);
+    expect(povCard.compareDocumentPosition(voiceCard) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(voiceCard.compareDocumentPosition(aliasesCard) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(aliasesCard.compareDocumentPosition(inputCard) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(inputCard.compareDocumentPosition(materialCard) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(materialCard.compareDocumentPosition(skyboxCard) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+    fireEvent.change(voiceSelect, { target: { value: "enemy" } });
+    fireEvent.change(inputSelect, { target: { value: "visible" } });
+    expect(onVoiceChange).toHaveBeenCalledWith("enemy");
+    expect(onInputModeChange).toHaveBeenCalledWith("hybrid");
   });
 
   it("loads an available custom skybox into the recording selector", async () => {
@@ -118,6 +212,82 @@ describe("ExperimentalPovSection POV recovery", () => {
     expect(screen.getByRole("combobox", { name: "录制天空盒" }).value).toBe(customId);
   });
 
+  it("allows a recording skybox override while rain defaults to Train overcast", () => {
+    API.get.mockReturnValue(new Promise(() => {}));
+    const onSkyboxChange = vi.fn();
+    const onMapMaterialChange = vi.fn();
+    const onWeatherEffectChange = vi.fn();
+    render(
+      <ExperimentalPovSection
+        visible
+        experimentalPovEnabled={false}
+        onExperimentalPovChange={() => {}}
+        recordingSkybox="cartoon3"
+        onRecordingSkyboxChange={onSkyboxChange}
+        recordingMapMaterial="default"
+        onRecordingMapMaterialChange={onMapMaterialChange}
+        recordingWeatherEffect="rain"
+        onRecordingWeatherEffectChange={onWeatherEffectChange}
+      />,
+    );
+
+    const skyboxSelect = screen.getByRole("combobox", { name: "录制天空盒" });
+    expect(skyboxSelect.value).toBe("cartoon3");
+    expect(skyboxSelect.disabled).toBe(false);
+    expect(screen.getAllByText(/默认使用 Train 阴天天空/).length).toBeGreaterThan(0);
+
+    const materialSelect = screen.getByRole("combobox", { name: "录制地图材质" });
+    expect(materialSelect.value).toBe("rain");
+    expect(materialSelect.disabled).toBe(false);
+    expect(Array.from(materialSelect.options).map(({ value, textContent }) => ({
+      value,
+      label: textContent,
+    }))).toEqual([
+      { value: "default", label: "原始地图材质（不替换）" },
+      { value: "waxed_reflection", label: "打蜡反光倒影" },
+      { value: "rain", label: "下雨（武器带水滴）" },
+    ]);
+    expect(screen.queryByRole("combobox", { name: "录制天气效果" })).toBeNull();
+    expect(onSkyboxChange).not.toHaveBeenCalled();
+    expect(onWeatherEffectChange).not.toHaveBeenCalled();
+    expect(onMapMaterialChange).not.toHaveBeenCalled();
+
+    fireEvent.change(materialSelect, { target: { value: "waxed_reflection" } });
+    expect(onMapMaterialChange).toHaveBeenCalledWith("waxed_reflection");
+    expect(onWeatherEffectChange).toHaveBeenCalledWith("default");
+    expect(onSkyboxChange).not.toHaveBeenCalled();
+  });
+
+  it("selecting rain switches the skybox to Train overcast and still allows a manual override", () => {
+    API.get.mockReturnValue(new Promise(() => {}));
+    const onSkyboxChange = vi.fn();
+    const onMapMaterialChange = vi.fn();
+    const onWeatherEffectChange = vi.fn();
+    render(
+      <ExperimentalPovSection
+        visible
+        experimentalPovEnabled={false}
+        onExperimentalPovChange={() => {}}
+        recordingSkybox="cartoon3"
+        onRecordingSkyboxChange={onSkyboxChange}
+        recordingMapMaterial="waxed_reflection"
+        onRecordingMapMaterialChange={onMapMaterialChange}
+        recordingWeatherEffect="default"
+        onRecordingWeatherEffectChange={onWeatherEffectChange}
+      />,
+    );
+
+    const materialSelect = screen.getByRole("combobox", { name: "录制地图材质" });
+    fireEvent.change(materialSelect, { target: { value: "rain" } });
+    expect(onMapMaterialChange).toHaveBeenCalledWith("default");
+    expect(onWeatherEffectChange).toHaveBeenCalledWith("rain");
+    expect(onSkyboxChange).toHaveBeenCalledWith("default");
+
+    const skyboxSelect = screen.getByRole("combobox", { name: "录制天空盒" });
+    fireEvent.change(skyboxSelect, { target: { value: "cartoon4" } });
+    expect(onSkyboxChange).toHaveBeenCalledWith("cartoon4");
+  });
+
   it("does not add a second experimental background when embedded in the preset", () => {
     API.get.mockReturnValue(new Promise(() => {}));
     render(
@@ -128,6 +298,10 @@ describe("ExperimentalPovSection POV recovery", () => {
         povVoiceMode="all"
         onPovVoiceModeChange={() => {}}
         onPovTeamcounterNumericChange={() => {}}
+        inputHudEnabled={false}
+        inputHudDisplayMode="active"
+        onInputHudEnabledChange={() => {}}
+        onInputHudDisplayModeChange={() => {}}
         recordingSkybox="default"
         onRecordingSkyboxChange={() => {}}
         omitEyebrow
@@ -139,6 +313,7 @@ describe("ExperimentalPovSection POV recovery", () => {
     expect(featureCard.className).not.toContain("bg-");
     expect(featureCard.className).not.toContain("border-");
     expect(featureCard.contains(screen.getByRole("combobox", { name: "语音控制" }))).toBe(true);
+    expect(featureCard.contains(screen.getByRole("combobox", { name: "按键显示方式" }))).toBe(true);
     expect(featureCard.contains(screen.getByRole("combobox", { name: "录制天空盒" }))).toBe(true);
   });
 

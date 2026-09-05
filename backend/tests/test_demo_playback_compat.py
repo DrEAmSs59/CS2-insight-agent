@@ -695,6 +695,245 @@ def test_clean_demo_is_byte_identical_and_second_pass_is_noop(tmp_path: Path):
     assert second.read_bytes() == source_bytes
 
 
+def test_chroma_playback_clears_only_skybox_spawn_group_manifests(tmp_path: Path):
+    world_name = b"maps/prefabs/de_ancient/de_ancient_skybox"
+    world_group_name = b"skyboxWorldGroup0"
+    spawn_group_load = (
+        b"\x0a" + compat._encode_varint(len(world_name)) + world_name
+        + b"\x42\x06retail"
+        + b"\xa2\x01" + compat._encode_varint(len(world_group_name)) + world_group_name
+    )
+    spawn_group_packet = _packet_data([(8, spawn_group_load)])
+    recovery_payload = (
+        b"\x12"
+        + compat._encode_varint(len(spawn_group_packet))
+        + spawn_group_packet
+    )
+    terminal_payload = (
+        b"\x1a"
+        + compat._encode_varint(len(spawn_group_packet))
+        + spawn_group_packet
+    )
+    frames = [
+        _frame(7, 42, _packet_proto(_packet_data([(76, b"kept-packet")]))),
+        _frame(18, compat._U32_MAX, recovery_payload),
+        _frame(0, 43, b"stop"),
+        _frame(2, 44, b"file-info"),
+        _frame(15, 45, terminal_payload, compressed=True),
+    ]
+    positions: list[int] = []
+    position = 16
+    for frame in frames:
+        positions.append(position)
+        position += len(frame)
+    source_bytes = (
+        b"PBDEMS2\x00"
+        + positions[3].to_bytes(4, "little")
+        + positions[4].to_bytes(4, "little")
+        + b"".join(frames)
+    )
+    source = _write(tmp_path / "source.dem", source_bytes)
+    destination = tmp_path / "playback.dem"
+
+    report = compat.prepare_cs2_playback_demo(
+        source,
+        destination,
+        drop_legacy_type138=False,
+        clear_chroma_skybox_spawn_group_manifest=True,
+    )
+
+    assert source.read_bytes() == source_bytes
+    assert report.outcome == "repaired"
+    assert report.rewritten_chroma_sky_references == 2
+    assert report.remaining_chroma_sky_references == 0
+    assert compat._count_terminal_chroma_spawn_group_manifests(destination) == (0, 2)
+    assert _first_packet_message_types(destination.read_bytes()) == [76]
+
+
+def test_chroma_spawn_group_manifest_clear_is_opt_in(tmp_path: Path):
+    world_name = b"maps/prefabs/de_ancient/de_ancient_skybox"
+    world_group_name = b"skyboxWorldGroup0"
+    spawn_group_load = (
+        b"\x0a" + compat._encode_varint(len(world_name)) + world_name
+        + b"\x42\x06retail"
+        + b"\xa2\x01" + compat._encode_varint(len(world_group_name)) + world_group_name
+    )
+    spawn_group_packet = _packet_data([(8, spawn_group_load)])
+    source_bytes = _demo(
+        _packet_proto(_packet_data([(76, b"kept")])),
+        zero_offsets=True,
+    ) + _frame(
+        18,
+        compat._U32_MAX,
+        b"\x12" + compat._encode_varint(len(spawn_group_packet)) + spawn_group_packet,
+    )
+    source = _write(tmp_path / "source.dem", source_bytes)
+    destination = tmp_path / "playback.dem"
+
+    report = compat.prepare_cs2_playback_demo(
+        source,
+        destination,
+        drop_legacy_type138=False,
+    )
+
+    assert report.outcome == "clean"
+    assert destination.read_bytes() == source_bytes
+
+
+def test_chroma_spawn_group_manifest_profile_replaces_both_terminal_forms(
+    tmp_path: Path,
+):
+    world_name = b"maps/prefabs/de_ancient/de_ancient_skybox"
+    world_group_name = b"skyboxWorldGroup0"
+    spawn_group_load = (
+        b"\x0a" + compat._encode_varint(len(world_name)) + world_name
+        + b"\x42\x06retail"
+        + b"\xa2\x01" + compat._encode_varint(len(world_group_name)) + world_group_name
+    )
+    spawn_group_packet = _packet_data([(8, spawn_group_load)])
+    recovery_payload = (
+        b"\x12"
+        + compat._encode_varint(len(spawn_group_packet))
+        + spawn_group_packet
+    )
+    terminal_payload = (
+        b"\x1a"
+        + compat._encode_varint(len(spawn_group_packet))
+        + spawn_group_packet
+    )
+    source_bytes = b"PBDEMS2\x00" + b"\x00" * 8 + b"".join(
+        [
+            _frame(18, compat._U32_MAX, recovery_payload),
+            _frame(15, 0, terminal_payload, compressed=True),
+        ]
+    )
+    source = _write(tmp_path / "source.dem", source_bytes)
+    destination = tmp_path / "playback.dem"
+    manifests = {18: b"captured-recovery", 15: b"captured-terminal"}
+
+    report = compat.prepare_cs2_playback_demo(
+        source,
+        destination,
+        drop_legacy_type138=False,
+        chroma_skybox_spawn_group_manifests=manifests,
+        chroma_skybox_spawn_group_world_name=world_name.decode(),
+    )
+
+    assert report.rewritten_chroma_sky_references == 2
+    assert report.remaining_chroma_sky_references == 0
+    assert compat._count_terminal_chroma_spawn_group_manifest_matches(
+        destination,
+        expected_world_name=world_name,
+        manifests_by_command=manifests,
+    ) == (2, 0)
+
+
+def test_chroma_manifest_profile_accepts_cache_sky_world_name(tmp_path: Path):
+    world_name = b"maps/prefabs/de_cache/de_cache_sky"
+    world_group_name = b"skyboxWorldGroup0"
+    spawn_group_load = (
+        b"\x0a" + compat._encode_varint(len(world_name)) + world_name
+        + b"\x42\x06retail"
+        + b"\xa2\x01" + compat._encode_varint(len(world_group_name)) + world_group_name
+    )
+    spawn_group_packet = _packet_data([(8, spawn_group_load)])
+    terminal_payload = (
+        b"\x1a"
+        + compat._encode_varint(len(spawn_group_packet))
+        + spawn_group_packet
+    )
+    source = _write(
+        tmp_path / "source.dem",
+        b"PBDEMS2\x00" + b"\x00" * 8 + _frame(15, 0, terminal_payload),
+    )
+
+    report = compat.prepare_cs2_playback_demo(
+        source,
+        tmp_path / "playback.dem",
+        drop_legacy_type138=False,
+        chroma_skybox_spawn_group_manifests={15: b"reference", 18: b"reference"},
+        chroma_skybox_spawn_group_world_name=world_name.decode(),
+    )
+
+    assert report.rewritten_chroma_sky_references == 1
+
+
+def test_detects_map_from_terminal_spawn_groups_without_header_metadata(
+    tmp_path: Path,
+):
+    world_name = b"de_dust2"
+    world_group_name = b"default"
+    spawn_group_load = (
+        b"\x0a" + compat._encode_varint(len(world_name)) + world_name
+        + b"\xa2\x01" + compat._encode_varint(len(world_group_name)) + world_group_name
+    )
+    packet = _packet_data([(8, spawn_group_load)])
+    terminal_payload = b"\x1a" + compat._encode_varint(len(packet)) + packet
+    source = _write(
+        tmp_path / "source.dem",
+        b"PBDEMS2\x00" + b"\x00" * 8 + _frame(15, 0, terminal_payload),
+    )
+
+    assert compat.detect_demo_map_name_from_spawn_groups(source) == "de_dust2"
+
+
+def test_chroma_spawn_group_manifest_redirect_is_bit_accurate(tmp_path: Path):
+    world_name = b"maps/prefabs/de_ancient/de_ancient_skybox"
+    world_group_name = b"skyboxWorldGroup0"
+    retail = b"/sky_hr_aztec_02_v1"
+    redirect = b"/cs2i_chroma_sky_v1"
+    start_bit = 2
+    manifest = bytearray((start_bit + len(retail) * 8 + 7) // 8 + 2)
+    for index in range(len(retail) * 8):
+        if (retail[index // 8] >> (index & 7)) & 1:
+            destination_bit = start_bit + index
+            manifest[destination_bit // 8] |= 1 << (destination_bit & 7)
+    spawn_group_load = (
+        b"\x0a" + compat._encode_varint(len(world_name)) + world_name
+        + b"\x42" + compat._encode_varint(len(manifest)) + bytes(manifest)
+        + b"\xa2\x01" + compat._encode_varint(len(world_group_name)) + world_group_name
+    )
+    spawn_group_packet = _packet_data([(8, spawn_group_load)])
+    source = _write(
+        tmp_path / "source.dem",
+        b"PBDEMS2\x00"
+        + b"\x00" * 8
+        + _frame(
+            18,
+            compat._U32_MAX,
+            b"\x12"
+            + compat._encode_varint(len(spawn_group_packet))
+            + spawn_group_packet,
+        )
+        + _frame(
+            15,
+            0,
+            b"\x1a"
+            + compat._encode_varint(len(spawn_group_packet))
+            + spawn_group_packet,
+            compressed=True,
+        ),
+    )
+    destination = tmp_path / "playback.dem"
+
+    report = compat.prepare_cs2_playback_demo(
+        source,
+        destination,
+        drop_legacy_type138=False,
+        chroma_skybox_spawn_group_world_name=world_name.decode(),
+        chroma_skybox_spawn_group_reference_redirect=(retail, redirect),
+    )
+
+    assert report.rewritten_chroma_sky_references == 2
+    assert report.remaining_chroma_sky_references == 0
+    assert compat._count_terminal_chroma_spawn_group_reference_redirects(
+        destination,
+        expected_world_name=world_name,
+        retail_reference=retail,
+        redirect_reference=redirect,
+    ) == (2, 0)
+
+
 def test_repaired_demo_second_pass_is_clean_and_byte_identical(tmp_path: Path):
     packet_data = _packet_data([(138, _remove_decals_payload(300_000)), (76, b"next")])
     source = _write(tmp_path / "source.dem", _demo(_packet_proto(packet_data), compressed=True))

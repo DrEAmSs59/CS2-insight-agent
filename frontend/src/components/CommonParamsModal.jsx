@@ -16,6 +16,10 @@ import {
 import { useT } from "../i18n/useT.js";
 import { normalizeRecordingSkyboxId } from "../utils/recordingSkybox.js";
 import { normalizeRecordingMapMaterialId } from "../utils/recordingMapMaterial.js";
+import {
+  DEFAULT_RECORDING_WEATHER_EFFECT,
+  normalizeRecordingWeatherEffectId,
+} from "../utils/recordingWeatherEffect.js";
 import { normalizePovVoiceMode } from "../utils/povVoiceMode.js";
 import {
   buildRecordingPresetFile,
@@ -32,11 +36,19 @@ const FB_KILL_POST = 1.5;
 /** 片段时间流示意图中间「主体段」参考秒数，与左右同为秒单位以便比例对齐 */
 const PACING_STRIP_CORE_REF_SEC = 6;
 
-function WorkflowSection({ title, subtitle, badge, defaultOpen = true, accentClass = "", children }) {
+function WorkflowSection({
+  title,
+  subtitle,
+  badge,
+  defaultOpen = true,
+  surfaceClass = "bg-cs2-bg-card",
+  accentClass = "",
+  children,
+}) {
   const [open, setOpen] = useState(defaultOpen);
   return (
     <section
-      className={`rounded-xl border border-cs2-border bg-cs2-bg-card transition-all ${accentClass}`.trim()}
+      className={`rounded-xl border border-cs2-border ${surfaceClass} transition-all ${accentClass}`.trim()}
     >
       <button
         type="button"
@@ -76,7 +88,9 @@ function RecordingPresetColumns({ children }) {
     return () => media.removeEventListener("change", sync);
   }, []);
 
-  const items = Children.toArray(children);
+  const items = Children.toArray(children).sort(
+    (a, b) => (a.props.presetOrder ?? 0) - (b.props.presetOrder ?? 0),
+  );
   if (!twoColumns) {
     return (
       <div
@@ -88,7 +102,9 @@ function RecordingPresetColumns({ children }) {
     );
   }
 
-  const leftColumnIndexes = new Set([0, 2, 3, 5]);
+  // Match the recording warmup layout: OBS, visuals, camera and launch stay on
+  // the left; experimental features and recording canvas stay on the right.
+  const leftColumnIndexes = new Set([0, 1, 2, 5]);
   const leftItems = items.filter((_, index) => leftColumnIndexes.has(index));
   const rightItems = items.filter((_, index) => !leftColumnIndexes.has(index));
 
@@ -183,16 +199,12 @@ export default function CommonParamsModal({
   experimentalPovEnabled = false,
   recordingSkybox = "default",
   recordingMapMaterial = "default",
+  recordingWeatherEffect = DEFAULT_RECORDING_WEATHER_EFFECT,
   cs2ExtraLaunchArgs = "",
   recordInjectConsoleLines = "",
   obsTransitionEnabled: initObsTransitionEnabled = false,
   obsTransitionName: initObsTransitionName = "Fade",
   obsTransitionDurationMs: initObsTransitionDurationMs = 100,
-  kbOverlayEnabled: initKbOverlayEnabled = false,
-  kbOverlayTickOffset: initKbOverlayTickOffset = 6,
-  kbOverlayPosition: initKbOverlayPosition = "bottom_center",
-  killFxEnabled: initKillFxEnabled = false,
-  killFxTickOffset: initKillFxTickOffset = 6,
   configRefreshKey = 0,
   onRegisterSave,
   onSaveUiChange,
@@ -203,7 +215,6 @@ export default function CommonParamsModal({
   const isModal = !isPage && !isEmbedded;
   const presetPacing = useRecordingQueue((s) => s.presetPacing);
   const setPresetPacing = useRecordingQueue((s) => s.setPresetPacing);
-  const resetPresetPacing = useRecordingQueue((s) => s.resetPresetPacing);
   const hydratePresetPacing = useRecordingQueue((s) => s.hydratePresetPacing);
 
   const post = presetPacing.post_last_sec ?? BACKEND_DEFAULT_PACING.post_last_sec;
@@ -230,15 +241,13 @@ export default function CommonParamsModal({
   const [obsTransEnabled, setObsTransEnabled] = useState(() => !!initObsTransitionEnabled);
   const [obsTransName, setObsTransName] = useState(() => initObsTransitionName);
   const [obsTransDurationMs, setObsTransDurationMs] = useState(() => Number(initObsTransitionDurationMs));
-  const [kbOverlayEnabled, setKbOverlayEnabled] = useState(() => !!initKbOverlayEnabled);
-  const [kbOverlayTickOffset, setKbOverlayTickOffset] = useState(() => Number(initKbOverlayTickOffset));
-  const [kbOverlayPosition, setKbOverlayPosition] = useState(() => initKbOverlayPosition || "bottom_center");
-  const [killFxEnabled, setKillFxEnabled] = useState(() => !!initKillFxEnabled);
-  const [killFxTickOffset, setKillFxTickOffset] = useState(() => Number(initKillFxTickOffset) || 0);
   const [povEnabled, setPovEnabled] = useState(() => !!experimentalPovEnabled);
   const [skyboxId, setSkyboxId] = useState(() => normalizeRecordingSkyboxId(recordingSkybox));
   const [mapMaterialId, setMapMaterialId] = useState(
     () => normalizeRecordingMapMaterialId(recordingMapMaterial),
+  );
+  const [weatherEffectId, setWeatherEffectId] = useState(
+    () => normalizeRecordingWeatherEffectId(recordingWeatherEffect),
   );
   const [localCs2ExtraLaunchArgs, setLocalCs2ExtraLaunchArgs] = useState(cs2ExtraLaunchArgs);
   const [localRecordInjectLines, setLocalRecordInjectLines] = useState(recordInjectConsoleLines);
@@ -280,14 +289,10 @@ export default function CommonParamsModal({
     setObsTransEnabled(!!initObsTransitionEnabled);
     setObsTransName(initObsTransitionName);
     setObsTransDurationMs(Number(initObsTransitionDurationMs));
-    setKbOverlayEnabled(!!initKbOverlayEnabled);
-    setKbOverlayTickOffset(Number(initKbOverlayTickOffset));
-    setKbOverlayPosition(initKbOverlayPosition || "bottom_center");
-    setKillFxEnabled(!!initKillFxEnabled);
-    setKillFxTickOffset(Number(initKillFxTickOffset) || 0);
     setPovEnabled(!!experimentalPovEnabled);
     setSkyboxId(normalizeRecordingSkyboxId(recordingSkybox));
     setMapMaterialId(normalizeRecordingMapMaterialId(recordingMapMaterial));
+    setWeatherEffectId(normalizeRecordingWeatherEffectId(recordingWeatherEffect));
     setLocalCs2ExtraLaunchArgs(cs2ExtraLaunchArgs);
     setLocalRecordInjectLines(recordInjectConsoleLines);
     setWarmupResolutionError("");
@@ -305,11 +310,7 @@ export default function CommonParamsModal({
     experimentalPovEnabled,
     recordingSkybox,
     recordingMapMaterial,
-    initKbOverlayEnabled,
-    initKbOverlayTickOffset,
-    initKbOverlayPosition,
-    initKillFxEnabled,
-    initKillFxTickOffset,
+    recordingWeatherEffect,
     cs2ExtraLaunchArgs,
     recordInjectConsoleLines,
   ]);
@@ -338,14 +339,10 @@ export default function CommonParamsModal({
       obs_transition_enabled: obsTransEnabled,
       obs_transition_name: obsTransName,
       obs_transition_duration_ms: obsTransDurationMs,
-      kb_overlay_enabled: kbOverlayEnabled,
-      kb_overlay_tick_offset: Number(kbOverlayTickOffset) || 0,
-      kb_overlay_position: kbOverlayPosition,
-      kill_fx_enabled: killFxEnabled,
-      kill_fx_tick_offset: Number(killFxTickOffset) || 0,
       experimental_pov_enabled: povEnabled,
       recording_skybox: skyboxId,
       recording_map_material: mapMaterialId,
+      recording_weather_effect: weatherEffectId,
     });
     setSaveState(result?.ok ? "saved" : "error");
     if (!result?.ok && result?.error) setSaveError(String(result.error));
@@ -363,14 +360,10 @@ export default function CommonParamsModal({
     obsTransEnabled,
     obsTransName,
     obsTransDurationMs,
-    kbOverlayEnabled,
-    kbOverlayTickOffset,
-    kbOverlayPosition,
-    killFxEnabled,
-    killFxTickOffset,
     povEnabled,
     skyboxId,
     mapMaterialId,
+    weatherEffectId,
   ]);
 
   const saveDisabled = !configReady || saveState === "saving" || batchRecording;
@@ -383,14 +376,10 @@ export default function CommonParamsModal({
     obs_transition_enabled: obsTransEnabled,
     obs_transition_name: obsTransName,
     obs_transition_duration_ms: Number(obsTransDurationMs),
-    kb_overlay_enabled: kbOverlayEnabled,
-    kb_overlay_tick_offset: Number(kbOverlayTickOffset) || 0,
-    kb_overlay_position: kbOverlayPosition,
-    kill_fx_enabled: killFxEnabled,
-    kill_fx_tick_offset: Number(killFxTickOffset) || 0,
     experimental_pov_enabled: povEnabled,
     recording_skybox: skyboxId,
     recording_map_material: mapMaterialId,
+    recording_weather_effect: weatherEffectId,
   }), [
     presetPacing,
     warmupOpts,
@@ -399,14 +388,10 @@ export default function CommonParamsModal({
     obsTransEnabled,
     obsTransName,
     obsTransDurationMs,
-    kbOverlayEnabled,
-    kbOverlayTickOffset,
-    kbOverlayPosition,
-    killFxEnabled,
-    killFxTickOffset,
     povEnabled,
     skyboxId,
     mapMaterialId,
+    weatherEffectId,
   ]);
 
   const handleExportPreset = useCallback(() => {
@@ -456,14 +441,10 @@ export default function CommonParamsModal({
       setObsTransEnabled(parsed.obs_transition_enabled);
       setObsTransName(parsed.obs_transition_name);
       setObsTransDurationMs(parsed.obs_transition_duration_ms);
-      setKbOverlayEnabled(parsed.kb_overlay_enabled);
-      setKbOverlayTickOffset(parsed.kb_overlay_tick_offset);
-      setKbOverlayPosition(parsed.kb_overlay_position);
-      setKillFxEnabled(parsed.kill_fx_enabled);
-      setKillFxTickOffset(parsed.kill_fx_tick_offset);
       setPovEnabled(parsed.experimental_pov_enabled);
       setSkyboxId(parsed.recording_skybox);
       setMapMaterialId(parsed.recording_map_material);
+      setWeatherEffectId(parsed.recording_weather_effect);
       setWarmupResolutionError("");
       setSaveError("");
       setSaveState("idle");
@@ -494,12 +475,6 @@ export default function CommonParamsModal({
     warmupOpts.resolution_height,
   );
   const resSummaryDisplay = resSummaryRaw.startsWith("record.") ? t(resSummaryRaw) : resSummaryRaw;
-
-  const KB_POSITIONS = [
-    { value: "bottom_center", labelKey: "record.warmupKbPosBottomCenter" },
-    { value: "minimap_below", labelKey: "record.warmupKbPosMinimapBelow" },
-    { value: "weapon_right",  labelKey: "record.warmupKbPosWeaponRight" },
-  ];
 
   const AR_TAGS = [
     { ar: "4:3",   sample: "1920×1440", tagKey: "record.arTag43" },
@@ -612,7 +587,10 @@ export default function CommonParamsModal({
                 </button>
               </div>
             </div>
-            <RecordingPresetColumns>
+            <div
+              className="grid min-w-0 gap-4 pb-4 xl:grid-cols-2 xl:items-start"
+              data-testid="recording-preset-top-grid"
+            >
           {/* A1 时间与多段节奏 */}
           <WorkflowSection
             title={t("record.commonSecPacing")}
@@ -696,17 +674,9 @@ export default function CommonParamsModal({
               </p>
             </div>
 
-            <button
-              type="button"
-              disabled={batchRecording}
-              onClick={() => resetPresetPacing()}
-              className="mt-4 text-xs text-cs2-text-muted hover:text-cs2-text-secondary disabled:opacity-40"
-            >
-              {t("record.commonPacingResetBtn")}
-            </button>
           </WorkflowSection>
 
-          {/* A2 镜头与 POV */}
+          {/* A2 录制预设专属的回看视角参数 */}
           <WorkflowSection
             title={t("record.commonSecCamera")}
             subtitle={t("record.commonSecCameraSubtitle")}
@@ -818,21 +788,24 @@ export default function CommonParamsModal({
                 </div>
               </div>
             </div>
+          </WorkflowSection>
+        </div>
 
-            <div className="my-5 border-t border-cs2-border" />
-            <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-cs2-text-muted">
-              {t("record.commonSecFovPov")}
-            </p>
-            <div className="mb-5 rounded-xl border border-cs2-border bg-cs2-amber-surface p-4">
-              <div className="mb-3 flex flex-wrap items-center gap-2">
-                <span className="rounded-md border border-cs2-border bg-cs2-bg-card px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-cs2-amber-on-surface">
-                  {t("record.commonExpBadge")}
-                </span>
-                <h4 className="text-sm font-bold text-cs2-text-primary">{t("record.commonExpTitle")}</h4>
-              </div>
-              <p className="mb-1 text-xs leading-relaxed text-cs2-amber-on-surface/90">
-                {t("record.commonExpDesc")}
-              </p>
+        <RecordingPresetColumns>
+          <WorkflowSection
+            presetOrder={3}
+            title={t("record.commonExpTitle")}
+            subtitle={t("pov.disclaimer")}
+            badge={(
+              <span className="rounded-md border border-cs2-border bg-cs2-bg-card px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-cs2-amber-on-surface">
+                {t("record.commonExpBadge")}
+              </span>
+            )}
+            defaultOpen
+            surfaceClass="bg-cs2-amber-surface"
+            accentClass="border-amber-500/25"
+          >
+            <div>
               <p className="mb-3 text-xs leading-relaxed text-cs2-text-muted">
                 {t("record.commonExpStatus", {
                   status: povEnabled
@@ -849,18 +822,29 @@ export default function CommonParamsModal({
                 onPovTeamcounterNumericChange={(v) => patchWarmup({ pov_teamcounter_numeric: v })}
                 povVoiceMode={warmupOpts.pov_voice_mode}
                 onPovVoiceModeChange={(v) => patchWarmup({ pov_voice_mode: v })}
+                inputHudEnabled={warmupOpts.input_hud_enabled}
+                inputHudDisplayMode={warmupOpts.input_hud_display_mode}
+                onInputHudEnabledChange={(v) => patchWarmup({ input_hud_enabled: v })}
+                onInputHudDisplayModeChange={(v) => patchWarmup({ input_hud_display_mode: v })}
                 recordingSkybox={skyboxId}
                 onRecordingSkyboxChange={setSkyboxId}
                 recordingMapMaterial={mapMaterialId}
                 onRecordingMapMaterialChange={setMapMaterialId}
+                recordingWeatherEffect={weatherEffectId}
+                onRecordingWeatherEffectChange={setWeatherEffectId}
                 omitEyebrow
+                omitDisclaimer
                 embedded
               />
             </div>
+          </WorkflowSection>
 
-            <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-cs2-text-muted">
-              {t("record.commonSecBasicCamera")}
-            </p>
+          <WorkflowSection
+            presetOrder={2}
+            title={t("record.commonSecFovPov")}
+            subtitle={t("record.commonSecFovPovSubtitle")}
+            defaultOpen
+          >
             <div className="space-y-4">
               <div className="rounded-lg border border-cs2-border bg-cs2-bg-input px-3 py-3">
                 <label className="flex cursor-pointer items-center gap-3">
@@ -977,6 +961,7 @@ export default function CommonParamsModal({
           </WorkflowSection>
 
               <WorkflowSection
+                presetOrder={0}
                 title={t("record.commonSecObs")}
                 subtitle={t("record.commonSecObsSubtitle")}
                 defaultOpen
@@ -1023,128 +1008,7 @@ export default function CommonParamsModal({
               </WorkflowSection>
 
               <WorkflowSection
-                title={t("record.commonSecOverlays")}
-                subtitle={t("record.commonSecOverlaysSubtitle")}
-                defaultOpen
-              >
-                <div className="grid gap-4 xl:grid-cols-2">
-                  <div className="rounded-lg border border-cs2-border bg-cs2-bg-input p-4">
-                    <h4 className="text-sm font-semibold text-cs2-text-primary">{t("record.commonSecKb")}</h4>
-                    <p className="mt-1 mb-3 text-xs leading-relaxed text-cs2-text-muted">
-                      {t("record.commonSecKbSubtitle")}
-                    </p>
-                    <label className="flex cursor-pointer items-center gap-3">
-                      <input
-                        type="checkbox"
-                        checked={kbOverlayEnabled}
-                        onChange={(e) => setKbOverlayEnabled(e.target.checked)}
-                        className="h-4 w-4 rounded border-cs2-border accent-cs2-orange"
-                      />
-                      <span className="text-sm text-cs2-text-primary">{t("record.warmupKbEnable")}</span>
-                    </label>
-                    <p className="mt-2 pl-7 text-xs leading-relaxed text-cs2-text-muted">
-                      {t("record.commonKbDesc")}
-                    </p>
-                    {kbOverlayEnabled && (
-                      <div className="mt-3 pl-7 flex flex-col gap-3">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <span className="text-xs text-cs2-text-secondary whitespace-nowrap">{t("record.warmupKbPosition")}</span>
-                          {KB_POSITIONS.map(({ value, labelKey }) => (
-                            <label key={value} className="flex items-center gap-1.5 cursor-pointer">
-                              <input
-                                type="radio"
-                                name="kb-pos-common"
-                                value={value}
-                                checked={kbOverlayPosition === value}
-                                onChange={() => setKbOverlayPosition(value)}
-                                className="accent-cs2-orange"
-                              />
-                              <span className="text-xs text-cs2-text-primary">{t(labelKey)}</span>
-                            </label>
-                          ))}
-                        </div>
-                        <div className="flex flex-wrap items-center gap-3">
-                          <span className="text-xs text-cs2-text-secondary whitespace-nowrap">{t("record.warmupKbSyncAdjust")}</span>
-                          <input
-                            type="number"
-                            value={kbOverlayTickOffset}
-                            onChange={(e) => {
-                              const raw = e.target.value;
-                              setKbOverlayTickOffset(raw === "" ? "" : Number(raw));
-                            }}
-                            onBlur={() => {
-                              if (kbOverlayTickOffset === "" || Number.isNaN(Number(kbOverlayTickOffset))) {
-                                setKbOverlayTickOffset(0);
-                              }
-                            }}
-                            min="-120"
-                            max="120"
-                            step="1"
-                            className="w-20 rounded border border-cs2-border bg-cs2-bg-elevated px-2 py-1 text-sm text-cs2-text-primary text-center"
-                          />
-                          <span className="text-xs text-cs2-text-muted tabular-nums">
-                            ≈ {Math.round(Math.abs(Number(kbOverlayTickOffset) || 0) / 64 * 1000)} ms{Number(kbOverlayTickOffset) > 0 ? t("record.warmupKbAhead") : Number(kbOverlayTickOffset) < 0 ? t("record.warmupKbBehind") : t("record.warmupKbNoCompensation")}
-                          </span>
-                        </div>
-                        <p className="text-xs text-cs2-text-muted leading-relaxed">
-                          {t("record.warmupKbSyncHint")}
-                        </p>
-                      </div>
-                    )}
-                  </div>
-
-                  <div className="rounded-lg border border-cs2-border bg-cs2-bg-input p-4">
-                    <h4 className="text-sm font-semibold text-cs2-text-primary">{t("record.warmupSecKillFx")}</h4>
-                    <p className="mt-1 mb-3 text-xs leading-relaxed text-cs2-text-muted">
-                      {t("record.commonKillFxSubtitle")}
-                    </p>
-                    <label className="flex cursor-pointer items-center gap-3">
-                      <input
-                        type="checkbox"
-                        checked={killFxEnabled}
-                        onChange={(e) => setKillFxEnabled(e.target.checked)}
-                        className="h-4 w-4 rounded border-cs2-border accent-cs2-orange"
-                      />
-                      <span className="text-sm text-cs2-text-primary">{t("record.warmupKillFxEnable")}</span>
-                    </label>
-                    <p className="mt-2 pl-7 text-xs leading-relaxed text-cs2-text-muted">
-                      {t("record.commonKillFxDesc")}
-                    </p>
-                    {killFxEnabled && (
-                      <div className="mt-3 pl-7 flex flex-col gap-2">
-                        <div className="flex flex-wrap items-center gap-3">
-                          <span className="text-xs text-cs2-text-secondary whitespace-nowrap">{t("record.warmupKillFxSyncAdjust")}</span>
-                          <input
-                            type="number"
-                            value={killFxTickOffset}
-                            onChange={(e) => {
-                              const raw = e.target.value;
-                              setKillFxTickOffset(raw === "" ? "" : Number(raw));
-                            }}
-                            onBlur={() => {
-                              if (killFxTickOffset === "" || Number.isNaN(Number(killFxTickOffset))) {
-                                setKillFxTickOffset(0);
-                              }
-                            }}
-                            min="-120"
-                            max="120"
-                            step="1"
-                            className="w-20 rounded border border-cs2-border bg-cs2-bg-elevated px-2 py-1 text-sm text-cs2-text-primary text-center"
-                          />
-                          <span className="text-xs text-cs2-text-muted tabular-nums">
-                            ≈ {Math.round(Math.abs(Number(killFxTickOffset) || 0) / 64 * 1000)} ms{Number(killFxTickOffset) > 0 ? t("record.warmupKbAhead") : Number(killFxTickOffset) < 0 ? t("record.warmupKbBehind") : t("record.warmupKbNoCompensation")}
-                          </span>
-                        </div>
-                        <p className="text-xs text-cs2-text-muted leading-relaxed">
-                          {t("record.warmupKillFxSyncHint")}
-                        </p>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </WorkflowSection>
-
-              <WorkflowSection
+                presetOrder={1}
                 title={t("record.commonSecVisuals")}
                 subtitle={t("record.commonSecVisualsSubtitle")}
                 defaultOpen
@@ -1214,6 +1078,7 @@ export default function CommonParamsModal({
               </WorkflowSection>
 
               <WorkflowSection
+                presetOrder={5}
                 title={t("record.commonSecLaunch")}
                 subtitle={t("record.commonSecLaunchSubtitle")}
                 defaultOpen
@@ -1227,11 +1092,14 @@ export default function CommonParamsModal({
                   recordInjectConsoleLines={localRecordInjectLines}
                   onRecordInjectConsoleLinesChange={setLocalRecordInjectLines}
                 />
+              </WorkflowSection>
 
-                <div className="my-5 border-t border-cs2-border" />
-            <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-cs2-text-muted">
-              {t("record.commonResSection")}
-            </p>
+              <WorkflowSection
+                presetOrder={4}
+                title={t("record.commonSecCanvas")}
+                subtitle={t("record.commonSecCanvasSubtitle")}
+                defaultOpen
+              >
             <div
               className={`rounded-xl border p-4 ${
                 warmupResolutionError

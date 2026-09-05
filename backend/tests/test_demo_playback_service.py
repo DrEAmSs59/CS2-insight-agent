@@ -20,6 +20,8 @@ class _FakePovManager:
         self.advanced_playback_flags = []
         self.skybox_ids = []
         self.map_material_ids = []
+        self.input_options = []
+        self.weather_effect_ids = []
         self.restored = 0
         self.needs_restore = False
         self.__class__.instances.append(self)
@@ -38,12 +40,28 @@ class _FakePovManager:
         advanced_playback_enabled=False,
         skybox_id="default",
         map_material_id="default",
+        input_hud_enabled=True,
+        input_hud_display_mode="hybrid",
+        input_hud_scale_percent=100,
+        input_audio_enabled=True,
+        input_audio_volume_percent=100,
+        weather_effect_id="default",
     ):
         self.installed += 1
         self.installed_demo_paths.append(demo_path)
         self.advanced_playback_flags.append(bool(advanced_playback_enabled))
         self.skybox_ids.append(skybox_id)
         self.map_material_ids.append(map_material_id)
+        self.input_options.append(
+            (
+                input_hud_enabled,
+                input_hud_display_mode,
+                input_hud_scale_percent,
+                input_audio_enabled,
+                input_audio_volume_percent,
+            )
+        )
+        self.weather_effect_ids.append(weather_effect_id)
         self.needs_restore = True
 
     def restore(self):
@@ -152,6 +170,51 @@ def test_normal_playback_uses_unique_demo_and_cleans_it(monkeypatch, tmp_path: P
     assert service._active is None
 
 
+@pytest.mark.parametrize("pov_enabled", [False, True])
+def test_alias_copy_is_used_for_playback_and_vpk_then_removed(monkeypatch, tmp_path, pov_enabled):
+    cfg, demo, _ = _paths(tmp_path)
+    process = _FakeProcess()
+    monkeypatch.setattr(playback.subprocess, "Popen", lambda *args, **kwargs: process)
+    repaired = []
+
+    def compatible(path):
+        repaired.append(path)
+        return SimpleNamespace(
+            cached=False,
+            report=SimpleNamespace(
+                outcome="clean",
+                removed_messages=0,
+                removed_win_panel_events=0,
+            ),
+        )
+
+    def copy(source, output, aliases):
+        assert source == demo and aliases == {"76561199032006224": "京介"}
+        output.write_bytes(b"aliased")
+        return output
+
+    monkeypatch.setattr(playback, "create_player_alias_copy", copy)
+    monkeypatch.setattr(playback, "ensure_demo_compatible", compatible)
+    service = playback.DemoPlaybackService()
+    service.launch(
+        demo,
+        cfg,
+        playback.DemoPlaybackPovOptions(
+            enabled=pov_enabled,
+            player_aliases={"76561199032006224": "京介"},
+        ),
+    )
+    session = service._active
+    assert session.copied_demo.read_bytes() == b"aliased"
+    assert repaired == [session.copied_demo]
+    if pov_enabled:
+        assert _FakePovManager.instances[-1].installed_demo_paths == [session.copied_demo]
+    assert demo.read_bytes() == b"demo"
+    session.started_at_monotonic = time.monotonic() - 4
+    service._monitor_session(session)
+    assert not session.copied_demo.exists()
+
+
 def test_pov_playback_installs_cfg_and_restores_after_exit(monkeypatch, tmp_path: Path):
     cfg, demo, _game_root = _paths(tmp_path)
     process = _FakeProcess()
@@ -171,6 +234,12 @@ def test_pov_playback_installs_cfg_and_restores_after_exit(monkeypatch, tmp_path
             teamcounter_numeric=True,
             skybox_id="cartoon3",
             map_material_id="waxed_reflection",
+            input_hud_enabled=True,
+            input_hud_display_mode="active",
+            input_hud_scale_percent=115,
+            input_audio_enabled=False,
+            input_audio_volume_percent=50,
+            weather_effect_id="snow",
         ),
     )
 
@@ -182,8 +251,15 @@ def test_pov_playback_installs_cfg_and_restores_after_exit(monkeypatch, tmp_path
     assert manager.advanced_playback_flags == [True]
     assert manager.skybox_ids == ["cartoon3"]
     assert manager.map_material_ids == ["waxed_reflection"]
+    assert manager.input_options == [(True, "active", 115, False, 50)]
     assert result["recording_skybox_id"] == "cartoon3"
     assert result["recording_map_material_id"] == "waxed_reflection"
+    assert result["input_hud_display_mode"] == "active"
+    assert result["input_hud_scale_percent"] == 115
+    assert result["input_audio_enabled"] is False
+    assert result["input_audio_volume_percent"] == 50
+    assert manager.weather_effect_ids == ["snow"]
+    assert result["weather_effect_id"] == "snow"
     assert session is not None and session.copied_cfg is not None
     cfg_text = session.copied_cfg.read_text(encoding="ascii")
     assert "demoui false" not in cfg_text
@@ -221,6 +297,154 @@ def test_pov_playback_installs_cfg_and_restores_after_exit(monkeypatch, tmp_path
     rechecked = service.session_status(result["session_id"])
     assert rechecked["state"] == "restore_failed"
     assert rechecked["restore"]["verified"] is False
+
+
+def test_rain_playback_cfg_does_not_fire_light_environment_commands(
+    monkeypatch,
+    tmp_path: Path,
+):
+    cfg, demo, _game_root = _paths(tmp_path)
+    process = _FakeProcess()
+    monkeypatch.setattr(playback.subprocess, "Popen", lambda *_args, **_kwargs: process)
+    service = playback.DemoPlaybackService()
+    result = service.launch(
+        demo,
+        cfg,
+        playback.DemoPlaybackPovOptions(
+            enabled=True,
+            weather_effect_id="rain",
+        ),
+    )
+
+    session = service._active
+    assert result["weather_effect_id"] == "rain"
+    assert session is not None and session.copied_cfg is not None
+    cfg_text = session.copied_cfg.read_text(encoding="ascii")
+    assert "r_directlighting 0" not in cfg_text
+    assert "r_rendersun 0" not in cfg_text
+    assert "ent_fire light_environment" not in cfg_text
+
+    session.started_at_monotonic = time.monotonic() - 4
+    service._monitor_session(session)
+
+
+def test_chroma_pov_playback_redirects_only_the_disposable_demo_copy(
+    monkeypatch,
+    tmp_path: Path,
+):
+    cfg, demo, _game_root = _paths(tmp_path)
+    original = demo.read_bytes()
+    process = _FakeProcess()
+    calls = []
+
+    def fake_prepare(source, destination, **kwargs):
+        calls.append((Path(source), Path(destination), kwargs))
+        Path(destination).write_bytes(b"redirected-handle-demo")
+        return SimpleNamespace(
+            manifest_report=SimpleNamespace(rewritten_chroma_sky_references=2),
+            handle_report=SimpleNamespace(
+                fields_rewritten=28,
+                input_sha256="1" * 64,
+                output_sha256="2" * 64,
+            ),
+        )
+
+    monkeypatch.setattr(playback, "prepare_chroma_demo_copy", fake_prepare)
+    monkeypatch.setattr(
+        playback,
+        "_detect_chroma_demo_map_name",
+        lambda _path: "de_ancient",
+    )
+    monkeypatch.setattr(playback.subprocess, "Popen", lambda *_args, **_kwargs: process)
+
+    service = playback.DemoPlaybackService()
+    service.launch(
+        demo,
+        cfg,
+        playback.DemoPlaybackPovOptions(
+            enabled=True,
+            skybox_id="chroma_blue",
+        ),
+    )
+
+    session = service._active
+    assert session is not None
+    assert demo.read_bytes() == original
+    assert session.copied_demo.read_bytes() == b"redirected-handle-demo"
+    assert len(calls) == 1
+    source, destination, kwargs = calls[0]
+    assert source == demo
+    assert destination == session.copied_demo
+    assert kwargs == {"map_name": "de_ancient"}
+
+    session.started_at_monotonic = time.monotonic() - 4
+    service._monitor_session(session)
+
+
+def test_aliases_are_applied_before_chroma_redirect_and_vpk_install(
+    monkeypatch,
+    tmp_path: Path,
+):
+    cfg, demo, _game_root = _paths(tmp_path)
+    original = demo.read_bytes()
+    process = _FakeProcess()
+    calls = []
+
+    def fake_alias(source, destination, aliases):
+        calls.append(("alias", Path(source), Path(destination), aliases))
+        Path(destination).write_bytes(b"aliased-demo")
+        return Path(destination)
+
+    def fake_prepare(source, destination, **kwargs):
+        source = Path(source)
+        destination = Path(destination)
+        calls.append(("chroma", source, destination, source.read_bytes(), kwargs))
+        destination.write_bytes(b"aliased-and-chroma-demo")
+        return SimpleNamespace(
+            manifest_report=SimpleNamespace(rewritten_chroma_sky_references=2),
+            handle_report=SimpleNamespace(
+                fields_rewritten=28,
+                input_sha256="1" * 64,
+                output_sha256="2" * 64,
+            ),
+        )
+
+    monkeypatch.setattr(playback, "create_player_alias_copy", fake_alias)
+    monkeypatch.setattr(playback, "prepare_chroma_demo_copy", fake_prepare)
+    monkeypatch.setattr(playback, "_detect_chroma_demo_map_name", lambda _path: "de_ancient")
+    monkeypatch.setattr(playback.subprocess, "Popen", lambda *_args, **_kwargs: process)
+
+    service = playback.DemoPlaybackService()
+    service.launch(
+        demo,
+        cfg,
+        playback.DemoPlaybackPovOptions(
+            enabled=True,
+            skybox_id="chroma_blue",
+            player_aliases={"76561199032006224": "京介"},
+        ),
+    )
+
+    session = service._active
+    assert session is not None
+    assert demo.read_bytes() == original
+    assert session.copied_demo.read_bytes() == b"aliased-and-chroma-demo"
+    assert calls[0] == (
+        "alias",
+        demo,
+        session.copied_demo,
+        {"76561199032006224": "京介"},
+    )
+    assert calls[1][0] == "chroma"
+    assert calls[1][1] == session.copied_demo
+    assert calls[1][2] == session.copied_demo.with_name(f"{session.copied_demo.stem}_chroma.dem")
+    assert calls[1][3] == b"aliased-demo"
+    assert calls[1][4] == {"map_name": "de_ancient"}
+    assert _FakePovManager.instances[-1].installed_demo_paths == [session.copied_demo]
+
+    session.started_at_monotonic = time.monotonic() - 4
+    service._monitor_session(session)
+    assert not session.copied_demo.exists()
 
 
 def test_pov_playback_snapshots_and_restores_player_configs(monkeypatch, tmp_path: Path):

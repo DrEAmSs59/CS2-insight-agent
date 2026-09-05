@@ -58,6 +58,11 @@ debug_demoparser.py
 debug_demo_max_tick.py
 debug_demoparser2.py
 debug_parse_demo.py
+
+# Local weather-effects research inputs and third-party development tools.
+# These are workstation-only and must not be published to GitHub.
+/MAP/
+/tools/vendor/
 # Local reverse-engineering probe; the tracked copy is hidden locally with
 # skip-worktree so workstation-only NetSetConVar diagnostics are not committed.
 tools/demo-cosmetic-rewriter/src/bin/demo-netmessage-audit.rs
@@ -88,6 +93,12 @@ data/**
 /data1/
 frontend/public/__litecut_visual_tmp/
 /artifacts/
+
+# Editable chroma payload work trees. The versioned runtime catalog is
+# pov/chroma_skybox_children/payloads.zip; use tools/chroma_payload_catalog.py
+# to extract/rebuild these local source trees when a map changes.
+/pov/chroma_skybox_children/payloads/
+/pov/chroma_main_maps/payloads/
 
 # Legacy Electron distribution (local artifacts may still exist after migration)
 frontend/dist_electron*/

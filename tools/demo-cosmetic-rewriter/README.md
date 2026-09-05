@@ -44,7 +44,18 @@ tools\demo-cosmetic-rewriter\target\release\demo-cosmetic-verifier.exe `
 `demo-input-hud-track` 是只读的 DEM 按键提取器。它直接解码
 `svc_UserCmds -> CMsgServerUserCmd -> CCSGOUserCmdPB`，完整还原三组
 button-state bit plane、上下沿、stateful codegen-delta subtick 列表和
-`userinfo` player-slot 身份时间线；不从坐标、速度或游戏事件猜按键。
+`userinfo` player-slot 身份时间线；同时保留每次非零
+`CBaseUserCmdPB.weaponselect` 请求，用于还原“请求选择哪一个武器实体”。
+它不从坐标、速度或游戏事件猜按键，也不会把 weapon selection 请求误称为
+数字键、滚轮或 `lastinv` 等不可从 DEM 区分的物理绑定。VPK 键盘会在实体
+索引与 DEM 的 active-weapon handle 严格匹配后，按物品定义投影到常规槽位
+标签 `1` 主武器、`2` 副武器、`3` 刀/装备、`4` 投掷物、`5` C4；这些标签
+表达选择目标，不宣称玩家实际按下了对应数字键。`E`、`F` 与 `TAB` 分别直接
+来自 `IN_USE`、`IN_LOOK_AT_WEAPON` 和 `IN_SCORE` 的 UserCmd 掩码；标签采用
+常见绑定名称，但 DEM 真源只证明对应游戏语义，并不证明玩家的物理绑定。
+鼠标轨迹直接来自同一 `CBaseUserCmdPB` 的 `mousedx`/`mousedy` 原始字段，
+按 demo tick 汇总后映射为 yaw/pitch 方向的近期光流；它保留记录方向和相对
+幅度，但不宣称知道玩家 DPI、灵敏度或操作系统鼠标加速设置。
 
 ```powershell
 cargo run --release --manifest-path tools\demo-cosmetic-rewriter\Cargo.toml `
@@ -54,8 +65,8 @@ cargo run --release --manifest-path tools\demo-cosmetic-rewriter\Cargo.toml `
   --include-evidence
 ```
 
-完整掩码目录、三平面状态码、subtick delta wire 语义与 EWC 2026 实测见
-[`docs/demo-input-truth-source.md`](../../docs/demo-input-truth-source.md)。
+JSON 报告内含完整掩码目录、三平面状态码、subtick delta wire 语义、
+weapon-selection 请求和值域统计。
 
 ## 玩家 HUD 只读审计（Probe 4A）
 

@@ -23,6 +23,10 @@ path = "src/bin/demo-hud-serverinfo-probe.rs"
 name = "demo-hud-audit"
 path = "src/bin/demo-hud-audit.rs"
 
+[[bin]]
+name = "demo-sky-handle-rewriter"
+path = "src/bin/demo-sky-handle-rewriter.rs"
+
 [dependencies]
 anyhow = "1.0"
 clap = { version = "4.5", features = ["derive"] }

@@ -14,9 +14,13 @@ from .skybox_vpk import normalize_skybox_map_name
 
 DEFAULT_MAP_MATERIAL_ID = "default"
 WAXED_REFLECTION_MAP_MATERIAL_ID = "waxed_reflection"
+SNOW_GROUND_MAP_MATERIAL_ID = "snow_ground"
+RAIN_PUDDLES_MAP_MATERIAL_ID = "rain_puddles"
 MAP_MATERIAL_IDS = (
     DEFAULT_MAP_MATERIAL_ID,
     WAXED_REFLECTION_MAP_MATERIAL_ID,
+    SNOW_GROUND_MAP_MATERIAL_ID,
+    RAIN_PUDDLES_MAP_MATERIAL_ID,
 )
 WAXED_REFLECTION_LIGHTING_COMMANDS = (
     "sv_cheats 1",
@@ -75,7 +79,7 @@ def _load_profile(
     if (
         not isinstance(lighting_commands, list)
         or tuple(str(command) for command in lighting_commands)
-        != WAXED_REFLECTION_LIGHTING_COMMANDS
+        != map_material_console_commands(material_id)
     ):
         raise MapMaterialVpkError("map-material lighting profile is invalid")
     expected_hash = str(manifest.get("catalog_sha256") or "").strip().lower()
@@ -85,8 +89,13 @@ def _load_profile(
     return manifest, catalog_path, catalog
 
 
-def _entry_mappings(value: object, *, field: str) -> list[tuple[str, str, str]]:
-    if not isinstance(value, list) or not value:
+def _entry_mappings(
+    value: object,
+    *,
+    field: str,
+    allow_empty: bool = False,
+) -> list[tuple[str, str, str]]:
+    if not isinstance(value, list) or (not value and not allow_empty):
         raise MapMaterialVpkError(f"map-material manifest field {field} is empty")
     result: list[tuple[str, str, str]] = []
     targets: set[str] = set()
@@ -136,7 +145,11 @@ def compose_recording_map_material_vpk(
         )
 
     mappings = [
-        *_entry_mappings(manifest.get("shared_entries"), field="shared_entries"),
+        *_entry_mappings(
+            manifest.get("shared_entries"),
+            field="shared_entries",
+            allow_empty=True,
+        ),
         *_entry_mappings(raw_map_entries, field=f"maps.{normalized_map}"),
     ]
     catalog_paths = {catalog for _target, catalog, _digest in mappings}

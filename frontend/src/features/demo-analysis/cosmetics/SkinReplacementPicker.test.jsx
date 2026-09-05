@@ -4,6 +4,8 @@ import SkinReplacementPicker from "./SkinReplacementPicker.jsx";
 
 test("renders candidate search under title, fills grid, defaults replacement wear/seed to 0", async () => {
   const onConfirm = vi.fn();
+  const onInspectInGame = vi.fn();
+  const onInspect3d = vi.fn();
   render(
     <SkinReplacementPicker
       open
@@ -21,6 +23,8 @@ test("renders candidate search under title, fills grid, defaults replacement wea
       }}
       onClose={() => {}}
       onConfirm={onConfirm}
+      onInspectInGame={onInspectInGame}
+      onInspect3d={onInspect3d}
     />,
   );
 
@@ -61,6 +65,14 @@ test("renders candidate search under title, fills grid, defaults replacement wea
 
   const first = within(candidates).getAllByRole("button")[0];
   fireEvent.click(first);
+  const inspectActions = screen.getByTestId("skin-picker-inspect-actions");
+  const gameInspect = within(inspectActions).getByRole("button", { name: /游戏内检视|Inspect in Game/i });
+  const inspect3d = within(inspectActions).getByRole("button", { name: /3D 检视|3D Inspect|Inspect in 3D/i });
+  expect(gameInspect.disabled).toBe(false);
+  expect(inspect3d.disabled).toBe(true);
+  fireEvent.click(gameInspect);
+  expect(onInspectInGame).toHaveBeenCalledWith(expect.objectContaining({ paint_wear: 0, paint_seed: 0 }));
+  expect(onInspect3d).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole("button", { name: /确认|Confirm/i }));
   expect(onConfirm).toHaveBeenCalledTimes(1);
   expect(onConfirm.mock.calls[0][0].paint_wear).toBe(0);

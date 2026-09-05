@@ -1,0 +1,35 @@
+{
+  "schema_version": 2,
+  "purpose": "temporary original-map weather injection; all visual resources resolve from the user's installed CS2 VPKs",
+  "maps": {
+    "de_dust2": {
+      "status": "candidate_requires_in_game_gate",
+      "main_source": {
+        "source_package_relative_path": "maps/de_dust2.vpk",
+        "source_package_size": 262476433,
+        "source_package_sha256": "51d6bb432b6553bfae6c38219a527c5de2464a2b107080f2b8be7d8427ebb885",
+        "expected_output_size": 262536900,
+        "expected_output_sha256": "3e78eaa952c5b32ac75a2650447422e38cac21326770d6f546c54432abcb9e11",
+        "expected_output_entry_count": 632,
+        "output_logical_path": "maps/de_dust2.vpk"
+      },
+      "loose_outer_replacements": [
+        {
+          "kind": "main_entity_lump",
+          "status": "candidate_requires_in_game_gate",
+          "source_package_relative_path": "maps/de_dust2.vpk",
+          "source_package_size": 262476433,
+          "source_package_sha256": "51d6bb432b6553bfae6c38219a527c5de2464a2b107080f2b8be7d8427ebb885",
+          "entry_path": "maps/de_dust2/entities/default_ents.vents_c",
+          "original_size": 45073,
+          "original_sha256": "515efdfc1e452b3d7052c5ffb1801a05e23b2395fb90586ff2dc9d14ae7ef80a",
+          "original_crc32": "d8aecbc3",
+          "payload_relative_path": "de_dust2/default_ents.vents_c",
+          "payload_size": 68577,
+          "payload_sha256": "aa2652d548313f7c93228a184480b7b755a42e7a32945e52b21c0dd1f09733b8",
+          "payload_crc32": "5b6e2fca"
+        }
+      ]
+    }
+  }
+}

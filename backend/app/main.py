@@ -338,26 +338,6 @@ if WEB_DIST_DIR is not None:
 else:
     logger.warning("未找到前端静态目录（web/ 或 frontend/dist），仅提供 API 服务")
 
-# ── 虚拟键盘 overlay：无条件注册路由，广播行为由 kb_overlay_enabled 配置项运行时控制 ──
-from fastapi import WebSocket, WebSocketDisconnect
-from .recording.executor.kb_overlay_bus import kb_overlay_bus as _kb_overlay_bus
-
-_overlay_dir = Path(__file__).parent / "recording" / "executor" / "overlay"
-app.mount("/overlay", StaticFiles(directory=str(_overlay_dir)), name="kb-overlay-static")
-
-@app.websocket("/ws/kb-overlay")
-async def kb_overlay_ws(ws: WebSocket) -> None:
-    await ws.accept()
-    await _kb_overlay_bus.register(ws)
-    try:
-        while True:
-            await ws.receive_text()
-    except WebSocketDisconnect:
-        pass
-    finally:
-        await _kb_overlay_bus.unregister(ws)
-
-
 # Montage and recorded-clip routes live in app.api.montage.
 
 
@@ -383,19 +363,9 @@ def index():
     return FileResponse(str(WEB_DIST_DIR / "index.html"))
 
 
-@app.get("/overlay/{filename:path}")
-def serve_kb_overlay(filename: str):
-    """直接提供虚拟键盘 Overlay 静态文件，避免被 SPA fallback 拦截。"""
-    from fastapi.responses import FileResponse as _FR
-    fp = (_overlay_dir / filename).resolve()
-    if fp.is_file() and str(fp).startswith(str(_overlay_dir.resolve())):
-        return _FR(str(fp))
-    raise HTTPException(404, "Not Found")
-
-
 @app.get("/{path:path}")
 def spa_fallback(path: str):
-    # API 路径和 overlay 路径保持 404/原路由处理，不进入前端 fallback。
+    # API 与已下线的旧资源路径保持 404，不回退到前端首页。
     if path.startswith("api/") or path.startswith("overlay/"):
         raise HTTPException(404, "Not Found")
     if WEB_DIST_DIR is None:

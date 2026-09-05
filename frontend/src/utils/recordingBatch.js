@@ -5,7 +5,6 @@ import { buildDtoFromQueueItem } from "../recording/buildDtoFromQueueItem";
 export function queueItemClientUid(it) {
   return it.clientClipUid || `legacy:${it.demoFilename}:${it.clipId}`;
 }
-
 /** @param {number} limit @param {T[]} items @param {(item: T) => Promise<void>} work @template T */
 export async function runWithConcurrency(limit, items, work) {
   if (!items.length) return;
@@ -302,28 +301,5 @@ export function applySessionObsTransitionToRequests(requests, session) {
   return requests.map((r) => ({
     ...r,
     options: { ...(r.options || {}), ...patch },
-  }));
-}
-
-/**
- * 将录制前弹窗中的虚拟键盘 / 击杀特效 Overlay 参数写入各 request.options（仅本次队列，不写配置）。
- * @param {object[]} requests
- * @param {{ kb_overlay_enabled?: boolean, kb_overlay_tick_offset?: number, kb_overlay_position?: string, kill_fx_enabled?: boolean, kill_fx_tick_offset?: number }} session
- */
-export function applySessionKbOverlayToRequests(requests, session) {
-  if (!Array.isArray(requests) || !requests.length || !session) return requests;
-  const hasKb = typeof session.kb_overlay_enabled === "boolean";
-  const hasFx = typeof session.kill_fx_enabled === "boolean";
-  if (!hasKb && !hasFx) return requests;
-  return requests.map((r) => ({
-    ...r,
-    options: {
-      ...(r.options || {}),
-      ...(hasKb && { kb_overlay_enabled: session.kb_overlay_enabled }),
-      ...(hasKb && typeof session.kb_overlay_tick_offset === "number" && { kb_overlay_tick_offset: session.kb_overlay_tick_offset }),
-      ...(hasKb && typeof session.kb_overlay_position === "string" && { kb_overlay_position: session.kb_overlay_position }),
-      ...(hasFx && { kill_fx_enabled: session.kill_fx_enabled }),
-      ...(hasFx && typeof session.kill_fx_tick_offset === "number" && { kill_fx_tick_offset: session.kill_fx_tick_offset }),
-    },
   }));
 }

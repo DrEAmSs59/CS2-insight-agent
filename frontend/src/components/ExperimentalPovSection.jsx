@@ -3,8 +3,10 @@ import API from "../api/api";
 import { useSkyboxResources } from "../api/skyboxResources";
 import { useT } from "../i18n/useT.js";
 import {
+  DEFAULT_RECORDING_SKYBOX,
   normalizeRecordingSkyboxId,
   isCustomRecordingSkyboxId,
+  partitionBuiltinRecordingSkyboxes,
   recordingSkyboxDisplayName,
   recordingSkyboxPreviewUrl,
   RECORDING_SKYBOX_OPTIONS,
@@ -14,12 +16,22 @@ import { normalizePovVoiceMode, POV_VOICE_MODES } from "../utils/povVoiceMode.js
 import {
   DEFAULT_RECORDING_MAP_MATERIAL,
   normalizeRecordingMapMaterialId,
-  WAXED_REFLECTION_MAP_MATERIAL,
 } from "../utils/recordingMapMaterial.js";
+import {
+  DEFAULT_RECORDING_MAP_APPEARANCE,
+  RAIN_RECORDING_MAP_APPEARANCE,
+  WAXED_RECORDING_MAP_APPEARANCE,
+  recordingMapAppearanceId,
+  applyRecordingMapAppearanceSelection,
+} from "../utils/recordingMapAppearance.js";
+import {
+  DEFAULT_RECORDING_WEATHER_EFFECT,
+  normalizeRecordingWeatherEffectId,
+} from "../utils/recordingWeatherEffect.js";
 
 /**
  * 实验性 POV：与常用参数 / 录制前观战弹窗共用；勾选写入 experimental.pov_enabled。
- * POV 开启时可调节语音受众与 HUD 正上方玩家显示（写入预热参数）。
+ * POV、语音、昵称、键鼠、地图材质和天空盒在同一区域中独立配置。
  */
 export default function ExperimentalPovSection({
   visible,
@@ -30,10 +42,16 @@ export default function ExperimentalPovSection({
   onPovTeamcounterNumericChange,
   povVoiceMode = "team",
   onPovVoiceModeChange,
+  inputHudEnabled = true,
+  onInputHudEnabledChange,
+  onInputHudDisplayModeChange,
   recordingSkybox = "default",
   onRecordingSkyboxChange,
   recordingMapMaterial = DEFAULT_RECORDING_MAP_MATERIAL,
   onRecordingMapMaterialChange,
+  recordingWeatherEffect = DEFAULT_RECORDING_WEATHER_EFFECT,
+  onRecordingWeatherEffectChange,
+  contentAfterVoice = null,
   omitEyebrow = false,
   omitDisclaimer = false,
   embedded = false,
@@ -58,16 +76,32 @@ export default function ExperimentalPovSection({
   const builtinSkyboxOptions = catalogBuiltinSkyboxOptions.length
     ? catalogBuiltinSkyboxOptions
     : RECORDING_SKYBOX_OPTIONS.slice(1).map((option) => ({ id: option.value }));
+  const {
+    solidColor: solidColorSkyboxOptions,
+    standard: standardBuiltinSkyboxOptions,
+  } = partitionBuiltinRecordingSkyboxes(builtinSkyboxOptions);
   const customSkyboxOptions = useMemo(
     () => skyboxResources.filter((item) => item.source === "custom" && item.available),
     [skyboxResources],
   );
   const selectedSkyboxId = normalizeRecordingSkyboxId(recordingSkybox);
-  const selectedCustomSkyboxAvailable = customSkyboxOptions.some(
-    (item) => item.id === selectedSkyboxId,
-  );
-  const selectedSkyboxPreview = recordingSkyboxPreviewUrl(selectedSkyboxId, skyboxResources);
   const selectedMapMaterial = normalizeRecordingMapMaterialId(recordingMapMaterial);
+  const selectedWeatherEffect = normalizeRecordingWeatherEffectId(recordingWeatherEffect);
+  const selectedMapAppearance = recordingMapAppearanceId(
+    selectedMapMaterial,
+    selectedWeatherEffect,
+  );
+  const inputHudSelection = inputHudEnabled ? "visible" : "hidden";
+  const rainSelected = selectedMapAppearance === RAIN_RECORDING_MAP_APPEARANCE;
+  const waxedSelected = selectedMapAppearance === WAXED_RECORDING_MAP_APPEARANCE;
+  const canChangeMapAppearance = Boolean(
+    onRecordingMapMaterialChange || onRecordingWeatherEffectChange,
+  );
+  const effectiveSkyboxId = selectedSkyboxId;
+  const selectedCustomSkyboxAvailable = customSkyboxOptions.some(
+    (item) => item.id === effectiveSkyboxId,
+  );
+  const selectedSkyboxPreview = recordingSkyboxPreviewUrl(effectiveSkyboxId, skyboxResources);
 
   const loadPovStatus = useCallback(async () => {
     setPovStatusLoading(true);
@@ -133,25 +167,7 @@ export default function ExperimentalPovSection({
       ) : null}
 
       {experimentalPovEnabled && onPovTeamcounterNumericChange ? (
-        <div className="mt-3 space-y-4 rounded-lg border border-cs2-border bg-cs2-bg-elevated px-3 py-2.5">
-          <label className="block text-[11px] text-cs2-text-secondary">
-            <span className="mb-1 block font-medium text-cs2-text-secondary">{t("pov.voiceModeLabel")}</span>
-            <select
-              aria-label={t("pov.voiceModeLabel")}
-              value={normalizePovVoiceMode(povVoiceMode)}
-              disabled={!onPovVoiceModeChange}
-              onChange={(event) => onPovVoiceModeChange?.(event.target.value)}
-              className="mt-1 w-full rounded border border-cs2-border bg-cs2-bg-input px-2 py-1.5 text-xs text-cs2-text-primary outline-none focus:border-cs2-accent/50 disabled:opacity-40"
-            >
-              {POV_VOICE_MODES.map((mode) => (
-                <option key={mode} value={mode}>{t(`pov.voiceMode.${mode}`)}</option>
-              ))}
-            </select>
-            <span className="mt-1 block text-[10px] leading-relaxed text-cs2-text-muted">
-              {t("pov.voiceModeHint")}
-            </span>
-          </label>
-
+        <div className="mt-3 rounded-lg border border-cs2-border bg-cs2-bg-elevated px-3 py-2.5">
           <label className="flex cursor-pointer items-start gap-2 rounded-md border border-cs2-border bg-cs2-bg-card px-2 py-2">
             <input
               type="checkbox"
@@ -257,7 +273,78 @@ export default function ExperimentalPovSection({
       ) : null}
       </div>
 
-      {onRecordingMapMaterialChange ? (
+      {onPovVoiceModeChange ? (
+        <div
+          className="mt-4 border-t border-amber-500/20 pt-4"
+          data-testid="experimental-voice-card"
+        >
+          <label className="block text-[11px] text-cs2-text-secondary">
+            <span className="mb-1 block font-semibold text-cs2-text-primary">{t("pov.voiceModeLabel")}</span>
+            <select
+              aria-label={t("pov.voiceModeLabel")}
+              value={normalizePovVoiceMode(povVoiceMode)}
+              disabled={checkboxDisabled}
+              onChange={(event) => onPovVoiceModeChange(event.target.value)}
+              className="mt-1 w-full rounded border border-cs2-border bg-cs2-bg-input px-2 py-1.5 text-xs text-cs2-text-primary outline-none focus:border-cs2-accent/50 disabled:opacity-40"
+            >
+              {POV_VOICE_MODES.map((mode) => (
+                <option key={mode} value={mode}>{t(`pov.voiceMode.${mode}`)}</option>
+              ))}
+            </select>
+            <span className="mt-1 block text-[10px] leading-relaxed text-cs2-text-muted">
+              {t("pov.voiceModeHint")}
+            </span>
+          </label>
+        </div>
+      ) : null}
+
+      {contentAfterVoice ? (
+        <div
+          className="mt-4 border-t border-amber-500/20 pt-4"
+          data-testid="experimental-after-voice-content"
+        >
+          {contentAfterVoice}
+        </div>
+      ) : null}
+
+      {onInputHudEnabledChange && onInputHudDisplayModeChange ? (
+        <div
+          className="mt-4 border-t border-amber-500/20 pt-4"
+          data-testid="experimental-input-hud-card"
+        >
+          <div className="flex items-center gap-3">
+            <div className="min-w-0 flex-1">
+              <p className="text-[11px] font-semibold text-cs2-text-primary">
+                {t("record.warmupInputHudTitle")}
+              </p>
+              <p className="mt-1 text-[10px] leading-relaxed text-cs2-text-muted">
+                {t("record.warmupInputHudDesc")}
+              </p>
+            </div>
+            <select
+              aria-label={t("record.warmupInputHudDisplayMode")}
+              value={inputHudSelection}
+              disabled={checkboxDisabled}
+              onChange={(event) => {
+                const value = event.target.value;
+                if (value === "hidden") {
+                  onInputHudEnabledChange(false);
+                  return;
+                }
+                onInputHudEnabledChange(true);
+                onInputHudDisplayModeChange("hybrid");
+              }}
+              className="min-w-44 max-w-[48%] rounded border border-cs2-border bg-cs2-bg-input px-2 py-1.5 text-xs font-semibold text-cs2-text-primary outline-none focus:border-cs2-accent/50 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              <option value="visible">{t("record.warmupInputHudShow")}</option>
+              <option value="hidden">{t("record.warmupInputHudHide")}</option>
+            </select>
+          </div>
+          {/* Virtual key sounds stay supported by the VPK but are temporarily hidden. */}
+        </div>
+      ) : null}
+
+      {canChangeMapAppearance ? (
         <div
           className="mt-4 border-t border-amber-500/20 pt-4"
           data-testid="experimental-map-material-card"
@@ -271,26 +358,47 @@ export default function ExperimentalPovSection({
             </span>
             <select
               aria-label={t("record.mapMaterialSelectLabel")}
-              value={selectedMapMaterial}
+              value={selectedMapAppearance}
               disabled={checkboxDisabled}
-              onChange={(event) => onRecordingMapMaterialChange(event.target.value)}
+              onChange={(event) => {
+                applyRecordingMapAppearanceSelection(event.target.value, {
+                  onRecordingMapMaterialChange,
+                  onRecordingWeatherEffectChange,
+                  onRecordingSkyboxChange,
+                });
+              }}
               className="mt-2 w-full rounded border border-cs2-border bg-cs2-bg-input px-2 py-1.5 text-xs text-cs2-text-primary outline-none focus:border-cs2-accent/50 disabled:opacity-40"
             >
-              <option value={DEFAULT_RECORDING_MAP_MATERIAL}>
+              <option value={DEFAULT_RECORDING_MAP_APPEARANCE}>
                 {t("record.mapMaterialDefault")}
               </option>
-              <option value={WAXED_REFLECTION_MAP_MATERIAL}>
+              <option value={WAXED_RECORDING_MAP_APPEARANCE}>
                 {t("record.mapMaterialWaxedReflection")}
+              </option>
+              <option value={RAIN_RECORDING_MAP_APPEARANCE}>
+                {t("record.weatherEffectRain")}
               </option>
             </select>
           </label>
-          <p className="mt-2 text-[10px] leading-relaxed text-cs2-text-muted">
-            {t("record.mapMaterialSupportedMaps")}
-          </p>
-          {selectedMapMaterial !== DEFAULT_RECORDING_MAP_MATERIAL ? (
-            <p className="mt-2 text-[10px] leading-relaxed text-cs2-amber-on-surface">
-              {t("record.mapMaterialOutcome")}
-            </p>
+          {waxedSelected ? (
+            <>
+              <p className="mt-2 text-[10px] leading-relaxed text-cs2-text-muted">
+                {t("record.mapMaterialSupportedMaps")}
+              </p>
+              <p className="mt-2 text-[10px] leading-relaxed text-cs2-amber-on-surface">
+                {t("record.mapMaterialOutcome")}
+              </p>
+            </>
+          ) : null}
+          {rainSelected ? (
+            <>
+              <p className="mt-2 text-[10px] leading-relaxed text-cs2-text-muted">
+                {t("record.weatherEffectRainSupportedMaps")}
+              </p>
+              <p className="mt-2 text-[10px] leading-relaxed text-cs2-amber-on-surface">
+                {t("record.weatherEffectRainOutcome")}
+              </p>
+            </>
           ) : null}
         </div>
       ) : null}
@@ -305,18 +413,27 @@ export default function ExperimentalPovSection({
               {t("record.skyboxTitle")}
             </span>
             <span className="mt-1 block text-[10px] leading-relaxed text-cs2-text-muted">
-              {t("record.skyboxSubtitle")}
+              {t(rainSelected ? "record.skyboxRainSelectable" : "record.skyboxSubtitle")}
             </span>
             <select
               aria-label={t("record.skyboxSelectLabel")}
-              value={selectedSkyboxId}
+              value={effectiveSkyboxId}
               disabled={checkboxDisabled}
               onChange={(event) => onRecordingSkyboxChange(event.target.value)}
               className="mt-2 w-full rounded border border-cs2-border bg-cs2-bg-input px-2 py-1.5 text-xs text-cs2-text-primary outline-none focus:border-cs2-accent/50 disabled:opacity-40"
             >
-              <option value="default">{t("record.skyboxDefault")}</option>
+              <option value={DEFAULT_RECORDING_SKYBOX}>
+                {t(rainSelected ? "record.skyboxRainDefault" : "record.skyboxDefault")}
+              </option>
+              <optgroup label={t("record.skyboxSolidColorOptions")}>
+                {solidColorSkyboxOptions.map((item) => (
+                  <option key={item.id} value={item.id}>
+                    {recordingSkyboxDisplayName(item.id, item.display_name, t)}
+                  </option>
+                ))}
+              </optgroup>
               <optgroup label={t("record.skyboxBuiltinOptions")}>
-                {builtinSkyboxOptions.map((item) => (
+                {standardBuiltinSkyboxOptions.map((item) => (
                   <option key={item.id} value={item.id}>
                     {recordingSkyboxDisplayName(item.id, item.display_name, t)}
                   </option>
@@ -329,8 +446,8 @@ export default function ExperimentalPovSection({
                   ))}
                 </optgroup>
               ) : null}
-              {isCustomRecordingSkyboxId(selectedSkyboxId) && !selectedCustomSkyboxAvailable ? (
-                <option value={selectedSkyboxId} disabled>
+              {isCustomRecordingSkyboxId(effectiveSkyboxId) && !selectedCustomSkyboxAvailable ? (
+                <option value={effectiveSkyboxId} disabled>
                   {t("record.skyboxMissingCustom")}
                 </option>
               ) : null}
@@ -341,8 +458,8 @@ export default function ExperimentalPovSection({
                 src={selectedSkyboxPreview}
                 alt={t("settings.skyboxPreviewAlt", {
                   name: recordingSkyboxDisplayName(
-                    selectedSkyboxId,
-                    skyboxResources.find((item) => item.id === selectedSkyboxId)?.display_name,
+                    effectiveSkyboxId,
+                    skyboxResources.find((item) => item.id === effectiveSkyboxId)?.display_name,
                     t,
                   ),
                 })}
@@ -358,7 +475,7 @@ export default function ExperimentalPovSection({
           <p className="mt-2 text-[10px] leading-relaxed text-cs2-text-muted">
             {t("record.skyboxSupportedMaps")}
           </p>
-          {selectedSkyboxId !== "default" ? (
+          {effectiveSkyboxId !== DEFAULT_RECORDING_SKYBOX ? (
             <p className="mt-2 text-[10px] leading-relaxed text-cs2-amber-on-surface">
               {t("record.skyboxOutcome")}
             </p>

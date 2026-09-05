@@ -4,11 +4,18 @@ import CosmeticsView from "./CosmeticsView";
 import { loadCustomSkinPlan, saveCustomSkinPlan } from "./saveCustomSkinPlan.js";
 
 const desktopBridgeMock = vi.hoisted(() => ({
+  openExternal: vi.fn(async () => {}),
   writeClipboardText: vi.fn(async () => {}),
 }));
 
+const launchCs2InspectOnHostMock = vi.hoisted(() => vi.fn(async () => ({ ok: true })));
+
 vi.mock("../../../desktop/desktopBridge.js", () => ({
   desktopBridge: desktopBridgeMock,
+}));
+
+vi.mock("../../../api/cs2InspectApi.js", () => ({
+  launchCs2InspectOnHost: launchCs2InspectOnHostMock,
 }));
 
 vi.mock("./saveCustomSkinPlan.js", () => ({
@@ -203,6 +210,113 @@ describe("CosmeticsView", () => {
     expect(screen.getByTestId("cosmetics-cancel-icon")).toBeTruthy();
   });
 
+  test("one-click applies the saved workshop plan to matching custom cosmetic slots", async () => {
+    const replacement = {
+      catalog_id: 9009,
+      def_index: 9,
+      paint_index: 344,
+      paint_seed: 777,
+      paint_wear: 0.42,
+      type: "weapon",
+      model: "awp",
+      name_zh: "AWP | 九头金蛇",
+      name_en: "AWP | Dragon Lore",
+      rarity: "#eb4b4b",
+    };
+    const trainingReplacement = {
+      ...replacement,
+      catalog_id: 9010,
+      paint_index: 279,
+      paint_seed: 12,
+      paint_wear: 0.15,
+      name_zh: "AWP | 无畏战神",
+      name_en: "AWP | Asiimov",
+    };
+    localStorage.setItem("cs2-insight:cosmetics-workshop-plan:v1", JSON.stringify([
+      {
+        id: "plan-1",
+        name: "训练方案",
+        selections: { ct: { "weapon:awp": trainingReplacement }, t: {} },
+      },
+      {
+        id: "plan-2",
+        name: "比赛方案",
+        selections: { ct: { "weapon:awp": replacement }, t: {} },
+      },
+    ]));
+    vi.mocked(loadCustomSkinPlan).mockClear();
+    vi.mocked(loadCustomSkinPlan).mockResolvedValueOnce({ ok: true, plan: null });
+    vi.mocked(saveCustomSkinPlan).mockClear();
+    vi.mocked(saveCustomSkinPlan).mockResolvedValueOnce({
+      ok: true,
+      succeeded: [],
+      failed: [],
+      plan: {
+        steamid: STEAM_ID,
+        items: [{
+          slot_key: "ct:id:27",
+          original: cosmetic({ item_id: 27, type: "weapon", model: "awp", def_index: 9, observed_teams: ["ct"] }),
+          replacement,
+        }],
+      },
+    });
+
+    try {
+      render(
+        <CosmeticsView
+          demoId={42}
+          selectedPlayer={{ name: "JW", steamid: STEAM_ID }}
+          workspace={{
+            cosmetics: {
+              players: {
+                [STEAM_ID]: [cosmetic({
+                  item_id: 27,
+                  type: "weapon",
+                  model: "awp",
+                  def_index: 9,
+                  name_zh: "AWP | 二西莫夫",
+                  observed_teams: ["ct"],
+                })],
+              },
+            },
+          }}
+          onlineAssetsEnabled
+        />,
+      );
+
+      await waitFor(() => expect(loadCustomSkinPlan).toHaveBeenCalled());
+      fireEvent.click(screen.getByTestId("cosmetics-customize"));
+      const applyButton = screen.getByTestId("cosmetics-apply-workshop-scheme");
+      expect(applyButton.disabled).toBe(false);
+      expect(applyButton.title).toMatch(/选择工坊方案|Choose workshop plan/);
+      fireEvent.click(applyButton);
+      expect(saveCustomSkinPlan).not.toHaveBeenCalled();
+
+      const picker = screen.getByRole("dialog");
+      expect(within(picker).getByRole("heading", { name: /选择饰品工坊方案|Choose a Cosmetics Workshop plan/ })).toBeTruthy();
+      expect(within(picker).getByRole("button", { name: /训练方案/ })).toBeTruthy();
+      const matchPlan = within(picker).getByRole("button", { name: /比赛方案/ });
+      fireEvent.click(matchPlan);
+      expect(matchPlan.getAttribute("aria-pressed")).toBe("true");
+      expect(within(picker).getByText("九头金蛇")).toBeTruthy();
+      expect(within(picker).getByText(/^(磨损|Wear) 0\.420000$/)).toBeTruthy();
+      expect(within(picker).getByText(/^(模板|Seed) 777$/)).toBeTruthy();
+      fireEvent.click(within(picker).getByTestId("cosmetics-confirm-workshop-scheme"));
+
+      await waitFor(() => expect(saveCustomSkinPlan).toHaveBeenCalled());
+      const request = vi.mocked(saveCustomSkinPlan).mock.calls.at(-1)[0];
+      expect(request.replacements["ct:id:27"]).toMatchObject({
+        paint_index: 344,
+        paint_seed: 777,
+        paint_wear: 0.42,
+      });
+      expect(request.replacements).not.toHaveProperty("t:id:27");
+      expect(request.originals["ct:id:27"].observed_teams).toEqual(["ct"]);
+    } finally {
+      localStorage.removeItem("cs2-insight:cosmetics-workshop-plan:v1");
+    }
+  });
+
   test("opens item details on click", () => {
     render(
       <CosmeticsView
@@ -230,9 +344,11 @@ describe("CosmeticsView", () => {
     expect(dialog.textContent).not.toContain("OriginalOwner");
   });
 
-  test("copies the generated inspect URL through the native desktop clipboard", async () => {
-    desktopBridgeMock.writeClipboardText.mockClear();
-    desktopBridgeMock.writeClipboardText.mockResolvedValueOnce();
+  test("launches the generated inspect URL through Steam instead of exposing a copy action", async () => {
+    launchCs2InspectOnHostMock.mockReset();
+    launchCs2InspectOnHostMock.mockResolvedValueOnce({ ok: true });
+    desktopBridgeMock.openExternal.mockReset();
+    desktopBridgeMock.writeClipboardText.mockReset();
     render(
       <CosmeticsView
         selectedPlayer={{ name: "JW", steamid64: STEAM_ID }}
@@ -242,16 +358,23 @@ describe("CosmeticsView", () => {
 
     fireEvent.click(screen.getAllByRole("button", { name: /★ M9 刺刀/ })[0]);
     const dialog = screen.getByRole("dialog");
-    fireEvent.click(within(dialog).getByRole("button", { name: /复制检视 URL|Copy inspect URL/i }));
+    expect(within(dialog).getByRole("button", { name: /3D 检视|3D Inspect|Inspect in 3D/i })).toBeTruthy();
+    expect(within(dialog).queryByRole("button", { name: /复制检视 URL|Copy inspect URL/i })).toBeNull();
+    fireEvent.click(within(dialog).getByRole("button", { name: /游戏内检视|Inspect in Game/i }));
 
-    await waitFor(() => expect(desktopBridgeMock.writeClipboardText).toHaveBeenCalledTimes(1));
-    expect(desktopBridgeMock.writeClipboardText.mock.calls[0][0]).toMatch(/^steam:\/\/rungame\/730\//);
-    const copiedButton = within(dialog).getByRole("button", { name: /检视 URL 已复制|Inspect URL copied/i });
-    expect(copiedButton.dataset.copied).toBe("true");
+    await waitFor(() => expect(launchCs2InspectOnHostMock).toHaveBeenCalledTimes(1));
+    expect(launchCs2InspectOnHostMock.mock.calls[0][0]).toMatch(/^[0-9A-F]+$/);
+    expect(desktopBridgeMock.openExternal).not.toHaveBeenCalled();
+    expect(desktopBridgeMock.writeClipboardText).not.toHaveBeenCalled();
+    expect(await within(dialog).findByText(/已通过 Steam 拉起 CS2 检视|launched through Steam/i)).toBeTruthy();
   });
 
-  test("reports a clipboard failure separately from inspect-data generation", async () => {
-    desktopBridgeMock.writeClipboardText.mockClear();
+  test("reports a game-inspect failure when both Steam launch and clipboard fallback fail", async () => {
+    launchCs2InspectOnHostMock.mockReset();
+    launchCs2InspectOnHostMock.mockRejectedValueOnce(new Error("host launch unavailable"));
+    desktopBridgeMock.openExternal.mockReset();
+    desktopBridgeMock.openExternal.mockRejectedValueOnce(new Error("Steam unavailable"));
+    desktopBridgeMock.writeClipboardText.mockReset();
     desktopBridgeMock.writeClipboardText.mockRejectedValueOnce(new Error("clipboard denied"));
     render(
       <CosmeticsView
@@ -262,11 +385,10 @@ describe("CosmeticsView", () => {
 
     fireEvent.click(screen.getAllByRole("button", { name: /★ M9 刺刀/ })[0]);
     const dialog = screen.getByRole("dialog");
-    fireEvent.click(within(dialog).getByRole("button", { name: /复制检视 URL|Copy inspect URL/i }));
+    fireEvent.click(within(dialog).getByRole("button", { name: /游戏内检视|Inspect in Game/i }));
 
     const alert = await within(dialog).findByRole("alert");
-    expect(alert.textContent).toMatch(/无法写入系统剪贴板|could not be written to the system clipboard/i);
-    expect(screen.queryByText(/无法生成该物品的检视数据|Could not generate inspection data/i)).toBeNull();
+    expect(alert.textContent).toMatch(/无法启动 CS2 检视|Could not launch CS2 inspection/i);
   });
 
   test("uses a flat background for the item detail preview", () => {

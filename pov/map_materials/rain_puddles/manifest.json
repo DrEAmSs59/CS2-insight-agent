@@ -1,0 +1,1439 @@
+{
+  "schema_version": 1,
+  "id": "rain_puddles",
+  "display_name": {
+    "zh": "全局雨天地图适配（实验）",
+    "en": "Global rainy-map adaptation (experimental)"
+  },
+  "lighting_commands": [],
+  "maps": {
+    "de_dust2": [
+      {
+        "target": "materials/de_dust/hr_dust/hr_dust_blend_asphalt_06.vmat_c",
+        "catalog": "_cs2_insight_catalog/map_materials/rain_puddles/de_dust2/0000.vmat_c",
+        "sha256": "5fb641e2e4cc8021a0316c254798321fb577f2c7a181122332e0decca44cb9a4"
+      },
+      {
+        "target": "materials/de_dust/hr_dust/hr_dust_blend_asphalt_07.vmat_c",
+        "catalog": "_cs2_insight_catalog/map_materials/rain_puddles/de_dust2/0001.vmat_c",
+        "sha256": "0e72a0893a88b09acee8150b2457d2137900704bbc954a61d0a5dce195ba3bb0"
+      },
+      {
+        "target": "materials/de_dust/hr_dust/hr_dust_blend_floortile_01.vmat_c",
+        "catalog": "_cs2_insight_catalog/map_materials/rain_puddles/de_dust2/0002.vmat_c",
+        "sha256": "1817a5cb2d762b1f13417838a78bd6c2a895db57440d9a0d7090ca51b7775c20"
+      },
+      {
+        "target": "materials/de_dust/hr_dust/hr_dust_blend_floortile_03.vmat_c",
+        "catalog": "_cs2_insight_catalog/map_materials/rain_puddles/de_dust2/0003.vmat_c",
+        "sha256": "57d401211209dc2f0f22a8777f084d46b664b6241aba19fea13388c6f68efd4a"
+      },
+      {
+        "target": "materials/de_dust/hr_dust/hr_dust_blend_groundrough01-groundrough02.vmat_c",
+        "catalog": "_cs2_insight_catalog/map_materials/rain_puddles/de_dust2/0004.vmat_c",
+        "sha256": "af756de016ab1e2dc0d2f956d868e111ac66eeb241a058aa9c577fb41f11aa79"
+      },
+      {
+        "target": "materials/de_dust/hr_dust/hr_dust_blend_groundrough01-groundsmooth01.vmat_c",
+        "catalog": "_cs2_insight_catalog/map_materials/rain_puddles/de_dust2/0005.vmat_c",
+        "sha256": "198317ea6f0b80c26550b6e5fea52b467a2328614f354bdbc4b07db3fc6231ae"
+      },
+      {
+        "target": "materials/de_dust/hr_dust/hr_dust_blend_groundrough01-groundsweeds01.vmat_c",
+        "catalog": "_cs2_insight_catalog/map_materials/rain_puddles/de_dust2/0006.vmat_c",
+        "sha256": "2e1bb5c7058a50a34ac5cb2e6f1b20777aca34cc57848d739bfb72e8ed4bfda9"
+      },
+      {
+        "target": "materials/de_dust/hr_dust/hr_dust_blend_groundrough02-groundsmooth01.vmat_c",
+        "catalog": "_cs2_insight_catalog/map_materials/rain_puddles/de_dust2/0007.vmat_c",
+        "sha256": "3fc9d15de7be12f97de12aef95d3db888d2c7bd1ada36308c58bcce5d98feaa3"
+      },
+      {
+        "target": "materials/de_dust/hr_dust/hr_dust_blend_groundstone01-groundrough01.vmat_c",
+        "catalog": "_cs2_insight_catalog/map_materials/rain_puddles/de_dust2/0008.vmat_c",
+        "sha256": "7e91bfe62f9a2c0df1f0e9fa522a2e1d26d5ee267e92dc7b7c0237137513a277"
+      },
+      {
+        "target": "materials/de_dust/hr_dust/hr_dust_blend_groundstone01-groundsmooth01.vmat_c",
+        "catalog": "_cs2_insight_catalog/map_materials/rain_puddles/de_dust2/0009.vmat_c",
+        "sha256": "c570922b1ced1941fd3023d9aa1536ec9cd1e0c0bb55d4c7dc2c3345f559b5aa"
+      },
+      {
+        "target": "materials/de_dust/hr_dust/hr_dust_blend_sand02_sand03.vmat_c",
+        "catalog": "_cs2_insight_catalog/map_materials/rain_puddles/de_dust2/0010.vmat_c",
+        "sha256": "cfd63f2f721f4ed7786d448d06a6be232f5ee6923b50da77163f2c5c95cb4265"
+      },
+      {
+        "target": "materials/de_dust/hr_dust/hr_dust_brick_ground_02.vmat_c",
+        "catalog": "_cs2_insight_catalog/map_materials/rain_puddles/de_dust2/0011.vmat_c",
+        "sha256": "c1635001065df16a830ccc9772f07a8f40d1e42c0068e43fdbb6e9a896811e9e"
+      },
+      {
+        "target": "materials/de_dust/hr_dust/hr_dust_brick_ground_04.vmat_c",
+        "catalog": "_cs2_insight_catalog/map_materials/rain_puddles/de_dust2/0012.vmat_c",
+        "sha256": "0f4512a56969ca10ee939a271a48590ac50d138edfe68c108e64a4d40eba9d8f"
+      },
+      {
+        "target": "materials/de_dust/hr_dust/hr_dust_sand_02.vmat_c",
+        "catalog": "_cs2_insight_catalog/map_materials/rain_puddles/de_dust2/0013.vmat_c",
+        "sha256": "a400e97bcaed5d6fcb8181cf520cca348d7386a9f4ca52756d74a766f6aacbd1"
+      },
+      {
+        "target": "materials/de_dust/hr_dust/hr_dust_stone_ground_01.vmat_c",
+        "catalog": "_cs2_insight_catalog/map_materials/rain_puddles/de_dust2/0014.vmat_c",
+        "sha256": "db5dcf77697817851f8e4c58f5d6ffa4e448af9f1d7617e8eb69234f3d3cd4f8"
+      },
+      {
+        "target": "materials/de_dust/hr_dust/hr_dust_tile_01.vmat_c",
+        "catalog": "_cs2_insight_catalog/map_materials/rain_puddles/de_dust2/0015.vmat_c",
+        "sha256": "1937d412b51ceaa3d572dbac8aa88b5b8fa90f46e505f3d106512d4a8ad433fd"
+      },
+      {
+        "target": "materials/de_dust/hr_dust/hr_dust_tile_02.vmat_c",
+        "catalog": "_cs2_insight_catalog/map_materials/rain_puddles/de_dust2/0016.vmat_c",
+        "sha256": "9301d83449c7728220e984f2eb14b78592d4acccaee30387a77989d38ab484ee"
+      },
+      {
+        "target": "materials/de_dust/hr_dust/hr_dust_tile_03.vmat_c",
+        "catalog": "_cs2_insight_catalog/map_materials/rain_puddles/de_dust2/0017.vmat_c",
+        "sha256": "9db70354b7e1a8fc7d5a89cbe5be088b1735ef64846f720652a5109f60901944"
+      },
+      {
+        "target": "materials/skybox/sky_de_dust2.vmat_c",
+        "catalog": "_cs2_insight_catalog/map_materials/rain_puddles/de_dust2/overcast_sky.vmat_c",
+        "sha256": "afbb3798fc64181b63a97e1e99f18a8fab0f273865802892c3bef1e232e18d8f"
+      }
+    ],
+    "de_mirage": [
+      {
+        "target": "materials/de_mirage/marble/marble_01.vmat_c",
+        "catalog": "_cs2_insight_catalog/map_materials/rain_puddles/de_mirage/0000.vmat_c",
+        "sha256": "9a02368c5d53f8337307396c6b9eb4698bb3edc517a3528ef162725ddac15ac7"
+      },
+      {
+        "target": "materials/de_mirage/tile/de_mirage_tile_ver4_diffuse.vmat_c",
+        "catalog": "_cs2_insight_catalog/map_materials/rain_puddles/de_mirage/0001.vmat_c",
+        "sha256": "26e873cabc4d3df7fa56f1aaac1cdee59944d684724ae8a7afb4635ca218ce5d"
+      },
+      {
+        "target": "materials/de_dust/stonestep03.vmat_c",
+        "catalog": "_cs2_insight_catalog/map_materials/rain_puddles/de_mirage/0002.vmat_c",
+        "sha256": "e1cdb11c5eab762ed7a31847c1570b1bab4b938e51c9d6402774cf9b1c3aaab6"
+      },
+      {
+        "target": "materials/de_mirage/ground/de_mirage_tilef_diffuse.vmat_c",
+        "catalog": "_cs2_insight_catalog/map_materials/rain_puddles/de_mirage/0003.vmat_c",
+        "sha256": "411bc413ab43950b0ca62c44302cf44366f4aa84ab381e58509ec06d63c74b42"
+      },
+      {
+        "target": "materials/tile/tile_mall_floor00.vmat_c",
+        "catalog": "_cs2_insight_catalog/map_materials/rain_puddles/de_mirage/0004.vmat_c",
+        "sha256": "bf3263e0da90f9b171525754a6c61376cfc84434ba20ac0dcd3cde35cb3d61b7"
+      },
+      {
+        "target": "materials/de_mirage/hr_mirage/mirage_plaster_blend_3.vmat_c",
+        "catalog": "_cs2_insight_catalog/map_materials/rain_puddles/de_mirage/0005.vmat_c",
+        "sha256": "bd35467e337007cb9474c0a6cf01031e82b9cc8cd8496cb525587eeaa098486b"
+      },
+      {
+        "target": "materials/wood/milbeams003.vmat_c",
+        "catalog": "_cs2_insight_catalog/map_materials/rain_puddles/de_mirage/0006.vmat_c",
+        "sha256": "2c5efb11338f82a804c148faa98624c73b267cdf31a9cccc92d0bc34ed8f9a02"
+      },
+      {
+        "target": "materials/wood/woodsteps001.vmat_c",
+        "catalog": "_cs2_insight_catalog/map_materials/rain_puddles/de_mirage/0007.vmat_c",
+        "sha256": "948af458834a25d2490e06e20d2b3a48ea377864b2e681535409337179235d08"
+      },
+      {
+        "target": "materials/de_dust/tilefloor02.vmat_c",
+        "catalog": "_cs2_insight_catalog/map_materials/rain_puddles/de_mirage/0008.vmat_c",
+        "sha256": "d06a1a630d13b3bf3429874a7431610323b5a09e9cebcbf6ac8f5c966c8e22eb"
+      },
+      {
+        "target": "materials/wood/plywood02.vmat_c",
+        "catalog": "_cs2_insight_catalog/map_materials/rain_puddles/de_mirage/0009.vmat_c",
+        "sha256": "56c5b76b587b3a4bb0443098ca7839e1fe5fb1b0067a63a8285852b47bb74662"
+      },
+      {
+        "target": "materials/de_mirage/wood/de_mirage_wood_ver3_diffuse.vmat_c",
+        "catalog": "_cs2_insight_catalog/map_materials/rain_puddles/de_mirage/0010.vmat_c",
+        "sha256": "248183e104f26d781c19c1b27bb64cf4e4c2a8461aca06cd524d614bd2b94ff1"
+      },
+      {
+        "target": "materials/de_mirage/brick/de_mirage_brick_ver1_diffuse.vmat_c",
+        "catalog": "_cs2_insight_catalog/map_materials/rain_puddles/de_mirage/0011.vmat_c",
+        "sha256": "26c567c7ecdc2649640c8cb3840a6169317c830ab25614013af55b521f2d559a"
+      },
+      {
+        "target": "materials/skybox/sky_de_mirage.vmat_c",
+        "catalog": "_cs2_insight_catalog/map_materials/rain_puddles/de_mirage/overcast_sky.vmat_c",
+        "sha256": "afbb3798fc64181b63a97e1e99f18a8fab0f273865802892c3bef1e232e18d8f"
+      }
+    ],
+    "de_cache": [
+      {
+        "target": "materials/de_cache/floor/ch2_floor_busstation_01_b.vmat_c",
+        "catalog": "_cs2_insight_catalog/map_materials/rain_puddles/de_cache/0000.vmat_c",
+        "sha256": "21463203028173c02b750e92c974aab7d4ea1ff0d95a971f258029ae9be20171"
+      },
+      {
+        "target": "materials/de_cache/floor/ch2_floor_busstation_01.vmat_c",
+        "catalog": "_cs2_insight_catalog/map_materials/rain_puddles/de_cache/0001.vmat_c",
+        "sha256": "1f903082f36d274d705e3779eaeb289bc2a60d2f988d78b6e5e7bd8bde4528e2"
+      },
+      {
+        "target": "materials/de_cache/floor/ch2_floor_vinyl_01.vmat_c",
+        "catalog": "_cs2_insight_catalog/map_materials/rain_puddles/de_cache/0002.vmat_c",
+        "sha256": "d09101b9d46b679749b6702e754f6ed3a14a7feb5669c7966dfc4762dbe21a88"
+      },
+      {
+        "target": "materials/de_cache/sky/de_cache_sky_001.vmat_c",
+        "catalog": "_cs2_insight_catalog/map_materials/rain_puddles/de_cache/overcast_sky.vmat_c",
+        "sha256": "afbb3798fc64181b63a97e1e99f18a8fab0f273865802892c3bef1e232e18d8f"
+      }
+    ],
+    "de_inferno": [
+      {
+        "target": "materials/de_inferno/ground/inferno_stonefloor07_dirt_blend.vmat_c",
+        "catalog": "_cs2_insight_catalog/map_materials/rain_puddles/de_inferno/0000.vmat_c",
+        "sha256": "c702a195c6fed73afd5249d65fd3fc8c555e0ea734387bc85a2b0156aceae594"
+      },
+      {
+        "target": "materials/de_inferno/ground/inferno_sewer_ground_01.vmat_c",
+        "catalog": "_cs2_insight_catalog/map_materials/rain_puddles/de_inferno/0001.vmat_c",
+        "sha256": "d2af4771d0f0251b221d0734813742ab207c173d71eac99fa69a9e24ba2bf94f"
+      },
+      {
+        "target": "materials/skybox/test/s2_de_inferno_sky01.vmat_c",
+        "catalog": "_cs2_insight_catalog/map_materials/rain_puddles/de_inferno/overcast_sky.vmat_c",
+        "sha256": "afbb3798fc64181b63a97e1e99f18a8fab0f273865802892c3bef1e232e18d8f"
+      }
+    ],
+    "de_ancient": [
+      {
+        "target": "materials/skybox/sky_hr_aztec_02_lighting.vmat_c",
+        "catalog": "_cs2_insight_catalog/map_materials/rain_puddles/de_ancient/overcast_sky_00.vmat_c",
+        "sha256": "afbb3798fc64181b63a97e1e99f18a8fab0f273865802892c3bef1e232e18d8f"
+      },
+      {
+        "target": "materials/skybox/sky_hr_aztec_02_v1.vmat_c",
+        "catalog": "_cs2_insight_catalog/map_materials/rain_puddles/de_ancient/overcast_sky_01.vmat_c",
+        "sha256": "afbb3798fc64181b63a97e1e99f18a8fab0f273865802892c3bef1e232e18d8f"
+      }
+    ],
+    "de_nuke": [
+      {
+        "target": "materials/skybox/sky_de_nuke.vmat_c",
+        "catalog": "_cs2_insight_catalog/map_materials/rain_puddles/de_nuke/overcast_sky.vmat_c",
+        "sha256": "afbb3798fc64181b63a97e1e99f18a8fab0f273865802892c3bef1e232e18d8f"
+      }
+    ],
+    "de_anubis": [
+      {
+        "target": "materials/skybox/sky_de_annubis.vmat_c",
+        "catalog": "_cs2_insight_catalog/map_materials/rain_puddles/de_anubis/overcast_sky.vmat_c",
+        "sha256": "afbb3798fc64181b63a97e1e99f18a8fab0f273865802892c3bef1e232e18d8f"
+      }
+    ]
+  },
+  "shared_entries": [
+    {
+      "target": "particles/rain_fx/rain.vpcf_c",
+      "catalog": "_cs2_insight_catalog/map_materials/rain_puddles/shared/rain_single_800.vpcf_c",
+      "sha256": "9d6424644447c9b3ee5969ae615a04c6daac30b40d3bd466a546cc5f9f1f050d"
+    }
+  ],
+  "source": {
+    "package": "pak01_dir.vpk",
+    "ground_mode": "dust2_native_textures_with_wetness",
+    "ground_shader": "csgo_environment_blend.vfx",
+    "ground_transform": {
+      "schema_version": 1,
+      "mode": "native_map_textures_with_wetness",
+      "shader": "csgo_environment_blend.vfx",
+      "material_count": 18,
+      "parameters": {
+        "F_WETNESS": 1,
+        "g_bPuddlesOnVerticalSurfaces": 0,
+        "g_bWetnessUseHeightmapAdjustments": 0,
+        "g_fPuddleBlendSoftness": 0.08,
+        "g_fPuddleRoughness": 0.02,
+        "g_fPuddleStrength": 1.0,
+        "g_fPuddleSedimentHeight": 0.9,
+        "g_fPuddleSedimentOpacity": 0.25,
+        "g_fWetnessStrength": 1.0,
+        "g_fRainStrength": 1.0,
+        "g_fRippleStrength": 1.0,
+        "g_fWetEdgeSpread": 0.2,
+        "g_fWetEdgeStrength": 0.5
+      },
+      "height_inputs": "native environment-blend sources preserve authored height inputs with height influence disabled; converted lightmapped sources use the same built-in constant AO resource for both layers",
+      "items": [
+        {
+          "file": "hr_dust_blend_asphalt_06.vmat_c",
+          "source_sha256": "473d066e0c1d82b270f54615c6a9b0a8ce14b5678605e30e73904447e5089063",
+          "output_sha256": "5fb641e2e4cc8021a0316c254798321fb577f2c7a181122332e0decca44cb9a4",
+          "output_bytes": 5488,
+          "source_shader": "csgo_lightmappedgeneric.vfx",
+          "shader": "csgo_environment_blend.vfx",
+          "texture_count": 7,
+          "source_layer_mode": "two_layer"
+        },
+        {
+          "file": "hr_dust_blend_asphalt_07.vmat_c",
+          "source_sha256": "a500e3d810f10ab655a08d660141433caf719056fba67c2a650ab0551d179c0f",
+          "output_sha256": "0e72a0893a88b09acee8150b2457d2137900704bbc954a61d0a5dce195ba3bb0",
+          "output_bytes": 5456,
+          "source_shader": "csgo_lightmappedgeneric.vfx",
+          "shader": "csgo_environment_blend.vfx",
+          "texture_count": 7,
+          "source_layer_mode": "two_layer"
+        },
+        {
+          "file": "hr_dust_blend_floortile_01.vmat_c",
+          "source_sha256": "58fcdb3860e75ed3003c2c53603e33203e5485dee5d115721eb597d856a4e0cb",
+          "output_sha256": "1817a5cb2d762b1f13417838a78bd6c2a895db57440d9a0d7090ca51b7775c20",
+          "output_bytes": 5712,
+          "source_shader": "csgo_lightmappedgeneric.vfx",
+          "shader": "csgo_environment_blend.vfx",
+          "texture_count": 7,
+          "source_layer_mode": "two_layer"
+        },
+        {
+          "file": "hr_dust_blend_floortile_03.vmat_c",
+          "source_sha256": "24b79dfc2f852e4a482e19e2a27a3895cb8a2d5bc5f6392e0a739923ed41474b",
+          "output_sha256": "57d401211209dc2f0f22a8777f084d46b664b6241aba19fea13388c6f68efd4a",
+          "output_bytes": 5504,
+          "source_shader": "csgo_lightmappedgeneric.vfx",
+          "shader": "csgo_environment_blend.vfx",
+          "texture_count": 7,
+          "source_layer_mode": "two_layer"
+        },
+        {
+          "file": "hr_dust_blend_groundrough01-groundrough02.vmat_c",
+          "source_sha256": "2ae8068f883f155c519a26a3259db5e00825e1f23c9d6ef785f92292013d91d5",
+          "output_sha256": "af756de016ab1e2dc0d2f956d868e111ac66eeb241a058aa9c577fb41f11aa79",
+          "output_bytes": 5504,
+          "source_shader": "csgo_lightmappedgeneric.vfx",
+          "shader": "csgo_environment_blend.vfx",
+          "texture_count": 7,
+          "source_layer_mode": "two_layer"
+        },
+        {
+          "file": "hr_dust_blend_groundrough01-groundsmooth01.vmat_c",
+          "source_sha256": "5d3b83630ac58a0d979d4592832e2d75b4d0d6ce4ef46518982b12cc7a39427d",
+          "output_sha256": "198317ea6f0b80c26550b6e5fea52b467a2328614f354bdbc4b07db3fc6231ae",
+          "output_bytes": 5488,
+          "source_shader": "csgo_lightmappedgeneric.vfx",
+          "shader": "csgo_environment_blend.vfx",
+          "texture_count": 7,
+          "source_layer_mode": "two_layer"
+        },
+        {
+          "file": "hr_dust_blend_groundrough01-groundsweeds01.vmat_c",
+          "source_sha256": "3a538bb37a563a9d8adaf099ca3cf58adb3f5de0285400d4e0e6f7051714aec1",
+          "output_sha256": "2e1bb5c7058a50a34ac5cb2e6f1b20777aca34cc57848d739bfb72e8ed4bfda9",
+          "output_bytes": 5536,
+          "source_shader": "csgo_lightmappedgeneric.vfx",
+          "shader": "csgo_environment_blend.vfx",
+          "texture_count": 7,
+          "source_layer_mode": "two_layer"
+        },
+        {
+          "file": "hr_dust_blend_groundrough02-groundsmooth01.vmat_c",
+          "source_sha256": "438e9e4670964ea2ad5f2c6cbdb6f1b0168de62b278849c03df8bc1d9eee49fd",
+          "output_sha256": "3fc9d15de7be12f97de12aef95d3db888d2c7bd1ada36308c58bcce5d98feaa3",
+          "output_bytes": 5504,
+          "source_shader": "csgo_lightmappedgeneric.vfx",
+          "shader": "csgo_environment_blend.vfx",
+          "texture_count": 7,
+          "source_layer_mode": "two_layer"
+        },
+        {
+          "file": "hr_dust_blend_groundstone01-groundrough01.vmat_c",
+          "source_sha256": "dfa060530abe4eb37fcc5595464000d8d70422fae0c5fc90202d8efd8e54e2b1",
+          "output_sha256": "7e91bfe62f9a2c0df1f0e9fa522a2e1d26d5ee267e92dc7b7c0237137513a277",
+          "output_bytes": 5456,
+          "source_shader": "csgo_lightmappedgeneric.vfx",
+          "shader": "csgo_environment_blend.vfx",
+          "texture_count": 7,
+          "source_layer_mode": "two_layer"
+        },
+        {
+          "file": "hr_dust_blend_groundstone01-groundsmooth01.vmat_c",
+          "source_sha256": "164511a6e73b86d8d647ec24761cfc2553ae41d60fd2e309688914fe0cf80814",
+          "output_sha256": "c570922b1ced1941fd3023d9aa1536ec9cd1e0c0bb55d4c7dc2c3345f559b5aa",
+          "output_bytes": 5456,
+          "source_shader": "csgo_lightmappedgeneric.vfx",
+          "shader": "csgo_environment_blend.vfx",
+          "texture_count": 7,
+          "source_layer_mode": "two_layer"
+        },
+        {
+          "file": "hr_dust_blend_sand02_sand03.vmat_c",
+          "source_sha256": "2f632c5a4f18c6609959e9dcd959e9573e86e77deb26ec5a752971cbec4ffa46",
+          "output_sha256": "cfd63f2f721f4ed7786d448d06a6be232f5ee6923b50da77163f2c5c95cb4265",
+          "output_bytes": 5200,
+          "source_shader": "csgo_lightmappedgeneric.vfx",
+          "shader": "csgo_environment_blend.vfx",
+          "texture_count": 7,
+          "source_layer_mode": "two_layer"
+        },
+        {
+          "file": "hr_dust_brick_ground_02.vmat_c",
+          "source_sha256": "2b65d0b54964d0dca4f1641f61952cdf411732432d1b4eb2c76556e0feefb84a",
+          "output_sha256": "c1635001065df16a830ccc9772f07a8f40d1e42c0068e43fdbb6e9a896811e9e",
+          "output_bytes": 5552,
+          "source_shader": "csgo_lightmappedgeneric.vfx",
+          "shader": "csgo_environment_blend.vfx",
+          "texture_count": 7,
+          "source_layer_mode": "two_layer"
+        },
+        {
+          "file": "hr_dust_brick_ground_04.vmat_c",
+          "source_sha256": "3e9a4ab3d039af481fa57596602880cadc1b8f7f358c85773c06c026620f39a1",
+          "output_sha256": "0f4512a56969ca10ee939a271a48590ac50d138edfe68c108e64a4d40eba9d8f",
+          "output_bytes": 5568,
+          "source_shader": "csgo_lightmappedgeneric.vfx",
+          "shader": "csgo_environment_blend.vfx",
+          "texture_count": 7,
+          "source_layer_mode": "two_layer"
+        },
+        {
+          "file": "hr_dust_sand_02.vmat_c",
+          "source_sha256": "49fd86de5f313f4fd0ea462b83e95aef07727561385353a20547affcf348caf1",
+          "output_sha256": "a400e97bcaed5d6fcb8181cf520cca348d7386a9f4ca52756d74a766f6aacbd1",
+          "output_bytes": 4960,
+          "source_shader": "csgo_lightmappedgeneric.vfx",
+          "shader": "csgo_environment_blend.vfx",
+          "texture_count": 7,
+          "source_layer_mode": "two_layer"
+        },
+        {
+          "file": "hr_dust_stone_ground_01.vmat_c",
+          "source_sha256": "16b4e5b0b4ed582c86faac93006ead69e0fcb54795d1ea581d43f1d536044715",
+          "output_sha256": "db5dcf77697817851f8e4c58f5d6ffa4e448af9f1d7617e8eb69234f3d3cd4f8",
+          "output_bytes": 5552,
+          "source_shader": "csgo_lightmappedgeneric.vfx",
+          "shader": "csgo_environment_blend.vfx",
+          "texture_count": 7,
+          "source_layer_mode": "two_layer"
+        },
+        {
+          "file": "hr_dust_tile_01.vmat_c",
+          "source_sha256": "a95bec5de1986e7b864acd93adc3287a61512a43c94be877ff1cd1fb597a475d",
+          "output_sha256": "1937d412b51ceaa3d572dbac8aa88b5b8fa90f46e505f3d106512d4a8ad433fd",
+          "output_bytes": 5504,
+          "source_shader": "csgo_lightmappedgeneric.vfx",
+          "shader": "csgo_environment_blend.vfx",
+          "texture_count": 7,
+          "source_layer_mode": "two_layer"
+        },
+        {
+          "file": "hr_dust_tile_02.vmat_c",
+          "source_sha256": "bad635b5ae88a3339cd960a005571dfefe47529544c45117736516d7b839006c",
+          "output_sha256": "9301d83449c7728220e984f2eb14b78592d4acccaee30387a77989d38ab484ee",
+          "output_bytes": 5344,
+          "source_shader": "csgo_lightmappedgeneric.vfx",
+          "shader": "csgo_environment_blend.vfx",
+          "texture_count": 7,
+          "source_layer_mode": "two_layer"
+        },
+        {
+          "file": "hr_dust_tile_03.vmat_c",
+          "source_sha256": "1e83283d1fd4a3fcfe625490051ffa2b7871c75a5bd76a1928ff8b70a68dbabe",
+          "output_sha256": "9db70354b7e1a8fc7d5a89cbe5be088b1735ef64846f720652a5109f60901944",
+          "output_bytes": 5408,
+          "source_shader": "csgo_lightmappedgeneric.vfx",
+          "shader": "csgo_environment_blend.vfx",
+          "texture_count": 7,
+          "source_layer_mode": "two_layer"
+        }
+      ]
+    },
+    "wet_shader_reference": "materials/de_ancient/hr_ancient_blend_groundpaver01-grounddirt01-wet.vmat_c",
+    "wet_shader_reference_sha256": "f50cdbac6b7e7bf2f6fd2103ae894e7e0867ff61ed11cecdca4c5b5a46275a9a",
+    "overcast_sky_donor": "materials/skybox/sky_overcast_01.vmat_c",
+    "overcast_sky_donor_size": 2066,
+    "overcast_sky_donor_sha256": "afbb3798fc64181b63a97e1e99f18a8fab0f273865802892c3bef1e232e18d8f",
+    "overcast_sky_texture_donor": "materials/skybox/sky_overcast_01_exr_da4019b1.vtex_c",
+    "overcast_sky_texture_donor_size": 7678498,
+    "overcast_sky_texture_donor_sha256": "315f9aa8953bf9322e74be4f459c4450babeca7f5a953d59cc9715cf836734d3",
+    "rain_particle_donor": "particles/rain_fx/rain_single_800.vpcf_c",
+    "rain_particle_donor_size": 2227,
+    "rain_particle_donor_sha256": "9d6424644447c9b3ee5969ae615a04c6daac30b40d3bd466a546cc5f9f1f050d",
+    "rain_particle_tuning": {
+      "profile": "ancient_style_conservative_footprints",
+      "official_particle": "rain_single_128",
+      "map_emitter_count": 385,
+      "spawn_radius": 64.0,
+      "clearance_radius": 72.0,
+      "parent_emit_rate": 20.0,
+      "parent_trail_length": [
+        3.0,
+        30.0
+      ],
+      "child_particle": "rain_impact_single",
+      "rain_streak_layers": 1,
+      "particle_internals_modified": false,
+      "region_manifest": "pov/weather_effects/regions/de_dust2_rain_emitters_v2.json",
+      "placement": "automatic physical-geometry plan; every retained 72-unit safety footprint stays on same-floor fully outdoor NAV"
+    },
+    "research_phase": "documented_phase_3_native_texture_preserving_wetness",
+    "in_game_evidence": "confirmed on original de_dust2 on 2026-09-02: the current-resource F_WETNESS serialization preserves native Dust2 terrain while adding wetness and puddle reflections"
+  },
+  "selection": {
+    "method": "the exact 18 Dust2 ground paths documented by the successful native-texture wet-ground research",
+    "region_manifest": "pov/weather_effects/regions/de_dust2.json",
+    "visual_caveat": "the 18 targets retain their installed Dust2 color, normal/roughness, blend-modulation, tint, and physical-surface resources; Ancient is used only as the official environment-blend input-signature reference; global rain/ripple strengths remain enabled",
+    "targets": [
+      "materials/de_dust/hr_dust/hr_dust_blend_asphalt_06.vmat_c",
+      "materials/de_dust/hr_dust/hr_dust_blend_asphalt_07.vmat_c",
+      "materials/de_dust/hr_dust/hr_dust_blend_floortile_01.vmat_c",
+      "materials/de_dust/hr_dust/hr_dust_blend_floortile_03.vmat_c",
+      "materials/de_dust/hr_dust/hr_dust_blend_groundrough01-groundrough02.vmat_c",
+      "materials/de_dust/hr_dust/hr_dust_blend_groundrough01-groundsmooth01.vmat_c",
+      "materials/de_dust/hr_dust/hr_dust_blend_groundrough01-groundsweeds01.vmat_c",
+      "materials/de_dust/hr_dust/hr_dust_blend_groundrough02-groundsmooth01.vmat_c",
+      "materials/de_dust/hr_dust/hr_dust_blend_groundstone01-groundrough01.vmat_c",
+      "materials/de_dust/hr_dust/hr_dust_blend_groundstone01-groundsmooth01.vmat_c",
+      "materials/de_dust/hr_dust/hr_dust_blend_sand02_sand03.vmat_c",
+      "materials/de_dust/hr_dust/hr_dust_brick_ground_02.vmat_c",
+      "materials/de_dust/hr_dust/hr_dust_brick_ground_04.vmat_c",
+      "materials/de_dust/hr_dust/hr_dust_sand_02.vmat_c",
+      "materials/de_dust/hr_dust/hr_dust_stone_ground_01.vmat_c",
+      "materials/de_dust/hr_dust/hr_dust_tile_01.vmat_c",
+      "materials/de_dust/hr_dust/hr_dust_tile_02.vmat_c",
+      "materials/de_dust/hr_dust/hr_dust_tile_03.vmat_c"
+    ],
+    "weather_mood": "Train official overcast sky; finalized Dust2 uses 385 official rain_single_128 hosts with Ancient-style full-footprint clearance"
+  },
+  "map_sources": {
+    "de_dust2": {
+      "ground_mode": "dust2_native_textures_with_wetness",
+      "ground_shader": "csgo_environment_blend.vfx",
+      "ground_transform": {
+        "schema_version": 1,
+        "mode": "native_map_textures_with_wetness",
+        "shader": "csgo_environment_blend.vfx",
+        "material_count": 18,
+        "parameters": {
+          "F_WETNESS": 1,
+          "g_bPuddlesOnVerticalSurfaces": 0,
+          "g_bWetnessUseHeightmapAdjustments": 0,
+          "g_fPuddleBlendSoftness": 0.08,
+          "g_fPuddleRoughness": 0.02,
+          "g_fPuddleStrength": 1.0,
+          "g_fPuddleSedimentHeight": 0.9,
+          "g_fPuddleSedimentOpacity": 0.25,
+          "g_fWetnessStrength": 1.0,
+          "g_fRainStrength": 1.0,
+          "g_fRippleStrength": 1.0,
+          "g_fWetEdgeSpread": 0.2,
+          "g_fWetEdgeStrength": 0.5
+        },
+        "height_inputs": "native environment-blend sources preserve authored height inputs with height influence disabled; converted lightmapped sources use the same built-in constant AO resource for both layers",
+        "items": [
+          {
+            "file": "hr_dust_blend_asphalt_06.vmat_c",
+            "source_sha256": "473d066e0c1d82b270f54615c6a9b0a8ce14b5678605e30e73904447e5089063",
+            "output_sha256": "5fb641e2e4cc8021a0316c254798321fb577f2c7a181122332e0decca44cb9a4",
+            "output_bytes": 5488,
+            "source_shader": "csgo_lightmappedgeneric.vfx",
+            "shader": "csgo_environment_blend.vfx",
+            "texture_count": 7,
+            "source_layer_mode": "two_layer"
+          },
+          {
+            "file": "hr_dust_blend_asphalt_07.vmat_c",
+            "source_sha256": "a500e3d810f10ab655a08d660141433caf719056fba67c2a650ab0551d179c0f",
+            "output_sha256": "0e72a0893a88b09acee8150b2457d2137900704bbc954a61d0a5dce195ba3bb0",
+            "output_bytes": 5456,
+            "source_shader": "csgo_lightmappedgeneric.vfx",
+            "shader": "csgo_environment_blend.vfx",
+            "texture_count": 7,
+            "source_layer_mode": "two_layer"
+          },
+          {
+            "file": "hr_dust_blend_floortile_01.vmat_c",
+            "source_sha256": "58fcdb3860e75ed3003c2c53603e33203e5485dee5d115721eb597d856a4e0cb",
+            "output_sha256": "1817a5cb2d762b1f13417838a78bd6c2a895db57440d9a0d7090ca51b7775c20",
+            "output_bytes": 5712,
+            "source_shader": "csgo_lightmappedgeneric.vfx",
+            "shader": "csgo_environment_blend.vfx",
+            "texture_count": 7,
+            "source_layer_mode": "two_layer"
+          },
+          {
+            "file": "hr_dust_blend_floortile_03.vmat_c",
+            "source_sha256": "24b79dfc2f852e4a482e19e2a27a3895cb8a2d5bc5f6392e0a739923ed41474b",
+            "output_sha256": "57d401211209dc2f0f22a8777f084d46b664b6241aba19fea13388c6f68efd4a",
+            "output_bytes": 5504,
+            "source_shader": "csgo_lightmappedgeneric.vfx",
+            "shader": "csgo_environment_blend.vfx",
+            "texture_count": 7,
+            "source_layer_mode": "two_layer"
+          },
+          {
+            "file": "hr_dust_blend_groundrough01-groundrough02.vmat_c",
+            "source_sha256": "2ae8068f883f155c519a26a3259db5e00825e1f23c9d6ef785f92292013d91d5",
+            "output_sha256": "af756de016ab1e2dc0d2f956d868e111ac66eeb241a058aa9c577fb41f11aa79",
+            "output_bytes": 5504,
+            "source_shader": "csgo_lightmappedgeneric.vfx",
+            "shader": "csgo_environment_blend.vfx",
+            "texture_count": 7,
+            "source_layer_mode": "two_layer"
+          },
+          {
+            "file": "hr_dust_blend_groundrough01-groundsmooth01.vmat_c",
+            "source_sha256": "5d3b83630ac58a0d979d4592832e2d75b4d0d6ce4ef46518982b12cc7a39427d",
+            "output_sha256": "198317ea6f0b80c26550b6e5fea52b467a2328614f354bdbc4b07db3fc6231ae",
+            "output_bytes": 5488,
+            "source_shader": "csgo_lightmappedgeneric.vfx",
+            "shader": "csgo_environment_blend.vfx",
+            "texture_count": 7,
+            "source_layer_mode": "two_layer"
+          },
+          {
+            "file": "hr_dust_blend_groundrough01-groundsweeds01.vmat_c",
+            "source_sha256": "3a538bb37a563a9d8adaf099ca3cf58adb3f5de0285400d4e0e6f7051714aec1",
+            "output_sha256": "2e1bb5c7058a50a34ac5cb2e6f1b20777aca34cc57848d739bfb72e8ed4bfda9",
+            "output_bytes": 5536,
+            "source_shader": "csgo_lightmappedgeneric.vfx",
+            "shader": "csgo_environment_blend.vfx",
+            "texture_count": 7,
+            "source_layer_mode": "two_layer"
+          },
+          {
+            "file": "hr_dust_blend_groundrough02-groundsmooth01.vmat_c",
+            "source_sha256": "438e9e4670964ea2ad5f2c6cbdb6f1b0168de62b278849c03df8bc1d9eee49fd",
+            "output_sha256": "3fc9d15de7be12f97de12aef95d3db888d2c7bd1ada36308c58bcce5d98feaa3",
+            "output_bytes": 5504,
+            "source_shader": "csgo_lightmappedgeneric.vfx",
+            "shader": "csgo_environment_blend.vfx",
+            "texture_count": 7,
+            "source_layer_mode": "two_layer"
+          },
+          {
+            "file": "hr_dust_blend_groundstone01-groundrough01.vmat_c",
+            "source_sha256": "dfa060530abe4eb37fcc5595464000d8d70422fae0c5fc90202d8efd8e54e2b1",
+            "output_sha256": "7e91bfe62f9a2c0df1f0e9fa522a2e1d26d5ee267e92dc7b7c0237137513a277",
+            "output_bytes": 5456,
+            "source_shader": "csgo_lightmappedgeneric.vfx",
+            "shader": "csgo_environment_blend.vfx",
+            "texture_count": 7,
+            "source_layer_mode": "two_layer"
+          },
+          {
+            "file": "hr_dust_blend_groundstone01-groundsmooth01.vmat_c",
+            "source_sha256": "164511a6e73b86d8d647ec24761cfc2553ae41d60fd2e309688914fe0cf80814",
+            "output_sha256": "c570922b1ced1941fd3023d9aa1536ec9cd1e0c0bb55d4c7dc2c3345f559b5aa",
+            "output_bytes": 5456,
+            "source_shader": "csgo_lightmappedgeneric.vfx",
+            "shader": "csgo_environment_blend.vfx",
+            "texture_count": 7,
+            "source_layer_mode": "two_layer"
+          },
+          {
+            "file": "hr_dust_blend_sand02_sand03.vmat_c",
+            "source_sha256": "2f632c5a4f18c6609959e9dcd959e9573e86e77deb26ec5a752971cbec4ffa46",
+            "output_sha256": "cfd63f2f721f4ed7786d448d06a6be232f5ee6923b50da77163f2c5c95cb4265",
+            "output_bytes": 5200,
+            "source_shader": "csgo_lightmappedgeneric.vfx",
+            "shader": "csgo_environment_blend.vfx",
+            "texture_count": 7,
+            "source_layer_mode": "two_layer"
+          },
+          {
+            "file": "hr_dust_brick_ground_02.vmat_c",
+            "source_sha256": "2b65d0b54964d0dca4f1641f61952cdf411732432d1b4eb2c76556e0feefb84a",
+            "output_sha256": "c1635001065df16a830ccc9772f07a8f40d1e42c0068e43fdbb6e9a896811e9e",
+            "output_bytes": 5552,
+            "source_shader": "csgo_lightmappedgeneric.vfx",
+            "shader": "csgo_environment_blend.vfx",
+            "texture_count": 7,
+            "source_layer_mode": "two_layer"
+          },
+          {
+            "file": "hr_dust_brick_ground_04.vmat_c",
+            "source_sha256": "3e9a4ab3d039af481fa57596602880cadc1b8f7f358c85773c06c026620f39a1",
+            "output_sha256": "0f4512a56969ca10ee939a271a48590ac50d138edfe68c108e64a4d40eba9d8f",
+            "output_bytes": 5568,
+            "source_shader": "csgo_lightmappedgeneric.vfx",
+            "shader": "csgo_environment_blend.vfx",
+            "texture_count": 7,
+            "source_layer_mode": "two_layer"
+          },
+          {
+            "file": "hr_dust_sand_02.vmat_c",
+            "source_sha256": "49fd86de5f313f4fd0ea462b83e95aef07727561385353a20547affcf348caf1",
+            "output_sha256": "a400e97bcaed5d6fcb8181cf520cca348d7386a9f4ca52756d74a766f6aacbd1",
+            "output_bytes": 4960,
+            "source_shader": "csgo_lightmappedgeneric.vfx",
+            "shader": "csgo_environment_blend.vfx",
+            "texture_count": 7,
+            "source_layer_mode": "two_layer"
+          },
+          {
+            "file": "hr_dust_stone_ground_01.vmat_c",
+            "source_sha256": "16b4e5b0b4ed582c86faac93006ead69e0fcb54795d1ea581d43f1d536044715",
+            "output_sha256": "db5dcf77697817851f8e4c58f5d6ffa4e448af9f1d7617e8eb69234f3d3cd4f8",
+            "output_bytes": 5552,
+            "source_shader": "csgo_lightmappedgeneric.vfx",
+            "shader": "csgo_environment_blend.vfx",
+            "texture_count": 7,
+            "source_layer_mode": "two_layer"
+          },
+          {
+            "file": "hr_dust_tile_01.vmat_c",
+            "source_sha256": "a95bec5de1986e7b864acd93adc3287a61512a43c94be877ff1cd1fb597a475d",
+            "output_sha256": "1937d412b51ceaa3d572dbac8aa88b5b8fa90f46e505f3d106512d4a8ad433fd",
+            "output_bytes": 5504,
+            "source_shader": "csgo_lightmappedgeneric.vfx",
+            "shader": "csgo_environment_blend.vfx",
+            "texture_count": 7,
+            "source_layer_mode": "two_layer"
+          },
+          {
+            "file": "hr_dust_tile_02.vmat_c",
+            "source_sha256": "bad635b5ae88a3339cd960a005571dfefe47529544c45117736516d7b839006c",
+            "output_sha256": "9301d83449c7728220e984f2eb14b78592d4acccaee30387a77989d38ab484ee",
+            "output_bytes": 5344,
+            "source_shader": "csgo_lightmappedgeneric.vfx",
+            "shader": "csgo_environment_blend.vfx",
+            "texture_count": 7,
+            "source_layer_mode": "two_layer"
+          },
+          {
+            "file": "hr_dust_tile_03.vmat_c",
+            "source_sha256": "1e83283d1fd4a3fcfe625490051ffa2b7871c75a5bd76a1928ff8b70a68dbabe",
+            "output_sha256": "9db70354b7e1a8fc7d5a89cbe5be088b1735ef64846f720652a5109f60901944",
+            "output_bytes": 5408,
+            "source_shader": "csgo_lightmappedgeneric.vfx",
+            "shader": "csgo_environment_blend.vfx",
+            "texture_count": 7,
+            "source_layer_mode": "two_layer"
+          }
+        ]
+      },
+      "rain_particle_tuning": {
+        "profile": "ancient_style_conservative_footprints",
+        "official_particle": "rain_single_128",
+        "map_emitter_count": 385,
+        "spawn_radius": 64.0,
+        "clearance_radius": 72.0,
+        "parent_emit_rate": 20.0,
+        "parent_trail_length": [
+          3.0,
+          30.0
+        ],
+        "child_particle": "rain_impact_single",
+        "rain_streak_layers": 1,
+        "particle_internals_modified": false,
+        "region_manifest": "pov/weather_effects/regions/de_dust2_rain_emitters_v2.json",
+        "placement": "automatic physical-geometry plan; every retained 72-unit safety footprint stays on same-floor fully outdoor NAV"
+      },
+      "in_game_evidence": "confirmed on original de_dust2 on 2026-09-02: the current-resource F_WETNESS serialization preserves native Dust2 terrain while adding wetness and puddle reflections"
+    },
+    "de_mirage": {
+      "ground_mode": "mirage_native_textures_with_wetness",
+      "ground_shader": "csgo_environment_blend.vfx",
+      "ground_transform": {
+        "schema_version": 1,
+        "mode": "native_map_textures_with_wetness",
+        "shader": "csgo_environment_blend.vfx",
+        "material_count": 12,
+        "parameters": {
+          "F_WETNESS": 1,
+          "g_bPuddlesOnVerticalSurfaces": 0,
+          "g_bWetnessUseHeightmapAdjustments": 0,
+          "g_fPuddleBlendSoftness": 0.08,
+          "g_fPuddleRoughness": 0.005,
+          "g_fPuddleStrength": 1.0,
+          "g_fPuddleSedimentHeight": 0.9,
+          "g_fPuddleSedimentOpacity": 0.12,
+          "g_fWetnessStrength": 1.0,
+          "g_fRainStrength": 1.0,
+          "g_fRippleStrength": 1.0,
+          "g_fWetEdgeSpread": 0.25,
+          "g_fWetEdgeStrength": 0.9
+        },
+        "height_inputs": "native environment-blend sources preserve authored height inputs with height influence disabled; converted lightmapped sources use the same built-in constant AO resource for both layers",
+        "items": [
+          {
+            "file": "de_mirage_brick_ver1_diffuse.vmat_c",
+            "source_sha256": "200966aaaeb8d057342c22bf1542a897a5adefa479240a303685b947bb107dbd",
+            "output_sha256": "26c567c7ecdc2649640c8cb3840a6169317c830ab25614013af55b521f2d559a",
+            "output_bytes": 4784,
+            "source_shader": "csgo_lightmappedgeneric.vfx",
+            "shader": "csgo_environment_blend.vfx",
+            "texture_count": 7,
+            "source_layer_mode": "single_layer_duplicated"
+          },
+          {
+            "file": "de_mirage_tile_ver4_diffuse.vmat_c",
+            "source_sha256": "fe394600ef06d65368d2f20e17ef05e16069d22e86130e83315d4a94fab4046a",
+            "output_sha256": "26e873cabc4d3df7fa56f1aaac1cdee59944d684724ae8a7afb4635ca218ce5d",
+            "output_bytes": 4736,
+            "source_shader": "csgo_lightmappedgeneric.vfx",
+            "shader": "csgo_environment_blend.vfx",
+            "texture_count": 7,
+            "source_layer_mode": "single_layer_duplicated"
+          },
+          {
+            "file": "de_mirage_tilef_diffuse.vmat_c",
+            "source_sha256": "38160ae6ba22c532c1e7f6c2ac444bdd86810606d4c2c290c7bdddd47f480946",
+            "output_sha256": "411bc413ab43950b0ca62c44302cf44366f4aa84ab381e58509ec06d63c74b42",
+            "output_bytes": 4800,
+            "source_shader": "csgo_lightmappedgeneric.vfx",
+            "shader": "csgo_environment_blend.vfx",
+            "texture_count": 7,
+            "source_layer_mode": "single_layer_duplicated"
+          },
+          {
+            "file": "de_mirage_wood_ver3_diffuse.vmat_c",
+            "source_sha256": "793b021fcd979d0b14ed903f35268bdfc6f16515105f4fe8cca9033337d74986",
+            "output_sha256": "248183e104f26d781c19c1b27bb64cf4e4c2a8461aca06cd524d614bd2b94ff1",
+            "output_bytes": 4896,
+            "source_shader": "csgo_lightmappedgeneric.vfx",
+            "shader": "csgo_environment_blend.vfx",
+            "texture_count": 7,
+            "source_layer_mode": "single_layer_duplicated"
+          },
+          {
+            "file": "marble_01.vmat_c",
+            "source_sha256": "56c16e94922666e0df996cb7e2b1974f266706acc9670979e0f6284ee40005e4",
+            "output_sha256": "9a02368c5d53f8337307396c6b9eb4698bb3edc517a3528ef162725ddac15ac7",
+            "output_bytes": 4992,
+            "source_shader": "csgo_lightmappedgeneric.vfx",
+            "shader": "csgo_environment_blend.vfx",
+            "texture_count": 7,
+            "source_layer_mode": "single_layer_duplicated"
+          },
+          {
+            "file": "milbeams003.vmat_c",
+            "source_sha256": "59634ea22a2cafe10e1d9df16a29e0498aa7ee87795d7438256e814794d60160",
+            "output_sha256": "2c5efb11338f82a804c148faa98624c73b267cdf31a9cccc92d0bc34ed8f9a02",
+            "output_bytes": 4672,
+            "source_shader": "csgo_lightmappedgeneric.vfx",
+            "shader": "csgo_environment_blend.vfx",
+            "texture_count": 7,
+            "source_layer_mode": "single_layer_duplicated"
+          },
+          {
+            "file": "mirage_plaster_blend_3.vmat_c",
+            "source_sha256": "3f7750313d4992af4f684be24169717462951b0cc6515add30ddd8ee93b8df37",
+            "output_sha256": "bd35467e337007cb9474c0a6cf01031e82b9cc8cd8496cb525587eeaa098486b",
+            "output_bytes": 5568,
+            "source_shader": "csgo_lightmappedgeneric.vfx",
+            "shader": "csgo_environment_blend.vfx",
+            "texture_count": 7,
+            "source_layer_mode": "two_layer"
+          },
+          {
+            "file": "plywood02.vmat_c",
+            "source_sha256": "cf08a882005ebaa5eb359633a206529a7ceb1b9ae55bbf92d5a50c6cc692fb33",
+            "output_sha256": "56c5b76b587b3a4bb0443098ca7839e1fe5fb1b0067a63a8285852b47bb74662",
+            "output_bytes": 4864,
+            "source_shader": "csgo_lightmappedgeneric.vfx",
+            "shader": "csgo_environment_blend.vfx",
+            "texture_count": 7,
+            "source_layer_mode": "single_layer_duplicated"
+          },
+          {
+            "file": "stonestep03.vmat_c",
+            "source_sha256": "a3dcea96ed28a57ab6c719a8794e1e546252dee42f21cd59a1923d61e9e94944",
+            "output_sha256": "e1cdb11c5eab762ed7a31847c1570b1bab4b938e51c9d6402774cf9b1c3aaab6",
+            "output_bytes": 4656,
+            "source_shader": "csgo_lightmappedgeneric.vfx",
+            "shader": "csgo_environment_blend.vfx",
+            "texture_count": 7,
+            "source_layer_mode": "single_layer_duplicated"
+          },
+          {
+            "file": "tile_mall_floor00.vmat_c",
+            "source_sha256": "894290864f3c74a50f6de8d31114f3347862c767378223e0e1c7675ecc2fd36a",
+            "output_sha256": "bf3263e0da90f9b171525754a6c61376cfc84434ba20ac0dcd3cde35cb3d61b7",
+            "output_bytes": 4752,
+            "source_shader": "csgo_lightmappedgeneric.vfx",
+            "shader": "csgo_environment_blend.vfx",
+            "texture_count": 7,
+            "source_layer_mode": "single_layer_duplicated"
+          },
+          {
+            "file": "tilefloor02.vmat_c",
+            "source_sha256": "1294fcc8ed11e315723f361bfc8214893c7c0bad4259ed63f2f5962881bcd78e",
+            "output_sha256": "d06a1a630d13b3bf3429874a7431610323b5a09e9cebcbf6ac8f5c966c8e22eb",
+            "output_bytes": 4720,
+            "source_shader": "csgo_lightmappedgeneric.vfx",
+            "shader": "csgo_environment_blend.vfx",
+            "texture_count": 7,
+            "source_layer_mode": "single_layer_duplicated"
+          },
+          {
+            "file": "woodsteps001.vmat_c",
+            "source_sha256": "93403613390e2ae7ccce6314b6b68f7bd4a30201705cde7f5853f470f855524b",
+            "output_sha256": "948af458834a25d2490e06e20d2b3a48ea377864b2e681535409337179235d08",
+            "output_bytes": 4672,
+            "source_shader": "csgo_lightmappedgeneric.vfx",
+            "shader": "csgo_environment_blend.vfx",
+            "texture_count": 7,
+            "source_layer_mode": "single_layer_duplicated"
+          }
+        ]
+      },
+      "rain_particle_tuning": {
+        "official_particle": "rain_single_128",
+        "map_emitter_count": 832,
+        "source_map_emitter_count": 832,
+        "removed_map_emitter_count": 0,
+        "emitter_reduction_percent": 0.0,
+        "spawn_radius": 64.0,
+        "parent_emit_rate": 20.0,
+        "parent_trail_length": [
+          3.0,
+          30.0
+        ],
+        "child_particle": "rain_impact_single",
+        "rain_streak_layers": 1,
+        "particle_internals_modified": false,
+        "placement": "green radar whitelist minus expanded red exclusion, plus cyan supplements and a magenta highest-floor-only override"
+      },
+      "in_game_evidence": "candidate built on 2026-09-02; requires the user's local Mirage map and Demo visual gate",
+      "world_puddle_atlas": {
+        "status": "candidate_requires_in_game_gate",
+        "metadata": "pov/weather_effects/regions/de_mirage_world_puddle_atlas_v1.json",
+        "models": [
+          {
+            "id": "puddle_01",
+            "model": "maps/de_mirage/worldnodes/n0_lr0_c4_s_mesh_overlay4.vmdl_c",
+            "model_sha256": "ed66782508cad7693d9831b9ea1538a13e192b3337a0d03f183e8f03ad651dc3"
+          },
+          {
+            "id": "puddle_02",
+            "model": "maps/de_mirage/worldnodes/n0_lr0_c280_s_mesh_overlay280.vmdl_c",
+            "model_sha256": "b0797d2fcf4598f89b05eee34728c6c1d36550fb7aee54336fedc5546cbd34f0"
+          },
+          {
+            "id": "puddle_03",
+            "model": "maps/de_mirage/worldnodes/n0_lr0_c60_s_mesh_overlay60.vmdl_c",
+            "model_sha256": "4f860890d0f0c7d14d58f67d890577a46ea955047c5262d5cb985ee840d63831"
+          },
+          {
+            "id": "puddle_04",
+            "model": "maps/de_mirage/worldnodes/n0_lr0_c253_s_mesh_overlay253.vmdl_c",
+            "model_sha256": "1211911df2b8ce1a6f8394c59bb340dbd58ad07b890f4781e18cb6141399513a"
+          },
+          {
+            "id": "puddle_06",
+            "model": "maps/de_mirage/worldnodes/n0_lr0_c22_s_mesh_overlay22.vmdl_c",
+            "model_sha256": "0536f1d6b2d4ed54e12546ef4dd41445f70e33c85fe75b50172deac50b4ef005"
+          },
+          {
+            "id": "puddle_07",
+            "model": "maps/de_mirage/worldnodes/n0_lr0_c111_s_mesh_overlay111.vmdl_c",
+            "model_sha256": "f0d8c997b990bc21bb27e5b8b7f9eccab847eb04204c60a8fae59396cc58650f"
+          },
+          {
+            "id": "puddle_08",
+            "model": "maps/de_mirage/worldnodes/n0_lr0_c125_s_mesh_overlay125.vmdl_c",
+            "model_sha256": "b89ae67fb1f27d68460cb537244ca7f608bfc0b8bdeb31055fce0cccfa4f5b05"
+          },
+          {
+            "id": "puddle_09",
+            "model": "maps/de_mirage/worldnodes/n0_lr0_c147_s_mesh_overlay147.vmdl_c",
+            "model_sha256": "da54fec5b9ac1fb3044b0a2253ace5c3505559d1699b51b71edebad3f0b28b91"
+          },
+          {
+            "id": "puddle_10",
+            "model": "maps/de_mirage/worldnodes/n0_lr0_c45_s_mesh_overlay45.vmdl_c",
+            "model_sha256": "d7414860eea73814b7a49ab81adae42f38cda4869dd0913a47a73240f428abb2"
+          },
+          {
+            "id": "puddle_11",
+            "model": "maps/de_mirage/worldnodes/n0_lr0_c14_s_mesh_overlay14.vmdl_c",
+            "model_sha256": "a610a144acbaf490001b5b845403e930d5955da9b87822c5a8108c0450334f5e"
+          },
+          {
+            "id": "puddle_12",
+            "model": "maps/de_mirage/worldnodes/n0_lr0_c104_s_mesh_overlay104.vmdl_c",
+            "model_sha256": "092a975008d40bdfec63b9d9067ea9904523c523cafdfbfa8dd7e88118143649"
+          },
+          {
+            "id": "puddle_13",
+            "model": "maps/de_mirage/worldnodes/n0_lr0_c6_s_mesh_overlay6.vmdl_c",
+            "model_sha256": "bbb2898970e5828aad549465538753705f485ec4c3f00fd703aea1f810af65c5"
+          },
+          {
+            "id": "puddle_14",
+            "model": "maps/de_mirage/worldnodes/n0_lr0_c86_s_mesh_overlay86.vmdl_c",
+            "model_sha256": "42aeb11e8a36dbc760cc2cb181ea117c8f7f4c693aaed36a1585ebbd09da5275"
+          },
+          {
+            "id": "puddle_15",
+            "model": "maps/de_mirage/worldnodes/n0_lr0_c48_s_mesh_overlay48.vmdl_c",
+            "model_sha256": "2a763c22a033312424db68b64b91f572c183b4a547086868c82d4454b2310414"
+          },
+          {
+            "id": "puddle_16",
+            "model": "maps/de_mirage/worldnodes/n0_lr0_c191_s_mesh_overlay191.vmdl_c",
+            "model_sha256": "d202dfe0141057ea6290d09d5a3ecc4f96a9706fd223998b737f90b9aecdfe2c"
+          },
+          {
+            "id": "puddle_17",
+            "model": "maps/de_mirage/worldnodes/n0_lr0_c192_s_mesh_overlay192.vmdl_c",
+            "model_sha256": "2957abaf2ad3b9942295a2fcf1e0c295f99a241779fe51335a92c84e3c8411a0"
+          },
+          {
+            "id": "puddle_18",
+            "model": "maps/de_mirage/worldnodes/n0_lr0_c11_s_mesh_overlay11.vmdl_c",
+            "model_sha256": "815a5ef1f05f70c11f63b2860ce1575f4364a1e02e2b03f442ccc2928baa756e"
+          }
+        ],
+        "material": "materials/models/effects/urban_puddle01a.vmat",
+        "render_host": "worldnode_static_overlay_model_overrides",
+        "worldnode": "maps/de_mirage/worldnodes/n0.vwnod_c",
+        "puddle_count": 17,
+        "vertex_count": 1653,
+        "triangle_count": 2528,
+        "uv_mapping": "center-radial-to-transparent-square-rim",
+        "collision": false
+      }
+    },
+    "de_cache": {
+      "ground_mode": "cache_native_environment_blend_with_wetness",
+      "ground_shader": "csgo_environment_blend.vfx",
+      "ground_transform": {
+        "schema_version": 1,
+        "mode": "native_map_textures_with_wetness",
+        "shader": "csgo_environment_blend.vfx",
+        "material_count": 3,
+        "parameters": {
+          "F_WETNESS": 1,
+          "g_bPuddlesOnVerticalSurfaces": 0,
+          "g_bWetnessUseHeightmapAdjustments": 0,
+          "g_fPuddleBlendSoftness": 0.08,
+          "g_fPuddleRoughness": 0.02,
+          "g_fPuddleStrength": 1.0,
+          "g_fPuddleSedimentHeight": 0.9,
+          "g_fPuddleSedimentOpacity": 0.25,
+          "g_fWetnessStrength": 1.0,
+          "g_fRainStrength": 1.0,
+          "g_fRippleStrength": 1.0,
+          "g_fWetEdgeSpread": 0.2,
+          "g_fWetEdgeStrength": 0.5
+        },
+        "height_inputs": "native environment-blend sources preserve authored height inputs with height influence disabled; converted lightmapped sources use the same built-in constant AO resource for both layers",
+        "items": [
+          {
+            "file": "ch2_floor_busstation_01_b.vmat_c",
+            "source_sha256": "4f07fc399e1ea47e92629914d1092207b485c8b047fc17231e3f275adf9693ca",
+            "output_sha256": "21463203028173c02b750e92c974aab7d4ea1ff0d95a971f258029ae9be20171",
+            "output_bytes": 9072,
+            "source_shader": "csgo_environment_blend.vfx",
+            "shader": "csgo_environment_blend.vfx",
+            "texture_count": 13,
+            "source_layer_mode": "native_environment_blend_preserved"
+          },
+          {
+            "file": "ch2_floor_busstation_01.vmat_c",
+            "source_sha256": "a9e44fc17d0e21a5ace86b360d04e7cfef954feb5646963a9ed04b8fb079fdb1",
+            "output_sha256": "1f903082f36d274d705e3779eaeb289bc2a60d2f988d78b6e5e7bd8bde4528e2",
+            "output_bytes": 9104,
+            "source_shader": "csgo_environment_blend.vfx",
+            "shader": "csgo_environment_blend.vfx",
+            "texture_count": 13,
+            "source_layer_mode": "native_environment_blend_preserved"
+          },
+          {
+            "file": "ch2_floor_vinyl_01.vmat_c",
+            "source_sha256": "215d30761c33fc7f4380b1dafe720229693b359a992aade263655c609779a003",
+            "output_sha256": "d09101b9d46b679749b6702e754f6ed3a14a7feb5669c7966dfc4762dbe21a88",
+            "output_bytes": 9760,
+            "source_shader": "csgo_environment_blend.vfx",
+            "shader": "csgo_environment_blend.vfx",
+            "texture_count": 13,
+            "source_layer_mode": "native_environment_blend_preserved"
+          }
+        ]
+      },
+      "rain_particle_tuning": {
+        "official_particle": "rain_single_800",
+        "map_emitter_count": 38,
+        "source_map_emitter_count": 222,
+        "removed_map_emitter_count": 184,
+        "emitter_reduction_percent": 82.9,
+        "spawn_radius": 390.0,
+        "parent_emit_rate": 550.0,
+        "child_emit_rate": 2000.0,
+        "parent_trail_length": [
+          3.0,
+          30.0
+        ],
+        "child_trail_length": [
+          7.0,
+          16.0
+        ],
+        "rain_streak_layers": 2,
+        "particle_internals_modified": false,
+        "placement": "user-authored magenta rain whitelist minus red indoor exclusion, plus yellow highest-floor-only override; deterministically thinned to a 350-unit maximum centre distance"
+      },
+      "in_game_evidence": "candidate built from the official de_cache.vpk baseline and the user's two-dimensional placement annotation; requires a local visual gate"
+    },
+    "de_inferno": {
+      "ground_mode": "inferno_native_environment_blend_with_wetness",
+      "ground_shader": "csgo_environment_blend.vfx",
+      "ground_transform": {
+        "schema_version": 1,
+        "mode": "native_map_textures_with_wetness",
+        "shader": "csgo_environment_blend.vfx",
+        "material_count": 2,
+        "parameters": {
+          "F_WETNESS": 1,
+          "g_bPuddlesOnVerticalSurfaces": 0,
+          "g_bWetnessUseHeightmapAdjustments": 0,
+          "g_fPuddleBlendSoftness": 0.08,
+          "g_fPuddleRoughness": 0.02,
+          "g_fPuddleStrength": 1.0,
+          "g_fPuddleSedimentHeight": 0.9,
+          "g_fPuddleSedimentOpacity": 0.25,
+          "g_fWetnessStrength": 1.0,
+          "g_fRainStrength": 1.0,
+          "g_fRippleStrength": 1.0,
+          "g_fWetEdgeSpread": 0.2,
+          "g_fWetEdgeStrength": 0.5
+        },
+        "height_inputs": "native environment-blend sources preserve authored height inputs with height influence disabled; converted lightmapped sources use the same built-in constant AO resource for both layers",
+        "items": [
+          {
+            "file": "inferno_sewer_ground_01.vmat_c",
+            "source_sha256": "ca57d0d80b4bfbaf430510b21cb4463d8bf6283b04a229ed2979ca3e979fed36",
+            "output_sha256": "d2af4771d0f0251b221d0734813742ab207c173d71eac99fa69a9e24ba2bf94f",
+            "output_bytes": 5584,
+            "source_shader": "csgo_environment_blend.vfx",
+            "shader": "csgo_environment_blend.vfx",
+            "texture_count": 6,
+            "source_layer_mode": "native_environment_blend_preserved"
+          },
+          {
+            "file": "inferno_stonefloor07_dirt_blend.vmat_c",
+            "source_sha256": "ad36bc02596e3e3f3a51b6a44f3bf97ff92310d7851f271ed73bddb43323a2ce",
+            "output_sha256": "c702a195c6fed73afd5249d65fd3fc8c555e0ea734387bc85a2b0156aceae594",
+            "output_bytes": 6544,
+            "source_shader": "csgo_environment_blend.vfx",
+            "shader": "csgo_environment_blend.vfx",
+            "texture_count": 6,
+            "source_layer_mode": "native_environment_blend_preserved"
+          }
+        ]
+      },
+      "rain_particle_tuning": {
+        "official_particle": "rain_single_128",
+        "map_emitter_count": 604,
+        "source_map_emitter_count": 604,
+        "removed_map_emitter_count": 0,
+        "emitter_reduction_percent": 0.0,
+        "spawn_radius": 64.0,
+        "parent_emit_rate": 20.0,
+        "parent_trail_length": [
+          3.0,
+          30.0
+        ],
+        "child_particle": "rain_impact_single",
+        "rain_streak_layers": 1,
+        "particle_internals_modified": false,
+        "placement": "user-authored magenta rain whitelist minus red indoor exclusion, with 72-unit indoor clearance, plus a 72-unit-inset yellow highest-floor-only override and two reviewed CT-spawn lower-layer roof corrections; all localized emitters are retained"
+      },
+      "in_game_evidence": "candidate built from the official de_inferno.vpk baseline and the user's two-dimensional placement annotation; requires a local visual gate"
+    },
+    "de_ancient": {
+      "ground_mode": "ancient_retail_wetness_and_puddles_preserved",
+      "ground_shader": "csgo_environment_blend.vfx",
+      "ground_transform": {
+        "material_count": 0,
+        "items": [],
+        "parameters": {
+          "WetnessUseHeightmapAdjustments": 0,
+          "PuddleBlendSoftness": 0.08,
+          "PuddleRoughness": 0.02,
+          "PuddleSedimentHeight": 0.9,
+          "PuddleSedimentOpacity": 0.25,
+          "WetEdgeSpread": 0.2,
+          "WetEdgeStrength": 0.5
+        },
+        "mode": "disabled_to_preserve_retail_wetness_and_puddles"
+      },
+      "rain_particle_tuning": {
+        "official_particle": "rain_single_128",
+        "map_emitter_count": 166,
+        "source_map_emitter_count": 166,
+        "removed_map_emitter_count": 0,
+        "emitter_reduction_percent": 0.0,
+        "spawn_radius": 64.0,
+        "parent_emit_rate": 20.0,
+        "parent_trail_length": [
+          3.0,
+          30.0
+        ],
+        "child_particle": "rain_impact_single",
+        "rain_streak_layers": 1,
+        "particle_internals_modified": false,
+        "placement": "automatic fully sky-exposed NAV floors with a 72-unit indoor and boundary clearance around every 64-unit rain footprint"
+      },
+      "in_game_evidence": "the user inspected the final automatic geometry in local de_ancient on 2026-09-03 and accepted it without adjustment; full Demo, performance, and restore evidence remain release gates"
+    },
+    "de_nuke": {
+      "ground_mode": "nuke_rain_only_no_ground_wetness",
+      "ground_shader": "csgo_environment_blend.vfx",
+      "ground_transform": {
+        "material_count": 0,
+        "items": [],
+        "parameters": {},
+        "mode": "rain_only_no_ground_override"
+      },
+      "rain_particle_tuning": {
+        "official_particle": "rain_single_128",
+        "map_emitter_count": 221,
+        "source_map_emitter_count": 221,
+        "removed_map_emitter_count": 0,
+        "emitter_reduction_percent": 0.0,
+        "spawn_radius": 64.0,
+        "parent_emit_rate": 20.0,
+        "parent_trail_length": [
+          3.0,
+          30.0
+        ],
+        "child_particle": "rain_impact_single",
+        "rain_streak_layers": 1,
+        "particle_internals_modified": false,
+        "placement": "fully sky-exposed upper-layer NAV floors with a 72-unit indoor and boundary clearance around every 64-unit rain footprint; ten user-confirmed exposed walkable surfaces override footprint coverage only; no emitter is at or below the B-layer cutoff Z=-495"
+      },
+      "in_game_evidence": "the user selected the final stable 221-emitter rain-only layout on 2026-09-04 after the ten reported exposed walkable gaps were added; ground wetness and puddles are intentionally disabled"
+    },
+    "de_anubis": {
+      "ground_mode": "anubis_native_environment_blend_with_wetness",
+      "ground_shader": "csgo_environment_blend.vfx",
+      "ground_transform": {
+        "material_count": 0,
+        "items": [],
+        "parameters": {
+          "WetnessUseHeightmapAdjustments": 0,
+          "PuddleBlendSoftness": 0.08,
+          "PuddleRoughness": 0.02,
+          "PuddleSedimentHeight": 0.9,
+          "PuddleSedimentOpacity": 0.25,
+          "WetEdgeSpread": 0.2,
+          "WetEdgeStrength": 0.5
+        },
+        "mode": "disabled_to_preserve_no_rain_ground"
+      },
+      "rain_particle_tuning": {
+        "official_particle": "rain_single_128",
+        "map_emitter_count": 1004,
+        "source_map_emitter_count": 1004,
+        "removed_map_emitter_count": 0,
+        "emitter_reduction_percent": 0.0,
+        "spawn_radius": 64.0,
+        "parent_emit_rate": 20.0,
+        "parent_trail_length": [
+          3.0,
+          30.0
+        ],
+        "child_particle": "rain_impact_single",
+        "rain_streak_layers": 1,
+        "particle_internals_modified": false,
+        "placement": "user-authored magenta rain whitelist minus a 72-unit yellow all-layer roof clearance, plus dark-blue highest-walkable-layer-only emitters; all localized emitters are retained"
+      },
+      "in_game_evidence": "candidate built from the official de_anubis.vpk baseline and the user's two-dimensional placement annotation; requires a local visual gate",
+      "world_puddle_atlas": {
+        "status": "candidate_requires_in_game_gate",
+        "metadata": "pov/weather_effects/regions/de_anubis_world_puddle_atlas_v1.json",
+        "models": [
+          {
+            "id": "puddle_01",
+            "model": "maps/de_anubis/worldnodes/n0_lr0_c35_s_mesh_overlay35_nz.vmdl_c",
+            "model_sha256": "1d8707daeed1e0c8a8bb81f6b6d5899bdd0b3d5f8ca5a724cd653dacb21f6335"
+          },
+          {
+            "id": "puddle_02",
+            "model": "maps/de_anubis/worldnodes/n0_lr0_c64_s_mesh_overlay64_nz.vmdl_c",
+            "model_sha256": "e50c095143c3f4cb6838aaa3efb0e0ef76ec97d0e1136b671f21d843c38d43ae"
+          },
+          {
+            "id": "puddle_03",
+            "model": "maps/de_anubis/worldnodes/n0_lr0_c71_s_mesh_overlay71_nz.vmdl_c",
+            "model_sha256": "d9d9b5818f09b7500363ed307b6e82a4ce710c0e4e674638769cdb28b3211a2d"
+          },
+          {
+            "id": "puddle_04",
+            "model": "maps/de_anubis/worldnodes/n0_lr0_c92_s_mesh_overlay92.vmdl_c",
+            "model_sha256": "54fc97470716a142c20c00aa210913580c20a2a6902829398c64a566e5f168c3"
+          },
+          {
+            "id": "puddle_05",
+            "model": "maps/de_anubis/worldnodes/n0_lr0_c67_s_mesh_overlay67_nz.vmdl_c",
+            "model_sha256": "29849f4081440c3ca3b8ed5a24d535cde5037c452dd928c1dd31e5b072f578f8"
+          },
+          {
+            "id": "puddle_06",
+            "model": "maps/de_anubis/worldnodes/n0_lr0_c95_s_mesh_overlay95.vmdl_c",
+            "model_sha256": "da650e5fedcf23ca02403babb38f9c261af5e3b406f2a057f0103b52d9b0af24"
+          },
+          {
+            "id": "puddle_07",
+            "model": "maps/de_anubis/worldnodes/n0_lr0_c39_s_mesh_overlay39_nz.vmdl_c",
+            "model_sha256": "a6039a98be41cb4d94d360b352d91f4dc3df7d1cb12cba690489832461e73172"
+          },
+          {
+            "id": "puddle_09",
+            "model": "maps/de_anubis/worldnodes/n0_lr0_c9_s_mesh_overlay9.vmdl_c",
+            "model_sha256": "ca4bc2d74f36db3212f881bc3d6b198bec99b62fe5234d63643c9b5b678a3f52"
+          },
+          {
+            "id": "puddle_11",
+            "model": "maps/de_anubis/worldnodes/n0_lr0_c6_s_mesh_overlay6_nz.vmdl_c",
+            "model_sha256": "63c211c04076a70cd7f4c63f5997356376b4e1f786057c0405b0620bb24bd1ae"
+          },
+          {
+            "id": "puddle_12",
+            "model": "maps/de_anubis/worldnodes/n0_lr0_c2_s_mesh_overlay2_nz.vmdl_c",
+            "model_sha256": "9a2bf46efed39fee707f704d0b8beb6564224ce6f6704a97f93fe311dc10214e"
+          },
+          {
+            "id": "puddle_13",
+            "model": "maps/de_anubis/worldnodes/n0_lr0_c66_s_mesh_overlay66_nz.vmdl_c",
+            "model_sha256": "eef9884c4d04bf4887ae597243969211749f2f85d0d07299fbd5b47a95d8a5df"
+          },
+          {
+            "id": "puddle_14",
+            "model": "maps/de_anubis/worldnodes/n0_lr0_c0_s_mesh_overlay0_nz.vmdl_c",
+            "model_sha256": "38f9ef68f7b4a012d4339118d9f7b3d0e974173350c636889cdb6caf7aa354db"
+          }
+        ],
+        "material": "materials/models/effects/urban_puddle01a.vmat",
+        "render_host": "worldnode_static_overlay_model_overrides",
+        "worldnode": "maps/de_anubis/worldnodes/n0.vwnod_c",
+        "puddle_count": 12,
+        "vertex_count": 1622,
+        "triangle_count": 2603,
+        "uv_mapping": "center-radial-to-transparent-square-rim",
+        "collision": false
+      }
+    }
+  },
+  "map_selections": {
+    "de_dust2": {
+      "method": "the exact 18 Dust2 ground paths documented by the successful native-texture wet-ground research",
+      "region_manifest": "pov/weather_effects/regions/de_dust2.json",
+      "visual_caveat": "the 18 targets retain their installed Dust2 color, normal/roughness, blend-modulation, tint, and physical-surface resources; Ancient is used only as the official environment-blend input-signature reference; global rain/ripple strengths remain enabled",
+      "targets": [
+        "materials/de_dust/hr_dust/hr_dust_blend_asphalt_06.vmat_c",
+        "materials/de_dust/hr_dust/hr_dust_blend_asphalt_07.vmat_c",
+        "materials/de_dust/hr_dust/hr_dust_blend_floortile_01.vmat_c",
+        "materials/de_dust/hr_dust/hr_dust_blend_floortile_03.vmat_c",
+        "materials/de_dust/hr_dust/hr_dust_blend_groundrough01-groundrough02.vmat_c",
+        "materials/de_dust/hr_dust/hr_dust_blend_groundrough01-groundsmooth01.vmat_c",
+        "materials/de_dust/hr_dust/hr_dust_blend_groundrough01-groundsweeds01.vmat_c",
+        "materials/de_dust/hr_dust/hr_dust_blend_groundrough02-groundsmooth01.vmat_c",
+        "materials/de_dust/hr_dust/hr_dust_blend_groundstone01-groundrough01.vmat_c",
+        "materials/de_dust/hr_dust/hr_dust_blend_groundstone01-groundsmooth01.vmat_c",
+        "materials/de_dust/hr_dust/hr_dust_blend_sand02_sand03.vmat_c",
+        "materials/de_dust/hr_dust/hr_dust_brick_ground_02.vmat_c",
+        "materials/de_dust/hr_dust/hr_dust_brick_ground_04.vmat_c",
+        "materials/de_dust/hr_dust/hr_dust_sand_02.vmat_c",
+        "materials/de_dust/hr_dust/hr_dust_stone_ground_01.vmat_c",
+        "materials/de_dust/hr_dust/hr_dust_tile_01.vmat_c",
+        "materials/de_dust/hr_dust/hr_dust_tile_02.vmat_c",
+        "materials/de_dust/hr_dust/hr_dust_tile_03.vmat_c"
+      ]
+    },
+    "de_mirage": {
+      "method": "NAV-to-world material ray audit; include lightmapped ground materials with at least 512 approximate outdoor area and at least 95% classified outdoor use",
+      "region_manifest": "pov/weather_effects/regions/de_mirage.json",
+      "visual_caveat": "four outdoor-dominant materials have small indoor reuse (under 5% by classified area), so the first local gate must check indoor leakage; single-layer materials duplicate their native color and normal into both wet-shader layers",
+      "targets": [
+        "materials/de_mirage/marble/marble_01.vmat_c",
+        "materials/de_mirage/tile/de_mirage_tile_ver4_diffuse.vmat_c",
+        "materials/de_dust/stonestep03.vmat_c",
+        "materials/de_mirage/ground/de_mirage_tilef_diffuse.vmat_c",
+        "materials/tile/tile_mall_floor00.vmat_c",
+        "materials/de_mirage/hr_mirage/mirage_plaster_blend_3.vmat_c",
+        "materials/wood/milbeams003.vmat_c",
+        "materials/wood/woodsteps001.vmat_c",
+        "materials/de_dust/tilefloor02.vmat_c",
+        "materials/wood/plywood02.vmat_c",
+        "materials/de_mirage/wood/de_mirage_wood_ver3_diffuse.vmat_c",
+        "materials/de_mirage/brick/de_mirage_brick_ver1_diffuse.vmat_c"
+      ]
+    },
+    "de_cache": {
+      "method": "NAV-to-world material ray audit; strict initial allowlist contains only observed ground materials with zero classified indoor area and a 100% classified outdoor ratio",
+      "region_manifest": "pov/weather_effects/regions/de_cache_rain_annotated.json",
+      "visual_caveat": "the conservative first pass wets only three Cache floor materials; shared asphalt, concrete, gravel, grass, curb, and tile materials remain untouched because the audit found indoor reuse",
+      "targets": [
+        "materials/de_cache/floor/ch2_floor_busstation_01_b.vmat_c",
+        "materials/de_cache/floor/ch2_floor_busstation_01.vmat_c",
+        "materials/de_cache/floor/ch2_floor_vinyl_01.vmat_c"
+      ],
+      "material_audit": {
+        "path": "pov/weather_effects/regions/de_cache_ground_material_annotation_audit.json",
+        "sha256": "32d2a3365cd6a122aa8e86bea449827c2425500f2f96b542cc92ee9bf2c09d2d",
+        "safe_outdoor_wet_candidate_count": 3,
+        "classified_indoor_area": 0.0,
+        "classified_outdoor_ratio": 1.0,
+        "safe_candidate_pool_count": 3
+      }
+    },
+    "de_inferno": {
+      "method": "NAV-to-world material ray audit; strict initial allowlist contains only observed ground materials with zero classified indoor area and a 100% classified outdoor ratio",
+      "region_manifest": "pov/weather_effects/regions/de_inferno_rain_annotated.json",
+      "visual_caveat": "the conservative first pass wets only two Inferno ground materials; widely reused stone, concrete, soil, curb, tile, and wood materials remain untouched because the annotation audit found indoor reuse",
+      "targets": [
+        "materials/de_inferno/ground/inferno_stonefloor07_dirt_blend.vmat_c",
+        "materials/de_inferno/ground/inferno_sewer_ground_01.vmat_c"
+      ],
+      "material_audit": {
+        "path": "pov/weather_effects/regions/de_inferno_ground_material_annotation_audit.json",
+        "sha256": "e0058631cad66acfe574c9cbeb10cd857cf1b1b8a66dd827a5296b818b3db2e1",
+        "safe_outdoor_wet_candidate_count": 2,
+        "classified_indoor_area": 0.0,
+        "classified_outdoor_ratio": 1.0,
+        "safe_candidate_pool_count": 2
+      }
+    },
+    "de_ancient": {
+      "method": "no ground material replacement; the user confirmed that retail Ancient already has sufficient wet ground and visible puddles",
+      "region_manifest": "pov/weather_effects/regions/de_ancient_rain_emitters.json",
+      "visual_caveat": "the automatic first pass adds only falling rain and an overcast sky; the local gate must check caves, temples, corridors, tree canopies, and the two child-skybox material targets",
+      "targets": []
+    },
+    "de_nuke": {
+      "method": "no Nuke ground materials are replaced; only the fixed overcast sky and map-native rain package are composed",
+      "region_manifest": "pov/weather_effects/regions/de_nuke_rain_emitters.json",
+      "visual_caveat": "Nuke intentionally has no wet-ground or puddle layer; its production preset changes only the overcast sky and finalized rain coverage",
+      "targets": []
+    },
+    "de_anubis": {
+      "method": "the corrected NAV-to-world audit found no actual Anubis ground material with zero use under the authored no-rain mask, so the strict roof-safe ground override set is empty",
+      "region_manifest": "pov/weather_effects/regions/de_anubis_rain_world_puddle.json",
+      "visual_caveat": "Anubis keeps its authored canals and water-adjacent surfaces, but does not globally replace any ground material because every real ground candidate is reused inside the no-rain clearance",
+      "targets": [],
+      "material_audit": {
+        "path": "pov/weather_effects/regions/de_anubis_ground_material_annotation_audit.json",
+        "sha256": "08310fe102d770ad45e5534db695e90e964b241c6e082cc7420026dde096b3ed",
+        "safe_outdoor_wet_candidate_count": 0,
+        "classified_indoor_area": 0.0,
+        "classified_outdoor_ratio": 1.0,
+        "safe_candidate_pool_count": 4
+      }
+    }
+  },
+  "map_count": 7,
+  "material_count": 43,
+  "ground_material_count": 35,
+  "shared_override_count": 1,
+  "entry_count": 44,
+  "catalog_bytes": 216728,
+  "catalog_sha256": "cca42b3b33081cbf254d61e2dba1a4ddfa5c2990235517ab5159b488f9790571"
+}

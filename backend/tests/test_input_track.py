@@ -78,6 +78,74 @@ def test_exact_track_can_bind_userinfo_slot_by_name():
     assert track[-1]["W"] is True
 
 
+def test_exact_track_exposes_in_use_without_changing_obs_key_set():
+    report = _report()
+    report["tracks"] = [
+        {
+            "slot": 12,
+            "changes": 2,
+            "encoded": _encoded((100, 1 << 10), (101, 0)),
+        }
+    ]
+    track = input_command.extract_player_input_track(
+        report,
+        steamid=76561198386265483,
+        player_name=None,
+        start_tick=100,
+        end_tick=101,
+    )
+
+    assert track[0]["use"] is True
+    assert track[1]["use"] is False
+    assert "use" not in input_track.KEYS
+
+
+def test_exact_track_exposes_inspect_without_changing_obs_key_set():
+    report = _report()
+    report["format_version"] = 6
+    report["tracks"] = [
+        {
+            "slot": 12,
+            "changes": 2,
+            "encoded": _encoded((100, 1 << 11), (101, 0)),
+        }
+    ]
+    track = input_command.extract_player_input_track(
+        report,
+        steamid=76561198386265483,
+        player_name=None,
+        start_tick=100,
+        end_tick=101,
+    )
+
+    assert track[0]["inspect"] is True
+    assert track[1]["inspect"] is False
+    assert "inspect" not in input_track.KEYS
+
+
+def test_exact_track_exposes_scoreboard_without_changing_obs_key_set():
+    report = _report()
+    report["format_version"] = 7
+    report["tracks"] = [
+        {
+            "slot": 12,
+            "changes": 2,
+            "encoded": _encoded((100, 1 << 12), (101, 0)),
+        }
+    ]
+    track = input_command.extract_player_input_track(
+        report,
+        steamid=76561198386265483,
+        player_name=None,
+        start_tick=100,
+        end_tick=101,
+    )
+
+    assert track[0]["scoreboard"] is True
+    assert track[1]["scoreboard"] is False
+    assert "scoreboard" not in input_track.KEYS
+
+
 def test_downsampling_ors_short_press_into_output_bucket():
     track = input_command.extract_player_input_track(
         _report(),

@@ -28,7 +28,7 @@ function renderRow(demoHasPlayerKeyboardInput) {
   );
 }
 
-describe("QueueWorkspaceRow keyboard input warning", () => {
+describe("QueueWorkspaceRow in-game input HUD warning", () => {
   beforeEach(() => {
     useLocaleStore.setState({
       locale: "zh",
@@ -40,15 +40,15 @@ describe("QueueWorkspaceRow keyboard input warning", () => {
 
   test("shows the warning only when input data is confirmed missing", () => {
     const missing = renderRow(false);
-    const warning = screen.getByTestId("queue-keyboard-input-warning");
-    expect(screen.getByText("该 Demo 中缺失玩家键盘输入数据")).toBeTruthy();
-    expect(screen.getByText("无法正常显示 OBS 虚拟键盘 Overlay")).toBeTruthy();
-    expect(screen.getByText("其他功能不受影响")).toBeTruthy();
+    const warning = screen.getByTestId("queue-input-hud-warning");
+    expect(screen.getByText("该 Demo 缺少权威玩家输入数据")).toBeTruthy();
+    expect(screen.getByText("该片段的局内 VPK 按键 HUD 可能保持为空。")).toBeTruthy();
+    expect(screen.getByText("其他局内 HUD 功能不受影响。")).toBeTruthy();
     expect(warning.className).toContain("w-fit");
     expect(warning.className).toContain("max-w-[290px]");
     missing.unmount();
 
     renderRow(null);
-    expect(screen.queryByTestId("queue-keyboard-input-warning")).toBeNull();
+    expect(screen.queryByTestId("queue-input-hud-warning")).toBeNull();
   });
 });

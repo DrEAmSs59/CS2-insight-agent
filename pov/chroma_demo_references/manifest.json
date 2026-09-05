@@ -1,0 +1,135 @@
+{
+  "schema_version": 1,
+  "purpose": "validated terminal SpawnGroup resource-registration profiles for advanced blue/green demo playback",
+  "target_material_path": "materials/cs2_insight/chroma/active_sky.vmat_c",
+  "target_sky_material_handle": "14038941216328320667",
+  "maps": {
+    "de_ancient": {
+      "status": "validated_reference_recording",
+      "world_name": "maps/prefabs/de_ancient/de_ancient_skybox",
+      "spawn_group_manifest_base64": "JwIAmLSmpoACAAAABAAKAAwA7OgAyvAA7NrC6AAA2sLg5l7g5MoAzMLE5l7Iyr4Aw9zG0src6ABUAb7m1vLE3vBewNnSztDoBMYHfgZ+QgZ0xurEygZM6MoA5NLC2OZexuZAZL7S3OYIhl/GQNDk3trCApTn4GDk0ujKBNYJCgHwAFLmZvfFlnaGAEb3BSf3Jlb2AWT3xlbXVvYVAEbHFjb3RcY2AYZGBgAvZW52AV5saWdodF9wAHJvYmVfdm9sAXRtZV9hdGxhEXIA8ghGNFYnVgDWFgb3FSYnFwCWB0AvYWN0aQB2ZV9za3kA9wAixlZXdsb2dgEWA5Avc2t5XwBocl9henRlYxFeMDILqmhuZwADAAB4",
+      "spawn_group_manifest_size": 279,
+      "spawn_group_manifest_sha256": "212d9d9042ec4a7351f296396bfcfe255373a94f18389002182c6e39192220e8",
+      "reference_demo_file": "cs2i_ancient_chroma_manifest_20260829.dem",
+      "reference_demo_size": 166922,
+      "reference_demo_sha256": "6df1df14d5b95a27d524ea53c26f8250b1ecd071096495ff73684ccc6933685f",
+      "demo_environment_overrides": {
+        "active_cubemap_fog_entities_to_disable": 1,
+        "disable_active_gradient_fog": true
+      }
+    },
+    "de_dust2": {
+      "status": "validated_reference_recording",
+      "world_name": "maps/prefabs/de_dust2/de_dust2_skybox",
+      "spawn_group_manifest_base64": "1wEAmLSmplgCAAAABAAKAAwA7OgAyvAA7NrC6AAA2sLg5l7g5MoAzMLE5l7Iyr5AyOrm6GQAEL/mANbyxN7wXtjS8M7Q6ARGBf4F/gXsxxDqxMoEzOnK5NJgwtjmXgIqAxbg5BDS6MoEVsbmZL4Q0tzmDGZfxtDkAN7awgDwUuZmAfbFlnaGRvcFASb3Jlb2ZffGAFbXVvYVRscWADYHIC9lbnZfAWJ1YmVtYXBfwWBycmF5Bj4GOvYBRMY2h0YGQC8Bcmt5X2RlX2QBdHN0MgD3IsYAVld2xvZ2FwMAkC9hY3RpdmVBXnNreQABAO4=",
+      "spawn_group_manifest_size": 239,
+      "spawn_group_manifest_sha256": "b0e0d12012b419c816b4db32e73a117f95dd065a7d1978f9c83434e4a199d389",
+      "reference_demo_file": "cs2i_ref_de_anubis_blue.dem",
+      "reference_demo_size": 868422,
+      "reference_demo_sha256": "1eae18991579adc1b4bf962db464e6684be98f3e22d29cd891946973a8e42cac",
+      "demo_environment_overrides": {
+        "active_cubemap_fog_entities_to_disable": 1,
+        "suppress_func_brush_model_handles": [
+          "14229486482546056262"
+        ]
+      }
+    },
+    "de_anubis": {
+      "status": "validated_reference_recording",
+      "world_name": "maps/prefabs/de_anubis/de_anubis_skybox",
+      "spawn_group_manifest_base64": "2wEAmLSmpmQCAAAABAAKAAwA7OgAyvAA7NrC6AAA2sLg5l7g5MoAzMLE5l7Iyr5AwtzqxNIANL/mANbyxN7wXtjS8M7Q6ASGBz4GPgYwxhDqxMoGDOjK5NJgwtjmXgIqAxbg5BDS6MoEVsbmZL4Q0tzmDKZfxtDkAN7awgDwUuZmAfbFlnaGRvcFASb3Jlb2ZffGAFbXVvYVRscWADYHIC9lbnZfAWJ1YmVtYXBfwWBycmF5Bj4GOvYBRMY2h0YGQC8Bcmt5X2RlX2EAbm51YmlzAPcAIsZWV3bG9nYBFgOQL2FjdGkAd2Vfc2t5AAEAzA==",
+      "spawn_group_manifest_size": 241,
+      "spawn_group_manifest_sha256": "a4525f0b409ab6fe70e76e97f92590542260d06b059eecf470e35deb6a48cd4a",
+      "reference_demo_file": "cs2i_ref_de_anubis111_blue.dem",
+      "reference_demo_size": 884536,
+      "reference_demo_sha256": "c662033f5eeb9c8647c5331ae3ef8230e7dc6c7e71ec82a6eaec20f224f4477f",
+      "demo_environment_overrides": {
+        "active_cubemap_fog_entities_to_disable": 2,
+        "suppress_func_brush_model_handles": [
+          "2989301448668638875"
+        ]
+      }
+    },
+    "de_cache": {
+      "status": "validated_reference_recording",
+      "world_name": "maps/prefabs/de_cache/de_cache_sky",
+      "spawn_group_manifest_base64": "DQIAmLSmpmACAAAABAAKAAwA7OgAyvAA7NrC6AAA2sLg5l7g5MoAzMLE5l7Iyr5AxsLG0MoAEL/mANbyXtjSztDoHgTmBJ4FngWGx+rEygIFbOnK5NLC2AQUBwLkA9Tm4OTS6MoCBBbH5mS+0tzmAgzGX8bQ5N7awgAA8FLmZvfFlgB2hkb3BSf3JgBW9mX3xlbXVgD2FUbHFjb3RQDGNodGBgAvZQBudl9saWdodAFecHJvYmVfdgFubHVtZV9hdEBsYXMA8ghGNFYBJlbWFgb3FSYBJheWB0AvZGUBXmNhY2hlX3MBanlfMDAxAPcAIsZWV3bG9nYBFgOQL2FjdGkkdgNmeQABAOw=",
+      "spawn_group_manifest_size": 266,
+      "spawn_group_manifest_sha256": "04cd7903f0b33228856f77724096c6be8daa635442c335b02c1d2926a761b600",
+      "reference_demo_file": "cs2i_ref_de_cache_blue.dem",
+      "reference_demo_size": 1069725,
+      "reference_demo_sha256": "869608586fe2bf1ad04b518b96e392454cbb29c3a46b466153c6d3c42985c0af",
+      "demo_environment_overrides": {
+        "active_cubemap_fog_entities_to_disable": 1,
+        "disable_active_gradient_fog": true
+      }
+    },
+    "de_inferno": {
+      "status": "validated_reference_recording",
+      "world_name": "maps/prefabs/de_inferno/inferno_skybox",
+      "spawn_group_manifest_base64": "fQIAmLSmpvICAAAABAAKAAwA7OgAyvAA7NrC6AAA2sLg5l7g5MoAzMLE5l7Iyr4A0tzMyuTc3l4CAOy+5tbyxN7wgF/Y0s7Q6ARmBx6GBh4GDsbqxMoE7OkAyuTSwtjmXsYo5mQEpOcIJl/G0CDk3trCApTn4ORw0ujKBNYJDAHE2t4AyMrYvtDe5soA1u7S2NbSyr4CDsQB8FLmZvfFAJZ2hkb3BSf3ACZW9mX3xlbXAFb2FUbHFjYHACAvZW52X2N1AGJlbWFwX2FyMHJheQY+Bjr2RcYANodGBkAvYWMAdGl2ZV9za3kAAPcixlZXdsYA9nYXA5Avc2sBeG1vZGVsX2gBbnNla3dpbGsBaGVfYWxiZWQBbl8wXzMwX3QBdHJiaWRpdHkRXjAyAyRkbGV2AWB0aW9uXzY1EV4wAAEAzg==",
+      "spawn_group_manifest_size": 322,
+      "spawn_group_manifest_sha256": "c5f988966706f6c68fe57e4fea145b43329e19fb27be15028691ad63311bb597",
+      "reference_demo_file": "cs2i_ref_de_inferno_blue.dem",
+      "reference_demo_size": 900920,
+      "reference_demo_sha256": "b235abc0bf139505d10819cc2aebb5cc5650ce036f1d25ac8df6979d66bed77d",
+      "demo_environment_overrides": {
+        "active_cubemap_fog_entities_to_disable": 1,
+        "disable_active_gradient_fog": true
+      }
+    },
+    "de_mirage": {
+      "status": "validated_reference_recording",
+      "world_name": "maps/prefabs/de_mirage/3dskybox_mirage_legacy",
+      "spawn_group_manifest_base64": "8QEAmLSmpnoCAAAABAAKAAwA7OgAyvAA7NrC6AAA2sLg5l7g5MoAzMLE5l7Iyr4A2tLkws7KXmYAyebW8sTe8ADsAb7Yys7CxvJewNnSztDoBkYG/gb+Qgb8xurEygbM6MqA5dLC2OZeBOoCFkDg5NLoygRWxuZAZL7S3OYOZl7GANDk3trCAPBSAOZm98WWdoZGAfYFJ/cmVvZlAfbGVtdW9hVGAcYWNgcgL2VuAHZfY3ViZW1hAHFfYXJyYXkGPgIGOvZFxjaHRgYAQC9za3lfZGUBXm1pcmFnZQAB9iLGVld2xvYAdhcDkC9hY3QBaHZlX3NreQADAADo",
+      "spawn_group_manifest_size": 252,
+      "spawn_group_manifest_sha256": "f41efcce16e18449f437b35d8fceb73d964b7065e06c1d2c36630972580aef06",
+      "reference_demo_file": "cs2i_ref_de_mirage_blue.dem",
+      "reference_demo_size": 910213,
+      "reference_demo_sha256": "83536e6fe13df336baad5ab8ed30e28fd97a0ba018bd4bfca2b73b36b8aefc1b",
+      "demo_environment_overrides": {
+        "active_cubemap_fog_entities_to_disable": 1
+      }
+    },
+    "de_nuke": {
+      "status": "validated_reference_recording",
+      "world_name": "maps/prefabs/de_nuke/de_nuke_skybox02",
+      "spawn_group_manifest_base64": "1wEAmLSmplYCAAAABAAKAAwA7OgAyvAA7NrC6AAA2sLg5l7g5MoAzMLE5l7Iyr4g3OrWygDuvubWAPLE3vBgZF7Y4NPO0OgERgX+Bf4F7CHG6sTKBMzpyuTA0sLY5l4CagMW4CDk0ujKBFbG5mQgvtLc5gxmX8bQAOTe2sIA8FLmAGb3xZZ2hkb3AQQn9yZW9mX3AMZW11b2FUbHABY2ByAvZW52AV5jdWJlbWFwgV9hcnJheQY+BjoA9kXGNodGBkABLnNreV9kZV8AbnVrZQD3IsYAVld2xvZ2FwMAkC9hY3RpdmVBXnNreQABACI=",
+      "spawn_group_manifest_size": 239,
+      "spawn_group_manifest_sha256": "4cb62025ec9fc78b63492bd1ee1efc760cd44c3bd4c6919d95a4e39dfcc5dc28",
+      "reference_demo_file": "cs2i_ref_de_nuke_blue.dem",
+      "reference_demo_size": 827049,
+      "reference_demo_sha256": "c631183d430da2da13fc96f867811a04c75ef976a7b2d05ab0384d46b53c8c74"
+    },
+    "de_overpass": {
+      "status": "validated_reference_recording",
+      "world_name": "maps/prefabs/overpass/overpass_3d_skybox",
+      "spawn_group_manifest_base64": "6QEAmLSmpnACAAAABAAKAAwA7OgAyvAA7NrC6AAA2sLg5l7g5MoAzMLE5l7e7Mog5ODC5gASv2bIAL7m1vLE3vBewNnSztDoBKYHXgZeQgZSxurEygYs6MqA5dLC2OZeAioDFkDg5NLoygRWxuZAZL7S3OYMxl/GANDk3trCAPBSAOZm98WWdoZGAfYFJ/cmVvZlAfbGVtdW9hVGAcYWNgcgL2VuAHZfY3ViZW1hAHFfYXJyYXkGPgIGOvZFxjaHRgYAQC9za3lfZGUBXm92ZXJwYXMBcl8wMQD3IsYAVld2xvZ2FwMAkC9hY3RpdmVBXnNreQABAOg=",
+      "spawn_group_manifest_size": 248,
+      "spawn_group_manifest_sha256": "2a5222ac754b535a3c1029f79b02a1272d0e4a85195f9a1036aa22b849eb6c75",
+      "reference_demo_file": "cs2i_ref_de_overpass_blue.dem",
+      "reference_demo_size": 999558,
+      "reference_demo_sha256": "4ac42e8d1e7294990647a3954ccc03001ebc87e514ce45ae6871444d9e58624d"
+    },
+    "de_train": {
+      "status": "validated_reference_recording",
+      "world_name": "maps/prefabs/de_train/de_train_skybox",
+      "spawn_group_manifest_base64": "FQIAmLSmpl4CAAAABAAKAAwA7OgAyvAA7NrC6AAA2sLg5l7g5MoAzMLE5l7Iyr5A6OTC0twAEL/mANbyxN7wXtjS8M7Q6ARGBf4F/gXsxxDqxMoEzOnK5NJgwtjmXgIqAxbg5BDS6MoEVsbmZL4Q0tzmDGZfxtDkAN7awgDwUuZmAfbFlnaGRvcFASb3Jlb2ZffGAFbXVvYVRscWADb3RcY2h0YGAAAvZW52X2xpAWZodF9wcm9iAWRfdm9sdW1lAV5hdGxhcwDyAghGNFYnVtYWBgH2FSYnF5YHQAEuc2t5X292ZQByY2FzdF8wMQAA9yLGVld2xgD2dhcDkC9hYwB0aXZlX3NreQQAAQBu",
+      "spawn_group_manifest_size": 270,
+      "spawn_group_manifest_sha256": "a63b842f67457a01d104a8e3a2a0bd59d0c01d29c97cdf72163a256d8de490c1",
+      "reference_demo_file": "cs2i_ref_de_train_blue.dem",
+      "reference_demo_size": 964939,
+      "reference_demo_sha256": "3105d0c2d228bd354c24020d70b3d2622e7fab73c94cb14ab2e01992c3b93a46"
+    },
+    "de_vertigo": {
+      "status": "validated_reference_recording",
+      "world_name": "maps/prefabs/de_vertigo/skybox2",
+      "spawn_group_manifest_base64": "2wEAmLSmpkQCAAAABAAKAAwA7OgAyvAA7NrC6AAA2sLg5l7g5MoAzMLE5l7Iyr4A7Mrk6NLO3l4A5tbyxN7wZF7A2dLO0OgEhgQ+BT5BXsbqxMoEDOnKwOTSwtjmAkwDFuAg5NLoygRWxuZkIL7S3OYMpl7G0ADk3trCAPBS5gBm98WWdoZG9wEEJ/cmVvZl9wDGVtdW9hVGxwAWNgcgL2VudgFeY3ViZW1hcIFfYXJyYXkGPgY6APZFxjaHRgZAAS5za3lfZGVfAHZlcnRpZ28AAfYixlZXdsb2AHYXA5AvYWN0AWh2ZV9za3kAAwAA3A==",
+      "spawn_group_manifest_size": 241,
+      "spawn_group_manifest_sha256": "73325769f4768d280cbda601bef8f1abbf7fa441182745b9fe1d1bb375672a93",
+      "reference_demo_file": "cs2i_ref_de_vertigo_blue.dem",
+      "reference_demo_size": 838584,
+      "reference_demo_sha256": "c9705deef6f99eff6d9d30aee976c99ef958dbadba1c6c8c9fe9ad2ec51382f1"
+    }
+  }
+}

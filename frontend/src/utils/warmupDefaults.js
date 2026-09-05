@@ -1,5 +1,6 @@
 import { normalizeRecordingSkyboxId } from "./recordingSkybox.js";
 import { normalizeRecordingMapMaterialId } from "./recordingMapMaterial.js";
+import { normalizeRecordingWeatherEffectId } from "./recordingWeatherEffect.js";
 import { normalizePovVoiceMode } from "./povVoiceMode.js";
 
 function gcdInt(a, b) {
@@ -125,6 +126,10 @@ export function warmupUiOptsToPersisted(opts) {
     pov_radar_mode: 0,
     pov_teamcounter_numeric: !!opts.pov_teamcounter_numeric,
     pov_voice_mode: normalizePovVoiceMode(opts.pov_voice_mode, opts.pov_voice_disabled === true),
+    input_hud_enabled: opts.input_hud_enabled !== false,
+    input_hud_display_mode: "hybrid",
+    input_audio_enabled: opts.input_audio_enabled !== false,
+    combat_stats_hud_enabled: opts.combat_stats_hud_enabled !== false,
   };
 }
 
@@ -217,19 +222,21 @@ export function splitRecordWarmupConfirmPayload(payload) {
     experimental_pov_enabled,
     recording_skybox,
     recording_map_material,
+    recording_weather_effect,
     obs_transition_enabled,
     obs_transition_name,
     obs_transition_duration_ms,
-    kb_overlay_enabled,
-    kb_overlay_tick_offset,
-    kb_overlay_position,
-    kill_fx_enabled,
-    kill_fx_tick_offset,
+    input_hud_enabled,
+    input_hud_display_mode,
+    input_audio_enabled,
+    combat_stats_hud_enabled,
+    player_aliases_by_demo,
     ...warmupForApi
   } = src;
   return {
     warmupForApi,
     session: {
+      player_aliases_by_demo: player_aliases_by_demo || {},
       cs2_extra_launch_args:
         typeof session_cs2_extra_launch_args === "string"
           ? session_cs2_extra_launch_args
@@ -241,14 +248,15 @@ export function splitRecordWarmupConfirmPayload(payload) {
       experimental_pov_enabled: !!experimental_pov_enabled,
       recording_skybox: normalizeRecordingSkyboxId(recording_skybox),
       recording_map_material: normalizeRecordingMapMaterialId(recording_map_material),
+      recording_weather_effect: normalizeRecordingWeatherEffectId(recording_weather_effect),
       obs_transition_enabled,
       obs_transition_name,
       obs_transition_duration_ms,
-      kb_overlay_enabled: typeof kb_overlay_enabled === "boolean" ? kb_overlay_enabled : undefined,
-      kb_overlay_tick_offset: typeof kb_overlay_tick_offset === "number" ? kb_overlay_tick_offset : undefined,
-      kb_overlay_position: typeof kb_overlay_position === "string" ? kb_overlay_position : undefined,
-      kill_fx_enabled: typeof kill_fx_enabled === "boolean" ? kill_fx_enabled : undefined,
-      kill_fx_tick_offset: typeof kill_fx_tick_offset === "number" ? kill_fx_tick_offset : undefined,
+      input_hud_enabled: typeof input_hud_enabled === "boolean" ? input_hud_enabled : true,
+      input_hud_display_mode: "hybrid",
+      input_audio_enabled: typeof input_audio_enabled === "boolean" ? input_audio_enabled : true,
+      combat_stats_hud_enabled:
+        typeof combat_stats_hud_enabled === "boolean" ? combat_stats_hud_enabled : true,
     },
   };
 }

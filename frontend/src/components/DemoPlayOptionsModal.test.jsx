@@ -13,6 +13,7 @@ describe("DemoPlayOptionsModal", () => {
     const onPlayAdvanced = vi.fn();
     const onRecordingSkyboxChange = vi.fn();
     const onRecordingMapMaterialChange = vi.fn();
+    const onRecordingWeatherEffectChange = vi.fn();
     const customSkyboxId = `custom:${"a".repeat(32)}`;
     render(
       <DemoPlayOptionsModal
@@ -28,6 +29,7 @@ describe("DemoPlayOptionsModal", () => {
         }]}
         onRecordingSkyboxChange={onRecordingSkyboxChange}
         onRecordingMapMaterialChange={onRecordingMapMaterialChange}
+        onRecordingWeatherEffectChange={onRecordingWeatherEffectChange}
         onPlayAdvanced={onPlayAdvanced}
         onClose={() => {}}
       />,
@@ -46,6 +48,13 @@ describe("DemoPlayOptionsModal", () => {
     expect(screen.getByText("跟随回合开")).toBeTruthy();
     expect(screen.getByText("原生 DemoUI · 进度与播放控制")).toBeTruthy();
     expect(screen.getAllByTestId("advanced-preview-player-row")).toHaveLength(10);
+    expect(screen.queryByText("自定义玩家昵称")).toBeNull();
+    expect(screen.queryByRole("checkbox", { name: "启用改名" })).toBeNull();
+    expect(screen.getByText("键鼠开")).toBeTruthy();
+    expect(screen.queryByText("内置按键 + 键鼠可视化")).toBeNull();
+    expect(screen.queryByRole("combobox", { name: "按键显示方式" })).toBeNull();
+    expect(screen.queryByRole("slider")).toBeNull();
+    expect(screen.queryByText("虚拟按键音")).toBeNull();
     const skyboxSelect = screen.getByRole("combobox", { name: "高级播放天空盒" });
     expect(skyboxSelect.value).toBe("cartoon3");
     expect(Array.from(skyboxSelect.options)
@@ -64,21 +73,51 @@ describe("DemoPlayOptionsModal", () => {
         "cartoon9",
         "cartoon10",
       ]);
+    const skyboxGroups = Array.from(skyboxSelect.querySelectorAll("optgroup"));
+    expect(skyboxGroups.map(({ label }) => label)).toEqual([
+      "纯色天空盒",
+      "Insight 内置天空盒",
+      "我的天空盒",
+    ]);
+    expect(Array.from(skyboxGroups[0].querySelectorAll("option")).map((option) => ({
+      value: option.value,
+      label: option.textContent,
+    }))).toEqual([
+      { value: "chroma_blue", label: "蓝色" },
+      { value: "chroma_green", label: "绿色" },
+    ]);
     expect(screen.getByTestId("demo-play-skybox-preview").getAttribute("src"))
       .toBe("/skyboxes/cartoon3.webp");
     fireEvent.change(skyboxSelect, { target: { value: customSkyboxId } });
     expect(onRecordingSkyboxChange).toHaveBeenCalledWith(customSkyboxId);
     const materialSelect = screen.getByRole("combobox", { name: "高级播放地图材质" });
     expect(materialSelect.value).toBe("waxed_reflection");
+    expect(Array.from(materialSelect.options).map(({ value, textContent }) => ({
+      value,
+      label: textContent,
+    }))).toEqual([
+      { value: "default", label: "原始地图材质（不替换）" },
+      { value: "waxed_reflection", label: "打蜡反光倒影" },
+      { value: "rain", label: "下雨（武器带水滴）" },
+    ]);
+    expect(screen.queryByRole("combobox", { name: "高级播放天气效果" })).toBeNull();
+    expect(screen.queryByText(/地表积雪/)).toBeNull();
     fireEvent.change(materialSelect, { target: { value: "default" } });
     expect(onRecordingMapMaterialChange).toHaveBeenCalledWith("default");
+    expect(onRecordingWeatherEffectChange).toHaveBeenCalledWith("default");
+    fireEvent.change(materialSelect, { target: { value: "rain" } });
+    expect(onRecordingMapMaterialChange).toHaveBeenCalledWith("default");
+    expect(onRecordingWeatherEffectChange).toHaveBeenCalledWith("rain");
+    expect(onRecordingSkyboxChange).toHaveBeenCalledWith("default");
 
     const preview = screen.getByTestId("demo-play-preview");
+    expect(screen.queryByTestId("demo-play-input-hud-option")).toBeNull();
     const materialOption = screen.getByTestId("demo-play-map-material-option");
     const skyboxOption = screen.getByTestId("demo-play-skybox-option");
     const warning = screen.getByTestId("demo-play-gameinfo-warning");
     expect(preview.compareDocumentPosition(materialOption) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(materialOption.compareDocumentPosition(skyboxOption) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.queryByTestId("demo-play-weather-effect-option")).toBeNull();
     expect(skyboxOption.compareDocumentPosition(warning) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(screen.getByText("将临时修改 CS2 文件")).toBeTruthy();
     expect(screen.queryByRole("button", { name: /普通播放/ })).toBeNull();
@@ -102,6 +141,38 @@ describe("DemoPlayOptionsModal", () => {
     expect(screen.queryByRole("button", { name: /启动高级播放 Demo/ })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: /重新检测/ }));
     expect(onRetry).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps skybox selection available while rain defaults to Train overcast", () => {
+    const onRecordingSkyboxChange = vi.fn();
+    const onRecordingMapMaterialChange = vi.fn();
+    const onRecordingWeatherEffectChange = vi.fn();
+    render(
+      <DemoPlayOptionsModal
+        open
+        demoLabel="dust2.dem"
+        recordingSkybox="cartoon3"
+        recordingMapMaterial="default"
+        recordingWeatherEffect="rain"
+        onRecordingSkyboxChange={onRecordingSkyboxChange}
+        onRecordingMapMaterialChange={onRecordingMapMaterialChange}
+        onRecordingWeatherEffectChange={onRecordingWeatherEffectChange}
+        onClose={() => {}}
+      />,
+    );
+
+    const skyboxSelect = screen.getByRole("combobox", { name: "高级播放天空盒" });
+    expect(skyboxSelect.value).toBe("cartoon3");
+    expect(skyboxSelect.disabled).toBe(false);
+    expect(screen.getAllByText(/默认使用 Train 阴天天空/).length).toBeGreaterThan(0);
+
+    const materialSelect = screen.getByRole("combobox", { name: "高级播放地图材质" });
+    expect(materialSelect.value).toBe("rain");
+    expect(materialSelect.disabled).toBe(false);
+    expect(screen.queryByRole("combobox", { name: "高级播放天气效果" })).toBeNull();
+    expect(onRecordingSkyboxChange).not.toHaveBeenCalled();
+    expect(onRecordingWeatherEffectChange).not.toHaveBeenCalled();
+    expect(onRecordingMapMaterialChange).not.toHaveBeenCalled();
   });
 
   it("shows the shared map-resource preparation state while launching", () => {

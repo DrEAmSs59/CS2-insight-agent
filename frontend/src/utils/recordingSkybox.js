@@ -1,7 +1,14 @@
 export const DEFAULT_RECORDING_SKYBOX = "default";
 export const RECORDING_SKYBOX_RESET_EVENT = "cs2-insight:recording-skybox-reset";
 
+export const SOLID_COLOR_RECORDING_SKYBOX_IDS = Object.freeze([
+  "chroma_blue",
+  "chroma_green",
+]);
+
 export const BUILTIN_RECORDING_SKYBOX_IDS = Object.freeze([
+  "chroma_green",
+  "chroma_blue",
   "cartoon",
   "cartoon1",
   "cartoon2",
@@ -16,6 +23,8 @@ export const BUILTIN_RECORDING_SKYBOX_IDS = Object.freeze([
 ]);
 
 const BUILTIN_LABEL_KEYS = Object.freeze({
+  chroma_green: "record.skyboxChromaGreen",
+  chroma_blue: "record.skyboxChromaBlue",
   cartoon3: "record.skyboxCartoon3",
 });
 
@@ -31,6 +40,7 @@ const RECORDING_SKYBOX_IDS = new Set(RECORDING_SKYBOX_OPTIONS.map(({ value }) =>
 const BUILTIN_RECORDING_SKYBOX_ORDER = new Map(
   BUILTIN_RECORDING_SKYBOX_IDS.map((value, index) => [value, index]),
 );
+const SOLID_COLOR_RECORDING_SKYBOX_ID_SET = new Set(SOLID_COLOR_RECORDING_SKYBOX_IDS);
 const CUSTOM_RECORDING_SKYBOX_ID = /^custom:[0-9a-f]{32}$/;
 
 export function sortBuiltinRecordingSkyboxes(resources) {
@@ -44,6 +54,16 @@ export function sortBuiltinRecordingSkyboxes(resources) {
       sensitivity: "base",
     });
   });
+}
+
+export function partitionBuiltinRecordingSkyboxes(resources) {
+  const sorted = sortBuiltinRecordingSkyboxes(resources);
+  return {
+    solidColor: SOLID_COLOR_RECORDING_SKYBOX_IDS.flatMap((skyboxId) => (
+      sorted.filter((item) => item?.id === skyboxId)
+    )),
+    standard: sorted.filter((item) => !SOLID_COLOR_RECORDING_SKYBOX_ID_SET.has(item?.id)),
+  };
 }
 
 export function isCustomRecordingSkyboxId(value) {

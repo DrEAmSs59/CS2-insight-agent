@@ -9,6 +9,15 @@ const repoRoot = join(frontendRoot, "..");
 const destination = join(frontendRoot, "src-tauri", "bundle-resources");
 const packageVersion = JSON.parse(readFileSync(join(frontendRoot, "package.json"), "utf8")).version;
 const appVersion = process.env.CS2_INSIGHT_APP_VERSION?.trim() || packageVersion;
+const finalRainMaps = [
+  "de_dust2",
+  "de_mirage",
+  "de_cache",
+  "de_inferno",
+  "de_anubis",
+  "de_ancient",
+  "de_nuke",
+];
 
 if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(appVersion)) {
   throw new Error(`Invalid desktop resource version: ${appVersion}`);
@@ -34,6 +43,74 @@ function copyFiltered(name, filter) {
       return !rel || (!commonSkip(rel) && filter(rel));
     },
   });
+}
+
+function readFinalRainRuntime() {
+  const weatherManifestPath = join(repoRoot, "pov", "weather_effects", "rain", "manifest.json");
+  const materialManifestPath = join(repoRoot, "pov", "map_materials", "rain_puddles", "manifest.json");
+  const weatherManifest = JSON.parse(readFileSync(weatherManifestPath, "utf8"));
+  const materialManifest = JSON.parse(readFileSync(materialManifestPath, "utf8"));
+  const expected = finalRainMaps.slice().sort().join("\n");
+  const weatherMaps = Object.keys(weatherManifest?.maps || {}).sort().join("\n");
+  const materialMaps = Object.keys(materialManifest?.maps || {}).sort().join("\n");
+  if (weatherMaps !== expected || materialMaps !== expected) {
+    throw new Error("Rain runtime must contain exactly the seven finalized map profiles");
+  }
+
+  const nukeWeather = weatherManifest.maps.de_nuke;
+  const nukeMaterial = materialManifest.map_sources?.de_nuke;
+  if (
+    nukeWeather?.spatial_puddles?.mode !== "rain_only_no_ground_wetness"
+    || Number(nukeWeather?.spatial_puddles?.wet_model_count) !== 0
+    || Number(nukeWeather?.spatial_puddles?.puddle_count) !== 0
+    || nukeMaterial?.ground_mode !== "nuke_rain_only_no_ground_wetness"
+    || Number(nukeMaterial?.ground_transform?.material_count) !== 0
+  ) {
+    throw new Error("Final Nuke profile must remain rain-only with no wet ground or puddles");
+  }
+
+  const keep = new Set(["manifest.json"]);
+  for (const [mapName, profile] of Object.entries(weatherManifest.maps)) {
+    const replacements = profile?.loose_outer_replacements;
+    if (!Array.isArray(replacements) || replacements.length === 0) {
+      throw new Error(`Final rain profile has no runtime payloads: ${mapName}`);
+    }
+    for (const replacement of replacements) {
+      const relativePath = String(replacement?.payload_relative_path || "")
+        .replaceAll("\\", "/")
+        .replace(/^\/+|\/+$/g, "");
+      if (!relativePath || relativePath.includes("..")) {
+        throw new Error(`Invalid final rain payload path for ${mapName}`);
+      }
+      const source = join(repoRoot, "pov", "weather_effects", "rain", ...relativePath.split("/"));
+      if (!existsSync(source)) throw new Error(`Missing final rain payload: ${source}`);
+      keep.add(relativePath.toLowerCase());
+    }
+  }
+  return keep;
+}
+
+const finalRainRuntimePaths = readFinalRainRuntime();
+
+function copyFinalPovResource(rel) {
+  const path = rel.replaceAll("\\", "/").toLowerCase();
+  if (path === "weather_effects/regions" || path.startsWith("weather_effects/regions/")) {
+    return false;
+  }
+  if (
+    path === "map_materials/rain_puddles/generated"
+    || path.startsWith("map_materials/rain_puddles/generated/")
+  ) {
+    return false;
+  }
+  const rainRoot = "weather_effects/rain";
+  if (path === rainRoot) return true;
+  if (path.startsWith(`${rainRoot}/`)) {
+    const withinRain = path.slice(rainRoot.length + 1);
+    return finalRainRuntimePaths.has(withinRain)
+      || [...finalRainRuntimePaths].some((kept) => kept.startsWith(`${withinRain}/`));
+  }
+  return true;
 }
 
 rmSync(destination, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
@@ -71,44 +148,69 @@ writeFileSync(catalogGzip, gzipSync(readFileSync(catalogJson), { level: 9 }));
 rmSync(catalogJson);
 console.log(`[desktop] compressed generated catalog: ${normalizedRelative(destination, catalogGzip)}`);
 writeFileSync(join(destination, "backend", "app", "release_version.txt"), `${appVersion}\n`);
-copyFiltered("pov", () => true);
+copyFiltered("pov", copyFinalPovResource);
+const requiredPovResources = [
+  "chroma_demo_references/manifest.json",
+  "chroma_main_maps/manifest.json",
+  "chroma_skybox_children/manifest.json",
+  "chroma_skybox_children/payloads.zip",
+  "skyboxes/chroma_blue/chroma_blue.vmat_c",
+  "skyboxes/chroma_blue/chroma_blue.vtex_c",
+  "skyboxes/chroma_green/chroma_green.vmat_c",
+  "skyboxes/chroma_green/chroma_green.vtex_c",
+  "map_materials/rain_puddles/manifest.json",
+  "map_materials/rain_puddles/catalog.vpk",
+  "weather_effects/rain/manifest.json",
+];
+for (const rel of requiredPovResources) {
+  const resource = join(destination, "pov", ...rel.split("/"));
+  if (!existsSync(resource)) throw new Error(`Missing staged POV resource: ${resource}`);
+}
+for (const rel of finalRainRuntimePaths) {
+  const resource = join(destination, "pov", "weather_effects", "rain", ...rel.split("/"));
+  if (!existsSync(resource)) throw new Error(`Missing staged final rain resource: ${resource}`);
+}
 const bundledDataFiles = new Set([
   "basic.ini",
   "cs2-insight.config.example.json",
 ]);
 copyFiltered("data", (rel) => bundledDataFiles.has(rel.toLowerCase()));
 
-/** Open-source DEM truth-source sidecar used by every keyboard overlay. */
-function buildAndStageInputExtractor() {
+/** Open-source DEM truth-source and names-only rewrite sidecars. */
+function buildAndStageDemoTools() {
   const manifest = join(repoRoot, "tools", "demo-cosmetic-rewriter", "Cargo.toml");
+  const binaries = ["demo-input-hud-track", "demo-player-aliases", "demo-sky-handle-rewriter"];
   const result = spawnSync(
     "cargo",
-    ["build", "--release", "--locked", "--manifest-path", manifest, "--bin", "demo-input-hud-track"],
+    [
+      "build", "--release", "--locked", "--manifest-path", manifest,
+      ...binaries.flatMap((name) => ["--bin", name]),
+    ],
     { cwd: repoRoot, env: process.env, stdio: "inherit", shell: false },
   );
   if (result.status !== 0) {
-    console.error("[desktop] failed to build authoritative DEM input extractor");
+    console.error("[desktop] failed to build authoritative DEM tools");
     process.exit(result.status ?? 1);
   }
-  const source = join(
-    repoRoot,
-    "tools",
-    "demo-cosmetic-rewriter",
-    "target",
-    "release",
-    process.platform === "win32" ? "demo-input-hud-track.exe" : "demo-input-hud-track",
-  );
-  if (!existsSync(source)) throw new Error(`Input extractor build produced no binary: ${source}`);
   const toolsDir = join(destination, "tools");
   mkdirSync(toolsDir, { recursive: true });
-  cpSync(
-    source,
-    join(toolsDir, process.platform === "win32" ? "demo-input-hud-track.exe" : "demo-input-hud-track"),
-  );
-  console.log(`[desktop] staged authoritative DEM input extractor from ${source}`);
+  for (const binary of binaries) {
+    const filename = process.platform === "win32" ? `${binary}.exe` : binary;
+    const source = join(
+      repoRoot,
+      "tools",
+      "demo-cosmetic-rewriter",
+      "target",
+      "release",
+      filename,
+    );
+    if (!existsSync(source)) throw new Error(`DEM tool build produced no binary: ${source}`);
+    cpSync(source, join(toolsDir, filename));
+    console.log(`[desktop] staged authoritative DEM tool from ${source}`);
+  }
 }
 
-buildAndStageInputExtractor();
+buildAndStageDemoTools();
 
 /** Optional proprietary sidecar — never fail OSS CI when absent. */
 function maybeStageSkinCore() {

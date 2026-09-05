@@ -1,6 +1,7 @@
 import asyncio
 import dataclasses
 import logging
+import tempfile
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -31,14 +32,21 @@ from ..skybox_vpk import DEFAULT_SKYBOX_ID, SkyboxVpkError, normalize_skybox_id
 from ..map_material_vpk import (
     DEFAULT_MAP_MATERIAL_ID,
     MapMaterialVpkError,
+    RAIN_PUDDLES_MAP_MATERIAL_ID,
     normalize_map_material_id,
 )
+from ..player_aliases import PlayerAliasError
 from ..pov_constants import normalize_pov_voice_mode
+from ..weather_effects import (
+    DEFAULT_WEATHER_EFFECT_ID,
+    RAIN_WEATHER_EFFECT_ID,
+    WeatherEffectError,
+    normalize_weather_effect_id,
+)
+from .player_aliases import prepare_recording_aliases
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/recording", tags=["recording"])
-
-_KILL_FX_SOURCE = "CS2 Kill FX Overlay"
 
 # ── Lazy singleton for the shared cs2-insight.db ────────────────────────────
 _montage_db: Optional[MontageDB] = None
@@ -455,73 +463,6 @@ async def execute_recording(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-    # kb_track: 为 overlay 填充逐 tick 按键状态（请求参数优先，否则读全局配置）
-    _kb_overlay_req = dto.options.kb_overlay_enabled
-    if _kb_overlay_req is None:
-        _kb_overlay_req = load_config().kb_overlay_enabled
-    if _kb_overlay_req:
-        from ..features.demo_analysis.input_track import (
-            extract_input_track as _extract_kb,
-            prepare_input_track_batch as _prepare_kb_batch,
-        )
-        try:
-            _kb_prepared = _prepare_kb_batch(
-                plan.demo_path,
-                [(_seg.start_tick, _seg.end_tick) for _seg in plan.segments],
-            )
-        except Exception as _kb_prepare_e:
-            logger.warning(
-                "kb_track shared preparation failed; using per-segment extraction: %s",
-                _kb_prepare_e,
-            )
-            _kb_prepared = None
-        _kb_off_req = dto.options.kb_overlay_tick_offset  # None → executor falls back to global config
-        for _seg in plan.segments:
-            _seg.metadata["kb_tick_offset"] = _kb_off_req
-            try:
-                _seg.metadata["kb_track"] = _extract_kb(
-                    plan.demo_path,
-                    steamid=_seg.target_steamid64,
-                    player_name=_seg.target_player_name,
-                    start_tick=_seg.start_tick,
-                    end_tick=_seg.end_tick,
-                    prepared=_kb_prepared,
-                )
-            except Exception as _kb_e:
-                logger.warning(
-                    "kb_track extraction failed seg=%d: %s", _seg.segment_index, _kb_e,
-                )
-                _seg.metadata["kb_track"] = []
-
-    # kill_track: 为击杀特效 overlay 填充窗口内的特殊击杀事件。
-    _exec_cfg = load_config()
-    _fx_req = dto.options.kill_fx_enabled
-    if _fx_req is None:
-        _fx_req = _exec_cfg.kill_fx_enabled
-    if _fx_req:
-        from ..features.demo_analysis.kill_track import extract_kill_track as _extract_fx
-        _ctx_tags = list(dto.source_ref.context_tags or [])
-        for _seg in plan.segments:
-            # 受害者视角片段不展示目标玩家的击杀特效。
-            if str(getattr(_seg.perspective, "value", _seg.perspective)) == "victim":
-                continue
-            _seg.metadata["kill_fx_tick_offset"] = dto.options.kill_fx_tick_offset
-            try:
-                _seg.metadata["kill_track"] = _extract_fx(
-                    plan.demo_path,
-                    steamid=_seg.target_steamid64,
-                    player_name=_seg.target_player_name,
-                    start_tick=_seg.start_tick,
-                    end_tick=_seg.end_tick,
-                    context_tags=_ctx_tags,
-                    round_number=_seg.round,
-                )
-            except Exception as _fx_e:
-                logger.warning(
-                    "kill_track extraction failed seg=%d: %s", _seg.segment_index, _fx_e,
-                )
-                _seg.metadata["kill_track"] = []
-
     config = load_config()
     obs_cfg = config.obs if hasattr(config, "obs") else OBSConfig()
     obs_client = OBSClient(obs_cfg)
@@ -576,19 +517,13 @@ class QueueRecordingRequest(BaseModel):
     requests: list[RecordingRequestDTO] = Field(..., min_length=1, max_length=100)
     warmup: Optional[dict] = None
     obs: Optional[dict] = None
-    pov_hud: Optional[dict] = None  # {enabled, radar_mode, teamcounter_numeric, voice_mode}
+    pov_hud: Optional[dict] = None  # POV plus independent in-game voice/input presentation choices
     skybox: Optional[dict] = None  # {id: default|built-in id|custom:<uuid hex>}
     map_material: Optional[dict] = None  # {id: default|waxed_reflection}
+    weather: Optional[dict] = None  # {id: default|rain}; future weather ids extend here
     # 仅本次录制队列生效，不写入 cs2-insight.config.json
     cs2_extra_launch_args: Optional[str] = None
     record_inject_console_lines: Optional[str] = None
-
-
-@router.get("/kb-prebuild-status")
-def get_kb_prebuild_status() -> dict:
-    """轮询虚拟键盘 kb_track 预构建进度，供前端 loading 状态展示。"""
-    from .kb_prebuild_state import get as _kbp_get
-    return _kbp_get()
 
 
 @router.post("/queue", response_model=list[dict])
@@ -653,66 +588,6 @@ async def execute_recording_queue(
         _pre_obs_client = OBSClient(obs_cfg)
         _pre_obs_client.connect()
         try:
-            # Auto-setup requested overlay Browser Sources.
-            _kb_overlay_requested = any(
-                getattr(dto.options, "kb_overlay_enabled", False)
-                for dto in req.requests
-            )
-            _kill_fx_requested = any(
-                (getattr(dto.options, "kill_fx_enabled", None) is True)
-                or (getattr(dto.options, "kill_fx_enabled", None) is None and cfg.kill_fx_enabled)
-                for dto in req.requests
-            )
-            if _kb_overlay_requested or _kill_fx_requested:
-                # 键盘 Overlay 必须建到录制专用场景（与 Game Capture 同场景），不能用
-                # 当前 program 场景：玩家 OBS 此刻可能停在别的场景，那样源会被建到错误
-                # 场景，录制时 OBS 切到专用场景就看不到键盘 Overlay。
-                _scene = cfg.obs_game_scene_name
-                # 专用场景此时可能尚未创建（fade controller 在录制阶段才创建），先幂等确保存在。
-                try:
-                    if _scene not in _pre_obs_client.get_scene_names():
-                        _pre_obs_client.create_scene(_scene)
-                except Exception as _sc_e:
-                    logger.warning(
-                        "[RecordingV3] kb overlay: ensure scene %r failed (non-fatal): %s",
-                        _scene, _sc_e,
-                    )
-                import os as _os
-                _port = int(_os.environ.get("CS2_INSIGHT_PORT") or _os.environ.get("PORT") or 8000)
-                if _kb_overlay_requested:
-                    # 优先取第一个启用了 kb_overlay 的请求里的位置，否则读全局配置
-                    _kb_pos = next(
-                        (
-                            getattr(dto.options, "kb_overlay_position", None)
-                            for dto in req.requests
-                            if getattr(dto.options, "kb_overlay_enabled", False)
-                            and getattr(dto.options, "kb_overlay_position", None)
-                        ),
-                        None,
-                    ) or load_config().kb_overlay_position or "bottom_center"
-                    _overlay_url = (
-                        f"http://127.0.0.1:{_port}/overlay/keyboard.html?pos={_kb_pos}"
-                    )
-                    ok = _pre_obs_client.ensure_kb_overlay_in_scene(_scene, _overlay_url)
-                    logger.info("[RecordingV3] kb overlay auto-setup: scene=%r ok=%s", _scene, ok)
-                if _kill_fx_requested:
-                    # 查询参数用于让已有 OBS Browser Source 刷新到新版布局。
-                    _fx_url = (
-                        f"http://127.0.0.1:{_port}/overlay/killfx.html?v=overlay-offset-3"
-                    )
-                    ok_fx = _pre_obs_client.ensure_kb_overlay_in_scene(
-                        _scene,
-                        _fx_url,
-                        source_name=_KILL_FX_SOURCE,
-                        reroute_audio=True,
-                    )
-                    logger.info(
-                        "[RecordingV3] kill fx overlay auto-setup: scene=%r ok=%s",
-                        _scene, ok_fx,
-                    )
-        except Exception as _kb_e:
-            logger.warning("[RecordingV3] overlay auto-setup failed (non-fatal): %s", _kb_e)
-        try:
             _pre_obs_client.disconnect()
         except Exception:
             pass
@@ -750,6 +625,13 @@ async def execute_recording_queue(
         )
     )
     for demo_path in unique_demo_paths:
+        # Alias sessions repair only the generated recording copy, never the source demo.
+        if any(
+            dto.player_aliases
+            for dto in resolved_requests
+            if dto.demo.demo_path == demo_path
+        ):
+            continue
         try:
             compat = await asyncio.to_thread(ensure_demo_compatible, demo_path)
         except Exception as exc:
@@ -777,10 +659,11 @@ async def execute_recording_queue(
         except Exception as e:
             logger.warning("[RecordingV3] warmup parse failed: %s", e)
 
-    if req.pov_hud and req.pov_hud.get("enabled"):
+    if req.pov_hud is not None:
         pov_hud_cfg = req.pov_hud
         if warmup_extras is None:
             warmup_extras = RecordingWarmupExtras()
+        pov_enabled = bool(pov_hud_cfg.get("enabled"))
         explicit_voice_mode = pov_hud_cfg.get("voice_mode")
         voice_mode = normalize_pov_voice_mode(
             explicit_voice_mode
@@ -796,20 +679,53 @@ async def execute_recording_queue(
                 )
             ),
         )
+        input_hud_display_mode = str(
+            pov_hud_cfg.get("input_hud_display_mode", "hybrid")
+        ).strip().lower()
+        if input_hud_display_mode not in {"hybrid", "always", "active"}:
+            input_hud_display_mode = "hybrid"
+        input_hud_enabled = bool(
+            pov_hud_cfg.get("input_hud_enabled", warmup_extras.input_hud_enabled)
+        )
+        has_independent_hud_choice = (
+            "voice_mode" in pov_hud_cfg or "input_hud_enabled" in pov_hud_cfg
+        )
+        recording_hud_enabled = bool(
+            pov_enabled
+            or (
+                has_independent_hud_choice
+                and (voice_mode != "mute" or input_hud_enabled)
+            )
+        )
         # Patch warmup extras with POV HUD settings
         warmup_extras = dataclasses.replace(
             warmup_extras,
-            pov_hud_enabled=True,
+            pov_hud_enabled=pov_enabled,
+            recording_hud_enabled=recording_hud_enabled,
             pov_radar_mode=int(pov_hud_cfg.get("radar_mode", 0)),
             pov_teamcounter_numeric=bool(pov_hud_cfg.get("teamcounter_numeric", False)),
             pov_voice_mode=voice_mode,
             pov_voice_disabled=False,
+            input_hud_enabled=input_hud_enabled,
+            input_hud_display_mode=input_hud_display_mode,
+            input_audio_enabled=bool(pov_hud_cfg.get("input_audio_enabled", True)),
+            combat_stats_hud_enabled=bool(
+                pov_hud_cfg.get("combat_stats_hud_enabled", True)
+            ),
         )
         logger.info(
-            "[RecordingV3] POV HUD enabled: radar_mode=%s, teamcounter_numeric=%s, voice_mode=%s",
+            "[RecordingV3] in-game HUD choices: pov=%s, recording_hud=%s, "
+            "radar_mode=%s, teamcounter_numeric=%s, "
+            "voice_mode=%s, input_hud=%s, input_mode=%s, input_audio=%s, combat_stats=%s",
+            warmup_extras.pov_hud_enabled,
+            warmup_extras.recording_hud_enabled,
             warmup_extras.pov_radar_mode,
             warmup_extras.pov_teamcounter_numeric,
             warmup_extras.pov_voice_mode,
+            warmup_extras.input_hud_enabled,
+            warmup_extras.input_hud_display_mode,
+            warmup_extras.input_audio_enabled,
+            warmup_extras.combat_stats_hud_enabled,
         )
 
     saved_skybox_id = getattr(cfg, "recording_skybox", DEFAULT_SKYBOX_ID)
@@ -843,15 +759,54 @@ async def execute_recording_queue(
         recording_map_material_id = normalize_map_material_id(raw_map_material_id)
     except MapMaterialVpkError as exc:
         raise HTTPException(422, str(exc)) from exc
-    if recording_map_material_id != DEFAULT_MAP_MATERIAL_ID:
+
+    saved_weather_effect_id = getattr(
+        cfg, "recording_weather_effect", DEFAULT_WEATHER_EFFECT_ID
+    )
+    raw_weather_effect_id = (
+        req.weather.get("id", saved_weather_effect_id)
+        if isinstance(req.weather, dict)
+        else saved_weather_effect_id
+    )
+    try:
+        recording_weather_effect_id = normalize_weather_effect_id(
+            raw_weather_effect_id
+        )
+    except WeatherEffectError as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+    # Compatibility for presets saved before rain became an independent
+    # weather category.
+    if recording_map_material_id == RAIN_PUDDLES_MAP_MATERIAL_ID:
+        if recording_weather_effect_id not in {
+            DEFAULT_WEATHER_EFFECT_ID,
+            RAIN_WEATHER_EFFECT_ID,
+        }:
+            raise HTTPException(422, "雨天不能与另一种天气效果同时启用。")
+        recording_map_material_id = DEFAULT_MAP_MATERIAL_ID
+        recording_weather_effect_id = RAIN_WEATHER_EFFECT_ID
+
+    if (
+        recording_map_material_id != DEFAULT_MAP_MATERIAL_ID
+        and recording_weather_effect_id != DEFAULT_WEATHER_EFFECT_ID
+    ):
+        raise HTTPException(422, "打蜡与天气效果不能同时启用。")
+
+    if (
+        recording_map_material_id != DEFAULT_MAP_MATERIAL_ID
+        or recording_weather_effect_id != DEFAULT_WEATHER_EFFECT_ID
+    ):
         if warmup_extras is None:
             warmup_extras = RecordingWarmupExtras()
         warmup_extras = dataclasses.replace(
             warmup_extras,
             map_material_id=recording_map_material_id,
+            weather_effect_id=recording_weather_effect_id,
         )
         logger.info(
-            "[RecordingV3] map material enabled: %s", recording_map_material_id
+            "[RecordingV3] visual effects enabled: map_material=%s weather=%s",
+            recording_map_material_id,
+            recording_weather_effect_id,
         )
 
     global _queue_abort_event
@@ -888,7 +843,17 @@ async def execute_recording_queue(
     )
 
     try:
-        results = await director.execute_plan_queue(resolved_requests, warmup=warmup_extras, fade_controller=fade_ctrl)
+        with tempfile.TemporaryDirectory(prefix="insight-player-aliases-") as alias_dir:
+            playback_requests = await asyncio.to_thread(
+                prepare_recording_aliases, resolved_requests, Path(alias_dir)
+            )
+            results = await director.execute_plan_queue(
+                playback_requests,
+                warmup=warmup_extras,
+                fade_controller=fade_ctrl,
+            )
+    except PlayerAliasError as e:
+        raise HTTPException(422, str(e)) from e
     except CS2AlreadyRunningError as e:
         raise HTTPException(409, error_detail("RECORDING_CS2_RUNNING")) from e
     except CS2NotReadyError as e:

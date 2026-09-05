@@ -97,7 +97,12 @@ def test_pov_restore_removes_session_backup_and_next_install_uses_fresh_gameinfo
 
     manager.install()
     assert "csgo/pov.vpk" in gameinfo.read_text(encoding="utf-8")
-    assert manager._read_manifest()["state"] == "installed"
+    installed_manifest = manager._read_manifest()
+    assert installed_manifest["state"] == "installed"
+    assert (
+        installed_manifest["planned_patched_gameinfo_sha256"]
+        == installed_manifest["patched_gameinfo_sha256"]
+    )
     verification = manager.restore()
     assert gameinfo.read_text(encoding="utf-8") == original
     assert verification["verified"] is True
@@ -152,6 +157,52 @@ def test_pov_install_rolls_back_when_target_vpk_cannot_be_written(
         manager.install()
 
     assert gameinfo.read_text(encoding="utf-8") == original
+    assert not (csgo / "pov.vpk").exists()
+    assert not manager.get_manifest_path().exists()
+    assert not manager.get_backup_gameinfo_path().exists()
+
+
+def test_pov_install_final_manifest_failure_restores_gameinfo_byte_exact(
+    monkeypatch,
+    tmp_path: Path,
+):
+    monkeypatch.setattr(pov_hud_manager.sys, "platform", "win32")
+    monkeypatch.setattr(pov_hud_manager, "is_cs2_running", lambda: False)
+
+    game_root = tmp_path / "game"
+    cs2 = game_root / "bin" / "win64" / "cs2.exe"
+    csgo = game_root / "csgo"
+    cs2.parent.mkdir(parents=True)
+    csgo.mkdir(parents=True)
+    cs2.write_bytes(b"exe")
+    gameinfo = csgo / "gameinfo.gi"
+    original = (
+        b"FileSystem\r\n{\r\n  SearchPaths\r\n  {\r\n"
+        b"    Game    csgo\r\n  }\r\n}\r\n"
+    )
+    gameinfo.write_bytes(original)
+    pov_source = tmp_path / "pov_default.vpk"
+    pov_source.write_bytes(b"pov")
+    manager = PovHudManager(SimpleNamespace(cs2_path=str(cs2)))
+    monkeypatch.setattr(manager, "get_pov_vpk_source_path", lambda _map=None: pov_source)
+
+    real_atomic_write_json = pov_hud_manager._atomic_write_json
+    writes = 0
+
+    def fail_final_manifest(path: Path, payload):
+        nonlocal writes
+        writes += 1
+        if writes == 2:
+            raise OSError("injected final manifest failure")
+        return real_atomic_write_json(path, payload)
+
+    monkeypatch.setattr(pov_hud_manager, "_atomic_write_json", fail_final_manifest)
+
+    with pytest.raises(PovHudError, match="无法完成 POV 恢复记录"):
+        manager.install()
+
+    assert writes == 2
+    assert gameinfo.read_bytes() == original
     assert not (csgo / "pov.vpk").exists()
     assert not manager.get_manifest_path().exists()
     assert not manager.get_backup_gameinfo_path().exists()

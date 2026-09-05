@@ -1,3 +1,8 @@
+// ---------------------------------------------------------------------------------------------
+// Copyright (c) unicbm. All rights reserved.
+// Licensed under the PolyForm Noncommercial License 1.0.0. See LICENSE in the project root for license information.
+// ---------------------------------------------------------------------------------------------
+
 use anyhow::{Context as AnyhowContext, Result};
 use clap::Parser as ClapParser;
 use demo_cosmetic_rewriter::input_command::extract_input_report;
@@ -8,7 +13,7 @@ const WORKER_STACK_SIZE: usize = 64 * 1024 * 1024;
 
 #[derive(Debug, ClapParser)]
 #[command(name = "demo-input-hud-track")]
-#[command(about = "Extract exact CS2 button-state planes, edges, subticks, and HUD tracks")]
+#[command(about = "Extract exact CS2 button states, subticks, weapon selections, and HUD tracks")]
 struct Cli {
     #[arg(long)]
     input: PathBuf,
@@ -48,8 +53,12 @@ fn run(cli: Cli) -> Result<()> {
     println!("report={}", cli.output.display());
     println!("elapsed_seconds={:.3}", report.elapsed_seconds);
     println!(
-        "commands={} button_updates={} subtick_steps={} decode_errors={}",
-        report.commands, report.button_updates, report.subtick_steps, report.decode_errors,
+        "commands={} button_updates={} subtick_steps={} weaponselect_requests={} decode_errors={}",
+        report.commands,
+        report.button_updates,
+        report.subtick_steps,
+        report.weaponselect_requests.len(),
+        report.decode_errors,
     );
     println!(
         "tracks={} changes={} observed_mask={}",
@@ -60,6 +69,17 @@ fn run(cli: Cli) -> Result<()> {
             .map(|track| track.changes)
             .sum::<usize>(),
         report.observed_mask_hex,
+    );
+    println!(
+        "mouse_updates={} mouse_nonzero_commands={} mouse_tracks={} mouse_samples={}",
+        report.mouse_updates,
+        report.mouse_nonzero_commands,
+        report.mouse_tracks.len(),
+        report
+            .mouse_tracks
+            .iter()
+            .map(|track| track.samples)
+            .sum::<usize>(),
     );
     Ok(())
 }

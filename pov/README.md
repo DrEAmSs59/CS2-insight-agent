@@ -103,8 +103,9 @@ The baked Panorama script also drives the rest of the POV HUD:
 
 Insight's direct **Advanced playback** entry additionally fills payload index
 12 with the XUID roster and a delta-tick event index. Moving the free demo
-cursor into the 18px strip at the right screen edge opens a Panorama menu; the
-panel hides again after the pointer leaves it. CS2's native DemoUI remains
+cursor over the small collapsed title-tab area at the right-center screen edge
+opens a Panorama menu, including when the persistent title bar is disabled;
+the panel hides again after the pointer leaves it. CS2's native DemoUI remains
 visible and owns the timeline and playback controls. The Insight menu has five
 sections, from top to bottom: HUD, voice, round seek, teams, and events. It
 provides:
@@ -134,6 +135,9 @@ provides:
   Insight's reconstructed feed and DEMO HUD uses CS2's native feed and lifetime.
 - DEMO HUD restores CS2's native square, non-rotating spectator radar (including
   its CT/T colors and 1-5 player numbers) instead of drawing Insight markers.
+- DEMO HUD also treats CS2's native DemoUI X-ray switch as the single source of
+  truth for both player outlines and overhead player markers. POV HUD retains
+  its separate deterministic player-ID behavior.
 - Event filters with five fixed visible rows and pagination embedded in the
   filter row; the content-sized menu preserves equal top and bottom padding
 - A deterministic right-center initial position and a freely draggable title
@@ -172,7 +176,26 @@ all other Steam or user changes.
 
 For demos with a decodable `svc_UserCmds` chain, the same native Panorama
 layer renders the observed pawn's W/A/S/D, Shift (walk), Ctrl (crouch), Space
-(jump), transient R (reload), M1, and M2 inputs.
+(jump), transient R (reload), M1, and M2 inputs. The centered input HUD uses
+the compact dark-key/Insight-orange-press styling from the retired OBS overlay, while
+retaining the VPK-only 1-5, Tab, E/F/H, hand-switch, and mouse-motion data. The
+1-5 row sits in an upward-expanded panel above the original three-row keyboard,
+so it remains visible without moving those rows on screen. The mouse-motion
+panel occupies only the rounded lower body, while the
+upper section is reserved for two flush M1/M2 outlines separated by their shared
+center line. The mouse sits closer to the keyboard, has no extra outer shell or
+wheel, and keeps both button labels blank.
+The complete input HUD stays fixed at its centered anchor even while native
+bomb, round, and match banners are visible. Weapon-select payload pulses remain
+exact, but the number-row highlight is held for 12 demo ticks so Panorama cannot
+skip a one-tick selection between display refreshes. The 1-4 and F keycaps stay
+visible in hybrid mode, and all pressed keycaps use the Insight primary orange.
+Recording presets and the pre-record dialog expose this as a binary show/hide
+choice; show always resolves to the high-frequency resident `hybrid` mode.
+Advanced Demo playback always packages that mode and adds a live `INPUT`
+toggle to the in-game HUD row, so visibility can be changed without relaunching
+the Demo. Each explicit switch to `DEMO HUD` also starts with CS2's native
+X-ray enabled; DemoUI can still turn it off afterwards.
 
 The generated package also owns the complete lower-left message stream at
 payload index 11. Tactical radio uses `grenade_thrown` when available; missing
@@ -213,11 +236,39 @@ hidden rather than substituting motion inference. Radar fails closed the same
 way: if the map transform or tick samples cannot be extracted, the custom radar
 HUD stays hidden while voice continues to work.
 
+All players remain in one switchable payload. High-frequency mouse samples,
+button-mask changes, and button-audio edges use delta-tick/base36 tracks; audio
+edges retain the exact IEEE-754 bits of the extractor's subtick `when` value.
+This reduces Panorama parse cost without discarding Pawns or coarsening input
+timing.
+
+The lower-left combat strip is sourced from
+`CCSPlayerController_ActionTrackingServices`, not reconstructed from damage
+events. Each Pawn carries sparse K/D/A, current-round damage, and match-damage
+states. `m_iDamage` supplies completed-round damage while
+`m_flTotalRoundDamageDealt` supplies the live round; the terminal overlap is
+deduplicated when the final round commits before the live value clears. K/D/A
+stays above the account balance; round and match damage occupy the unused strip
+to the balance's right. The glyphs use CS2's own `digitpanel-font` metrics
+(Stratum2 Mono, 38 px, 18 px columns) and the stock DigitPanel 0.6-second
+cubic-bezier transition. Pawn switches initialize instantly; changes for the
+same Pawn use the native per-digit roll. The complete strip is mounted under
+native `HudLowerLeft`; each rolling-number container carries the same
+`.hud-colorize-wash` class directly used by `HudMoney`, while the caption
+Labels carry the same direct wash class used by the stock health labels. This
+strip also carries the native `HudMoney` parent's `.additive` blend class. This
+preserves both the wash hue and final scene-composited luminance instead of
+tinting an ancestor composition layer or assigning a guessed text color. Team
+color, custom HUD color, and `cl_hud_color 12` observed-Pawn color therefore
+follow the same live cascade as the account balance.
+
 If a demo has no usable voice packets, the generated package keeps a
-roster-only payload so radar and kill-feedback tracks can still attach. If the
-dynamic build fails or the compact payload does not fit the fixed template
-slot, installation falls back to `pov_default.vpk` rather than installing a
-partial package. The direct Advanced playback exception is described above.
+roster-only payload so radar and kill-feedback tracks can still attach. The
+compiled Panorama `DATA` block expands to the exact compact payload size and
+its resource offsets and VPK CRCs are rebuilt before launch, so long demos are
+not constrained by a fixed template slot. If the dynamic build itself fails,
+installation falls back to `pov_default.vpk` rather than installing a partial
+package. The direct Advanced playback exception is described above.
 
 Every POV kill plays the stock body/headshot attacker-feedback event and the
 stock `UI.KillCard.1` confirmation layer (`kill_doof_01.vsnd`) together. The

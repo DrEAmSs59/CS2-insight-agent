@@ -16,7 +16,9 @@ from app.demo_voice_hud import (
     _kill_cash_award,
     _weapon_fire_sound_radius,
     add_advanced_playback_track_to_payload,
+    add_combat_stats_track_to_payload,
     add_flash_blind_track_to_payload,
+    add_input_presentation_to_payload,
     add_input_tracks_to_payload,
     add_kill_feedback_track_to_payload,
     add_radio_track_to_payload,
@@ -82,6 +84,97 @@ def test_voice_payload_compacts_intervals_and_location_changes():
     ]
     assert input_tracks == []
     assert roster == [["111", 0, 2], ["222", 1, 3]]
+
+
+def test_combat_stats_use_controller_sendprops_and_avoid_terminal_damage_overlap():
+    class _CombatParser:
+        @staticmethod
+        def parse_event(name, **_kwargs):
+            return {
+                "player_hurt": {"tick": [100, 200, 400]},
+                "player_death": {"tick": [100, 400]},
+                "round_start": {"tick": [0, 300]},
+                "round_end": {"tick": [250, 400]},
+            }.get(name, {"tick": []})
+
+        @staticmethod
+        def parse_ticks(fields, *, ticks):
+            snapshots = {
+                0: {
+                    111: (0, 0, 0, 0, 0),
+                    222: (0, 0, 0, 0, 0),
+                },
+                100: {
+                    111: (1, 0, 0, 0, 100),
+                    222: (0, 1, 0, 0, 0),
+                },
+                200: {
+                    111: (1, 0, 0, 0, 140),
+                    222: (0, 1, 0, 0, 0),
+                },
+                250: {
+                    111: (1, 0, 0, 0, 140),
+                    222: (0, 1, 0, 0, 0),
+                },
+                300: {
+                    111: (1, 0, 0, 140, 0),
+                    222: (0, 1, 0, 0, 0),
+                },
+                # The final round is committed before its live round-damage
+                # sendprop clears. Visible total must remain 200, not 260.
+                400: {
+                    111: (2, 0, 0, 200, 60),
+                    222: (-1, 2, 0, 0, 0),
+                },
+            }
+            result = {field: [] for field in fields}
+            result.update({"tick": [], "steamid": [], "name": []})
+            for tick in ticks:
+                for xuid, values in snapshots.get(tick, {}).items():
+                    result["tick"].append(tick)
+                    result["steamid"].append(xuid)
+                    result["name"].append(str(xuid))
+                    for field, value in zip(fields, values, strict=True):
+                        result[field].append(value)
+            return result
+
+    voice_payload, _ = build_voice_payload("match.dem", parser_factory=_FakeParser)
+    payload, stats = add_combat_stats_track_to_payload(
+        voice_payload,
+        "match.dem",
+        parser_factory=lambda _path: _CombatParser(),
+    )
+    combat = json.loads(payload)[19]
+    tracks = {row[0]: row[1] for row in combat[1]}
+
+    def decode(encoded):
+        tick = 0
+        decoded = []
+        for token in encoded.split(","):
+            fields = [int(value, 36) for value in token.split(".")]
+            tick += fields[0]
+            signed = [
+                -(value // 2) - 1 if value & 1 else value // 2
+                for value in fields[1:4]
+            ]
+            decoded.append((tick, *signed, *fields[4:]))
+        return decoded
+
+    assert combat[0] == 1
+    assert decode(tracks["111"]) == [
+        (0, 0, 0, 0, 0, 0),
+        (100, 1, 0, 0, 100, 100),
+        (200, 1, 0, 0, 140, 140),
+        (300, 1, 0, 0, 0, 140),
+        (400, 2, 0, 0, 60, 200),
+    ]
+    assert decode(tracks["222"])[-1] == (400, -1, 2, 0, 0, 0)
+    assert stats == {
+        "combat_stats_players": 2,
+        "combat_stats_changes": 8,
+        "combat_stats_parse_failed": 0,
+        "payload_bytes": len(payload),
+    }
 
 
 def test_advanced_playback_payload_indexes_players_kills_deaths_and_utility():
@@ -345,7 +438,319 @@ def test_exact_input_tracks_are_mapped_from_usercmd_slots_to_xuids():
         "input_commands": 100,
         "input_button_updates": 25,
         "input_subtick_steps": 12,
+        "input_weaponselect_requests": 0,
+        "input_weaponselect_resolved": 0,
+        "input_weaponselect_unresolved": 0,
+        "input_weaponselect_tracks": 0,
+        "input_weaponselect_parse_failed": 0,
+        "input_mouse_tracks": 0,
+        "input_mouse_samples": 0,
+        "input_mouse_updates": 0,
+        "input_hand_switch_tracks": 0,
+        "input_hand_switch_events": 0,
+        "input_left_hand_desired_updates": 0,
+        "input_audio_edge_tracks": 0,
+        "input_audio_edges": 0,
+        "input_audio_subtick_edges": 0,
     }
+
+
+def test_exact_input_tracks_follow_userinfo_when_a_player_slot_is_reused():
+    voice_payload, _ = build_voice_payload("match.dem", parser_factory=_FakeParser)
+    payload, stats = add_input_tracks_to_payload(
+        voice_payload,
+        "match.dem",
+        {
+            "format_version": 4,
+            "commands": 40,
+            "button_updates": 4,
+            "subtick_steps": 0,
+            "player_identity_updates": [
+                {"demo_tick": 0, "player_slot": 0, "xuid": 111},
+                {"demo_tick": 20, "player_slot": 0, "xuid": 222},
+            ],
+            "tracks": [
+                {"slot": 0, "changes": 4, "encoded": "5.1,f.0,5.2,5.0"},
+            ],
+        },
+        parser_factory=_FakeParser,
+    )
+
+    assert json.loads(payload)[2] == [
+        ["111", "5.1,f.0"],
+        ["222", "p.2,5.0"],
+    ]
+    assert stats["input_tracks"] == 2
+    assert stats["input_changes"] == 4
+
+
+def test_exact_mouse_tracks_follow_userinfo_and_preserve_signed_axes():
+    voice_payload, _ = build_voice_payload("match.dem", parser_factory=_FakeParser)
+    payload, stats = add_input_tracks_to_payload(
+        voice_payload,
+        "match.dem",
+        {
+            "format_version": 8,
+            "commands": 3,
+            "button_updates": 1,
+            "subtick_steps": 0,
+            "mouse_updates": 3,
+            "player_identity_updates": [
+                {"demo_tick": 0, "player_slot": 0, "xuid": 111},
+                {"demo_tick": 20, "player_slot": 0, "xuid": 222},
+            ],
+            "tracks": [{"slot": 0, "changes": 1, "encoded": "0.1"}],
+            "mouse_tracks": [
+                {"slot": 0, "samples": 3, "encoded": "5.4.1,a.5.8,a.2.4"},
+            ],
+        },
+        parser_factory=_FakeParser,
+    )
+
+    assert json.loads(payload)[15] == [
+        ["111", "5.4.1,a.5.8"],
+        ["222", "p.2.4"],
+    ]
+    assert stats["input_mouse_tracks"] == 2
+    assert stats["input_mouse_samples"] == 3
+    assert stats["input_mouse_updates"] == 3
+
+
+def test_handedness_edges_drive_identity_bound_h_key_pulses():
+    voice_payload, _ = build_voice_payload("match.dem", parser_factory=_FakeParser)
+    payload, stats = add_input_tracks_to_payload(
+        voice_payload,
+        "match.dem",
+        {
+            "format_version": 9,
+            "commands": 3,
+            "button_updates": 1,
+            "subtick_steps": 0,
+            "left_hand_desired_updates": 3,
+            "player_identity_updates": [
+                {"demo_tick": 0, "player_slot": 0, "xuid": 111},
+                {"demo_tick": 20, "player_slot": 0, "xuid": 222},
+            ],
+            "tracks": [{"slot": 0, "changes": 1, "encoded": "0.1"}],
+            "handedness_changes": [
+                {"demo_tick": 10, "player_slot": 0, "left_hand_desired": True},
+                {"demo_tick": 12, "player_slot": 0, "left_hand_desired": False},
+                {"demo_tick": 30, "player_slot": 0, "left_hand_desired": True},
+            ],
+        },
+        parser_factory=_FakeParser,
+    )
+
+    assert json.loads(payload)[16] == [
+        ["111", "a.1,6.0"],
+        ["222", "u.1,4.0"],
+    ]
+    assert stats["input_hand_switch_tracks"] == 2
+    assert stats["input_hand_switch_events"] == 3
+    assert stats["input_left_hand_desired_updates"] == 3
+
+
+def test_button_edges_drive_identity_bound_input_audio_without_mask_inference():
+    voice_payload, _ = build_voice_payload("match.dem", parser_factory=_FakeParser)
+    payload, stats = add_input_tracks_to_payload(
+        voice_payload,
+        "match.dem",
+        {
+            "format_version": 10,
+            "commands": 4,
+            "button_updates": 2,
+            "subtick_steps": 2,
+            "player_identity_updates": [
+                {"demo_tick": 0, "player_slot": 0, "xuid": 111},
+                {"demo_tick": 20, "player_slot": 0, "xuid": 222},
+            ],
+            "tracks": [{"slot": 0, "changes": 1, "encoded": "0.1"}],
+            "button_edges": [
+                {
+                    "demo_tick": 10,
+                    "player_slot": 0,
+                    "command_index": 2,
+                    "edge_ordinal": 0,
+                    "bit": 3,
+                    "pressed": True,
+                    "when": 0.25,
+                    "source": "subtick",
+                },
+                {
+                    "demo_tick": 10,
+                    "player_slot": 0,
+                    "command_index": 2,
+                    "edge_ordinal": 1,
+                    "bit": 3,
+                    "pressed": False,
+                    "when": 0.75,
+                    "source": "subtick",
+                },
+                {
+                    "demo_tick": 30,
+                    "player_slot": 0,
+                    "command_index": 3,
+                    "edge_ordinal": 0,
+                    "bit": 0,
+                    "pressed": True,
+                    "when": None,
+                    "source": "button_state",
+                },
+            ],
+        },
+        parser_factory=_FakeParser,
+    )
+
+    encoded_tracks = json.loads(payload)[17]
+    assert [track[0] for track in encoded_tracks] == ["111", "222"]
+
+    def decode_track(encoded):
+        previous_tick = 0
+        decoded = []
+        for token in encoded.split(","):
+            fields = token.split(".")
+            tick = previous_tick + int(fields[0], 36)
+            edge_code = int(fields[1], 36)
+            when = (
+                struct.unpack("<f", struct.pack("<I", int(fields[2], 36)))[0]
+                if len(fields) > 2
+                else None
+            )
+            decoded.append([tick, edge_code >> 1, bool(edge_code & 1), when])
+            previous_tick = tick
+        return decoded
+
+    assert decode_track(encoded_tracks[0][1]) == [
+        [10, 0, True, 0.25],
+        [10, 0, False, 0.75],
+    ]
+    assert decode_track(encoded_tracks[1][1]) == [[30, 8, True, None]]
+    assert stats["input_audio_edge_tracks"] == 2
+    assert stats["input_audio_edges"] == 3
+    assert stats["input_audio_subtick_edges"] == 2
+
+
+def test_input_presentation_payload_uses_explicit_session_settings():
+    payload = add_input_presentation_to_payload(
+        b"[[],[],[],[]]",
+        enabled=True,
+        display_mode="active",
+        scale_percent=115,
+        audio_enabled=True,
+        audio_volume_percent=50,
+        combat_stats_enabled=False,
+    )
+
+    assert json.loads(payload)[18] == [1, "active", 115, 1, 50, 0]
+
+    with pytest.raises(DemoVoiceHudError, match="display mode"):
+        add_input_presentation_to_payload(
+            b"[[],[],[],[]]",
+            enabled=True,
+            display_mode="guess",
+            scale_percent=100,
+            audio_enabled=True,
+            audio_volume_percent=100,
+        )
+
+
+def test_weaponselect_entity_indexes_drive_exact_number_row_pulses():
+    class _WeaponSelectionParser:
+        def __init__(self, _path: str):
+            pass
+
+        @staticmethod
+        def parse_ticks(fields, *, ticks):
+            assert fields == ["active_weapon", "item_def_idx"]
+            assert {10, 20, 30, 40, 50}.issubset(ticks)
+            return {
+                "tick": [10, 20, 30, 40, 50],
+                "steamid": [111, 111, 111, 111, 111],
+                "active_weapon": [
+                    0x4000 | 101,
+                    0x8000 | 102,
+                    0xC000 | 103,
+                    0x10000 | 104,
+                    0x14000 | 105,
+                ],
+                "item_def_idx": [7, 4, 42, 43, 49],
+            }
+
+    voice_payload, _ = build_voice_payload("match.dem", parser_factory=_FakeParser)
+    payload, stats = add_input_tracks_to_payload(
+        voice_payload,
+        "match.dem",
+        {
+            "format_version": 5,
+            "commands": 5,
+            "button_updates": 1,
+            "subtick_steps": 0,
+            "player_identity_updates": [
+                {"demo_tick": 0, "player_slot": 0, "xuid": 111},
+            ],
+            "tracks": [{"slot": 0, "changes": 1, "encoded": "0.1"}],
+            "weaponselect_requests": [
+                {
+                    "demo_tick": tick,
+                    "player_slot": 0,
+                    "command_index": index,
+                    "weaponselect": entity,
+                }
+                for index, (tick, entity) in enumerate(
+                    ((10, 101), (20, 102), (30, 103), (40, 104), (50, 105))
+                )
+            ],
+        },
+        parser_factory=_WeaponSelectionParser,
+    )
+
+    assert json.loads(payload)[6] == [
+        ["111", "a.1,1.0,9.2,1.0,9.3,1.0,9.4,1.0,9.5,1.0"]
+    ]
+    assert stats["input_weaponselect_requests"] == 5
+    assert stats["input_weaponselect_resolved"] == 5
+    assert stats["input_weaponselect_unresolved"] == 0
+    assert stats["input_weaponselect_tracks"] == 1
+    assert stats["input_weaponselect_parse_failed"] == 0
+
+
+def test_weaponselect_resolution_failure_does_not_drop_exact_button_track():
+    class _UnavailableWeaponStateParser:
+        def __init__(self, _path: str):
+            pass
+
+        @staticmethod
+        def parse_ticks(_fields, *, ticks):
+            assert ticks
+            raise RuntimeError("weapon state unavailable")
+
+    voice_payload, _ = build_voice_payload("match.dem", parser_factory=_FakeParser)
+    payload, stats = add_input_tracks_to_payload(
+        voice_payload,
+        "match.dem",
+        {
+            "format_version": 5,
+            "commands": 1,
+            "button_updates": 1,
+            "subtick_steps": 0,
+            "player_identity_updates": [
+                {"demo_tick": 0, "player_slot": 0, "xuid": 111},
+            ],
+            "tracks": [{"slot": 0, "changes": 1, "encoded": "0.1"}],
+            "weaponselect_requests": [
+                {"demo_tick": 10, "player_slot": 0, "weaponselect": 101},
+            ],
+        },
+        parser_factory=_UnavailableWeaponStateParser,
+    )
+
+    packed = json.loads(payload)
+    assert packed[2] == [["111", "0.1"]]
+    assert packed[6] == []
+    assert stats["input_weaponselect_requests"] == 1
+    assert stats["input_weaponselect_resolved"] == 0
+    assert stats["input_weaponselect_unresolved"] == 1
+    assert stats["input_weaponselect_parse_failed"] == 1
 
 
 def test_inline_vpk_round_trip_preserves_entries_and_checks_crc():
@@ -363,18 +768,42 @@ def test_inline_vpk_round_trip_preserves_entries_and_checks_crc():
         read_inline_vpk(bytes(damaged))
 
 
-def test_voice_payload_injection_is_bounded_and_rebuilds_vpk():
-    template_script = b"before" + VOICE_DATA_BEGIN + (b" " * 12) + VOICE_DATA_END + b"after"
+def test_voice_payload_injection_resizes_compiled_resource_and_rebuilds_vpk():
+    data = b"before" + VOICE_DATA_BEGIN + b"[]" + VOICE_DATA_END + b"after"
+    block_table_size = 16 + (2 * 12)
+    data_descriptor = 16
+    tail_descriptor = 28
+    tail = b"tail-block"
+    template_script = b"".join(
+        (
+            struct.pack("<4I", block_table_size + len(data) + len(tail), 0, 0, 2),
+            b"DATA",
+            struct.pack("<2I", block_table_size - (data_descriptor + 4), len(data)),
+            b"TAIL",
+            struct.pack(
+                "<2I",
+                block_table_size + len(data) - (tail_descriptor + 4),
+                len(tail),
+            ),
+            data,
+            tail,
+        )
+    )
     template = write_inline_vpk({VOICE_SCRIPT_PATH: template_script})
 
-    generated = inject_voice_payload(template, b"[[\"A\"],[]]")
+    payload = b"x" * 1_000_000
+    generated = inject_voice_payload(template, payload)
     script = read_inline_vpk(generated)[VOICE_SCRIPT_PATH]
     start = script.index(VOICE_DATA_BEGIN) + len(VOICE_DATA_BEGIN)
     end = script.index(VOICE_DATA_END)
-    assert script[start:end].rstrip() == b"[[\"A\"],[]]"
-
-    with pytest.raises(DemoVoiceHudError, match="template holds 12"):
-        inject_voice_payload(template, b"x" * 13)
+    assert script[start:end] == payload
+    assert struct.unpack_from("<I", script, 0)[0] == len(script)
+    assert struct.unpack_from("<I", script, data_descriptor + 8)[0] == (
+        len(data) - 2 + len(payload)
+    )
+    tail_relative = struct.unpack_from("<I", script, tail_descriptor + 4)[0]
+    tail_start = tail_descriptor + 4 + tail_relative
+    assert script[tail_start : tail_start + len(tail)] == tail
 
 
 def test_checked_in_voice_template_contains_only_an_empty_payload():
@@ -389,6 +818,10 @@ def test_checked_in_voice_template_contains_only_an_empty_payload():
 
     assert script[start:end].rstrip() == b"[[], [], [], []]"
     assert "panorama/layout/hud/hudalerts.vxml_c" in entries
+    assert "soundevents/soundevents_addon.vsndevts_c" in entries
+    assert len(entries["soundevents/soundevents_addon.vsndevts_c"]) > 2_462
+    assert "sounds/cs2_insight/input/keyboard-normal-01.vsnd_c" in entries
+    assert "sounds/cs2_insight/input/mouse-down.vsnd_c" in entries
     assert "panorama/styles/hud/hudalerts.vcss_c" not in entries
     assert "panorama/styles/hud/hudhealthammocenter.vcss_c" not in entries
     assert "panorama/styles/hud/hudradar.vcss_c" in entries
@@ -399,7 +832,7 @@ def test_checked_in_voice_template_contains_only_an_empty_payload():
     assert b"PanoramaGameTimeJumpEvent" in alert_script
     assert b"SEEK_SETTLE_SAMPLES = 60" in alert_script
     assert b"HIDDEN_STABLE_SAMPLES = 10" in alert_script
-    assert end - start == 8_000_000
+    assert script[start:end] == b"[[], [], [], []]"
     assert b"CS2InsightDemoVoice" in script
     assert b"CS2InsightInputHud" in script
     assert b"CS2InsightRadarHud" in script
@@ -491,10 +924,191 @@ def test_checked_in_voice_template_contains_only_an_empty_payload():
     assert b'fx.anchor.style.x = "0px"' not in script
     assert b'fx.anchor.style.y = "0px"' not in script
     assert b'ConsoleCommand("cl_drawhud_force_radar 0")' not in script
-    assert b'["SHIFT", 0, 0' in script
-    assert b'["SPACE", 82, 112' in script
-    assert b'["R", 194, 0' in script
+    for slot, x in ((1, 66), (2, 108), (3, 150), (4, 192), (5, 234)):
+        only_when_active = "false" if slot <= 4 else "true"
+        spec = (
+            f'["{slot}", {x}, 0, 38, 34, 18, 5, -1, '
+            f'{only_when_active}, {slot}]'
+        ).encode()
+        assert spec in script
+    assert b'["E", 150, 38' in script
+    assert b'["TAB", 4, 38, 58, 34, 13, 8, 12' in script
+    assert b'["SHIFT", 4, 76' in script
+    assert b'["F", 192, 76, 38, 34, 18, 5, 11, false, 0]' in script
+    assert b'["H", 234, 76, 38, 34, 18, 5, -1, true, 0, "hand"]' in script
+    assert b'["SPACE", 66, 114' in script
+    assert b'["R", 192, 38' in script
+    assert b'["M1", 276, 38, 39, 44, 11, 13, 8' in script
+    assert b'["M2", 315, 38, 39, 44, 11, 13, 9' in script
+    assert b'key.text = mouseButton ? "" : spec[0]' in script
+    assert b'key.style.borderRadius = "39px 0px 0px 0px"' in script
+    assert b'key.style.borderRadius = "0px 39px 0px 0px"' in script
+    assert b'key._insightMouseButton = true' in script
+    assert b"CS2InsightInputMouseShell" not in script
+    assert b"CS2InsightMouseWheelWell" not in script
+    assert b"CS2InsightMouseWheel" not in script
+    assert b'["W", 108, 38, 38, 34, 18, 5, 0, false, 0]' in script
+    assert b'["SHIFT", 4, 76, 58, 34, 12, 8, 6, false, 0]' in script
+    assert b'["CTRL", 4, 114, 58, 34, 13, 8, 5, false, 0]' in script
+    assert b'["SPACE", 66, 114, 164, 34, 12, 8, 4, false, 0]' in script
+    assert b'pad.style.position = "276px 82px 0px"' in script
+    assert b"const MOUSE_PAD_WIDTH = 78" in script
+    assert b"const MOUSE_PAD_HEIGHT = 70" in script
+    assert b'pad.style.border = "0px solid #00000000"' in script
+    assert b'pad.style.borderRadius = "0px 0px 24px 24px"' in script
+    assert b"const encodedMouseTracks = packed[15] || []" in script
+    assert b"const encodedHandSwitchTracks = packed[16] || []" in script
+    assert b"const encodedInputAudioEdges = packed[17] || []" in script
+    assert b"function float32FromBits(rawBits)" in script
+    assert b"const encodedInputPresentation = Array.isArray(packed[18])" in script
+    assert b"const encodedCombatStats = packed[19] || null" in script
+    assert b"const combatStatsHudEnabled = false" in script
+    assert b"function decodeCombatStats(raw)" in script
+    assert b"function updateCombatStatsHud()" in script
+    assert b'combatStatsHud.style.backgroundColor = "#00000000"' in script
+    assert b'"CS2InsightKdaKills", 0, 36, 2, "K"' in script
+    assert b'"CS2InsightKdaDeaths", 48, 36, 2, "D"' in script
+    assert b'"CS2InsightKdaAssists", 96, 36, 2, "A"' in script
+    assert b'function createCombatSeparator' not in script
+    assert b'"R DMG"' in script
+    assert b'"DMG"' in script
+    assert b'combatStatsHud.AddClass("hud-colorize-wash")' not in script
+    assert b'combatStatsHud.AddClass("additive")' in script
+    assert b'panel.AddClass("hud-colorize-wash")' in script
+    assert b'label.AddClass("stratum-bold-mono")' in script
+    assert b'label.AddClass("hud-colorize-wash")' in script
+    assert b'title.style.position = "0px -12px 0px"' in script
+    assert b'const COMBAT_DIGIT_DURATION_SECONDS = 0.6' in script
+    assert b'const COMBAT_DIGIT_TIMING = "cubic-bezier( 0.9, 0.01, 0.1, 1 )"' in script
+    assert b'function createCombatDigitPanel(parent, id, x, y, digits)' in script
+    assert b'function setCombatDigitPanel(panel, value, instant)' in script
+    assert b'function positionCombatStatsHud(mount)' in script
+    assert b'cursor.actualxoffset' in script
+    assert b'cursor.actualyoffset' in script
+    assert b'const left = Math.round(x / scaleX) + 50' in script
+    assert b'const top = Math.round(y / scaleY) - 54' in script
+    assert b'damageStrip.style.position = "154px 44px 0px"' in script
+    assert b'damageStrip, "CS2InsightTotalDamage", 88, 112, 5, "DMG"' in script
+    assert b'const mount = findHudTraverse("HudLowerLeft")' in script
+    assert b'combatMoneyPanel = findHudTraverse("HudMoney")' in script
+    assert b'$.CreatePanel("Panel", mount, "CS2InsightCombatStatsHud")' in script
+    assert b'setCombatDigitPanel(combatKdaKillsPanel, visibleState.kills, true)' in script
+    assert b'setCombatDigitPanel(combatRoundDamagePanel, visibleState.roundDamage, instant)' in script
+    assert b"function setCombatStatsColor" not in script
+    assert b"function animateCombatKda" not in script
+    assert b"CS2InsightKdaIncoming" not in script
+    assert b"const inputHudDisplayMode = encodedAdvancedPlayback" in script
+    assert b'? "hybrid"' in script
+    assert script.index(b"const inputHudDisplayMode = encodedAdvancedPlayback") < script.index(
+        b"const advancedPlayback = (function safelyDecodeAdvancedPlayback()"
+    )
+    assert b"inputHudScalePercent / 100" in script
+    assert b'inputAudioVolumePercent !== 100' in script
+    assert b"const handSwitchTracksByXuid = {}" in script
+    assert b"const inputAudioEdgesByXuid = {}" in script
+    assert b"const mouseTracksByXuid = {}" in script
+    assert b"let inputMousePad = null" in script
+    assert b"let inputMouseHeadDot = null" in script
+    assert b"inputMouseTrailDots" not in script
+    assert b"let inputMousePathXuid = \"\"" in script
+    assert b"let inputMousePathPoints = []" in script
+    assert b"const MOUSE_TRAIL_POINT_COUNT = 24" in script
+    assert b"function advanceMousePath(samples, xuid, tick)" in script
+    assert b"function panMousePathAtEdge()" in script
+    assert b"function smoothMousePath(points)" in script
+    assert b"smoothMousePath(advanceMousePath(samples || [], xuid, tick))" in script
+    assert b"function mouseCssPx(value)" in script
+    assert b'return normalized.toFixed(3) + "px"' in script
+    assert b"function mouseCssDegrees(value)" in script
+    assert b'return normalized.toFixed(3) + "deg"' in script
+    assert b"segment.style.position = mouseCssPx(start.x)" in script
+    assert b"mouseCssDegrees(Math.atan2(dy, dx) * 180 / Math.PI)" in script
+    assert b"inputMouseHeadDot.style.position = mouseCssPx(head.x - 3)" in script
+    assert b'segment.style.position = start.x + "px "' not in script
+    assert b'(Math.atan2(dy, dx) * 180 / Math.PI) + "deg"' not in script
+    assert b'pad.style.backgroundColor = "#23262D"' in script
+    assert b'pad.style.border = "0px solid #00000000"' in script
+    assert b'head.style.boxShadow = "fill #E07F0A80 0px 0px 5px 0px"' in script
+    assert b'segment.style.boxShadow = "none"' in script
+    assert b"horizontalAxis" not in script
+    assert b"verticalAxis" not in script
+    assert b"inputMouseCursorX += dx" in script
+    assert b"inputMouseCursorY += dy" in script
+    assert b"offsetX = 34 - newest.x * scale" not in script
+    assert b"offsetY = 33.5 - newest.y * scale" not in script
+    assert b"function updateMouseMotionPad(samples, xuid, tick)" in script
+    assert b"updateMouseMotionPad(mouseSamples, xuid, tick)" in script
+    assert b"const INPUT_HUD_REFRESH_SECONDS = 0.016" in script
+    assert b"function advanceInputAudio(edges, xuid, tick)" in script
+    assert b'$.DispatchEvent("CSGOPlaySoundEffect", soundEvent, "MOUSE")' in script
+    assert b"const INPUT_HUD_SCOREBOARD_BIT = 12" in script
+    assert b"function currentInputPovXuid(state)" not in script
+    assert b"const xuid = currentPovXuid(state)" in script
+    assert b"inputHudRenderedXuid === xuid && inputHudRenderedTick === tick" in script
+    assert b"function setMirroredScoreboardActive(active)" in script
+    assert b'ConsoleCommand(desired ? "+showscores" : "-showscores")' in script
+    assert b"function releaseMirroredScoreboard()" in script
+    assert b"if (mirroredScoreboardActive)" in script
+    assert b"function updateMirroredScoreboard(mask)" in script
+    assert b"const mirrorEnabled = Boolean(advancedPlayback)" in script
+    assert b"&& advancedPovVisualsEnabled" in script
+    assert b"&& !advancedHudHidden" in script
+    assert b"mirrorEnabled && Boolean(mask & (1 << INPUT_HUD_SCOREBOARD_BIT))" in script
+    assert script.count(b"releaseMirroredScoreboard();") >= 2
+    assert script.index(b"        updateMirroredScoreboard(mask);") < script.index(
+        b"inputHudRenderedXuid === xuid && inputHudRenderedTick === tick"
+    )
+    assert b"$.Schedule(INPUT_HUD_REFRESH_SECONDS, updateInputHud)" in script
+    assert b"$.Schedule(0, updateInputHud)" not in script
+    assert b'inputHud.style.width = INPUT_HUD_WIDTH + "px"' in script
+    assert b'inputHud.style.height = "190px"' in script
+    assert b'inputHud.style.marginBottom = "139px"' in script
+    assert b'inputHud.style.flowChildren = "none"' in script
+    assert b'inputHud.style.overflow = "noclip"' not in script
+    assert b'inputHud.style.zIndex = "1000"' in script
+    assert b'inputHud.style.opacity = "0.92"' in script
+    assert b'key.style.verticalAlign = "center"' not in script
+    assert b'key.style.transform = "rotateZ(-2deg)"' not in script
+    assert b'key.style.fontStyle = "italic"' not in script
+    assert b'const inactiveBackground = panel._insightMouseButton ? "#23262D" : "#2A2D34"' in script
+    assert b'panel.style.backgroundColor = active ? "#E07F0A" : inactiveBackground' in script
+    assert b'panel.style.border = active ? "1px solid #F29A32" : "1px solid #3F434D"' in script
+    assert b'panel.style.color = active ? "#FFFFFF" : "#8A8F99"' in script
+    assert b'? "fill #E07F0A8C 0px 0px 7px 0px"' in script
+    assert b': "none"' in script
+    assert b'function createInputMouseShell(parent)' not in script
+    assert b'function createInputMouseDetails(parent)' not in script
+    assert script.index(b"createMouseMotionPad(inputHud);") < script.index(
+        b"inputKeyPanels = specs.map"
+    )
+    input_hud_start = script.index(b"function createInputKey")
+    input_hud_end = script.index(b"function combatStatAt", input_hud_start)
+    for label in (b'"1"', b'"2"', b'"3"', b'"4"', b'"5"', b'"E"', b'"F"', b'"H"', b'"TAB"'):
+        assert label in script[input_hud_start:input_hud_end]
+    assert b'inputHud.style.position = "0px 0px 0px"' in script
+    assert b"function stockHudAlertClaimsInputLane()" not in script
+    assert b"function stockHudAlertHorizontalMetrics(panel, root, rootWidth)" not in script
+    assert b"positionInputHudForStockAlert(panel)" not in script
+    assert b"panel.visible = true" in script
+    assert b"weaponSelectTracksByXuid" in script
+    assert b"const INPUT_HUD_WEAPON_SELECT_HOLD_TICKS = 12" in script
+    assert b"function weaponSlotPulseAt(changes, tick)" in script
+    assert b"age > INPUT_HUD_WEAPON_SELECT_HOLD_TICKS" in script
+    assert b"const weaponSlot = weaponSlotPulseAt(" in script
+    assert b"stickyMask" not in script[input_hud_start:input_hud_end]
+    assert b"transitionDuration" not in script[input_hud_start:input_hud_end]
+    input_update_start = script.index(b"function updateInputHud()")
+    input_update_end = script.index(b"function playerColorHex", input_update_start)
+    assert b"advancedPovVisualsActive" not in script[input_update_start:input_update_end]
     assert b"onlyWhenActive" in script
+    assert b'inputHudDisplayMode === "always"' in script
+    assert b'inputHudDisplayMode === "hybrid" && !onlyWhenActive' in script
+    assert b'inputHudDisplayMode === "hybrid" && !key.onlyWhenActive' in script
+    assert b"const runtimeInputHudEnabled = advancedPlayback" in script
+    assert b"!advancedHudHidden && advancedQuickOptions.inputHud" in script
+    assert b"if (!runtimeInputHudEnabled)" in script
+    assert b"if (inputAudioEnabled)" in script
+    assert b'key.semanticTrack === "hand"' in script
     assert b'findHudTraverse("VisiblePlayerIDs")' in script
     assert b'GameInterfaceAPI.ConsoleCommand(commands[index])' in script
     assert b'"cl_drawhud_force_teamid_overhead 1"' in script
@@ -507,6 +1121,12 @@ def test_checked_in_voice_template_contains_only_an_empty_payload():
     assert b'firstChildWithClass(playerPanel, "playerid__name")' in script
     assert b'playerPanel.BHasClass("playerid--team-ct")' in script
     assert b'setPlayerOverheadContentVisible(playerPanel, visible)' in script
+    assert b'GameInterfaceAPI.GetSettingString("spec_show_xray")' in script
+    assert b'GameInterfaceAPI.GetSettingFloat("spec_show_xray")' in script
+    assert b"function syncNativeDemoXrayOverhead(enabled)" in script
+    assert b'"cl_drawhud_force_teamid_overhead " + (enabled ? 1 : -1)' in script
+    assert b"const nativeXrayEnabled = !advancedHudHidden && nativeDemoXrayEnabled()" in script
+    assert b"setPlayerOverheadContentVisible(panel, nativeXrayEnabled)" in script
     assert b'label.text = text' in script
     assert b'playerPanel.SetHasClass("money", active)' in script
     assert b'playerPanel.SetHasClass("normal-health", false)' in script
@@ -603,6 +1223,8 @@ def test_checked_in_voice_template_contains_only_an_empty_payload():
     profile_start = script.index(b"function advancedApplyPlaybackProfile(profile)")
     profile_end = script.index(b"function advancedSetVoicePolicy(policy)", profile_start)
     assert b"spec_mode" not in script[profile_start:profile_end]
+    assert b'"spec_show_xray 1"' in script[profile_start:profile_end]
+    assert b'"cl_drawhud_force_teamid_overhead 0"' not in script[profile_start:profile_end]
     assert b"CS2InsightAdvancedProgress" not in script
     assert b"CS2InsightAdvancedProgressSlider" not in script
     assert b"function advancedNumericEntryText(entry)" not in script
@@ -697,8 +1319,10 @@ def test_checked_in_voice_template_contains_only_an_empty_payload():
     assert b"advancedProgressSlider.max = 1" not in script
     assert b"advancedQuickOptions.messages" not in script
     assert b'["messages", advancedCopy(' not in script
-    assert b"advancedQuickOptions.input" not in script
-    assert b'["input", advancedCopy(' not in script
+    assert b"inputHud: advancedPlayback ? true : inputHudEnabled" in script
+    assert 'advancedOptionLabels.inputHud = advancedCopy("键鼠", "INPUT")'.encode() in script
+    assert b'advancedToggleQuickOption("inputHud")' in script
+    assert b"advancedOptionButtons.inputHud = inputHudToggle" in script
     assert b'"tv_nochat 0"' in script
     assert b"advancedNativeMessagesRestored" in script
     assert b'"cl_drawhud_force_radar " + radarMode' in script
@@ -747,8 +1371,11 @@ def test_checked_in_voice_template_contains_only_an_empty_payload():
     assert b'advancedMenu.style.verticalAlign = "center"' in script
     assert b'advancedMenu.style.marginRight = "6px"' in script
     assert b'advancedMenu.style.marginTop = "0px"' in script
-    assert b'advancedEdgeTrigger.style.height = "100%"' in script
+    assert b'advancedEdgeTrigger.style.width = advancedChinese() ? "108px" : "148px"' in script
+    assert b'advancedEdgeTrigger.style.height = "38px"' in script
     assert b'advancedEdgeTrigger.style.verticalAlign = "center"' in script
+    assert b'advancedEdgeTrigger.style.marginRight = "6px"' in script
+    assert b'advancedEdgeTrigger.style.height = "100%"' not in script
     assert b"advancedMenu.style.x =" not in script
     assert b"advancedMenu.style.y =" not in script
     assert b"function restrictPovTeamCounterEquipment()" in script
@@ -822,6 +1449,7 @@ def test_advanced_playback_template_uses_native_hot_switchable_hud_styles():
     end = script.index(VOICE_DATA_END)
 
     assert script[start:end].rstrip() == b"[[], [], [], []]"
+    assert b"const combatStatsHudEnabled = false" in script
     assert b"Math.pow(remainingSeconds / FLASH_CERTAIN_BLIND_SECONDS, FLASH_FADE_EXPONENT)" in script
     assert b"return Math.max(0, Math.min(1, white))" in script
     assert b"const afterimage" not in script
@@ -1027,11 +1655,13 @@ def test_recording_build_keeps_pov_only_compiled_styles():
         parser_factory=_FakeParser,
     )
     entries = read_inline_vpk(build.vpk_bytes)
+    script = entries[VOICE_SCRIPT_PATH]
 
     assert "panorama/styles/hud/hudhealthammocenter.vcss_c" not in entries
     assert "panorama/styles/hud/hudradar.vcss_c" in entries
     assert "panorama/styles/hud/hudteamcounter-equipmentinfo.vcss_c" in entries
     assert "panorama/styles/hud/hudteamcounter.vcss_c" in entries
+    assert b"const combatStatsHudEnabled = false" in script
 
 
 def test_static_pov_package_resets_only_stale_match_alert_toasts():
@@ -1105,6 +1735,12 @@ def test_session_console_commands_are_embedded_in_the_payload():
         template_path,
         parser_factory=_FakeParser,
         session_console_commands=commands,
+        input_hud_enabled=True,
+        input_hud_display_mode="active",
+        input_hud_scale_percent=115,
+        input_audio_enabled=False,
+        input_audio_volume_percent=50,
+        combat_stats_enabled=False,
     )
     script = read_inline_vpk(build.vpk_bytes)[VOICE_SCRIPT_PATH]
     start = script.index(VOICE_DATA_BEGIN) + len(VOICE_DATA_BEGIN)
@@ -1112,6 +1748,7 @@ def test_session_console_commands_are_embedded_in_the_payload():
     payload = json.loads(script[start:end].rstrip())
 
     assert payload[14] == commands
+    assert payload[18] == [1, "active", 115, 0, 50, 0]
 
 
 def test_session_console_commands_reject_command_separators():
@@ -2116,6 +2753,12 @@ def test_pov_manager_installs_generated_voice_package(monkeypatch, tmp_path: Pat
         voice_enabled=True,
         voice_mode="team",
         advanced_playback_enabled=False,
+        input_hud_enabled=True,
+        input_hud_display_mode="hybrid",
+        input_hud_scale_percent=100,
+        input_audio_enabled=True,
+        input_audio_volume_percent=100,
+        combat_stats_enabled=True,
         session_console_commands=(),
     ):
         calls.append(
@@ -2126,19 +2769,29 @@ def test_pov_manager_installs_generated_voice_package(monkeypatch, tmp_path: Pat
                 voice_enabled,
                 voice_mode,
                 advanced_playback_enabled,
+                input_hud_enabled,
+                input_hud_display_mode,
+                input_hud_scale_percent,
+                input_audio_enabled,
+                input_audio_volume_percent,
+                combat_stats_enabled,
                 tuple(session_console_commands),
             )
         )
         return built
 
     monkeypatch.setattr(pov_hud_manager, "build_demo_voice_hud_vpk", fake_build)
+    input_report = {"format_version": 4, "tracks": []}
+    monkeypatch.setattr(pov_hud_manager, "load_input_report", lambda _path: input_report)
     manager = PovHudManager(SimpleNamespace(cs2_path=str(cs2)))
     monkeypatch.setattr(manager, "get_project_pov_dir", lambda: pov_dir)
 
     result = manager.install(demo_path=demo)
 
     assert result is built
-    assert calls == [(demo, template, None, True, "team", False, ())]
+    assert calls == [
+        (demo, template, input_report, True, "team", False, True, "hybrid", 100, True, 100, True, ())
+    ]
     assert (csgo / "pov.vpk").read_bytes() == b"generated"
     manifest = json.loads(manager.get_manifest_path().read_text(encoding="utf-8"))
     assert manifest["demo_voice_hud_generated"] is True
@@ -2152,6 +2805,11 @@ def test_pov_manager_installs_generated_voice_package(monkeypatch, tmp_path: Pat
         "compose_recording_map_material_vpk",
         lambda *, base_vpk_bytes, **_kwargs: base_vpk_bytes,
     )
+    monkeypatch.setattr(
+        pov_hud_manager,
+        "_detect_chroma_demo_map_name",
+        lambda _demo_path: "de_dust2",
+    )
     advanced_result = manager.install(
         demo_path=demo,
         advanced_playback_enabled=True,
@@ -2162,12 +2820,18 @@ def test_pov_manager_installs_generated_voice_package(monkeypatch, tmp_path: Pat
     assert calls[-1] == (
         demo,
         advanced_template,
-        None,
+        input_report,
         True,
         "team",
         True,
-        (
-            "sv_cheats 1",
+        True,
+        "hybrid",
+        100,
+            True,
+            100,
+            True,
+            (
+                "sv_cheats 1",
             "mat_fullbright 0",
             "r_rendersun 0",
             "r_directlighting 0",

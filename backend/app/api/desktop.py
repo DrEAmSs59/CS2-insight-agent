@@ -5,12 +5,15 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
+
+from ..win_cs2_console import find_cs2_hwnd
 
 router = APIRouter(tags=["desktop"])
 
@@ -116,6 +119,104 @@ class OpenFolderBody(BaseModel):
 
 class RevealFileInExplorerBody(BaseModel):
     path: str = Field(..., min_length=1, max_length=2600)
+
+
+class Cs2InspectBody(BaseModel):
+    hex: str = Field(..., min_length=12, max_length=8192)
+
+
+_CS2_INSPECT_HEX_PATTERN = re.compile(r"^[0-9a-fA-F]+$")
+
+
+def _validated_cs2_inspect_hex(value: str) -> str:
+    payload = str(value or "").strip()
+    if (
+        len(payload) < 12
+        or len(payload) > 8192
+        or len(payload) % 2 != 0
+        or _CS2_INSPECT_HEX_PATTERN.fullmatch(payload) is None
+    ):
+        raise ValueError("CS2 检视载荷格式无效")
+    return payload.upper()
+
+
+def _launch_cs2_inspect_url(inspect_url: str) -> None:
+    """Hand a validated CS2 preview URL to the host OS.
+
+    Browser development mode cannot invoke Tauri commands, so the local
+    backend owns this OS-level action just like Insight's other native helpers.
+    """
+    if sys.platform == "win32":
+        os.startfile(inspect_url)  # type: ignore[attr-defined]  # noqa: S606
+        return
+    if sys.platform == "darwin":
+        subprocess.Popen(
+            ["open", inspect_url],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        return
+    subprocess.Popen(
+        ["xdg-open", inspect_url],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+
+
+async def _wait_for_cs2_window(timeout: float = 75.0) -> bool:
+    deadline = asyncio.get_running_loop().time() + max(1.0, timeout)
+    while asyncio.get_running_loop().time() < deadline:
+        if await asyncio.to_thread(find_cs2_hwnd):
+            return True
+        await asyncio.sleep(0.4)
+    return False
+
+
+async def _launch_and_deliver_cs2_inspect(payload: str) -> dict[str, bool]:
+    """Ensure CS2 is ready, then dispatch the canonical game-inspect URI.
+
+    A `+` command in the initial cold-start URI can be consumed before CS2 is
+    ready. Start the game without a command in that case, wait for the real game
+    window to settle, and only then send the `rungame` URI used by Steam item
+    inspection. This path does not depend on keyboard focus or console binds.
+    """
+    already_running = bool(await asyncio.to_thread(find_cs2_hwnd))
+    if not already_running:
+        await asyncio.to_thread(_launch_cs2_inspect_url, "steam://run/730")
+        if not await _wait_for_cs2_window():
+            raise RuntimeError("等待 CS2 窗口就绪超时")
+        try:
+            settle_seconds = max(
+                0.0,
+                float(os.environ.get("CS2_INSIGHT_INSPECT_STARTUP_SETTLE_SEC", "12")),
+            )
+        except ValueError:
+            settle_seconds = 12.0
+        if settle_seconds:
+            await asyncio.sleep(settle_seconds)
+
+    inspect_url = (
+        "steam://rungame/730/76561202255233023/"
+        f"+csgo_econ_action_preview%20{payload}"
+    )
+    await asyncio.to_thread(_launch_cs2_inspect_url, inspect_url)
+    return {"already_running": already_running, "dispatched": True}
+
+
+@router.post("/api/cs2/inspect")
+async def launch_cs2_inspect(body: Cs2InspectBody):
+    try:
+        payload = _validated_cs2_inspect_hex(body.hex)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+    try:
+        launch_result = await _launch_and_deliver_cs2_inspect(payload)
+    except Exception as exc:
+        raise HTTPException(400, f"无法通过 Steam 启动 CS2 检视：{exc}") from exc
+    return {"ok": True, **launch_result}
 
 
 @router.post("/api/open-folder")

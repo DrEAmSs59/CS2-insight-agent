@@ -22,6 +22,7 @@ describe("playDemoInCs2", () => {
     expect(API.post).toHaveBeenCalledWith("/demos/42/play", {
       pov_hud: { enabled: false, radar_mode: 0, teamcounter_numeric: false, skybox_id: "default" },
       map_material: { id: "default" },
+      weather_effect: { id: "default" },
     });
   });
 
@@ -32,6 +33,7 @@ describe("playDemoInCs2", () => {
       path: "C:/tmp/a.dem",
       pov_hud: { enabled: false, radar_mode: 0, teamcounter_numeric: false, skybox_id: "default" },
       map_material: { id: "default" },
+      weather_effect: { id: "default" },
     });
   });
 
@@ -45,11 +47,56 @@ describe("playDemoInCs2", () => {
         teamcounter_numeric: true,
         skybox_id: "cartoon3",
         map_material_id: "waxed_reflection",
+        input_hud_enabled: true,
+        input_hud_display_mode: "active",
+        // Legacy callers may still send these, but the current product preset
+        // fixes both values at 100.
+        input_hud_scale_percent: 115,
+        input_audio_enabled: true,
+        input_audio_volume_percent: 50,
+        weather_effect_id: "default",
       },
     });
     expect(API.post).toHaveBeenCalledWith("/demos/7/play", {
-      pov_hud: { enabled: true, radar_mode: -1, teamcounter_numeric: true, skybox_id: "cartoon3" },
+      pov_hud: {
+        enabled: true,
+        radar_mode: -1,
+        teamcounter_numeric: true,
+        skybox_id: "cartoon3",
+        input_hud_enabled: true,
+        input_hud_display_mode: "hybrid",
+        input_hud_scale_percent: 100,
+        input_audio_enabled: true,
+        input_audio_volume_percent: 100,
+      },
       map_material: { id: "waxed_reflection" },
+      weather_effect: { id: "default" },
+    });
+  });
+
+  it("treats rain and puddles as one bundled playback preset", async () => {
+    API.post.mockResolvedValue({ data: { ok: true } });
+    await playDemoInCs2({
+      id: 8,
+      advancedPlayback: {
+        enabled: true,
+        map_material_id: "rain_puddles",
+      },
+    });
+    expect(API.post).toHaveBeenCalledWith("/demos/8/play", {
+      pov_hud: {
+        enabled: true,
+        radar_mode: 0,
+        teamcounter_numeric: false,
+        skybox_id: "default",
+        input_hud_enabled: true,
+        input_hud_display_mode: "hybrid",
+        input_hud_scale_percent: 100,
+        input_audio_enabled: true,
+        input_audio_volume_percent: 100,
+      },
+      map_material: { id: "default" },
+      weather_effect: { id: "rain" },
     });
   });
 

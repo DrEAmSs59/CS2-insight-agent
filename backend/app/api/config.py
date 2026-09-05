@@ -28,9 +28,10 @@ from ..env_utils import (
     resolve_config_path,
     save_config,
 )
-from ..update_info import build_update_payload, resolve_local_version_info
-from ..skybox_vpk import SkyboxVpkError, normalize_skybox_id
 from ..map_material_vpk import MapMaterialVpkError, normalize_map_material_id
+from ..skybox_vpk import SkyboxVpkError, normalize_skybox_id
+from ..weather_effects import WeatherEffectError, normalize_weather_effect_id
+from ..update_info import build_update_payload, resolve_local_version_info
 
 router = APIRouter(tags=["config"])
 
@@ -58,6 +59,7 @@ class ConfigPayload(BaseModel):
     default_record_warmup: Optional[dict[str, Any]] = None
     recording_skybox: Optional[str] = None
     recording_map_material: Optional[str] = None
+    recording_weather_effect: Optional[str] = None
     cs2_extra_launch_args: Optional[str] = None
     cs2_extra_launch_args_user_configured: Optional[bool] = None
     record_inject_console_lines: Optional[str] = None
@@ -65,11 +67,6 @@ class ConfigPayload(BaseModel):
     obs_transition_enabled: Optional[bool] = None
     obs_transition_name: Optional[str] = None
     obs_transition_duration_ms: Optional[int] = None
-    kb_overlay_enabled: Optional[bool] = None
-    kb_overlay_tick_offset: Optional[int] = None
-    kb_overlay_position: Optional[str] = None
-    kill_fx_enabled: Optional[bool] = None
-    kill_fx_tick_offset: Optional[int] = None
     experimental: Optional[ExperimentalPayload] = None
     steam_api_key: Optional[str] = None
     steam_id64: Optional[str] = None
@@ -78,7 +75,6 @@ class ConfigPayload(BaseModel):
     match_count: Optional[int] = None
     update_check_frequency: Optional[str] = None
     last_update_check_at: Optional[str] = None
-    latency_calibration_enabled: Optional[bool] = None
 
 
 @router.get("/api/config")
@@ -325,7 +321,6 @@ async def update_config(payload: ConfigPayload):
             cfg.obs.obs_path,
         )
         obs = payload.obs
-        obs_fields = getattr(obs, "model_fields_set", set()) or set()
         cfg.obs.host = obs.host
         try:
             cfg.obs.port = int(obs.port)
@@ -336,9 +331,6 @@ async def update_config(payload: ConfigPayload):
             cfg.obs.password = raw_password
         if obs.obs_path is not None:
             cfg.obs.obs_path = str(obs.obs_path).strip()
-        # 设置页已下线该开关；未显式传入时保留配置文件/API 调试值。
-        if "browser_begin_frame_scheduling" in obs_fields:
-            cfg.obs.browser_begin_frame_scheduling = bool(obs.browser_begin_frame_scheduling)
         verified_connection_after = (
             cfg.obs.host,
             cfg.obs.port,
@@ -375,8 +367,6 @@ async def update_config(payload: ConfigPayload):
         cfg.ai_mode = payload.ai_mode
     if payload.obs_agent_auto_prepare is not None:
         cfg.obs_agent_auto_prepare = bool(payload.obs_agent_auto_prepare)
-    if payload.latency_calibration_enabled is not None:
-        cfg.latency_calibration_enabled = bool(payload.latency_calibration_enabled)
     if payload.locale is not None and payload.locale in ("zh", "en", "auto"):
         cfg.locale = payload.locale
     if payload.expected_parse_players is not None:
@@ -420,6 +410,19 @@ async def update_config(payload: ConfigPayload):
         except MapMaterialVpkError as exc:
             raise HTTPException(422, str(exc)) from exc
         cfg.recording_map_material = map_material_id
+    if payload.recording_weather_effect is not None:
+        try:
+            weather_effect_id = normalize_weather_effect_id(
+                payload.recording_weather_effect
+            )
+        except WeatherEffectError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        cfg.recording_weather_effect = weather_effect_id
+    if (
+        str(getattr(cfg, "recording_map_material", "default")) != "default"
+        and str(getattr(cfg, "recording_weather_effect", "default")) != "default"
+    ):
+        raise HTTPException(422, "打蜡与天气效果不能同时启用。")
     if payload.cs2_extra_launch_args is not None:
         next_launch_args = str(payload.cs2_extra_launch_args)
         if payload.cs2_extra_launch_args_user_configured is not None:
@@ -455,23 +458,6 @@ async def update_config(payload: ConfigPayload):
     if payload.obs_transition_duration_ms is not None:
         try:
             cfg.obs_transition_duration_ms = max(0, int(payload.obs_transition_duration_ms))
-        except (TypeError, ValueError):
-            pass
-    if payload.kb_overlay_enabled is not None:
-        cfg.kb_overlay_enabled = bool(payload.kb_overlay_enabled)
-    if payload.kb_overlay_tick_offset is not None:
-        try:
-            cfg.kb_overlay_tick_offset = int(payload.kb_overlay_tick_offset)
-        except (TypeError, ValueError):
-            pass
-    if payload.kb_overlay_position is not None:
-        if str(payload.kb_overlay_position) in ("bottom_center", "minimap_below", "weapon_right"):
-            cfg.kb_overlay_position = str(payload.kb_overlay_position)
-    if payload.kill_fx_enabled is not None:
-        cfg.kill_fx_enabled = bool(payload.kill_fx_enabled)
-    if payload.kill_fx_tick_offset is not None:
-        try:
-            cfg.kill_fx_tick_offset = int(payload.kill_fx_tick_offset)
         except (TypeError, ValueError):
             pass
     if payload.experimental is not None and payload.experimental.pov_enabled is not None:

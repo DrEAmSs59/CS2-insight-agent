@@ -10,14 +10,10 @@ const preset = {
   obs_transition_enabled: true,
   obs_transition_name: "Fade",
   obs_transition_duration_ms: 200,
-  kb_overlay_enabled: false,
-  kb_overlay_tick_offset: 6,
-  kb_overlay_position: "bottom_center",
-  kill_fx_enabled: true,
-  kill_fx_tick_offset: 6,
   experimental_pov_enabled: false,
   recording_skybox: "cartoon3",
   recording_map_material: "waxed_reflection",
+  recording_weather_effect: "default",
 };
 
 describe("recording preset share JSON", () => {
@@ -35,21 +31,20 @@ describe("recording preset share JSON", () => {
     expect(() => parseRecordingPresetFile(file, RECORD_WARMUP_DEFAULT_OPTIONS)).toThrow();
   });
 
-  test("defaults kill FX off when the field is missing", () => {
-    const { kill_fx_enabled: _removed, ...legacyPreset } = preset;
-    const file = buildRecordingPresetFile(legacyPreset);
-    expect(parseRecordingPresetFile(file, RECORD_WARMUP_DEFAULT_OPTIONS).kill_fx_enabled).toBe(false);
-  });
-
-  test("migrates a version-1 KillFX fine-tune to an independent offset", () => {
-    const file = { ...buildRecordingPresetFile({ ...preset, kb_overlay_tick_offset: 8, kill_fx_tick_offset: -2 }), version: 1 };
-    expect(parseRecordingPresetFile(file, RECORD_WARMUP_DEFAULT_OPTIONS).kill_fx_tick_offset).toBe(6);
-  });
-
-  test("defaults a missing version-1 KillFX fine-tune to the keyboard offset", () => {
-    const { kill_fx_tick_offset: _removed, ...legacyPreset } = preset;
-    const file = { ...buildRecordingPresetFile(legacyPreset), version: 1 };
-    expect(parseRecordingPresetFile(file, RECORD_WARMUP_DEFAULT_OPTIONS).kill_fx_tick_offset).toBe(6);
+  test("ignores retired OBS overlay fields in legacy presets", () => {
+    const file = {
+      ...buildRecordingPresetFile({
+        ...preset,
+        kb_overlay_enabled: true,
+        kb_overlay_tick_offset: 12,
+        kb_overlay_position: "weapon_right",
+        kill_fx_enabled: true,
+        kill_fx_tick_offset: -2,
+      }),
+      version: 4,
+    };
+    expect(parseRecordingPresetFile(file, RECORD_WARMUP_DEFAULT_OPTIONS))
+      .toEqual(preset);
   });
 
   test("defaults legacy presets to the original map sky", () => {
@@ -92,6 +87,37 @@ describe("recording preset share JSON", () => {
     };
     expect(parseRecordingPresetFile(buildRecordingPresetFile(next), RECORD_WARMUP_DEFAULT_OPTIONS))
       .toEqual(next);
+  });
+
+  test("round trips the in-game input HUD recording defaults", () => {
+    const next = {
+      ...preset,
+      default_record_warmup: {
+        ...preset.default_record_warmup,
+        input_hud_enabled: false,
+        input_hud_display_mode: "active",
+      },
+    };
+    expect(parseRecordingPresetFile(buildRecordingPresetFile(next), RECORD_WARMUP_DEFAULT_OPTIONS))
+      .toEqual({
+        ...next,
+        default_record_warmup: {
+          ...next.default_record_warmup,
+          input_hud_display_mode: "hybrid",
+        },
+      });
+  });
+
+  test("rejects an unknown in-game input HUD display mode", () => {
+    const next = {
+      ...preset,
+      default_record_warmup: {
+        ...preset.default_record_warmup,
+        input_hud_display_mode: "sometimes",
+      },
+    };
+    expect(() => parseRecordingPresetFile(buildRecordingPresetFile(next), RECORD_WARMUP_DEFAULT_OPTIONS))
+      .toThrow();
   });
 
   test("migrates the legacy disabled voice switch", () => {

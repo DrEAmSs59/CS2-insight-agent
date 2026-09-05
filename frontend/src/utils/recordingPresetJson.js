@@ -1,12 +1,20 @@
 import { isRecordingSkyboxId } from "./recordingSkybox.js";
 import {
+  DEFAULT_RECORDING_MAP_MATERIAL,
   isRecordingMapMaterialId,
   normalizeRecordingMapMaterialId,
+  RAIN_PUDDLES_MAP_MATERIAL,
 } from "./recordingMapMaterial.js";
+import {
+  DEFAULT_RECORDING_WEATHER_EFFECT,
+  isRecordingWeatherEffectId,
+  normalizeRecordingWeatherEffectId,
+  RAIN_RECORDING_WEATHER_EFFECT,
+} from "./recordingWeatherEffect.js";
 import { isPovVoiceMode, normalizePovVoiceMode } from "./povVoiceMode.js";
 
 export const RECORDING_PRESET_FORMAT = "cs2-insight-recording-preset";
-export const RECORDING_PRESET_VERSION = 4;
+export const RECORDING_PRESET_VERSION = 7;
 export const RECORDING_PRESET_MAX_BYTES = 256 * 1024;
 
 const isObject = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
@@ -81,6 +89,10 @@ function parseWarmup(value, defaults) {
       const text = requireString(value[key], field, 16);
       if (!isPovVoiceMode(text)) invalid(field, "range");
       result[key] = text;
+    } else if (key === "input_hud_display_mode") {
+      const text = requireString(value[key], field, 16);
+      if (!["hybrid", "always", "active"].includes(text)) invalid(field, "range");
+      result[key] = "hybrid";
     } else if (key === "aspect_ratio") {
       const text = requireString(value[key], field, 8);
       if (!["", "4:3", "16:9", "16:10"].includes(text)) invalid(field, "range");
@@ -112,14 +124,10 @@ export function buildRecordingPresetFile(preset, exportedAt = new Date().toISOSt
 export function parseRecordingPresetFile(value, warmupDefaults) {
   if (!isObject(value)) invalid("root", "type");
   if (value.format !== RECORDING_PRESET_FORMAT) invalid("format", "format");
-  if (![1, 2, 3, RECORDING_PRESET_VERSION].includes(value.version)) invalid("version", "version");
+  if (![1, 2, 3, 4, 5, 6, RECORDING_PRESET_VERSION].includes(value.version)) invalid("version", "version");
   if (!isObject(value.preset)) invalid("preset", "type");
 
   const p = value.preset;
-  const kbOverlayTickOffset = requireNumber(p.kb_overlay_tick_offset, "kb_overlay_tick_offset", -6400, 6400, true);
-  const storedKillFxOffset = Object.hasOwn(p, "kill_fx_tick_offset")
-    ? requireNumber(p.kill_fx_tick_offset, "kill_fx_tick_offset", -6400, 6400, true)
-    : 0;
   const result = {
     recording_global_pacing: parsePacing(p.recording_global_pacing),
     default_record_warmup: parseWarmup(p.default_record_warmup, warmupDefaults),
@@ -128,17 +136,6 @@ export function parseRecordingPresetFile(value, warmupDefaults) {
     obs_transition_enabled: requireBoolean(p.obs_transition_enabled, "obs_transition_enabled"),
     obs_transition_name: requireString(p.obs_transition_name, "obs_transition_name", 128),
     obs_transition_duration_ms: requireNumber(p.obs_transition_duration_ms, "obs_transition_duration_ms", 0, 10000, true),
-    kb_overlay_enabled: requireBoolean(p.kb_overlay_enabled, "kb_overlay_enabled"),
-    kb_overlay_tick_offset: kbOverlayTickOffset,
-    kb_overlay_position: requireString(p.kb_overlay_position, "kb_overlay_position", 32),
-    kill_fx_enabled: Object.hasOwn(p, "kill_fx_enabled")
-      ? requireBoolean(p.kill_fx_enabled, "kill_fx_enabled")
-      : false,
-    // Version 1 stored a KillFX fine-tune relative to the keyboard offset.
-    // Version 2 stores two independent absolute offsets.
-    kill_fx_tick_offset: value.version === 1
-      ? kbOverlayTickOffset + storedKillFxOffset
-      : (Object.hasOwn(p, "kill_fx_tick_offset") ? storedKillFxOffset : 6),
     experimental_pov_enabled: requireBoolean(p.experimental_pov_enabled, "experimental_pov_enabled"),
     recording_skybox: Object.hasOwn(p, "recording_skybox")
       ? requireString(p.recording_skybox, "recording_skybox", 64)
@@ -146,18 +143,36 @@ export function parseRecordingPresetFile(value, warmupDefaults) {
     recording_map_material: Object.hasOwn(p, "recording_map_material")
       ? requireString(p.recording_map_material, "recording_map_material", 64)
       : "default",
+    recording_weather_effect: Object.hasOwn(p, "recording_weather_effect")
+      ? requireString(p.recording_weather_effect, "recording_weather_effect", 64)
+      : DEFAULT_RECORDING_WEATHER_EFFECT,
   };
-  if (!["bottom_center", "minimap_below", "weapon_right"].includes(result.kb_overlay_position)) {
-    invalid("kb_overlay_position", "range");
-  }
   if (!isRecordingSkyboxId(result.recording_skybox)) {
     invalid("recording_skybox", "range");
+  }
+  const legacyRainMaterial = result.recording_map_material.trim().toLowerCase()
+    === RAIN_PUDDLES_MAP_MATERIAL;
+  if (legacyRainMaterial) {
+    result.recording_map_material = DEFAULT_RECORDING_MAP_MATERIAL;
+    result.recording_weather_effect = RAIN_RECORDING_WEATHER_EFFECT;
   }
   if (!isRecordingMapMaterialId(result.recording_map_material)) {
     invalid("recording_map_material", "range");
   }
+  if (!isRecordingWeatherEffectId(result.recording_weather_effect)) {
+    invalid("recording_weather_effect", "range");
+  }
   result.recording_map_material = normalizeRecordingMapMaterialId(
     result.recording_map_material,
   );
+  result.recording_weather_effect = normalizeRecordingWeatherEffectId(
+    result.recording_weather_effect,
+  );
+  if (
+    result.recording_map_material !== DEFAULT_RECORDING_MAP_MATERIAL
+    && result.recording_weather_effect !== DEFAULT_RECORDING_WEATHER_EFFECT
+  ) {
+    invalid("recording_weather_effect", "conflict");
+  }
   return result;
 }

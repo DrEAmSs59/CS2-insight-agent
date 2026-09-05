@@ -16,16 +16,12 @@ export default function RecordingParamsPage({ embedded = false, onRegisterSave, 
       experimentalPovEnabled={s.experimentalPovEnabled}
       recordingSkybox={s.recordingSkybox}
       recordingMapMaterial={s.recordingMapMaterial}
+      recordingWeatherEffect={s.recordingWeatherEffect}
       cs2ExtraLaunchArgs={s.cs2ExtraLaunchArgs}
       recordInjectConsoleLines={s.recordInjectConsoleLines}
       obsTransitionEnabled={s.obsTransitionEnabled}
       obsTransitionName={s.obsTransitionName}
       obsTransitionDurationMs={s.obsTransitionDurationMs}
-      kbOverlayEnabled={s.kbOverlayEnabled}
-      kbOverlayTickOffset={s.kbOverlayTickOffset}
-      kbOverlayPosition={s.kbOverlayPosition}
-      killFxEnabled={s.killFxEnabled}
-      killFxTickOffset={s.killFxTickOffset}
       onRegisterSave={onRegisterSave}
       onSaveUiChange={onSaveUiChange}
     />

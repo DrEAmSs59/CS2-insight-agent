@@ -4,11 +4,15 @@
 // demo_voice_hud.py replaces only the bounded payload
 // between the two marker comments before installing the package. The payload
 // contains [location tokens, voice speakers, exact svc_UserCmd input tracks,
-// SteamID/slot/team roster, reserved slots, radar track at index 8,
+// SteamID/slot/team roster, reserved slots, exact weapon-selection pulses at
+// index 6, radar track at index 8,
 // kill/HS attacker-feedback cues at index 9, flash-blind intervals at index 10,
 // reconstructed team radio at index 11, advanced-playback menu data at index 12,
 // fixed recording voice audience at index 13, trusted post-load session console
-// commands at index 14].
+// commands at index 14, exact UserCmd mouse deltas at index 15, authoritative
+// left_hand_desired switch edges at index 16, exact input-audio button edges at
+// index 17, per-session input-HUD presentation settings at index 18, and
+// authoritative controller K/D/A + damage state tracks at index 19].
 ;(function CS2InsightDemoVoiceHud() {
     "use strict";
 
@@ -17,6 +21,7 @@
     const encodedSpeakers = packed[1];
     const encodedInputTracks = packed[2] || [];
     const encodedRoster = packed[3] || [];
+    const encodedWeaponSelectTracks = packed[6] || [];
     const encodedRadar = packed[8] || null;
     const encodedKillFeedback = packed[9] || null;
     const encodedFlashBlind = packed[10] || null;
@@ -24,12 +29,44 @@
     const encodedAdvancedPlayback = packed[12] || null;
     const encodedRecordingVoiceMode = String(packed[13] || "team");
     const encodedSessionConsoleCommands = Array.isArray(packed[14]) ? packed[14] : [];
+    const encodedMouseTracks = packed[15] || [];
+    const encodedHandSwitchTracks = packed[16] || [];
+    const encodedInputAudioEdges = packed[17] || [];
+    const encodedInputPresentation = Array.isArray(packed[18]) ? packed[18] : [];
+    const encodedCombatStats = packed[19] || null;
     const sessionConsoleCommands = encodedSessionConsoleCommands.map(function (command) {
         return String(command || "").trim();
     }).filter(Boolean);
     const recordingVoiceMode = ["all", "team", "enemy", "mute"].indexOf(encodedRecordingVoiceMode) >= 0
         ? encodedRecordingVoiceMode
         : "team";
+    const inputHudEnabled = encodedInputPresentation.length > 0
+        ? Boolean(encodedInputPresentation[0])
+        : true;
+    const requestedInputHudDisplayMode = String(encodedInputPresentation[1] || "hybrid");
+    // encodedAdvancedPlayback is available at this point; the decoded
+    // advancedPlayback object is initialized later in the script.
+    const inputHudDisplayMode = encodedAdvancedPlayback
+        ? "hybrid"
+        : (["hybrid", "always", "active"].indexOf(requestedInputHudDisplayMode) >= 0
+            ? requestedInputHudDisplayMode
+            : "hybrid");
+    const requestedInputHudScalePercent = Number(encodedInputPresentation[2] || 100);
+    const inputHudScalePercent = Math.max(75, Math.min(125, requestedInputHudScalePercent));
+    const inputAudioEnabled = encodedInputPresentation.length > 3
+        ? Boolean(encodedInputPresentation[3])
+        : true;
+    const requestedInputAudioVolumePercent = Number(encodedInputPresentation[4] || 100);
+    // Temporarily disable the custom K/D/A, R DMG, and DMG block in every
+    // generated POV VPK. Keep the session setting and implementation in place
+    // so the feature can be restored without changing the payload contract.
+    // const combatStatsHudEnabled = encodedInputPresentation.length > 5
+    //     ? Boolean(encodedInputPresentation[5])
+    //     : true;
+    const combatStatsHudEnabled = false;
+    const inputAudioVolumePercent = [25, 50, 75, 100].indexOf(requestedInputAudioVolumePercent) >= 0
+        ? requestedInputAudioVolumePercent
+        : 100;
     const PLAYER_COLOR_HEX = ["#88CEF5", "#009E80", "#F1E441", "#E6802A", "#BD2C96"];
     const RADAR_MAP_SIZE = 1024;
     const POV_RADAR_SCALE = 0.4;
@@ -89,6 +126,26 @@
     const STOCK_HUD_ALERT_SUPPRESS_CLASS = "CS2InsightPausedSeekSuppress";
     const STOCK_HUD_ALERT_RESUME_GRACE_TICKS = 128;
     const STOCK_HUD_ALERT_HIDDEN_STABLE_FRAMES = 10;
+    const MOUSE_TRAIL_POINT_COUNT = 24;
+    const MOUSE_TRAIL_WINDOW_TICKS = 48;
+    const MOUSE_PAD_WIDTH = 78;
+    const MOUSE_PAD_HEIGHT = 70;
+    const MOUSE_PAD_EDGE_INSET = 6;
+    const MOUSE_PATH_VISUAL_SCALE = 1.2;
+    const MOUSE_PATH_MAX_VISUAL_STEP = 26;
+    const INPUT_HUD_WIDTH = 390;
+    const INPUT_HUD_REFRESH_SECONDS = 0.016;
+    const INPUT_HUD_WEAPON_SELECT_HOLD_TICKS = 12;
+    const INPUT_AUDIO_KEY_DOWN_EVENT = "CS2Insight.Input.Keyboard.Down";
+    const INPUT_AUDIO_KEY_UP_EVENT = "CS2Insight.Input.Keyboard.Up";
+    const INPUT_AUDIO_SPACE_DOWN_EVENT = "CS2Insight.Input.Space.Down";
+    const INPUT_AUDIO_SPACE_UP_EVENT = "CS2Insight.Input.Space.Up";
+    const INPUT_AUDIO_MOUSE_LEFT_DOWN_EVENT = "CS2Insight.Input.Mouse.Left.Down";
+    const INPUT_AUDIO_MOUSE_LEFT_UP_EVENT = "CS2Insight.Input.Mouse.Left.Up";
+    const INPUT_AUDIO_MOUSE_RIGHT_DOWN_EVENT = "CS2Insight.Input.Mouse.Right.Down";
+    const INPUT_AUDIO_MOUSE_RIGHT_UP_EVENT = "CS2Insight.Input.Mouse.Right.Up";
+    // Compact input-track bit 12 is authoritative raw IN_SCORE (UserCmd bit 33).
+    const INPUT_HUD_SCOREBOARD_BIT = 12;
     const RADIO_PAYLOAD_VERSION = 2;
     // Current CS2 hudvoicestatus.vcss: AlertNoticeLifetime is 15.5s. The
     // ShowAndHide animation fades over 0-5%, holds through 90%, then fades to
@@ -154,9 +211,79 @@
         });
         inputTracksByXuid[String(encoded[0])] = changes;
     });
+    const weaponSelectTracksByXuid = {};
+    encodedWeaponSelectTracks.forEach(function (encoded) {
+        let previousTick = 0;
+        const changes = encoded[1].split(",").filter(Boolean).map(function (pair) {
+            const fields = pair.split(".");
+            const tick = previousTick + parseInt(fields[0], 36);
+            previousTick = tick;
+            return [tick, parseInt(fields[1], 36)];
+        });
+        weaponSelectTracksByXuid[String(encoded[0])] = changes;
+    });
+    const mouseTracksByXuid = {};
+    encodedMouseTracks.forEach(function (encoded) {
+        let previousTick = 0;
+        const samples = encoded[1].split(",").filter(Boolean).map(function (token) {
+            const fields = token.split(".");
+            const tick = previousTick + parseInt(fields[0], 36);
+            previousTick = tick;
+            return [
+                tick,
+                zigzagDecode(parseInt(fields[1], 36)),
+                zigzagDecode(parseInt(fields[2], 36)),
+            ];
+        });
+        mouseTracksByXuid[String(encoded[0])] = samples;
+    });
+    const handSwitchTracksByXuid = {};
+    encodedHandSwitchTracks.forEach(function (encoded) {
+        let previousTick = 0;
+        const changes = encoded[1].split(",").filter(Boolean).map(function (pair) {
+            const fields = pair.split(".");
+            const tick = previousTick + parseInt(fields[0], 36);
+            previousTick = tick;
+            return [tick, parseInt(fields[1], 36)];
+        });
+        handSwitchTracksByXuid[String(encoded[0])] = changes;
+    });
+    const inputAudioEdgesByXuid = {};
+    encodedInputAudioEdges.forEach(function (encoded) {
+        if (!Array.isArray(encoded) || typeof encoded[1] !== "string") {
+            return;
+        }
+        let previousTick = 0;
+        inputAudioEdgesByXuid[String(encoded[0])] = encoded[1].split(",").filter(Boolean).map(function (token) {
+            const fields = token.split(".");
+            const tick = previousTick + parseInt(fields[0], 36);
+            const edgeCode = parseInt(fields[1], 36);
+            previousTick = tick;
+            return [
+                tick,
+                edgeCode >> 1,
+                Boolean(edgeCode & 1),
+                fields.length > 2 ? float32FromBits(parseInt(fields[2], 36)) : null,
+            ];
+        });
+    });
 
     function zigzagDecode(value) {
         return (value & 1) ? (-(value >> 1) - 1) : (value >> 1);
+    }
+
+    function float32FromBits(rawBits) {
+        const bits = Number(rawBits) >>> 0;
+        const sign = (bits >>> 31) ? -1 : 1;
+        const exponent = (bits >>> 23) & 0xff;
+        const mantissa = bits & 0x7fffff;
+        if (exponent === 0xff) {
+            return mantissa ? NaN : sign * Infinity;
+        }
+        if (exponent === 0) {
+            return sign * mantissa * Math.pow(2, -149);
+        }
+        return sign * (1 + mantissa / 0x800000) * Math.pow(2, exponent - 127);
     }
 
     function annotateContinuousStepSounds(sounds, tickRate) {
@@ -369,6 +496,49 @@
 
     const killFeedbackTrack = decodeKillFeedbackTrack(encodedKillFeedback);
     const killFeedbackEvents = killFeedbackTrack ? killFeedbackTrack.events : null;
+
+    function decodeCombatStats(raw) {
+        if (!Array.isArray(raw) || Number(raw[0] || 0) !== 1 || !Array.isArray(raw[1])) {
+            return null;
+        }
+        const byXuid = {};
+        raw[1].forEach(function (track) {
+            const xuid = normalizeXuid(track && track[0]);
+            if (!xuid) {
+                return;
+            }
+            let previousTick = 0;
+            const states = String(track[1] || "").split(",").filter(Boolean).map(function (token) {
+                const fields = token.split(".");
+                if (fields.length < 6) {
+                    return null;
+                }
+                previousTick += parseInt(fields[0], 36) || 0;
+                return {
+                    tick: previousTick,
+                    kills: zigzagDecode(parseInt(fields[1], 36) || 0),
+                    deaths: zigzagDecode(parseInt(fields[2], 36) || 0),
+                    assists: zigzagDecode(parseInt(fields[3], 36) || 0),
+                    roundDamage: Math.max(0, parseInt(fields[4], 36) || 0),
+                    totalDamage: Math.max(0, parseInt(fields[5], 36) || 0),
+                };
+            }).filter(Boolean);
+            if (states.length) {
+                byXuid[xuid] = states;
+            }
+        });
+        return Object.keys(byXuid).length ? { byXuid: byXuid } : null;
+    }
+
+    // Like every other truth-source lane, malformed optional data fails closed:
+    // no event-derived KDA or damage estimate is substituted in Panorama.
+    const combatStats = (function safelyDecodeCombatStats() {
+        try {
+            return decodeCombatStats(encodedCombatStats);
+        } catch (errCombatStatsDecode) {
+            return null;
+        }
+    })();
 
     function decodeFlashBlindTrack(raw) {
         if (!raw || !raw.length || raw.length < 2) {
@@ -584,6 +754,30 @@
     let audienceRefreshFrames = 0;
     let inputHud = null;
     let inputKeyPanels = [];
+    let inputMousePad = null;
+    let inputMouseHeadDot = null;
+    let inputMouseTrailSegments = [];
+    let inputMousePathXuid = "";
+    let inputMousePathLastTick = -1;
+    let inputMousePathSampleIndex = -1;
+    let inputMouseCursorX = MOUSE_PAD_WIDTH * 0.5;
+    let inputMouseCursorY = MOUSE_PAD_HEIGHT * 0.5;
+    let inputMousePathPoints = [];
+    let inputHudRenderedXuid = "";
+    let inputHudRenderedTick = -1;
+    let inputAudioXuid = "";
+    let inputAudioLastTick = -1;
+    let inputAudioEdgeIndex = -1;
+    let mirroredScoreboardActive = false;
+    let combatStatsHud = null;
+    let combatKdaKillsPanel = null;
+    let combatKdaDeathsPanel = null;
+    let combatKdaAssistsPanel = null;
+    let combatRoundDamagePanel = null;
+    let combatTotalDamagePanel = null;
+    let combatMoneyPanel = null;
+    let combatStatsRenderedXuid = "";
+    let combatStatsRenderedTick = -1;
     let radarHud = null;
     let flashWashPanel = null;
     let flashTinnitusArmedTick = -1;
@@ -656,6 +850,7 @@
     let advancedNativeMessagesRestored = false;
     let advancedNativeRadarRestored = false;
     let advancedNativeOverheadRestored = false;
+    let advancedNativeXrayOverheadEnabled = null;
     let advancedEdgeRevealArmed = true;
     let advancedRoundIntervals = advancedPlayback && advancedPlayback.rounds
         ? advancedPlayback.rounds.slice()
@@ -687,6 +882,7 @@
         xray: false,
         radar: true,
         overhead: true,
+        inputHud: advancedPlayback ? true : inputHudEnabled,
     };
     // Stock-ish radar intel timings (no public convar; matched to live feel).
     const RADAR_DEATH_ICON_SECONDS = 2.0;
@@ -1648,6 +1844,38 @@
         } catch (err) {}
     }
 
+    function nativeDemoXrayEnabled() {
+        try {
+            if (GameInterfaceAPI.GetSettingString) {
+                const setting = String(
+                    GameInterfaceAPI.GetSettingString("spec_show_xray") || "",
+                ).trim().toLowerCase();
+                if (setting) {
+                    return setting !== "0" && setting !== "false";
+                }
+            }
+            if (GameInterfaceAPI.GetSettingFloat) {
+                return Number(GameInterfaceAPI.GetSettingFloat("spec_show_xray")) !== 0;
+            }
+        } catch (errSetting) {}
+        return Boolean(advancedQuickOptions.xray);
+    }
+
+    function syncNativeDemoXrayOverhead(enabled) {
+        if (advancedNativeXrayOverheadEnabled === enabled) {
+            return;
+        }
+        advancedNativeXrayOverheadEnabled = enabled;
+        try {
+            // DemoUI owns spec_show_xray. Mirror that native switch onto the
+            // player-ID force mode so its X-ray button controls both outlines
+            // and overhead markers even after POV HUD previously forced them.
+            GameInterfaceAPI.ConsoleCommand(
+                "cl_drawhud_force_teamid_overhead " + (enabled ? 1 : -1),
+            );
+        } catch (errCommand) {}
+    }
+
     function setNativePlayerEconomy(playerPanel, money) {
         if (!playerPanel || !playerPanel.FindChildrenWithClassTraverse) {
             return;
@@ -1757,6 +1985,12 @@
     function updateOverheadInfoHud() {
         const state = controller.GetDemoControllerState();
         if (!advancedPovVisualsActive()) {
+            const nativeXrayEnabled = !advancedHudHidden && nativeDemoXrayEnabled();
+            if (!advancedHudHidden) {
+                syncNativeDemoXrayOverhead(nativeXrayEnabled);
+            } else {
+                advancedNativeXrayOverheadEnabled = null;
+            }
             const nativeIds = findHudTraverse("VisiblePlayerIDs");
             if (nativeIds && nativeIds.IsValid() && nativeIds.FindChildrenWithClassTraverse) {
                 const nativePanels = nativeIds.FindChildrenWithClassTraverse("playerid") || [];
@@ -1768,21 +2002,19 @@
                             // 10 Hz prevented native DEMO HUD details from being
                             // populated and left only the player name visible.
                             restoreNativePlayerEconomy(panel);
-                            setPlayerOverheadContentVisible(panel, true);
                         }
-                        if (!advancedQuickOptions.overhead) {
-                            setPlayerOverheadContentVisible(panel, false);
-                        }
+                        // CS2's DemoUI writes spec_show_xray. Keep the native
+                        // player-ID content on that same source of truth.
+                        setPlayerOverheadContentVisible(panel, nativeXrayEnabled);
                     }
                 });
-                if (advancedQuickOptions.overhead) {
-                    advancedNativeOverheadRestored = true;
-                }
+                advancedNativeOverheadRestored = true;
             }
             $.Schedule(0.1, updateOverheadInfoHud);
             return;
         }
         advancedNativeOverheadRestored = false;
+        advancedNativeXrayOverheadEnabled = null;
         if (advancedPlayback && !advancedQuickOptions.overhead) {
             const nativeIds = findHudTraverse("VisiblePlayerIDs");
             if (nativeIds && nativeIds.IsValid() && nativeIds.FindChildrenWithClassTraverse) {
@@ -2204,31 +2436,282 @@
     }
 
     function styleKey(panel, active) {
-        panel.style.backgroundColor = active ? "#12cfaee8" : "#071015c9";
-        panel.style.border = active ? "2px solid #a4fff0" : "1px solid #8aa3ad88";
-        panel.style.color = active ? "#ffffffff" : "#edf6f9e8";
+        const inactiveBackground = panel._insightMouseButton ? "#23262D" : "#2A2D34";
+        panel.style.backgroundColor = active ? "#E07F0A" : inactiveBackground;
+        panel.style.border = active ? "1px solid #F29A32" : "1px solid #3F434D";
+        panel.style.color = active ? "#FFFFFF" : "#8A8F99";
         panel.style.boxShadow = active
-            ? "fill #19f5c466 0px 0px 14px 0px"
-            : "fill #00000099 0px 2px 7px 0px";
+            ? "fill #E07F0A8C 0px 0px 7px 0px"
+            : "none";
     }
 
     function createInputKey(parent, spec, index) {
         const key = $.CreatePanel("Label", parent, "CS2InsightInputKey" + index);
-        key.text = spec[0];
+        const mouseButton = spec[0] === "M1" || spec[0] === "M2";
+        key.text = mouseButton ? "" : spec[0];
         key.hittest = false;
         key.style.position = spec[1] + "px " + spec[2] + "px 0px";
         key.style.width = spec[3] + "px";
         key.style.height = spec[4] + "px";
         key.style.fontSize = spec[5] + "px";
         key.style.fontWeight = "bold";
+        key.style.fontFamily = "Consolas";
         key.style.textAlign = "center";
-        key.style.verticalAlign = "center";
         key.style.paddingTop = spec[6] + "px";
-        key.style.borderRadius = "5px";
-        key.style.transitionProperty = "background-color, border, color, box-shadow";
-        key.style.transitionDuration = "0.025s";
+        if (spec[0] === "M1") {
+            key._insightMouseButton = true;
+            key.style.borderRadius = "39px 0px 0px 0px";
+        } else if (spec[0] === "M2") {
+            key._insightMouseButton = true;
+            key.style.borderRadius = "0px 39px 0px 0px";
+        } else {
+            key.style.borderRadius = "6px";
+        }
+        key.style.textShadow = "none";
         styleKey(key, false);
         return key;
+    }
+
+    function createMouseMotionPad(parent) {
+        const pad = $.CreatePanel("Panel", parent, "CS2InsightMouseMotionPad");
+        pad.hittest = false;
+        pad.style.position = "276px 82px 0px";
+        pad.style.width = MOUSE_PAD_WIDTH + "px";
+        pad.style.height = MOUSE_PAD_HEIGHT + "px";
+        pad.style.flowChildren = "none";
+        pad.style.backgroundColor = "#23262D";
+        pad.style.border = "0px solid #00000000";
+        pad.style.borderRadius = "0px 0px 24px 24px";
+        pad.style.boxShadow = "none";
+
+        inputMouseTrailSegments = [];
+        for (let index = 0; index < MOUSE_TRAIL_POINT_COUNT - 1; index += 1) {
+            const segment = $.CreatePanel("Panel", pad, "CS2InsightMouseTrailSegment" + index);
+            segment.hittest = false;
+            segment.visible = false;
+            segment.style.height = "2px";
+            segment.style.transformOrigin = "0% 50%";
+            segment.style.backgroundColor = "#E07F0A";
+            segment.style.borderRadius = "1px";
+            segment.style.boxShadow = "none";
+            inputMouseTrailSegments.push(segment);
+        }
+
+        const head = $.CreatePanel("Panel", pad, "CS2InsightMouseHead");
+        head.hittest = false;
+        head.visible = false;
+        head.style.width = "6px";
+        head.style.height = "6px";
+        head.style.backgroundColor = "#F29A32";
+        head.style.borderRadius = "50%";
+        head.style.boxShadow = "fill #E07F0A80 0px 0px 5px 0px";
+        inputMouseHeadDot = head;
+        inputMousePad = pad;
+        return pad;
+    }
+
+    function mouseSampleIndexAtOrBefore(samples, tick) {
+        let low = 0;
+        let high = samples.length - 1;
+        let found = -1;
+        while (low <= high) {
+            const middle = (low + high) >> 1;
+            if (samples[middle][0] <= tick) {
+                found = middle;
+                low = middle + 1;
+            } else {
+                high = middle - 1;
+            }
+        }
+        return found;
+    }
+
+    function mouseVisualDelta(value) {
+        const scaled = Number(value || 0) * MOUSE_PATH_VISUAL_SCALE;
+        return Math.max(
+            -MOUSE_PATH_MAX_VISUAL_STEP,
+            Math.min(MOUSE_PATH_MAX_VISUAL_STEP, scaled)
+        );
+    }
+
+    function mouseCssPx(value) {
+        const numeric = Number(value);
+        if (!isFinite(numeric)) {
+            return "0.000px";
+        }
+        // Panorama's CSS parser rejects JavaScript's scientific notation
+        // (for example 4.26e-14px). Quantize only at the render boundary;
+        // keep the full-precision path state used by subsequent samples.
+        const normalized = Math.abs(numeric) < 0.0005 ? 0 : numeric;
+        return normalized.toFixed(3) + "px";
+    }
+
+    function mouseCssDegrees(value) {
+        const numeric = Number(value);
+        if (!isFinite(numeric)) {
+            return "0.000deg";
+        }
+        // Keep transform values out of scientific notation for Panorama's
+        // stricter CSS parser, including near-zero atan2 round-off.
+        const normalized = Math.abs(numeric) < 0.0005 ? 0 : numeric;
+        return normalized.toFixed(3) + "deg";
+    }
+
+    function panMousePathAtEdge() {
+        const maximumX = MOUSE_PAD_WIDTH - MOUSE_PAD_EDGE_INSET;
+        const maximumY = MOUSE_PAD_HEIGHT - MOUSE_PAD_EDGE_INSET;
+        let shiftX = 0;
+        let shiftY = 0;
+        if (inputMouseCursorX < MOUSE_PAD_EDGE_INSET) {
+            shiftX = MOUSE_PAD_EDGE_INSET - inputMouseCursorX;
+        } else if (inputMouseCursorX > maximumX) {
+            shiftX = maximumX - inputMouseCursorX;
+        }
+        if (inputMouseCursorY < MOUSE_PAD_EDGE_INSET) {
+            shiftY = MOUSE_PAD_EDGE_INSET - inputMouseCursorY;
+        } else if (inputMouseCursorY > maximumY) {
+            shiftY = maximumY - inputMouseCursorY;
+        }
+        if (!shiftX && !shiftY) {
+            return;
+        }
+        inputMouseCursorX += shiftX;
+        inputMouseCursorY += shiftY;
+        inputMousePathPoints.forEach(function (point) {
+            point.x += shiftX;
+            point.y += shiftY;
+        });
+    }
+
+    function trimMousePath(tick) {
+        const minimumTick = tick - MOUSE_TRAIL_WINDOW_TICKS;
+        while (inputMousePathPoints.length
+                && inputMousePathPoints[0].tick < minimumTick) {
+            inputMousePathPoints.shift();
+        }
+        if (inputMousePathPoints.length > MOUSE_TRAIL_POINT_COUNT) {
+            inputMousePathPoints = inputMousePathPoints.slice(-MOUSE_TRAIL_POINT_COUNT);
+        }
+    }
+
+    function appendMousePathSample(sample) {
+        const sampleTick = Number(sample[0] || 0);
+        const dx = mouseVisualDelta(sample[1]);
+        const dy = mouseVisualDelta(sample[2]);
+        if (!dx && !dy) {
+            return;
+        }
+        if (!inputMousePathPoints.length) {
+            inputMousePathPoints.push({
+                x: inputMouseCursorX,
+                y: inputMouseCursorY,
+                tick: sampleTick,
+            });
+        }
+        inputMouseCursorX += dx;
+        inputMouseCursorY += dy;
+        panMousePathAtEdge();
+        inputMousePathPoints.push({
+            x: inputMouseCursorX,
+            y: inputMouseCursorY,
+            tick: sampleTick,
+        });
+        if (inputMousePathPoints.length > MOUSE_TRAIL_POINT_COUNT) {
+            inputMousePathPoints.shift();
+        }
+    }
+
+    function resetMousePath(samples, xuid, tick) {
+        inputMousePathXuid = xuid;
+        inputMousePathLastTick = tick;
+        inputMouseCursorX = MOUSE_PAD_WIDTH * 0.5;
+        inputMouseCursorY = MOUSE_PAD_HEIGHT * 0.5;
+        inputMousePathPoints = [];
+        inputMousePathSampleIndex = mouseSampleIndexAtOrBefore(
+            samples,
+            tick - MOUSE_TRAIL_WINDOW_TICKS - 1
+        );
+        while (inputMousePathSampleIndex + 1 < samples.length
+                && samples[inputMousePathSampleIndex + 1][0] <= tick) {
+            inputMousePathSampleIndex += 1;
+            appendMousePathSample(samples[inputMousePathSampleIndex]);
+        }
+        trimMousePath(tick);
+    }
+
+    function advanceMousePath(samples, xuid, tick) {
+        const discontinuity = inputMousePathXuid !== xuid
+            || inputMousePathLastTick < 0
+            || tick < inputMousePathLastTick
+            || tick - inputMousePathLastTick > TRANSIENT_HUD_TICK_JUMP_THRESHOLD;
+        if (discontinuity) {
+            resetMousePath(samples, xuid, tick);
+            return inputMousePathPoints;
+        }
+        while (inputMousePathSampleIndex + 1 < samples.length
+                && samples[inputMousePathSampleIndex + 1][0] <= tick) {
+            inputMousePathSampleIndex += 1;
+            appendMousePathSample(samples[inputMousePathSampleIndex]);
+        }
+        inputMousePathLastTick = tick;
+        trimMousePath(tick);
+        return inputMousePathPoints;
+    }
+
+    function smoothMousePath(points) {
+        return points.map(function (point, index) {
+            if (index === 0 || index === points.length - 1) {
+                return point;
+            }
+            const previous = points[index - 1];
+            const next = points[index + 1];
+            return {
+                x: (previous.x + point.x * 2 + next.x) * 0.25,
+                y: (previous.y + point.y * 2 + next.y) * 0.25,
+                tick: point.tick,
+            };
+        });
+    }
+
+    function updateMouseMotionPad(samples, xuid, tick) {
+        if (!inputMousePad || !inputMousePad.IsValid()) {
+            return;
+        }
+        inputMousePad.visible = Boolean(samples && samples.length);
+        const points = smoothMousePath(advanceMousePath(samples || [], xuid, tick));
+        inputMouseTrailSegments.forEach(function (segment, index) {
+            if (!segment || !segment.IsValid()) {
+                return;
+            }
+            if (index >= points.length - 1) {
+                segment.visible = false;
+                return;
+            }
+            const start = points[index];
+            const end = points[index + 1];
+            const dx = end.x - start.x;
+            const dy = end.y - start.y;
+            const distance = Math.max(1, Math.sqrt(dx * dx + dy * dy));
+            const age = (index + 1) / Math.max(1, points.length - 1);
+            segment.visible = true;
+            segment.style.position = mouseCssPx(start.x) + " "
+                + mouseCssPx(start.y) + " 0px";
+            segment.style.width = mouseCssPx(distance);
+            segment.style.opacity = String((0.06 + age * 0.54).toFixed(3));
+            segment.style.transform = "rotateZ("
+                + mouseCssDegrees(Math.atan2(dy, dx) * 180 / Math.PI) + ")";
+        });
+        if (!inputMouseHeadDot || !inputMouseHeadDot.IsValid()) {
+            return;
+        }
+        if (!points.length) {
+            inputMouseHeadDot.visible = false;
+            return;
+        }
+        const head = points[points.length - 1];
+        inputMouseHeadDot.visible = true;
+        inputMouseHeadDot.style.position = mouseCssPx(head.x - 3) + " "
+            + mouseCssPx(head.y - 3) + " 0px";
     }
 
     function ensureInputHud() {
@@ -2243,35 +2726,56 @@
 
         inputHud = $.CreatePanel("Panel", root, "CS2InsightInputHud");
         inputHud.hittest = false;
-        inputHud.style.width = "396px";
-        inputHud.style.height = "144px";
+        inputHud.style.width = INPUT_HUD_WIDTH + "px";
+        inputHud.style.height = "190px";
         inputHud.style.horizontalAlign = "center";
         inputHud.style.verticalAlign = "bottom";
-        inputHud.style.marginBottom = "132px";
+        inputHud.style.position = "0px 0px 0px";
+        inputHud.style.marginBottom = "139px";
+        inputHud.style.flowChildren = "none";
         inputHud.style.zIndex = "1000";
+        inputHud.style.opacity = "0.92";
+        const inputHudScale = (inputHudScalePercent / 100).toFixed(2);
+        inputHud.style.transformOrigin = "50% 100%";
+        inputHud.style.transform = "scale3d(" + inputHudScale + ", " + inputHudScale + ", 1)";
 
         const specs = [
-            ["SHIFT", 0, 0, 74, 50, 16, 12, 6, false],
-            ["CTRL", 0, 56, 74, 50, 17, 11, 5, false],
-            ["W", 138, 0, 50, 50, 24, 8, 0, false],
-            ["A", 82, 56, 50, 50, 24, 8, 1, false],
-            ["S", 138, 56, 50, 50, 24, 8, 2, false],
-            ["D", 194, 56, 50, 50, 24, 8, 3, false],
-            ["R", 194, 0, 50, 50, 24, 8, 7, true],
-            ["SPACE", 82, 112, 162, 32, 14, 5, 4, false],
-            ["M1", 264, 0, 58, 144, 18, 52, 8, false],
-            ["M2", 338, 0, 58, 144, 18, 52, 9, false],
+            ["1", 66, 0, 38, 34, 18, 5, -1, false, 1],
+            ["2", 108, 0, 38, 34, 18, 5, -1, false, 2],
+            ["3", 150, 0, 38, 34, 18, 5, -1, false, 3],
+            ["4", 192, 0, 38, 34, 18, 5, -1, false, 4],
+            ["5", 234, 0, 38, 34, 18, 5, -1, true, 5],
+            ["W", 108, 38, 38, 34, 18, 5, 0, false, 0],
+            ["E", 150, 38, 38, 34, 18, 5, 10, false, 0],
+            ["R", 192, 38, 38, 34, 18, 5, 7, false, 0],
+            ["TAB", 4, 38, 58, 34, 13, 8, 12, false, 0],
+            ["SHIFT", 4, 76, 58, 34, 12, 8, 6, false, 0],
+            ["A", 66, 76, 38, 34, 18, 5, 1, false, 0],
+            ["S", 108, 76, 38, 34, 18, 5, 2, false, 0],
+            ["D", 150, 76, 38, 34, 18, 5, 3, false, 0],
+            ["F", 192, 76, 38, 34, 18, 5, 11, false, 0],
+            ["H", 234, 76, 38, 34, 18, 5, -1, true, 0, "hand"],
+            ["CTRL", 4, 114, 58, 34, 13, 8, 5, false, 0],
+            ["SPACE", 66, 114, 164, 34, 12, 8, 4, false, 0],
+            ["M1", 276, 38, 39, 44, 11, 13, 8, false, 0],
+            ["M2", 315, 38, 39, 44, 11, 13, 9, false, 0],
         ];
+        createMouseMotionPad(inputHud);
         inputKeyPanels = specs.map(function (spec, index) {
             const panel = createInputKey(inputHud, spec, index);
             const onlyWhenActive = Boolean(spec[8]);
-            panel.visible = !onlyWhenActive;
+            panel.visible = inputHudDisplayMode === "always"
+                || (inputHudDisplayMode === "hybrid" && !onlyWhenActive);
             return {
                 panel: panel,
                 bit: spec[7],
                 onlyWhenActive: onlyWhenActive,
+                weaponSlot: Number(spec[9]) || 0,
+                semanticTrack: String(spec[10] || ""),
             };
         });
+        inputHudRenderedXuid = "";
+        inputHudRenderedTick = -1;
         return inputHud;
     }
 
@@ -2291,52 +2795,535 @@
         if (found < 0) {
             return 0;
         }
-        let mask = changes[found][1];
-        // Keep single-tick jump/reload/fire/scope transitions visible for four demo
-        // ticks without introducing a wall-clock that would desync after goto.
-        const stickyMask = (1 << 4) | (1 << 7) | (1 << 8) | (1 << 9);
-        for (let index = found; index >= 0 && changes[index][0] >= tick - 3; index -= 1) {
-            mask |= changes[index][1] & stickyMask;
+        return changes[found][1];
+    }
+
+    function weaponSlotPulseAt(changes, tick) {
+        let low = 0;
+        let high = changes.length - 1;
+        let found = -1;
+        while (low <= high) {
+            const middle = (low + high) >> 1;
+            if (changes[middle][0] <= tick) {
+                found = middle;
+                low = middle + 1;
+            } else {
+                high = middle - 1;
+            }
         }
-        return mask;
+        for (let index = found; index >= 0; index -= 1) {
+            const age = tick - Number(changes[index][0] || 0);
+            if (age > INPUT_HUD_WEAPON_SELECT_HOLD_TICKS) {
+                break;
+            }
+            const slot = Number(changes[index][1] || 0);
+            if (slot > 0) {
+                return slot;
+            }
+        }
+        return 0;
+    }
+
+    function combatStatAt(states, tick) {
+        let low = 0;
+        let high = states.length - 1;
+        let found = -1;
+        while (low <= high) {
+            const middle = (low + high) >> 1;
+            if (states[middle].tick <= tick) {
+                found = middle;
+                low = middle + 1;
+            } else {
+                high = middle - 1;
+            }
+        }
+        return found >= 0 ? states[found] : null;
+    }
+
+    function combatStatesForXuid(xuid) {
+        if (!combatStats || !combatStats.byXuid) {
+            return null;
+        }
+        const wanted = normalizeXuid(xuid);
+        if (combatStats.byXuid[wanted]) {
+            return combatStats.byXuid[wanted];
+        }
+        const keys = Object.keys(combatStats.byXuid);
+        for (let index = 0; index < keys.length; index += 1) {
+            if (sameXuid(keys[index], wanted)) {
+                return combatStats.byXuid[keys[index]];
+            }
+        }
+        return null;
+    }
+
+    const COMBAT_DIGIT_SYMBOLS = " 0123456789";
+    const COMBAT_DIGIT_HEIGHT = 38;
+    const COMBAT_DIGIT_WIDTH = 18;
+    const COMBAT_DIGIT_DURATION_SECONDS = 0.6;
+    const COMBAT_DIGIT_TIMING = "cubic-bezier( 0.9, 0.01, 0.1, 1 )";
+
+    function styleCombatCaption(label, align) {
+        label.hittest = false;
+        // Stock health labels carry the tint class on the Label itself. The
+        // DigitPanel font class is only for rolling numerals and distorts the
+        // small caption line box when reused here.
+        label.AddClass("stratum-bold-mono");
+        label.AddClass("hud-colorize-wash");
+        label.style.color = "#FFFFFFFF";
+        label.style.fontFamily = "Stratum2 Mono, 'Arial Unicode MS'";
+        label.style.fontSize = "16px";
+        label.style.fontWeight = "bold";
+        label.style.textAlign = align || "left";
+        label.style.textShadow = "0px 0px 3px 0.0 #000000DD";
+        label.style.letterSpacing = "1px";
+        label.style.opacity = "1.0";
+    }
+
+    function createCombatDigitPanel(parent, id, x, y, digits) {
+        const panel = $.CreatePanel("Panel", parent, id);
+        panel.hittest = false;
+        panel.AddClass("digitpanel-container");
+        // Match HudMoney exactly: its wash class lives on the rolling digit
+        // container, not on an ancestor composition layer.
+        panel.AddClass("hud-colorize-wash");
+        panel.style.position = x + "px " + y + "px 0px";
+        panel.style.width = (digits * COMBAT_DIGIT_WIDTH) + "px";
+        panel.style.height = COMBAT_DIGIT_HEIGHT + "px";
+        panel.style.flowChildren = "right";
+        panel.style.overflow = "clip";
+        panel.m_nDigits = digits;
+        panel.m_columns = [];
+        panel.m_value = null;
+
+        for (let digit = 0; digit < digits; digit += 1) {
+            const column = $.CreatePanel("Panel", panel, id + "Digit" + digit);
+            column.hittest = false;
+            column.AddClass("digitpanel__digit");
+            column.style.width = COMBAT_DIGIT_WIDTH + "px";
+            column.style.flowChildren = "down";
+            column.style.transitionProperty = "transform, position";
+            column.style.transitionDuration = COMBAT_DIGIT_DURATION_SECONDS + "s";
+            column.style.transitionTimingFunction = COMBAT_DIGIT_TIMING;
+            for (let symbolIndex = 0; symbolIndex < COMBAT_DIGIT_SYMBOLS.length;
+                    symbolIndex += 1) {
+                const numeral = $.CreatePanel(
+                    "Label", column, id + "Digit" + digit + "Symbol" + symbolIndex,
+                );
+                numeral.hittest = false;
+                numeral.AddClass("digitpanel-font");
+                numeral.text = COMBAT_DIGIT_SYMBOLS.charAt(symbolIndex);
+                numeral.style.width = COMBAT_DIGIT_WIDTH + "px";
+                numeral.style.height = COMBAT_DIGIT_HEIGHT + "px";
+                numeral.style.color = "#FFFFFFFF";
+                numeral.style.fontFamily = "Stratum2 Mono, 'Arial Unicode MS'";
+                numeral.style.fontSize = "38px";
+                numeral.style.fontWeight = "bold";
+                numeral.style.textAlign = "center";
+                numeral.style.letterSpacing = "0px";
+            }
+            panel.m_columns.push(column);
+        }
+        return panel;
+    }
+
+    function setCombatDigitPanel(panel, value, instant) {
+        if (!panel || !panel.IsValid()) {
+            return;
+        }
+        const rendered = String(Math.max(0, Math.floor(Number(value) || 0)));
+        if (panel.m_value === rendered) {
+            return;
+        }
+        panel.m_value = rendered;
+        const padded = (Array(panel.m_nDigits + 1).join(" ") + rendered)
+            .slice(-panel.m_nDigits);
+        for (let digit = 0; digit < panel.m_nDigits; digit += 1) {
+            const column = panel.m_columns[digit];
+            const symbolIndex = COMBAT_DIGIT_SYMBOLS.indexOf(padded.charAt(digit));
+            if (!column || symbolIndex < 0) {
+                continue;
+            }
+            column.style.transitionDuration = instant
+                ? "0s"
+                : COMBAT_DIGIT_DURATION_SECONDS + "s";
+            const y = -symbolIndex * 100;
+            $.Schedule(0.01, function applyCombatDigitPosition() {
+                if (column && column.IsValid()) {
+                    column.style.transform = "translate3D( " + digit + "%, "
+                        + y + "%, 0px)";
+                }
+            });
+        }
+    }
+
+    function createCombatValueBlock(parent, id, x, width, digits, heading) {
+        const block = $.CreatePanel("Panel", parent, id);
+        block.hittest = false;
+        block.style.position = x + "px 0px 0px";
+        block.style.width = width + "px";
+        block.style.height = "62px";
+        block.style.flowChildren = "none";
+        block.style.overflow = "noclip";
+
+        const title = $.CreatePanel("Label", block, id + "Title");
+        title.text = heading;
+        // Panorama's rolling numerals have tall Stratum ascenders. Put the
+        // caption in its own row above the number instead of sharing the
+        // DigitPanel's visual line box.
+        title.style.position = "0px -12px 0px";
+        title.style.width = "100%";
+        title.style.height = "18px";
+        styleCombatCaption(title, "center");
+
+        const digitWidth = digits * COMBAT_DIGIT_WIDTH;
+        const value = createCombatDigitPanel(
+            block, id + "Value", Math.floor((width - digitWidth) / 2), 20, digits,
+        );
+        return { block: block, title: title, value: value };
+    }
+
+    function positionCombatStatsHud(mount) {
+        if (!combatStatsHud || !combatStatsHud.IsValid()
+                || !combatMoneyPanel || !combatMoneyPanel.IsValid()
+                || !mount || !mount.IsValid()) {
+            return;
+        }
+        let x = 0;
+        let y = 0;
+        let cursor = combatMoneyPanel;
+        let depth = 0;
+        while (cursor && cursor.IsValid() && cursor !== mount && depth < 12) {
+            x += Number(cursor.actualxoffset || 0);
+            y += Number(cursor.actualyoffset || 0);
+            cursor = cursor.GetParent();
+            depth += 1;
+        }
+        if (cursor !== mount) {
+            return;
+        }
+        const scaleX = Math.max(0.01, Number(mount.actualuiscale_x || 1));
+        const scaleY = Math.max(0.01, Number(mount.actualuiscale_y || 1));
+        // HudMoney owns a 50px stock inset before its rendered balance text.
+        // Match that numeral edge, then reserve 54px for the K/D/A row.
+        const left = Math.round(x / scaleX) + 50;
+        const top = Math.round(y / scaleY) - 54;
+        combatStatsHud.style.position = left + "px " + top + "px 0px";
+    }
+
+    function ensureCombatStatsHud() {
+        if (combatStatsHud && combatStatsHud.IsValid()) {
+            return combatStatsHud;
+        }
+        // Track the stock money panel but mount beside it. HudMoney is a flow
+        // container, so adding children would reflow the real balance.
+        const mount = findHudTraverse("HudLowerLeft");
+        combatMoneyPanel = findHudTraverse("HudMoney");
+        if (!mount || !mount.IsValid()
+                || !combatMoneyPanel || !combatMoneyPanel.IsValid()) {
+            return null;
+        }
+        combatStatsHud = mount.FindChildTraverse("CS2InsightCombatStatsHud");
+        if (combatStatsHud && combatStatsHud.IsValid()) {
+            combatKdaKillsPanel = combatStatsHud.FindChildTraverse("CS2InsightKdaKillsValue");
+            combatKdaDeathsPanel = combatStatsHud.FindChildTraverse("CS2InsightKdaDeathsValue");
+            combatKdaAssistsPanel = combatStatsHud.FindChildTraverse("CS2InsightKdaAssistsValue");
+            combatRoundDamagePanel = combatStatsHud.FindChildTraverse("CS2InsightRoundDamageValue");
+            combatTotalDamagePanel = combatStatsHud.FindChildTraverse("CS2InsightTotalDamageValue");
+            positionCombatStatsHud(mount);
+            return combatStatsHud;
+        }
+
+        combatStatsHud = $.CreatePanel("Panel", mount, "CS2InsightCombatStatsHud");
+        combatStatsHud.hittest = false;
+        // HudMoney itself is additive in the stock hud.xml. The direct wash
+        // classes below match its hue; this parent blend class also matches
+        // the final luminance/edge composition over the game scene.
+        combatStatsHud.AddClass("additive");
+        combatStatsHud.style.width = "410px";
+        // Keep the K/D/A block in the compact band immediately above the
+        // balance. A taller root pushed it into the stock chat lane at common
+        // recording resolutions even though the damage row itself was right.
+        combatStatsHud.style.height = "108px";
+        combatStatsHud.style.horizontalAlign = "left";
+        combatStatsHud.style.flowChildren = "none";
+        combatStatsHud.style.overflow = "noclip";
+        combatStatsHud.style.backgroundColor = "#00000000";
+        combatStatsHud.style.zIndex = "950";
+
+        const kda = $.CreatePanel("Panel", combatStatsHud, "CS2InsightKdaBlock");
+        kda.hittest = false;
+        kda.style.position = "0px 0px 0px";
+        kda.style.width = "132px";
+        kda.style.height = "72px";
+        kda.style.flowChildren = "none";
+        kda.style.overflow = "noclip";
+        // Use three stock-style number blocks. Panorama's native digit panel
+        // has no slash glyph, so separators would always be a visual impostor.
+        const kills = createCombatValueBlock(
+            kda, "CS2InsightKdaKills", 0, 36, 2, "K",
+        );
+        combatKdaKillsPanel = kills.value;
+        const deaths = createCombatValueBlock(
+            kda, "CS2InsightKdaDeaths", 48, 36, 2, "D",
+        );
+        combatKdaDeathsPanel = deaths.value;
+        const assists = createCombatValueBlock(
+            kda, "CS2InsightKdaAssists", 96, 36, 2, "A",
+        );
+        combatKdaAssistsPanel = assists.value;
+
+        // CS2 caps account balance at five digits, leaving a stable strip to
+        // its right. Damage lives in that native lower-left row while K/D/A
+        // remains directly above the balance.
+        const damageStrip = $.CreatePanel(
+            "Panel", combatStatsHud, "CS2InsightDamageStrip",
+        );
+        damageStrip.hittest = false;
+        // Root top is 54px above HudMoney. Caption at y=44 and digits at y=64
+        // align the rolling damage numerals with the stock balance numerals.
+        // Pull the strip into the unused money-row gap. HudLowerLeft's right
+        // edge can clip the last DMG column at 4:3 recording resolutions.
+        damageStrip.style.position = "154px 44px 0px";
+        damageStrip.style.width = "226px";
+        damageStrip.style.height = "62px";
+        damageStrip.style.flowChildren = "none";
+        damageStrip.style.overflow = "noclip";
+
+        const roundDamage = createCombatValueBlock(
+            damageStrip, "CS2InsightRoundDamage", 0, 90, 3, "R DMG",
+        );
+        combatRoundDamagePanel = roundDamage.value;
+        const totalDamage = createCombatValueBlock(
+            damageStrip, "CS2InsightTotalDamage", 88, 112, 5, "DMG",
+        );
+        combatTotalDamagePanel = totalDamage.value;
+        positionCombatStatsHud(mount);
+        combatStatsRenderedXuid = "";
+        combatStatsRenderedTick = -1;
+        return combatStatsHud;
+    }
+
+    function updateCombatStatsHud() {
+        // Schedule first so a transient root rebuild during spec_player cannot
+        // permanently stop this independent HUD lane.
+        $.Schedule(INPUT_HUD_REFRESH_SECONDS, updateCombatStatsHud);
+        if (!combatStatsHudEnabled || !combatStats || !advancedPovVisualsActive()
+                || (advancedPlayback && advancedHudHidden)) {
+            if (combatStatsHud && combatStatsHud.IsValid()) {
+                combatStatsHud.visible = false;
+            }
+            return;
+        }
+        const state = controller.GetDemoControllerState();
+        const xuid = state ? currentPovXuid(state) : "";
+        const states = combatStatesForXuid(xuid);
+        if (!state || !xuid || !states) {
+            if (combatStatsHud && combatStatsHud.IsValid()) {
+                combatStatsHud.visible = false;
+            }
+            combatStatsRenderedXuid = "";
+            combatStatsRenderedTick = -1;
+            return;
+        }
+        const tick = Number(state.nTick || 0);
+        const visibleState = combatStatAt(states, tick);
+        if (!visibleState) {
+            if (combatStatsHud && combatStatsHud.IsValid()) {
+                combatStatsHud.visible = false;
+            }
+            return;
+        }
+        const panel = ensureCombatStatsHud();
+        if (!panel) {
+            return;
+        }
+        positionCombatStatsHud(findHudTraverse("HudLowerLeft"));
+        panel.visible = true;
+        if (combatStatsRenderedXuid === xuid && combatStatsRenderedTick === tick) {
+            return;
+        }
+        const instant = combatStatsRenderedXuid !== xuid;
+        setCombatDigitPanel(combatKdaKillsPanel, visibleState.kills, true);
+        setCombatDigitPanel(combatKdaDeathsPanel, visibleState.deaths, true);
+        setCombatDigitPanel(combatKdaAssistsPanel, visibleState.assists, true);
+        setCombatDigitPanel(combatRoundDamagePanel, visibleState.roundDamage, instant);
+        setCombatDigitPanel(combatTotalDamagePanel, visibleState.totalDamage, instant);
+        combatStatsRenderedXuid = xuid;
+        combatStatsRenderedTick = tick;
+    }
+
+    function inputAudioEdgeIndexAtOrBefore(edges, tick) {
+        let low = 0;
+        let high = edges.length - 1;
+        let found = -1;
+        while (low <= high) {
+            const middle = (low + high) >> 1;
+            if (edges[middle][0] <= tick) {
+                found = middle;
+                low = middle + 1;
+            } else {
+                high = middle - 1;
+            }
+        }
+        return found;
+    }
+
+    function resetInputAudio(edges, xuid, tick) {
+        inputAudioXuid = xuid;
+        inputAudioLastTick = tick;
+        inputAudioEdgeIndex = inputAudioEdgeIndexAtOrBefore(edges, tick);
+    }
+
+    function clearInputAudio() {
+        inputAudioXuid = "";
+        inputAudioLastTick = -1;
+        inputAudioEdgeIndex = -1;
+    }
+
+    function playInputAudioEdge(edge) {
+        const bit = Number(edge[1] || 0);
+        const pressed = Boolean(edge[2]);
+        let soundEvent = pressed ? INPUT_AUDIO_KEY_DOWN_EVENT : INPUT_AUDIO_KEY_UP_EVENT;
+        if (bit === 4) {
+            soundEvent = pressed ? INPUT_AUDIO_SPACE_DOWN_EVENT : INPUT_AUDIO_SPACE_UP_EVENT;
+        } else if (bit === 8) {
+            soundEvent = pressed
+                ? INPUT_AUDIO_MOUSE_LEFT_DOWN_EVENT
+                : INPUT_AUDIO_MOUSE_LEFT_UP_EVENT;
+        } else if (bit === 9) {
+            soundEvent = pressed
+                ? INPUT_AUDIO_MOUSE_RIGHT_DOWN_EVENT
+                : INPUT_AUDIO_MOUSE_RIGHT_UP_EVENT;
+        }
+        if (inputAudioVolumePercent !== 100) {
+            soundEvent += ".V" + inputAudioVolumePercent;
+        }
+        $.DispatchEvent("CSGOPlaySoundEffect", soundEvent, "MOUSE");
+    }
+
+    function advanceInputAudio(edges, xuid, tick) {
+        const discontinuity = inputAudioXuid !== xuid
+            || inputAudioLastTick < 0
+            || tick < inputAudioLastTick
+            || tick - inputAudioLastTick > TRANSIENT_HUD_TICK_JUMP_THRESHOLD;
+        if (discontinuity) {
+            resetInputAudio(edges, xuid, tick);
+            return;
+        }
+        while (inputAudioEdgeIndex + 1 < edges.length
+                && edges[inputAudioEdgeIndex + 1][0] <= tick) {
+            inputAudioEdgeIndex += 1;
+            if (edges[inputAudioEdgeIndex][0] > inputAudioLastTick) {
+                playInputAudioEdge(edges[inputAudioEdgeIndex]);
+            }
+        }
+        inputAudioLastTick = tick;
+    }
+
+    function setMirroredScoreboardActive(active) {
+        const desired = Boolean(active);
+        if (desired === mirroredScoreboardActive) {
+            return;
+        }
+        GameInterfaceAPI.ConsoleCommand(desired ? "+showscores" : "-showscores");
+        mirroredScoreboardActive = desired;
+    }
+
+    function releaseMirroredScoreboard() {
+        // Never emit an unconditional -showscores: when this script did not
+        // open the stock scoreboard, the viewer's own TAB remains untouched.
+        if (mirroredScoreboardActive) {
+            setMirroredScoreboardActive(false);
+        }
+    }
+
+    function updateMirroredScoreboard(mask) {
+        const mirrorEnabled = Boolean(advancedPlayback)
+            && advancedPovVisualsEnabled
+            && !advancedHudHidden;
+        setMirroredScoreboardActive(
+            mirrorEnabled && Boolean(mask & (1 << INPUT_HUD_SCOREBOARD_BIT))
+        );
     }
 
     function updateInputHud() {
+        // Register the next pass first. A transient Panorama panel invalidation
+        // during spec_player must not permanently kill the keyboard/mouse loop.
+        $.Schedule(INPUT_HUD_REFRESH_SECONDS, updateInputHud);
         const state = controller.GetDemoControllerState();
-        if (!advancedPovVisualsActive()) {
-            if (inputHud && inputHud.IsValid()) {
-                inputHud.visible = false;
-            }
-            $.Schedule(0.1, updateInputHud);
-            return;
-        }
         if (!state) {
             if (inputHud && inputHud.IsValid()) {
                 inputHud.visible = false;
             }
-            $.Schedule(0.1, updateInputHud);
+            inputHudRenderedXuid = "";
+            inputHudRenderedTick = -1;
+            clearInputAudio();
+            releaseMirroredScoreboard();
             return;
         }
 
-        let xuid = currentPovXuid(state);
-        let changes = inputTracksByXuid[xuid];
+        const xuid = currentPovXuid(state);
+        const changes = inputTracksByXuid[xuid];
         if (!changes) {
             if (inputHud && inputHud.IsValid()) {
                 inputHud.visible = false;
             }
-            $.Schedule(0, updateInputHud);
+            inputHudRenderedXuid = "";
+            inputHudRenderedTick = -1;
+            clearInputAudio();
+            releaseMirroredScoreboard();
+            return;
+        }
+
+        const tick = Number(state.nTick || 0);
+        const mask = inputMaskAt(changes, tick);
+        // Keep this ahead of the rendered-tick short circuit. The advanced HUD
+        // profile can change while a demo is paused on the same tick.
+        updateMirroredScoreboard(mask);
+        const runtimeInputHudEnabled = advancedPlayback
+            ? (!advancedHudHidden && advancedQuickOptions.inputHud)
+            : inputHudEnabled;
+        if (!runtimeInputHudEnabled) {
+            if (inputHud && inputHud.IsValid()) {
+                inputHud.visible = false;
+            }
+            inputHudRenderedXuid = "";
+            inputHudRenderedTick = -1;
+            clearInputAudio();
             return;
         }
 
         const panel = ensureInputHud();
         panel.visible = true;
-        const mask = inputMaskAt(changes, state.nTick);
+        if (inputAudioEnabled) {
+            advanceInputAudio(inputAudioEdgesByXuid[xuid] || [], xuid, tick);
+        } else {
+            clearInputAudio();
+        }
+        if (inputHudRenderedXuid === xuid && inputHudRenderedTick === tick) {
+            return;
+        }
+        inputHudRenderedXuid = xuid;
+        inputHudRenderedTick = tick;
+        const weaponSlot = weaponSlotPulseAt(weaponSelectTracksByXuid[xuid] || [], tick);
+        const handSwitchActive = Boolean(inputMaskAt(handSwitchTracksByXuid[xuid] || [], tick));
+        const mouseSamples = mouseTracksByXuid[xuid] || [];
         inputKeyPanels.forEach(function (key) {
-            const active = Boolean(mask & (1 << key.bit));
-            key.panel.visible = !key.onlyWhenActive || active;
+            if (!key.panel || !key.panel.IsValid()) {
+                return;
+            }
+            const active = key.semanticTrack === "hand"
+                ? handSwitchActive
+                : (key.weaponSlot > 0
+                    ? weaponSlot === key.weaponSlot
+                    : Boolean(mask & (1 << key.bit)));
+            key.panel.visible = inputHudDisplayMode === "always"
+                || (inputHudDisplayMode === "hybrid" && !key.onlyWhenActive)
+                || active;
             styleKey(key.panel, active);
         });
-        $.Schedule(0, updateInputHud);
+        updateMouseMotionPad(mouseSamples, xuid, tick);
     }
 
     function playerColorHex(xuid, colorSlot) {
@@ -4813,14 +5800,19 @@
     }
 
     function advancedApplyQuickOptions() {
-        const overheadMode = !advancedHudHidden && advancedQuickOptions.overhead
-            ? 1
-            : -1;
+        const demoXrayEnabled = !advancedHudHidden && !advancedPovVisualsEnabled
+            ? nativeDemoXrayEnabled()
+            : false;
+        const overheadEnabled = !advancedHudHidden && (
+            advancedPovVisualsEnabled
+                ? advancedQuickOptions.overhead
+                : demoXrayEnabled
+        );
+        const overheadMode = overheadEnabled ? 1 : -1;
         const radarMode = !advancedHudHidden && advancedQuickOptions.radar
             ? 0
             : -1;
         const commands = [
-            "spec_show_xray " + (advancedQuickOptions.xray ? 1 : 0),
             "cl_drawhud_force_radar " + radarMode,
             "cl_drawhud_force_teamid_overhead " + overheadMode,
             // Messages are profile-owned: reconstructed in POV HUD, native in
@@ -4828,6 +5820,13 @@
             // resume its own lifetime/animation without another user switch.
             "tv_nochat 0",
         ];
+        // In DEMO HUD, CS2's own DemoUI is the sole owner of spec_show_xray.
+        // POV HUD keeps its deterministic session option.
+        if (advancedPovVisualsEnabled) {
+            commands.unshift("spec_show_xray " + (advancedQuickOptions.xray ? 1 : 0));
+        } else if (!advancedHudHidden) {
+            advancedNativeXrayOverheadEnabled = demoXrayEnabled;
+        }
         for (let index = 0; index < commands.length; index += 1) {
             try { GameInterfaceAPI.ConsoleCommand(commands[index]); } catch (errCommand) {}
         }
@@ -4839,6 +5838,18 @@
             return;
         }
         advancedQuickOptions[key] = !advancedQuickOptions[key];
+        if (key === "inputHud") {
+            if (!advancedQuickOptions.inputHud) {
+                if (inputHud && inputHud.IsValid()) {
+                    inputHud.visible = false;
+                }
+                inputHudRenderedXuid = "";
+                inputHudRenderedTick = -1;
+                clearInputAudio();
+            }
+            advancedRefreshQuickOptionButtons();
+            return;
+        }
         if (key === "overhead") {
             advancedNativeOverheadRestored = false;
         }
@@ -5622,6 +6633,9 @@
             "cl_spec_show_bindings 1",
             "cl_spec_stats 1",
             "r_spectator_flashbang_opacity 1",
+            // Each explicit switch to DEMO HUD starts with CS2's native X-ray
+            // enabled. DemoUI remains free to turn it off again afterwards.
+            "spec_show_xray 1",
             "cl_radar_always_centered 0",
             "cl_radar_square_always true",
             "cl_radar_rotate false",
@@ -5664,9 +6678,6 @@
         }
         if (!advancedPovVisualsEnabled) {
             restoreAdvancedTeamCounterPanels();
-            if (inputHud && inputHud.IsValid()) {
-                inputHud.visible = false;
-            }
             if (radarHud && radarHud.IsValid()) {
                 radarHud.visible = false;
             }
@@ -6458,10 +7469,14 @@
         }
         if (!advancedEdgeTrigger || !advancedEdgeTrigger.IsValid()) {
             advancedEdgeTrigger = advancedCreatePanel("Panel", root, "CS2InsightAdvancedEdge");
-            advancedEdgeTrigger.style.width = "18px";
-            advancedEdgeTrigger.style.height = "100%";
+            // Match the collapsed title tab instead of claiming the complete
+            // right screen edge. This remains the only reveal target when the
+            // persistent title bar is turned off.
+            advancedEdgeTrigger.style.width = advancedChinese() ? "108px" : "148px";
+            advancedEdgeTrigger.style.height = "38px";
             advancedEdgeTrigger.style.horizontalAlign = "right";
             advancedEdgeTrigger.style.verticalAlign = "center";
+            advancedEdgeTrigger.style.marginRight = "6px";
             advancedEdgeTrigger.style.backgroundColor = "#00000000";
             advancedEdgeTrigger.style.border = "0px solid #00000000";
             advancedEdgeTrigger.style.boxShadow = "none";
@@ -6610,12 +7625,23 @@
         advancedProfileButtons.pov = pov;
         advancedProfileButtons.demo = demo;
         advancedProfileButtons.hidden = hidden;
+        advancedOptionLabels.inputHud = advancedCopy("键鼠", "INPUT");
+        const inputHudToggle = advancedCreateButton(
+            viewRow,
+            "",
+            function () { advancedToggleQuickOption("inputHud"); },
+            "76px",
+        );
+        inputHudToggle.style.height = "25px";
+        advancedOptionButtons.inputHud = inputHudToggle;
         pov.style.marginRight = "5px";
         demo.style.marginRight = "5px";
-        hidden.style.marginRight = "0px";
+        hidden.style.marginRight = "5px";
+        inputHudToggle.style.marginRight = "0px";
         advancedStyleButton(pov, advancedPovVisualsEnabled && !advancedHudHidden);
         advancedStyleButton(demo, !advancedPovVisualsEnabled && !advancedHudHidden);
         advancedStyleButton(hidden, advancedHudHidden);
+        advancedStyleButton(inputHudToggle, advancedQuickOptions.inputHud);
         [pov, demo, hidden].forEach(function (button) { button.style.height = "25px"; });
 
         const voiceRow = advancedCreatePanel("Panel", advancedMenuBody, "");
@@ -6844,7 +7870,10 @@
 
     $.Schedule(0, ensureDemoVoicesUnmuted);
     $.Schedule(0, update);
-    $.Schedule(0, updateInputHud);
+    $.Schedule(INPUT_HUD_REFRESH_SECONDS, updateInputHud);
+    if (combatStats && combatStatsHudEnabled) {
+        $.Schedule(0, updateCombatStatsHud);
+    }
     $.Schedule(0, tickTeamCounterHud);
     $.Schedule(0, updateOverheadInfoHud);
     $.Schedule(0, tickFlashBlindHud);

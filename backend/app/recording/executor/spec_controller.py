@@ -14,7 +14,12 @@ async def spec_player(player_name: str, mode: int = 5) -> None:
     Send spec_mode + spec_player commands to CS2.
     mode: 5 = first-person (POV), 4 = chase/third-person, 1 = free
     """
-    cmds = [f"spec_mode {mode}", f"spec_player {player_name}"]
+    # Nicknames are display data, never console commands. Numeric-slot selection
+    # remains the normal route (and works for every legal nickname). If an old
+    # request has no slot, fail closed for names the console cannot quote safely.
+    if not player_name.strip() or any(char in player_name for char in '\x00\r\n;"\\'):
+        raise ValueError("此昵称不能用于控制台名称回退；请重新解析 Demo，使用玩家槽位录制。")
+    cmds = [f"spec_mode {int(mode)}", f'spec_player "{player_name}"']
     try:
         await asyncio.to_thread(inject_console_sequence, cmds)
     except Exception as e:

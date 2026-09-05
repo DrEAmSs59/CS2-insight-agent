@@ -26,6 +26,7 @@ from obswebsocket import obsws, requests as obs_requests
 from obswebsocket.core import RecvThread, ReconnectThread
 
 from .demo_parse_isolation import IsolatedParseError, get_demo_match_summary_isolated
+from .chroma_demo_copy import ChromaDemoCopyReport, prepare_chroma_demo_copy
 from .demo_parser import (
     BUFFER_SECONDS_AFTER,
     BUFFER_SECONDS_BEFORE,
@@ -66,6 +67,24 @@ from .pov_constants import (
 from .win_cs2_console import ensure_cs2_foreground, find_cs2_hwnd, inject_console_sequence, send_cs2_space_taps
 
 logger = logging.getLogger(__name__)
+
+
+def _prepare_recording_playback_demo_copy(
+    source: Path,
+    destination: Path,
+    *,
+    chroma_demo_map_name: Optional[str] = None,
+) -> ChromaDemoCopyReport | None:
+    """Create only the disposable Demo that CS2 will play for recording."""
+
+    if chroma_demo_map_name:
+        return prepare_chroma_demo_copy(
+            source,
+            destination,
+            map_name=chroma_demo_map_name,
+        )
+    shutil.copy2(source, destination)
+    return None
 
 
 def _empty_voice_ban_payload(original: bytes) -> bytes:
@@ -1834,12 +1853,26 @@ class RecordingWarmupExtras:
     pov_voice_disabled: bool = False
     # RecordingV3 queue: enable POV HUD lifecycle (install vpk + patch gameinfo.gi)
     pov_hud_enabled: bool = False
+    # Build the demo-specific in-game voice/input VPK independently of POV mode.
+    recording_hud_enabled: bool = False
+    # Authoritative in-game input visualization. Presentation size and audio
+    # gain are fixed product presets; only visibility policy and sound on/off
+    # are session choices.
+    input_hud_enabled: bool = True
+    input_hud_display_mode: Literal["hybrid", "always", "active"] = "hybrid"
+    input_audio_enabled: bool = True
+    # Presentation-only switch. The authoritative combat track remains in the
+    # demo-specific payload so this never changes truth extraction or Pawn switching.
+    combat_stats_hud_enabled: bool = True
     # Independent recording preset. Non-default values install a sky-only VPK
     # in ordinary mode, or merge the same layer into the POV package.
     skybox_id: str = "default"
     # Independent recording map-material preset. Non-default values merge only
     # the current demo map's verified material entries into the temporary VPK.
     map_material_id: str = "default"
+    # Independent weather category. Rain may provide a bundled default sky,
+    # while an explicitly selected skybox remains the final override.
+    weather_effect_id: str = "default"
 
 
 # CS2 视频设置「宽高比」下拉与 setting.aspectratiomode 枚举（社区常用映射）。
@@ -2325,6 +2358,8 @@ class OBSDirector:
         self,
         demo_abs: Path,
         warmup: Optional[RecordingWarmupExtras] = None,
+        *,
+        chroma_demo_map_name: Optional[str] = None,
     ) -> None:
         """
         将 Demo 复制到 CS2 的 game/csgo/ 下再以 +playdemo 启动。
@@ -2364,9 +2399,20 @@ class OBSDirector:
         csgo_dir = game_root / "csgo"
         dest_name = f"_insight_{uuid.uuid4().hex}.dem"
         dest = csgo_dir / dest_name
-        # The persistent compatibility preflight has already removed legacy
-        # type 138 and the terminal win-panel event from the source.
-        shutil.copy2(demo_abs, dest)
+        chroma_report = _prepare_recording_playback_demo_copy(
+            demo_abs,
+            dest,
+            chroma_demo_map_name=chroma_demo_map_name,
+        )
+        if chroma_report is not None:
+            logger.info(
+                "[RecordingV3][CHROMA] disposable Demo ready: map=%s "
+                "manifests=%d handles=%d output_sha256=%s",
+                chroma_report.map_name,
+                chroma_report.manifest_report.rewritten_chroma_sky_references,
+                chroma_report.handle_report.fields_rewritten,
+                chroma_report.handle_report.output_sha256,
+            )
         self._copied_demo = dest
 
         cfg_dir = csgo_dir / "cfg"
@@ -3574,15 +3620,25 @@ class OBSDirector:
         from .pov_hud_manager import (
             PovHudError,
             PovHudManager,
+            _detect_chroma_demo_map_name,
             restore_pov_after_cs2_exit,
         )
         from .pov_constants import POV_CORE_FORCED_COMMANDS, pov_tail_commands
         from .map_material_vpk import (
             DEFAULT_MAP_MATERIAL_ID,
-            map_material_console_commands,
             normalize_map_material_id,
         )
-        from .skybox_vpk import DEFAULT_SKYBOX_ID, normalize_skybox_id
+        from .skybox_vpk import (
+            CHROMA_SKYBOX_IDS,
+            DEFAULT_SKYBOX_ID,
+            normalize_skybox_id,
+            normalize_skybox_map_name,
+        )
+        from .weather_effects import (
+            DEFAULT_WEATHER_EFFECT_ID,
+            normalize_weather_effect_id,
+            visual_layer_console_commands,
+        )
 
         logger.info("[RecordingV3] execute_plan_queue: %d requests", len(requests))
 
@@ -3605,11 +3661,27 @@ class OBSDirector:
 
         pov_mgr_v3: "Optional[PovHudManager]" = None
         pov_on_v3 = bool(warmup and getattr(warmup, "pov_hud_enabled", False))
+        recording_hud_on_v3 = bool(
+            pov_on_v3
+            or (warmup and getattr(warmup, "recording_hud_enabled", False))
+        )
         pov_voice_mode_v3 = normalize_pov_voice_mode(
             getattr(warmup, "pov_voice_mode", None) if warmup else None,
             legacy_voice_disabled=bool(
                 warmup and getattr(warmup, "pov_voice_disabled", False)
             ),
+        )
+        input_hud_enabled_v3 = bool(
+            getattr(warmup, "input_hud_enabled", True) if warmup else True
+        )
+        # Recording exposes a binary show/hide choice. A visible input HUD
+        # always uses the high-frequency resident (hybrid) presentation.
+        input_hud_display_mode_v3 = "hybrid"
+        input_audio_enabled_v3 = bool(
+            getattr(warmup, "input_audio_enabled", True) if warmup else True
+        )
+        combat_stats_hud_enabled_v3 = bool(
+            getattr(warmup, "combat_stats_hud_enabled", True) if warmup else True
         )
         skybox_id_v3 = normalize_skybox_id(
             getattr(warmup, "skybox_id", DEFAULT_SKYBOX_ID) if warmup else DEFAULT_SKYBOX_ID
@@ -3621,27 +3693,22 @@ class OBSDirector:
             else DEFAULT_MAP_MATERIAL_ID
         )
         map_material_on_v3 = map_material_id_v3 != DEFAULT_MAP_MATERIAL_ID
-        recording_vpk_on_v3 = pov_on_v3 or skybox_on_v3 or map_material_on_v3
+        weather_effect_id_v3 = normalize_weather_effect_id(
+            getattr(warmup, "weather_effect_id", DEFAULT_WEATHER_EFFECT_ID)
+            if warmup
+            else DEFAULT_WEATHER_EFFECT_ID
+        )
+        weather_on_v3 = weather_effect_id_v3 != DEFAULT_WEATHER_EFFECT_ID
+        visual_layer_on_v3 = skybox_on_v3 or map_material_on_v3 or weather_on_v3
+        recording_vpk_on_v3 = recording_hud_on_v3 or visual_layer_on_v3
         pov_install_attempted = False
         pov_expected_gameinfo_sha256: Optional[str] = None
         pov_restoration: Optional[dict[str, Any]] = None
 
         try:
-            # ── Phase 0: 预构建 plan + 提取 overlay 轨道（CS2 启动前完成，避免进游戏后卡顿）────
-            from .env_utils import load_config as _phase0_load_cfg
-            _phase0_cfg = _phase0_load_cfg()
-
-            def _fx_on(_dto) -> bool:
-                value = getattr(_dto.options, "kill_fx_enabled", None)
-                return bool(_phase0_cfg.kill_fx_enabled) if value is None else bool(value)
-
+            # ── Phase 0: CS2 启动前预构建录制计划 ──────────────────────────
             _plan_cache: dict = {}   # {request_id: RecordingPlan}
-            _kb_any = any(getattr(dto.options, "kb_overlay_enabled", False) for dto in requests)
-            _fx_any = any(_fx_on(dto) for dto in requests)
-            logger.info(
-                "[RecordingV3] Pre-building %d plans (kb_overlay=%s kill_fx=%s)",
-                len(requests), _kb_any, _fx_any,
-            )
+            logger.info("[RecordingV3] Pre-building %d plans", len(requests))
             for dto in requests:
                 if self._abort_requested():
                     break
@@ -3650,137 +3717,7 @@ class OBSDirector:
                 except Exception as _bp_e:
                     logger.warning("[RecordingV3] pre-build plan failed %s: %s", dto.request_id, _bp_e)
 
-            if (_kb_any or _fx_any) and _plan_cache and not self._abort_requested():
-                from .features.demo_analysis.input_track import (
-                    extract_input_track as _pre_extract_kb,
-                    prepare_input_track_batch as _prepare_kb_batch,
-                )
-                from .features.demo_analysis.kill_track import extract_kill_track as _pre_extract_fx
-                _kb_prepared_by_demo: dict = {}
-
-                async def _extract_seg_pre(_seg, _demo_path):
-                    if self._abort_requested():
-                        _seg.metadata["kb_track"] = []
-                        return
-                    try:
-                        _frames = await asyncio.to_thread(
-                            _pre_extract_kb,
-                            _demo_path,
-                            steamid=_seg.target_steamid64,
-                            player_name=_seg.target_player_name,
-                            start_tick=_seg.start_tick,
-                            end_tick=_seg.end_tick,
-                            prepared=_kb_prepared_by_demo.get(_demo_path),
-                        )
-                        _seg.metadata["kb_track"] = _frames
-                        logger.info(
-                            "[kb_overlay] pre-extract seg=%d %d frames (ticks %d-%d)",
-                            _seg.segment_index, len(_frames), _seg.start_tick, _seg.end_tick,
-                        )
-                    except Exception as _e:
-                        logger.warning("[kb_overlay] pre-extract seg=%d failed: %s", _seg.segment_index, _e)
-                        _seg.metadata["kb_track"] = []
-
-                async def _extract_seg_fx(_seg, _demo_path, _ctx_tags):
-                    if self._abort_requested():
-                        _seg.metadata["kill_track"] = []
-                        return
-                    try:
-                        _kills = await asyncio.to_thread(
-                            _pre_extract_fx,
-                            _demo_path,
-                            steamid=_seg.target_steamid64,
-                            player_name=_seg.target_player_name,
-                            start_tick=_seg.start_tick,
-                            end_tick=_seg.end_tick,
-                            context_tags=_ctx_tags,
-                            round_number=_seg.round,
-                        )
-                        _seg.metadata["kill_track"] = _kills
-                        logger.info(
-                            "[kill_fx] pre-extract seg=%d %d kills (ticks %d-%d)",
-                            _seg.segment_index, len(_kills), _seg.start_tick, _seg.end_tick,
-                        )
-                    except Exception as _e:
-                        logger.warning("[kill_fx] pre-extract seg=%d failed: %s", _seg.segment_index, _e)
-                        _seg.metadata["kill_track"] = []
-
-                # 收集所有需要提取的任务：(coroutine, args)
-                _kb_tasks = []
-                _kb_segments_by_demo: dict[str, list] = {}
-                for _dto in requests:
-                    _plan = _plan_cache.get(_dto.request_id)
-                    if not _plan:
-                        continue
-                    if getattr(_dto.options, "kb_overlay_enabled", False):
-                        _kb_off_req = getattr(_dto.options, "kb_overlay_tick_offset", None)
-                        for _seg in _plan.segments:
-                            _seg.metadata["kb_tick_offset"] = _kb_off_req  # None → executor falls back to global config
-                            _kb_tasks.append((_extract_seg_pre, (_seg, _plan.demo_path)))
-                            _kb_segments_by_demo.setdefault(_plan.demo_path, []).append(_seg)
-                    if _fx_on(_dto):
-                        _ctx_tags = list(getattr(_dto.source_ref, "context_tags", None) or [])
-                        for _seg in _plan.segments:
-                            # 受害者视角片段不展示目标玩家的击杀特效。
-                            if str(getattr(_seg.perspective, "value", _seg.perspective)) == "victim":
-                                continue
-                            _seg.metadata["kill_fx_tick_offset"] = getattr(
-                                _dto.options, "kill_fx_tick_offset", None,
-                            )
-                            _kb_tasks.append((_extract_seg_fx, (_seg, _plan.demo_path, _ctx_tags)))
-
-                # Tick/event tables are parsed once per demo below.  Segment
-                # tasks only filter those shared tables and build their frames.
-                _BATCH = 4
-                _kb_total = len(_kb_tasks)
-                _kb_done = 0
-                _task_batches = []
-                for _task_fn in (_extract_seg_pre, _extract_seg_fx):
-                    _same_kind = [task for task in _kb_tasks if task[0] is _task_fn]
-                    _task_batches.extend(
-                        _same_kind[index: index + _BATCH]
-                        for index in range(0, len(_same_kind), _BATCH)
-                    )
-                logger.info("[kb_overlay] Pre-extracting %d overlay tasks before CS2 launch", _kb_total)
-
-                from .recording.kb_prebuild_state import start as _kbp_start, update as _kbp_update, finish as _kbp_finish, reset as _kbp_reset
-                _kbp_start(_kb_total)
-
-                for _demo_path, _segments in _kb_segments_by_demo.items():
-                    if self._abort_requested():
-                        break
-                    try:
-                        _kb_prepared_by_demo[_demo_path] = await asyncio.to_thread(
-                            _prepare_kb_batch,
-                            _demo_path,
-                            [(_seg.start_tick, _seg.end_tick) for _seg in _segments],
-                        )
-                        logger.info(
-                            "[kb_overlay] prepared shared demo tables: demo=%s segments=%d",
-                            _demo_path, len(_segments),
-                        )
-                    except Exception as _prepare_e:
-                        # Preserve recording correctness if an unsupported demo
-                        # cannot use the optimized batch path.
-                        logger.warning(
-                            "[kb_overlay] shared demo preparation failed; falling back to "
-                            "per-segment extraction: demo=%s error=%s",
-                            _demo_path, _prepare_e,
-                        )
-
-                for _batch_index, _batch in enumerate(_task_batches):
-                    if self._abort_requested():
-                        logger.info("[kb_overlay] Pre-extraction aborted at batch %d", _batch_index)
-                        _kbp_reset()
-                        break
-                    await asyncio.gather(*[_fn(*_args) for _fn, _args in _batch])
-                    _kb_done += len(_batch)
-                    _kbp_update(_kb_done, _kb_total)
-                else:
-                    _kbp_finish()
-                logger.info("[kb_overlay] Pre-extraction done")
-
-            # An abort may arrive while plans/overlay tracks are being built.
+            # An abort may arrive while plans are being built.
             # Do not continue into POV installation or launch CS2 after that.
             self._check_abort()
 
@@ -3791,10 +3728,11 @@ class OBSDirector:
                     _app_cfg = _load_cfg()
                     pov_mgr_v3 = PovHudManager(_app_cfg)
                 except PovHudError as _pov_e:
-                    if skybox_on_v3 or map_material_on_v3:
+                    if visual_layer_on_v3:
                         raise
                     logger.error("[RecordingV3][POV] setup failed: %s; continuing without POV HUD", _pov_e)
                     pov_on_v3 = False
+                    recording_hud_on_v3 = False
                     recording_vpk_on_v3 = False
 
             for job_idx, (demo_key, demo_requests) in enumerate(demo_groups.items()):
@@ -3810,29 +3748,49 @@ class OBSDirector:
                         demo_map_name = str(
                             getattr(demo_requests[0].demo, "map_name", "") or ""
                         ).strip()
+                        if visual_layer_on_v3:
+                            detected_demo_map = _detect_chroma_demo_map_name(demo_abs)
+                            declared_demo_map = normalize_skybox_map_name(demo_map_name)
+                            if declared_demo_map and declared_demo_map != detected_demo_map:
+                                raise PovHudError(
+                                    "录制任务地图与 Demo 文件检测结果不一致："
+                                    f"{declared_demo_map} != {detected_demo_map}。"
+                                )
+                            demo_map_name = detected_demo_map
                         logger.info(
                             "[RecordingV3][VPK] build and install package for %s "
-                            "(pov=%s map_material=%s skybox=%s map=%s)",
+                            "(pov=%s map_material=%s weather=%s skybox=%s map=%s)",
                             demo_name,
                             pov_on_v3,
                             map_material_id_v3,
+                            weather_effect_id_v3,
                             skybox_id_v3,
                             demo_map_name,
                         )
                         pov_install_attempted = True
-                        if pov_on_v3:
+                        if recording_hud_on_v3:
                             pov_mgr_v3.install(
                                 map_name=demo_map_name,
                                 demo_path=demo_abs,
                                 voice_mode=pov_voice_mode_v3,
                                 skybox_id=skybox_id_v3,
                                 map_material_id=map_material_id_v3,
+                                weather_effect_id=weather_effect_id_v3,
+                                input_hud_enabled=input_hud_enabled_v3,
+                                input_hud_display_mode=input_hud_display_mode_v3,
+                                input_hud_scale_percent=100,
+                                input_audio_enabled=input_audio_enabled_v3,
+                                input_audio_volume_percent=100,
+                                combat_stats_enabled=(
+                                    combat_stats_hud_enabled_v3 if pov_on_v3 else False
+                                ),
                             )
                         else:
                             pov_mgr_v3.install(
                                 map_name=demo_map_name,
                                 skybox_id=skybox_id_v3,
                                 map_material_id=map_material_id_v3,
+                                weather_effect_id=weather_effect_id_v3,
                             )
                         installed_status = pov_mgr_v3.status()
                         pov_expected_gameinfo_sha256 = str(
@@ -3844,7 +3802,7 @@ class OBSDirector:
                             )
                         self._pov_enabled = pov_on_v3
                     except PovHudError as _pov_e:
-                        if skybox_on_v3 or map_material_on_v3:
+                        if visual_layer_on_v3:
                             logger.error(
                                 "[RecordingV3][VISUAL] install failed for %s: %s",
                                 demo_name,
@@ -3858,11 +3816,19 @@ class OBSDirector:
                             _pov_e,
                         )
                         pov_on_v3 = False
+                        recording_hud_on_v3 = False
                         self._pov_enabled = False
 
                 # ── CS2 launch ────────────────────────────────────────────────
                 try:
-                    self._launch_cs2(demo_abs, warmup)
+                    if skybox_id_v3 in CHROMA_SKYBOX_IDS:
+                        self._launch_cs2(
+                            demo_abs,
+                            warmup,
+                            chroma_demo_map_name=demo_map_name,
+                        )
+                    else:
+                        self._launch_cs2(demo_abs, warmup)
                 except CS2AlreadyRunningError:
                     raise
                 except CS2NotReadyError:
@@ -3911,12 +3877,16 @@ class OBSDirector:
                 if warmup is not None:
                     effective_warmup_cmds = self._recording_warmup_console_lines(
                         warmup,
-                        pov_enabled=self._pov_enabled,
+                        pov_enabled=recording_hud_on_v3,
                     )
-                    if map_material_on_v3:
+                    visual_cmds = visual_layer_console_commands(
+                        map_material_id=map_material_id_v3,
+                        weather_effect_id=weather_effect_id_v3,
+                    )
+                    if visual_cmds:
                         effective_warmup_cmds = [
                             *effective_warmup_cmds,
-                            *map_material_console_commands(map_material_id_v3),
+                            *visual_cmds,
                         ]
                     effective_warmup_cmds = [
                         *effective_warmup_cmds,
@@ -3933,6 +3903,15 @@ class OBSDirector:
                             ),
                         ]
                         effective_warmup_cmds = [*effective_warmup_cmds, *pov_cmds]
+                    elif recording_hud_on_v3 and pov_voice_mode_v3 != "mute":
+                        # Voice/input VPK mode is independent from the POV cvar
+                        # preset. Only enable the native demo voice path here;
+                        # the Panorama payload owns its selected audience mask.
+                        effective_warmup_cmds = [
+                            *effective_warmup_cmds,
+                            "voice_modenable 1",
+                            "snd_voipvolume 1",
+                        ]
                     if effective_warmup_cmds:
                         logger.info(
                             "[RecordingV3] applying warmup console commands: %d",
@@ -4022,7 +4001,7 @@ class OBSDirector:
                 for dto in demo_requests:
                     self._check_abort()
 
-                    # 优先使用预构建的 plan（已含 kb_track 数据），避免重复 build_plan
+                    # 优先使用预构建的 plan，避免重复 build_plan
                     plan = _plan_cache.get(dto.request_id)
                     if plan is None:
                         logger.info("[RecordingV3] build plan (fallback): request_id=%s type=%s",
@@ -4131,6 +4110,7 @@ class OBSDirector:
                         "pov_hud_enabled": pov_on_v3,
                         "recording_skybox": skybox_id_v3,
                         "recording_map_material": map_material_id_v3,
+                        "recording_weather_effect": weather_effect_id_v3,
                         "recording_perspective": (
                             "pov_hud" if pov_on_v3
                             else "player_follow" if (dto.target_player and dto.target_player.name)
@@ -4163,9 +4143,8 @@ class OBSDirector:
                         ],
                     })
 
-                    # 产物 JSON 是时序自检唯一的落盘出口：calibration_markers 只存在于
-                    # ExecutionResult 里，不进 clip_meta。传最终路径而不是
-                    # result.output_path，后者在上面的重命名之后已经指向不存在的文件。
+                    # 传最终路径而不是 result.output_path，后者在上面的重命名之后
+                    # 已经指向不存在的文件。
                     try:
                         write_result(result, output_path=final_output_path)
                     except Exception as exc:  # noqa: BLE001 - 诊断产物不该影响录制
@@ -4314,6 +4293,16 @@ class OBSDirector:
                     {
                         "recording_map_material_id": map_material_id_v3,
                         "recording_map_material_enabled": True,
+                        "recording_vpk_enabled": True,
+                        "recording_vpk_restore_verified": pov_restore_checked,
+                        "recording_vpk_restored": pov_restore_ok,
+                    }
+                )
+            if weather_on_v3:
+                recovery.update(
+                    {
+                        "recording_weather_effect_id": weather_effect_id_v3,
+                        "recording_weather_effect_enabled": True,
                         "recording_vpk_enabled": True,
                         "recording_vpk_restore_verified": pov_restore_checked,
                         "recording_vpk_restored": pov_restore_ok,

@@ -304,13 +304,55 @@ $PovHasAssets = (
     (Test-Path (Join-Path $PovSrc "pov.vpk")) -or
     (Test-Path (Join-Path $PovSrc "pov_default.vpk")) -or
     (Test-Path (Join-Path $PovSrc "skyboxes")) -or
-    (Test-Path (Join-Path $PovSrc "map_materials"))
+    (Test-Path (Join-Path $PovSrc "map_materials")) -or
+    (Test-Path (Join-Path $PovSrc "weather_effects"))
 )
 $DestPov = Join-Path $OutDir "pov"
 if ($PovHasAssets) {
     Write-Step "Copy pov/ (POV HUD assets)"
-    robocopy $PovSrc $DestPov /E /NFL /NDL /NJH /NJS /nc /ns /np | Out-Null
+    $PovExcludedDirectories = @(
+        (Join-Path $PovSrc "weather_effects\regions"),
+        (Join-Path $PovSrc "map_materials\rain_puddles\generated")
+    )
+    robocopy $PovSrc $DestPov /E /NFL /NDL /NJH /NJS /nc /ns /np `
+        /XD $PovExcludedDirectories | Out-Null
     if ($LASTEXITCODE -ge 8) { throw "robocopy pov failed (exit $LASTEXITCODE)" }
+
+    $RainManifestPath = Join-Path $DestPov "weather_effects\rain\manifest.json"
+    if (Test-Path -LiteralPath $RainManifestPath) {
+        $RainRuntimeRoot = (Resolve-Path -LiteralPath (Split-Path -Parent $RainManifestPath)).Path
+        $RainManifest = Get-Content -LiteralPath $RainManifestPath -Raw | ConvertFrom-Json
+        $FinalRainMaps = @("de_dust2", "de_mirage", "de_cache", "de_inferno", "de_anubis", "de_ancient", "de_nuke")
+        $ActualRainMaps = @($RainManifest.maps.PSObject.Properties.Name)
+        if (@(Compare-Object ($FinalRainMaps | Sort-Object) ($ActualRainMaps | Sort-Object)).Count -ne 0) {
+            throw "Rain runtime must contain exactly the seven finalized map profiles."
+        }
+        if (
+            $RainManifest.maps.de_nuke.spatial_puddles.mode -ne "rain_only_no_ground_wetness" -or
+            [int]$RainManifest.maps.de_nuke.spatial_puddles.wet_model_count -ne 0 -or
+            [int]$RainManifest.maps.de_nuke.spatial_puddles.puddle_count -ne 0
+        ) {
+            throw "Final Nuke profile must remain rain-only with no wet ground or puddles."
+        }
+        $KeepRainFiles = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+        [void]$KeepRainFiles.Add((Resolve-Path -LiteralPath $RainManifestPath).Path)
+        foreach ($MapProperty in $RainManifest.maps.PSObject.Properties) {
+            foreach ($Replacement in @($MapProperty.Value.loose_outer_replacements)) {
+                $PayloadPath = Join-Path $RainRuntimeRoot ([string]$Replacement.payload_relative_path).Replace("/", "\")
+                if (-not (Test-Path -LiteralPath $PayloadPath -PathType Leaf)) {
+                    throw "Missing final rain payload: $PayloadPath"
+                }
+                [void]$KeepRainFiles.Add((Resolve-Path -LiteralPath $PayloadPath).Path)
+            }
+        }
+        Get-ChildItem -LiteralPath $RainRuntimeRoot -Recurse -File |
+            Where-Object { -not $KeepRainFiles.Contains($_.FullName) } |
+            Remove-Item -Force
+        Get-ChildItem -LiteralPath $RainRuntimeRoot -Recurse -Directory |
+            Sort-Object FullName -Descending |
+            Where-Object { -not (Get-ChildItem -LiteralPath $_.FullName -Force) } |
+            Remove-Item -Force
+    }
 }
 else {
     Write-Host "跳过 pov/：未找到 POV HUD、地图材质或天空盒资源目录，便携包内将无法安装录制 VPK。" -ForegroundColor Yellow

@@ -1,0 +1,538 @@
+<!-- kv3 encoding:text:version{e21c7f3c-8a33-41c5-9977-a76d3a32aa0d} format:generic:version{7412167c-06e9-4698-aff2-e63eb59037e7} -->
+// ---------------------------------------------------------------------------------------------
+// Copyright (c) unicbm. All rights reserved.
+// Licensed under the PolyForm Noncommercial License 1.0.0. See LICENSE in the project root for license information.
+// ---------------------------------------------------------------------------------------------
+{
+    "CS2Insight.Input.Keyboard.Down" =
+    {
+        type = "csgo_mega"
+        mixgroup = "UI"
+        volume = 0.34
+        volume_random_min = -0.018
+        volume_random_max = 0.012
+        pitch = 1.0
+        pitch_random_min = -0.012
+        pitch_random_max = 0.012
+        occlusion_intensity = 0.0
+        reverb_wet = 0.0
+        use_world_position = false
+        position_relative_to_player = false
+        vsnd_files_track_01 =
+        [
+            "sounds/cs2_insight/input/keyboard-normal-01.vsnd",
+            "sounds/cs2_insight/input/keyboard-normal-02.vsnd",
+            "sounds/cs2_insight/input/keyboard-normal-03.vsnd",
+            "sounds/cs2_insight/input/keyboard-normal-04.vsnd",
+        ]
+    }
+    "CS2Insight.Input.Keyboard.Up" =
+    {
+        type = "csgo_mega"
+        mixgroup = "UI"
+        volume = 0.14
+        volume_random_min = -0.012
+        volume_random_max = 0.008
+        pitch = 1.035
+        pitch_random_min = -0.01
+        pitch_random_max = 0.01
+        occlusion_intensity = 0.0
+        reverb_wet = 0.0
+        use_world_position = false
+        position_relative_to_player = false
+        vsnd_files_track_01 =
+        [
+            "sounds/cs2_insight/input/keyboard-release-01.vsnd",
+            "sounds/cs2_insight/input/keyboard-release-02.vsnd",
+        ]
+    }
+    "CS2Insight.Input.Space.Down" =
+    {
+        type = "csgo_mega"
+        mixgroup = "UI"
+        volume = 0.31
+        volume_random_min = -0.015
+        volume_random_max = 0.01
+        pitch = 0.9
+        pitch_random_min = -0.008
+        pitch_random_max = 0.008
+        occlusion_intensity = 0.0
+        reverb_wet = 0.0
+        use_world_position = false
+        position_relative_to_player = false
+        vsnd_files_track_01 =
+        [
+            "sounds/cs2_insight/input/space-down-01.vsnd",
+            "sounds/cs2_insight/input/space-down-02.vsnd",
+            "sounds/cs2_insight/input/space-down-03.vsnd",
+            "sounds/cs2_insight/input/space-down-04.vsnd",
+        ]
+    }
+    "CS2Insight.Input.Space.Up" =
+    {
+        type = "csgo_mega"
+        mixgroup = "UI"
+        volume = 0.12
+        volume_random_min = -0.01
+        volume_random_max = 0.006
+        pitch = 0.94
+        pitch_random_min = -0.008
+        pitch_random_max = 0.008
+        occlusion_intensity = 0.0
+        reverb_wet = 0.0
+        use_world_position = false
+        position_relative_to_player = false
+        vsnd_files_track_01 =
+        [
+            "sounds/cs2_insight/input/space-release-01.vsnd",
+            "sounds/cs2_insight/input/space-release-02.vsnd",
+        ]
+    }
+    "CS2Insight.Input.Mouse.Left.Down" =
+    {
+        type = "csgo_mega"
+        mixgroup = "UI"
+        volume = 0.37
+        pitch = 1.0
+        occlusion_intensity = 0.0
+        reverb_wet = 0.0
+        use_world_position = false
+        position_relative_to_player = false
+        vsnd_files_track_01 = "sounds/cs2_insight/input/mouse-down.vsnd"
+    }
+    "CS2Insight.Input.Mouse.Left.Up" =
+    {
+        type = "csgo_mega"
+        mixgroup = "UI"
+        volume = 0.22
+        pitch = 1.015
+        occlusion_intensity = 0.0
+        reverb_wet = 0.0
+        use_world_position = false
+        position_relative_to_player = false
+        vsnd_files_track_01 = "sounds/cs2_insight/input/mouse-release.vsnd"
+    }
+    "CS2Insight.Input.Mouse.Right.Down" =
+    {
+        type = "csgo_mega"
+        mixgroup = "UI"
+        volume = 0.35
+        pitch = 0.965
+        occlusion_intensity = 0.0
+        reverb_wet = 0.0
+        use_world_position = false
+        position_relative_to_player = false
+        vsnd_files_track_01 = "sounds/cs2_insight/input/mouse-down.vsnd"
+    }
+    "CS2Insight.Input.Mouse.Right.Up" =
+    {
+        type = "csgo_mega"
+        mixgroup = "UI"
+        volume = 0.2
+        pitch = 0.98
+        occlusion_intensity = 0.0
+        reverb_wet = 0.0
+        use_world_position = false
+        position_relative_to_player = false
+        vsnd_files_track_01 = "sounds/cs2_insight/input/mouse-release.vsnd"
+    }
+    // Precompiled per-session volume bank (25% of the authored level).
+    "CS2Insight.Input.Keyboard.Down.V25" =
+    {
+        type = "csgo_mega"
+        mixgroup = "UI"
+        volume = 0.085
+        volume_random_min = -0.0045
+        volume_random_max = 0.003
+        pitch = 1.0
+        pitch_random_min = -0.012
+        pitch_random_max = 0.012
+        occlusion_intensity = 0.0
+        reverb_wet = 0.0
+        use_world_position = false
+        position_relative_to_player = false
+        vsnd_files_track_01 =
+        [
+            "sounds/cs2_insight/input/keyboard-normal-01.vsnd",
+            "sounds/cs2_insight/input/keyboard-normal-02.vsnd",
+            "sounds/cs2_insight/input/keyboard-normal-03.vsnd",
+            "sounds/cs2_insight/input/keyboard-normal-04.vsnd",
+        ]
+    }
+    "CS2Insight.Input.Keyboard.Up.V25" =
+    {
+        type = "csgo_mega"
+        mixgroup = "UI"
+        volume = 0.035
+        volume_random_min = -0.003
+        volume_random_max = 0.002
+        pitch = 1.035
+        pitch_random_min = -0.01
+        pitch_random_max = 0.01
+        occlusion_intensity = 0.0
+        reverb_wet = 0.0
+        use_world_position = false
+        position_relative_to_player = false
+        vsnd_files_track_01 =
+        [
+            "sounds/cs2_insight/input/keyboard-release-01.vsnd",
+            "sounds/cs2_insight/input/keyboard-release-02.vsnd",
+        ]
+    }
+    "CS2Insight.Input.Space.Down.V25" =
+    {
+        type = "csgo_mega"
+        mixgroup = "UI"
+        volume = 0.0775
+        volume_random_min = -0.00375
+        volume_random_max = 0.0025
+        pitch = 0.9
+        pitch_random_min = -0.008
+        pitch_random_max = 0.008
+        occlusion_intensity = 0.0
+        reverb_wet = 0.0
+        use_world_position = false
+        position_relative_to_player = false
+        vsnd_files_track_01 =
+        [
+            "sounds/cs2_insight/input/space-down-01.vsnd",
+            "sounds/cs2_insight/input/space-down-02.vsnd",
+            "sounds/cs2_insight/input/space-down-03.vsnd",
+            "sounds/cs2_insight/input/space-down-04.vsnd",
+        ]
+    }
+    "CS2Insight.Input.Space.Up.V25" =
+    {
+        type = "csgo_mega"
+        mixgroup = "UI"
+        volume = 0.03
+        volume_random_min = -0.0025
+        volume_random_max = 0.0015
+        pitch = 0.94
+        pitch_random_min = -0.008
+        pitch_random_max = 0.008
+        occlusion_intensity = 0.0
+        reverb_wet = 0.0
+        use_world_position = false
+        position_relative_to_player = false
+        vsnd_files_track_01 =
+        [
+            "sounds/cs2_insight/input/space-release-01.vsnd",
+            "sounds/cs2_insight/input/space-release-02.vsnd",
+        ]
+    }
+    "CS2Insight.Input.Mouse.Left.Down.V25" =
+    {
+        type = "csgo_mega"
+        mixgroup = "UI"
+        volume = 0.0925
+        pitch = 1.0
+        occlusion_intensity = 0.0
+        reverb_wet = 0.0
+        use_world_position = false
+        position_relative_to_player = false
+        vsnd_files_track_01 = "sounds/cs2_insight/input/mouse-down.vsnd"
+    }
+    "CS2Insight.Input.Mouse.Left.Up.V25" =
+    {
+        type = "csgo_mega"
+        mixgroup = "UI"
+        volume = 0.055
+        pitch = 1.015
+        occlusion_intensity = 0.0
+        reverb_wet = 0.0
+        use_world_position = false
+        position_relative_to_player = false
+        vsnd_files_track_01 = "sounds/cs2_insight/input/mouse-release.vsnd"
+    }
+    "CS2Insight.Input.Mouse.Right.Down.V25" =
+    {
+        type = "csgo_mega"
+        mixgroup = "UI"
+        volume = 0.0875
+        pitch = 0.965
+        occlusion_intensity = 0.0
+        reverb_wet = 0.0
+        use_world_position = false
+        position_relative_to_player = false
+        vsnd_files_track_01 = "sounds/cs2_insight/input/mouse-down.vsnd"
+    }
+    "CS2Insight.Input.Mouse.Right.Up.V25" =
+    {
+        type = "csgo_mega"
+        mixgroup = "UI"
+        volume = 0.05
+        pitch = 0.98
+        occlusion_intensity = 0.0
+        reverb_wet = 0.0
+        use_world_position = false
+        position_relative_to_player = false
+        vsnd_files_track_01 = "sounds/cs2_insight/input/mouse-release.vsnd"
+    }
+    // Precompiled per-session volume bank (50% of the authored level).
+    "CS2Insight.Input.Keyboard.Down.V50" =
+    {
+        type = "csgo_mega"
+        mixgroup = "UI"
+        volume = 0.17
+        volume_random_min = -0.009
+        volume_random_max = 0.006
+        pitch = 1.0
+        pitch_random_min = -0.012
+        pitch_random_max = 0.012
+        occlusion_intensity = 0.0
+        reverb_wet = 0.0
+        use_world_position = false
+        position_relative_to_player = false
+        vsnd_files_track_01 =
+        [
+            "sounds/cs2_insight/input/keyboard-normal-01.vsnd",
+            "sounds/cs2_insight/input/keyboard-normal-02.vsnd",
+            "sounds/cs2_insight/input/keyboard-normal-03.vsnd",
+            "sounds/cs2_insight/input/keyboard-normal-04.vsnd",
+        ]
+    }
+    "CS2Insight.Input.Keyboard.Up.V50" =
+    {
+        type = "csgo_mega"
+        mixgroup = "UI"
+        volume = 0.07
+        volume_random_min = -0.006
+        volume_random_max = 0.004
+        pitch = 1.035
+        pitch_random_min = -0.01
+        pitch_random_max = 0.01
+        occlusion_intensity = 0.0
+        reverb_wet = 0.0
+        use_world_position = false
+        position_relative_to_player = false
+        vsnd_files_track_01 =
+        [
+            "sounds/cs2_insight/input/keyboard-release-01.vsnd",
+            "sounds/cs2_insight/input/keyboard-release-02.vsnd",
+        ]
+    }
+    "CS2Insight.Input.Space.Down.V50" =
+    {
+        type = "csgo_mega"
+        mixgroup = "UI"
+        volume = 0.155
+        volume_random_min = -0.0075
+        volume_random_max = 0.005
+        pitch = 0.9
+        pitch_random_min = -0.008
+        pitch_random_max = 0.008
+        occlusion_intensity = 0.0
+        reverb_wet = 0.0
+        use_world_position = false
+        position_relative_to_player = false
+        vsnd_files_track_01 =
+        [
+            "sounds/cs2_insight/input/space-down-01.vsnd",
+            "sounds/cs2_insight/input/space-down-02.vsnd",
+            "sounds/cs2_insight/input/space-down-03.vsnd",
+            "sounds/cs2_insight/input/space-down-04.vsnd",
+        ]
+    }
+    "CS2Insight.Input.Space.Up.V50" =
+    {
+        type = "csgo_mega"
+        mixgroup = "UI"
+        volume = 0.06
+        volume_random_min = -0.005
+        volume_random_max = 0.003
+        pitch = 0.94
+        pitch_random_min = -0.008
+        pitch_random_max = 0.008
+        occlusion_intensity = 0.0
+        reverb_wet = 0.0
+        use_world_position = false
+        position_relative_to_player = false
+        vsnd_files_track_01 =
+        [
+            "sounds/cs2_insight/input/space-release-01.vsnd",
+            "sounds/cs2_insight/input/space-release-02.vsnd",
+        ]
+    }
+    "CS2Insight.Input.Mouse.Left.Down.V50" =
+    {
+        type = "csgo_mega"
+        mixgroup = "UI"
+        volume = 0.185
+        pitch = 1.0
+        occlusion_intensity = 0.0
+        reverb_wet = 0.0
+        use_world_position = false
+        position_relative_to_player = false
+        vsnd_files_track_01 = "sounds/cs2_insight/input/mouse-down.vsnd"
+    }
+    "CS2Insight.Input.Mouse.Left.Up.V50" =
+    {
+        type = "csgo_mega"
+        mixgroup = "UI"
+        volume = 0.11
+        pitch = 1.015
+        occlusion_intensity = 0.0
+        reverb_wet = 0.0
+        use_world_position = false
+        position_relative_to_player = false
+        vsnd_files_track_01 = "sounds/cs2_insight/input/mouse-release.vsnd"
+    }
+    "CS2Insight.Input.Mouse.Right.Down.V50" =
+    {
+        type = "csgo_mega"
+        mixgroup = "UI"
+        volume = 0.175
+        pitch = 0.965
+        occlusion_intensity = 0.0
+        reverb_wet = 0.0
+        use_world_position = false
+        position_relative_to_player = false
+        vsnd_files_track_01 = "sounds/cs2_insight/input/mouse-down.vsnd"
+    }
+    "CS2Insight.Input.Mouse.Right.Up.V50" =
+    {
+        type = "csgo_mega"
+        mixgroup = "UI"
+        volume = 0.1
+        pitch = 0.98
+        occlusion_intensity = 0.0
+        reverb_wet = 0.0
+        use_world_position = false
+        position_relative_to_player = false
+        vsnd_files_track_01 = "sounds/cs2_insight/input/mouse-release.vsnd"
+    }
+    // Precompiled per-session volume bank (75% of the authored level).
+    "CS2Insight.Input.Keyboard.Down.V75" =
+    {
+        type = "csgo_mega"
+        mixgroup = "UI"
+        volume = 0.255
+        volume_random_min = -0.0135
+        volume_random_max = 0.009
+        pitch = 1.0
+        pitch_random_min = -0.012
+        pitch_random_max = 0.012
+        occlusion_intensity = 0.0
+        reverb_wet = 0.0
+        use_world_position = false
+        position_relative_to_player = false
+        vsnd_files_track_01 =
+        [
+            "sounds/cs2_insight/input/keyboard-normal-01.vsnd",
+            "sounds/cs2_insight/input/keyboard-normal-02.vsnd",
+            "sounds/cs2_insight/input/keyboard-normal-03.vsnd",
+            "sounds/cs2_insight/input/keyboard-normal-04.vsnd",
+        ]
+    }
+    "CS2Insight.Input.Keyboard.Up.V75" =
+    {
+        type = "csgo_mega"
+        mixgroup = "UI"
+        volume = 0.105
+        volume_random_min = -0.009
+        volume_random_max = 0.006
+        pitch = 1.035
+        pitch_random_min = -0.01
+        pitch_random_max = 0.01
+        occlusion_intensity = 0.0
+        reverb_wet = 0.0
+        use_world_position = false
+        position_relative_to_player = false
+        vsnd_files_track_01 =
+        [
+            "sounds/cs2_insight/input/keyboard-release-01.vsnd",
+            "sounds/cs2_insight/input/keyboard-release-02.vsnd",
+        ]
+    }
+    "CS2Insight.Input.Space.Down.V75" =
+    {
+        type = "csgo_mega"
+        mixgroup = "UI"
+        volume = 0.2325
+        volume_random_min = -0.01125
+        volume_random_max = 0.0075
+        pitch = 0.9
+        pitch_random_min = -0.008
+        pitch_random_max = 0.008
+        occlusion_intensity = 0.0
+        reverb_wet = 0.0
+        use_world_position = false
+        position_relative_to_player = false
+        vsnd_files_track_01 =
+        [
+            "sounds/cs2_insight/input/space-down-01.vsnd",
+            "sounds/cs2_insight/input/space-down-02.vsnd",
+            "sounds/cs2_insight/input/space-down-03.vsnd",
+            "sounds/cs2_insight/input/space-down-04.vsnd",
+        ]
+    }
+    "CS2Insight.Input.Space.Up.V75" =
+    {
+        type = "csgo_mega"
+        mixgroup = "UI"
+        volume = 0.09
+        volume_random_min = -0.0075
+        volume_random_max = 0.0045
+        pitch = 0.94
+        pitch_random_min = -0.008
+        pitch_random_max = 0.008
+        occlusion_intensity = 0.0
+        reverb_wet = 0.0
+        use_world_position = false
+        position_relative_to_player = false
+        vsnd_files_track_01 =
+        [
+            "sounds/cs2_insight/input/space-release-01.vsnd",
+            "sounds/cs2_insight/input/space-release-02.vsnd",
+        ]
+    }
+    "CS2Insight.Input.Mouse.Left.Down.V75" =
+    {
+        type = "csgo_mega"
+        mixgroup = "UI"
+        volume = 0.2775
+        pitch = 1.0
+        occlusion_intensity = 0.0
+        reverb_wet = 0.0
+        use_world_position = false
+        position_relative_to_player = false
+        vsnd_files_track_01 = "sounds/cs2_insight/input/mouse-down.vsnd"
+    }
+    "CS2Insight.Input.Mouse.Left.Up.V75" =
+    {
+        type = "csgo_mega"
+        mixgroup = "UI"
+        volume = 0.165
+        pitch = 1.015
+        occlusion_intensity = 0.0
+        reverb_wet = 0.0
+        use_world_position = false
+        position_relative_to_player = false
+        vsnd_files_track_01 = "sounds/cs2_insight/input/mouse-release.vsnd"
+    }
+    "CS2Insight.Input.Mouse.Right.Down.V75" =
+    {
+        type = "csgo_mega"
+        mixgroup = "UI"
+        volume = 0.2625
+        pitch = 0.965
+        occlusion_intensity = 0.0
+        reverb_wet = 0.0
+        use_world_position = false
+        position_relative_to_player = false
+        vsnd_files_track_01 = "sounds/cs2_insight/input/mouse-down.vsnd"
+    }
+    "CS2Insight.Input.Mouse.Right.Up.V75" =
+    {
+        type = "csgo_mega"
+        mixgroup = "UI"
+        volume = 0.15
+        pitch = 0.98
+        occlusion_intensity = 0.0
+        reverb_wet = 0.0
+        use_world_position = false
+        position_relative_to_player = false
+        vsnd_files_track_01 = "sounds/cs2_insight/input/mouse-release.vsnd"
+    }
+}

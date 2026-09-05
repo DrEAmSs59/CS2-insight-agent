@@ -140,15 +140,15 @@ export default function QueueWorkspaceRow({
 
       {item.demoHasPlayerKeyboardInput === false ? (
         <div
-          data-testid="queue-keyboard-input-warning"
+          data-testid="queue-input-hud-warning"
           className="mx-2 flex w-fit max-w-[290px] shrink-0 items-start gap-2 rounded-md border border-cs2-accent/35 bg-cs2-amber-surface px-3 py-2 text-cs2-amber-on-surface"
           role="status"
         >
           <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
           <div className="min-w-0 text-[11px] leading-4">
-            <p className="font-semibold">{t("queue.keyboardInputMissingTitle")}</p>
-            <p className="text-cs2-text-secondary">{t("queue.keyboardInputMissingBody")}</p>
-            <p className="text-cs2-text-secondary">{t("queue.keyboardInputMissingUnaffected")}</p>
+            <p className="font-semibold">{t("queue.inputHudMissingTitle")}</p>
+            <p className="text-cs2-text-secondary">{t("queue.inputHudMissingBody")}</p>
+            <p className="text-cs2-text-secondary">{t("queue.inputHudMissingUnaffected")}</p>
           </div>
         </div>
       ) : null}

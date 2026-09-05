@@ -5,6 +5,7 @@ import {
   DEFAULT_RECORDING_SKYBOX,
   isCustomRecordingSkyboxId,
   normalizeRecordingSkyboxId,
+  partitionBuiltinRecordingSkyboxes,
   recordingSkyboxDisplayName,
   recordingSkyboxPreviewUrl,
   RECORDING_SKYBOX_OPTIONS,
@@ -13,9 +14,21 @@ import {
 import {
   DEFAULT_RECORDING_MAP_MATERIAL,
   normalizeRecordingMapMaterialId,
-  WAXED_REFLECTION_MAP_MATERIAL,
 } from "../utils/recordingMapMaterial.js";
+import {
+  DEFAULT_RECORDING_MAP_APPEARANCE,
+  RAIN_RECORDING_MAP_APPEARANCE,
+  WAXED_RECORDING_MAP_APPEARANCE,
+  recordingMapAppearanceId,
+  applyRecordingMapAppearanceSelection,
+} from "../utils/recordingMapAppearance.js";
+import {
+  DEFAULT_RECORDING_WEATHER_EFFECT,
+  normalizeRecordingWeatherEffectId,
+} from "../utils/recordingWeatherEffect.js";
 import Modal from "./ui/Modal.jsx";
+import PlayerAliasesSection from "./PlayerAliasesSection.jsx";
+import { hasInvalidPlayerAliases, PLAYER_ALIAS_ENTRY_VISIBLE } from "../utils/playerAliases.js";
 
 export default function DemoPlayOptionsModal({
   open,
@@ -26,17 +39,37 @@ export default function DemoPlayOptionsModal({
   launchingMode = "",
   recordingSkybox = DEFAULT_RECORDING_SKYBOX,
   recordingMapMaterial = DEFAULT_RECORDING_MAP_MATERIAL,
+  recordingWeatherEffect = DEFAULT_RECORDING_WEATHER_EFFECT,
   skyboxResources = [],
   onClose,
   onRetry,
   onPlayAdvanced,
   onRecordingSkyboxChange,
   onRecordingMapMaterialChange,
+  onRecordingWeatherEffectChange,
+  aliasDemos = [],
+  aliasEditor,
+  onAliasEditorChange,
+  aliasesReady = false,
+  onAliasesReadyChange,
 }) {
   const t = useT();
   const launching = !!launchingMode;
+  const aliasesBlocked = PLAYER_ALIAS_ENTRY_VISIBLE
+    && aliasEditor?.enabled
+    && (!aliasesReady || hasInvalidPlayerAliases(aliasEditor));
   const selectedSkybox = normalizeRecordingSkyboxId(recordingSkybox);
   const selectedMapMaterial = normalizeRecordingMapMaterialId(recordingMapMaterial);
+  const selectedWeatherEffect = normalizeRecordingWeatherEffectId(recordingWeatherEffect);
+  const selectedMapAppearance = recordingMapAppearanceId(
+    selectedMapMaterial,
+    selectedWeatherEffect,
+  );
+  const rainSelected = selectedMapAppearance === RAIN_RECORDING_MAP_APPEARANCE;
+  const canChangeMapAppearance = Boolean(
+    onRecordingMapMaterialChange || onRecordingWeatherEffectChange,
+  );
+  const effectiveSkybox = selectedSkybox;
   const catalogBuiltinSkyboxes = sortBuiltinRecordingSkyboxes(
     Array.isArray(skyboxResources)
       ? skyboxResources.filter((item) => item?.source === "builtin" && item?.available)
@@ -45,11 +78,15 @@ export default function DemoPlayOptionsModal({
   const builtinSkyboxes = catalogBuiltinSkyboxes.length
     ? catalogBuiltinSkyboxes
     : RECORDING_SKYBOX_OPTIONS.slice(1).map((option) => ({ id: option.value }));
+  const {
+    solidColor: solidColorSkyboxes,
+    standard: standardBuiltinSkyboxes,
+  } = partitionBuiltinRecordingSkyboxes(builtinSkyboxes);
   const customSkyboxes = Array.isArray(skyboxResources)
     ? skyboxResources.filter((item) => item?.source === "custom" && item?.available)
     : [];
-  const selectedCustomAvailable = customSkyboxes.some((item) => item.id === selectedSkybox);
-  const selectedSkyboxPreview = recordingSkyboxPreviewUrl(selectedSkybox, skyboxResources);
+  const selectedCustomAvailable = customSkyboxes.some((item) => item.id === effectiveSkybox);
+  const selectedSkyboxPreview = recordingSkyboxPreviewUrl(effectiveSkybox, skyboxResources);
   const blockedMessage = blockedReason === "path"
     ? t("playDemo.cs2PathMissing")
     : blockedReason === "busy"
@@ -168,6 +205,7 @@ export default function DemoPlayOptionsModal({
                       <PreviewControl active>POV HUD</PreviewControl>
                       <PreviewControl>DEMO HUD</PreviewControl>
                       <PreviewControl>{t("playDemo.previewHudHidden")}</PreviewControl>
+                      <PreviewControl active>{t("playDemo.previewInputHudOn")}</PreviewControl>
                     </PreviewHudRow>
                     <PreviewHudRow label={t("playDemo.previewVoice")}>
                       <PreviewControl active>{t("playDemo.previewVoiceAll")}</PreviewControl>
@@ -228,6 +266,17 @@ export default function DemoPlayOptionsModal({
               </div>
             </div>
 
+            {PLAYER_ALIAS_ENTRY_VISIBLE ? (
+              <PlayerAliasesSection
+                demos={aliasDemos}
+                value={aliasEditor}
+                onChange={onAliasEditorChange}
+                onReadyChange={onAliasesReadyChange}
+                disabled={launching}
+                compact
+              />
+            ) : null}
+
             <div
               data-testid="demo-play-map-material-option"
               className="flex items-center gap-3 rounded-lg border border-cs2-border bg-cs2-bg-input/45 px-3 py-2.5"
@@ -241,13 +290,20 @@ export default function DemoPlayOptionsModal({
               </div>
               <select
                 aria-label={t("playDemo.mapMaterialSelectLabel")}
-                value={selectedMapMaterial}
-                disabled={launching || !onRecordingMapMaterialChange}
-                onChange={(event) => onRecordingMapMaterialChange?.(event.target.value)}
+                value={selectedMapAppearance}
+                disabled={launching || !canChangeMapAppearance}
+                onChange={(event) => {
+                  applyRecordingMapAppearanceSelection(event.target.value, {
+                    onRecordingMapMaterialChange,
+                    onRecordingWeatherEffectChange,
+                    onRecordingSkyboxChange,
+                  });
+                }}
                 className="min-w-44 max-w-[48%] rounded-md border border-cs2-border bg-cs2-bg-input px-2.5 py-2 text-xs font-semibold text-cs2-text-primary outline-none focus:border-cs2-accent/60 disabled:opacity-50"
               >
-                <option value={DEFAULT_RECORDING_MAP_MATERIAL}>{t("record.mapMaterialDefault")}</option>
-                <option value={WAXED_REFLECTION_MAP_MATERIAL}>{t("record.mapMaterialWaxedReflection")}</option>
+                <option value={DEFAULT_RECORDING_MAP_APPEARANCE}>{t("record.mapMaterialDefault")}</option>
+                <option value={WAXED_RECORDING_MAP_APPEARANCE}>{t("record.mapMaterialWaxedReflection")}</option>
+                <option value={RAIN_RECORDING_MAP_APPEARANCE}>{t("record.weatherEffectRain")}</option>
               </select>
             </div>
 
@@ -261,9 +317,9 @@ export default function DemoPlayOptionsModal({
                   src={selectedSkyboxPreview}
                   alt={t("settings.skyboxPreviewAlt", {
                     name: recordingSkyboxDisplayName(
-                      selectedSkybox,
+                      effectiveSkybox,
                       (Array.isArray(skyboxResources)
-                        ? skyboxResources.find((item) => item?.id === selectedSkybox)?.display_name
+                        ? skyboxResources.find((item) => item?.id === effectiveSkybox)?.display_name
                         : ""),
                       t,
                     ),
@@ -277,18 +333,29 @@ export default function DemoPlayOptionsModal({
               )}
               <div className="min-w-0 flex-1">
                 <p className="text-[12px] font-bold text-cs2-text-primary">{t("playDemo.skyboxTitle")}</p>
-                <p className="mt-0.5 text-[10px] leading-relaxed text-cs2-text-muted">{t("playDemo.skyboxHint")}</p>
+                <p className="mt-0.5 text-[10px] leading-relaxed text-cs2-text-muted">
+                  {t(rainSelected ? "playDemo.skyboxRainSelectable" : "playDemo.skyboxHint")}
+                </p>
               </div>
               <select
                 aria-label={t("playDemo.skyboxSelectLabel")}
-                value={selectedSkybox}
+                value={effectiveSkybox}
                 disabled={launching || !onRecordingSkyboxChange}
                 onChange={(event) => onRecordingSkyboxChange?.(event.target.value)}
                 className="min-w-44 max-w-[48%] rounded-md border border-cs2-border bg-cs2-bg-input px-2.5 py-2 text-xs font-semibold text-cs2-text-primary outline-none focus:border-cs2-accent/60 disabled:opacity-50"
               >
-                <option value={DEFAULT_RECORDING_SKYBOX}>{t("record.skyboxDefault")}</option>
+                <option value={DEFAULT_RECORDING_SKYBOX}>
+                  {t(rainSelected ? "record.skyboxRainDefault" : "record.skyboxDefault")}
+                </option>
+                <optgroup label={t("record.skyboxSolidColorOptions")}>
+                  {solidColorSkyboxes.map((item) => (
+                    <option key={item.id} value={item.id}>
+                      {recordingSkyboxDisplayName(item.id, item.display_name, t)}
+                    </option>
+                  ))}
+                </optgroup>
                 <optgroup label={t("record.skyboxBuiltinOptions")}>
-                  {builtinSkyboxes.map((item) => (
+                  {standardBuiltinSkyboxes.map((item) => (
                     <option key={item.id} value={item.id}>
                       {recordingSkyboxDisplayName(item.id, item.display_name, t)}
                     </option>
@@ -301,8 +368,8 @@ export default function DemoPlayOptionsModal({
                     ))}
                   </optgroup>
                 ) : null}
-                {isCustomRecordingSkyboxId(selectedSkybox) && !selectedCustomAvailable ? (
-                  <option value={selectedSkybox} disabled>{t("record.skyboxMissingCustom")}</option>
+                {isCustomRecordingSkyboxId(effectiveSkybox) && !selectedCustomAvailable ? (
+                  <option value={effectiveSkybox} disabled>{t("record.skyboxMissingCustom")}</option>
                 ) : null}
               </select>
             </div>
@@ -332,7 +399,7 @@ export default function DemoPlayOptionsModal({
               </button>
               <button
                 type="button"
-                disabled={launching}
+                disabled={launching || aliasesBlocked}
                 onClick={onPlayAdvanced}
                 data-testid="demo-play-advanced-option"
                 className="flex items-center gap-1.5 rounded-lg bg-cs2-accent px-3 py-2 text-xs font-bold text-cs2-text-on-accent hover:bg-cs2-accent-light disabled:opacity-50"
