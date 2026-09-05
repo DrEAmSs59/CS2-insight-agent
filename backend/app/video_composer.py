@@ -525,6 +525,28 @@ def _concat_file_line(p: Path) -> str:
     return f"file '{s}'"
 
 
+def _normalize_output_acl(path: Path) -> None:
+    """Windows：恢复导出成片对父目录的继承 ACL。
+
+    受限令牌 / 沙箱环境下，部分导出文件会被写成仅 SYSTEM、Administrators
+    可访问的安全描述符（无继承），导致当前用户无法打开成片。这里用 icacls
+    把父目录的继承条目（Authenticated Users 修改、Users 读取）恢复到文件上。
+    非 Windows 或执行失败时静默跳过。
+    """
+    if os.name != "nt":
+        return
+    try:
+        subprocess.run(
+            ["icacls", str(path), "/inheritance:e"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=60,
+            check=False,
+        )
+    except Exception:
+        logger.warning("output ACL normalization skipped for %s", path, exc_info=True)
+
+
 def _finalize_mp4_for_common_players(
     ffmpeg_bin: Path,
     src: Path,
@@ -1570,6 +1592,7 @@ def _compose_montage_once(
     montage_encoder: str = "auto",
     name_cards: Optional[list[dict | None]] = None,
     framemeld_enabled: bool = False,
+    radar_segments: Optional[list[dict[str, Any]]] = None,
     encoder_device_args: Sequence[str] | None = None,
     encoder_adapter: object | None = None,
     rife_device_plan: FrameMeldRifeDevicePlan | None = None,
@@ -1592,6 +1615,18 @@ def _compose_montage_once(
     if bgm_path is not None and not bgm_path.is_file():
         raise MontageComposerError("MONTAGE_BGM_MISSING")
 
+    # cs数据图 雷达片段：插入到指定片段之前（image 由 ffmpeg 转成视频段）
+    radar_segments = radar_segments or []
+    _radar_by_clip: dict[int, list[dict[str, Any]]] = {}
+    for _rs in radar_segments:
+        if not isinstance(_rs, dict):
+            continue
+        _radar_path = Path(str(_rs.get("image_path") or "")).expanduser()
+        if not _radar_path.is_file():
+            raise MontageComposerError("MONTAGE_RADAR_IMAGE_MISSING", name=_radar_path.name)
+        _clip_idx = int(_rs.get("before_clip_index", 0))
+        _radar_by_clip.setdefault(_clip_idx, []).append(_rs)
+
     _codec = str(montage_encoder or "libx264").strip().lower()
     video_encode_quality = apply_encoder_device_args(
         h264_encode_cli_args(_codec, "quality"),
@@ -1607,7 +1642,6 @@ def _compose_montage_once(
     _font_path = resolve_name_card_font()
     _font_semi_path, _font_bold_path = resolve_rajdhani_fonts()
 
-    intro_n = 1 if intro_path is not None else 0
     n_clips = len(clip_paths)
 
     tmpdir = tempfile.mkdtemp(prefix="cs2_montage_", dir=str(output_path.parent))
@@ -1623,11 +1657,27 @@ def _compose_montage_once(
         _name_card_scale = max(1.0, min(h / 1080.0, 2.25))
 
         segments: list[Path] = []
+        radar_dur_by_index: dict[int, float] = {}
+        clip_segment_index: dict[int, int] = {}
+        radar_segment_indexes: set[int] = set()
         if intro_path is not None:
             segments.append(intro_path)
-        segments.extend(working_clip_paths)
+        for _ci in range(n_clips):
+            for _rs in _radar_by_clip.get(_ci, []):
+                _seg_idx = len(segments)
+                segments.append(Path(str(_rs["image_path"])).expanduser())
+                radar_segment_indexes.add(_seg_idx)
+                try:
+                    _radar_dur = max(1.0, float(_rs.get("duration", 4.0)))
+                except (TypeError, ValueError):
+                    _radar_dur = 4.0
+                radar_dur_by_index[_seg_idx] = _radar_dur
+            clip_segment_index[_ci] = len(segments)
+            segments.append(working_clip_paths[_ci])
         if outro_path is not None:
             segments.append(outro_path)
+        # 片段序 → 段下标 映射（名牌只烧给真正的片段；雷达动画视频段跳过）
+        seg_to_clip_ordinal: dict[int, int] = {idx: ci for ci, idx in clip_segment_index.items()}
 
         probed_segment_info: dict[Path, dict[str, Any]] = {
             working_clip_paths[0].resolve(): ref,
@@ -1668,7 +1718,12 @@ def _compose_montage_once(
         for i, seg in enumerate(segments):
             out_ts = Path(tmpdir) / f"norm_{i:03d}.ts"
             if _is_image_path(seg):
-                img_dur = _intro_img_dur if i == _intro_idx else _outro_img_dur
+                if i in radar_dur_by_index:
+                    img_dur = radar_dur_by_index[i]
+                elif i == _intro_idx:
+                    img_dur = _intro_img_dur
+                else:
+                    img_dur = _outro_img_dur
                 _image_to_ts_with_fade(
                     ffmpeg_bin=ffmpeg_bin,
                     image_path=seg,
@@ -1695,7 +1750,9 @@ def _compose_montage_once(
             # Determine whether this segment gets a name card overlay.
             # "有卡"（_use_card）只要有名字即可；"有头像"（_has_avatar）需头像文件存在。
             # 无头像时仍烧名字框，只是文字左移填满卡片。
-            _clip_index = i - intro_n
+            # 只有真正的片段（clip_segment_index 映射的段）才烧名牌；
+            # 雷达动画视频段（插入在片段前）不参与名牌。
+            _clip_index = seg_to_clip_ordinal.get(i, -1)
             _is_clip_seg = (name_cards is not None and 0 <= _clip_index < len(name_cards))
             _card = name_cards[_clip_index] if _is_clip_seg else None
             _use_card = bool(
@@ -1853,7 +1910,7 @@ def _compose_montage_once(
             _progress(0.65, "transitions", {"stage_progress": 0.0})
             # 按硬切边界（duration=0 或 type=none）拆成若干组；
             # 组内片段用 xfade 连接，组间直接 concat——这样 0s 转场就是真正的硬切。
-            clip_norm = normed[intro_n : intro_n + n_clips]
+            clip_norm = [normed[clip_segment_index[ci]] for ci in range(n_clips)]
             ids = [int(x) for x in clip_row_ids]
 
             grp_clips: list[Path] = [clip_norm[0]]
@@ -1862,7 +1919,10 @@ def _compose_montage_once(
 
             for i in range(1, n_clips):
                 t_type, t_dur = _parse_transition_for_edge(transitions, ids[i - 1])
-                if _is_hard_cut(t_type, t_dur, fps):
+                # 片段前插入了雷达动画/图片段 → 强制硬切分组，
+                # 保证雷达段能落在转场组之间（组内片段会被 xfade 合并成单文件）。
+                radar_boundary = i in _radar_by_clip
+                if _is_hard_cut(t_type, t_dur, fps) or radar_boundary:
                     groups.append((grp_clips, grp_ids))
                     grp_clips = [clip_norm[i]]
                     grp_ids = [ids[i]]
@@ -1872,9 +1932,13 @@ def _compose_montage_once(
             groups.append((grp_clips, grp_ids))
 
             processed: list[Path] = []
+            clip_to_processed: dict[int, Path] = {}
+            first_row_of_group: set[int] = set()
             for gi, (g_clips, g_ids) in enumerate(groups):
                 if len(g_clips) == 1:
                     processed.append(g_clips[0])
+                    clip_to_processed[g_ids[0]] = g_clips[0]
+                    first_row_of_group.add(g_ids[0])
                 else:
                     grp_ts = Path(tmpdir) / f"clips_xfade_g{gi:03d}.ts"
                     _montage_xfade_chain_to_ts(
@@ -1888,18 +1952,30 @@ def _compose_montage_once(
                         video_encode_quality=video_encode_quality,
                     )
                     processed.append(grp_ts)
+                    for _gid in g_ids:
+                        clip_to_processed[_gid] = grp_ts
+                    first_row_of_group.add(g_ids[0])
                 _progress(
                     0.65 + 0.09 * ((gi + 1) / max(1, len(groups))),
                     "transitions",
                     {"stage_progress": (gi + 1) / max(1, len(groups))},
                 )
 
+            # 按原始段顺序拼装：片段只在「所在转场组的第一个片段」处输出一次（组文件
+            # 已包含组内其余片段）；雷达动画/图片段与片头片尾用归一化版本。
             concat_paths: list[Path] = []
-            if intro_path is not None:
-                concat_paths.append(normed[0])
-            concat_paths.extend(processed)
-            if outro_path is not None:
-                concat_paths.append(normed[-1])
+            for _i, _seg in enumerate(segments):
+                if _i in radar_segment_indexes or _is_image_path(_seg):
+                    concat_paths.append(normed[_i])
+                    continue
+                _ci = seg_to_clip_ordinal.get(_i, -1)
+                if _ci >= 0 and _ci < n_clips and clip_row_ids is not None:
+                    _rid = int(clip_row_ids[_ci])
+                    if _rid in first_row_of_group:
+                        concat_paths.append(clip_to_processed.get(_rid, normed[_i]))
+                else:
+                    # 片头/片尾视频等非片段视频段
+                    concat_paths.append(normed[_i])
         else:
             concat_paths = normed
 
@@ -2139,6 +2215,7 @@ def _compose_montage_impl(
     montage_encoder: str = "auto",
     name_cards: Optional[list[dict | None]] = None,
     framemeld_enabled: bool = False,
+    radar_segments: Optional[list[dict[str, Any]]] = None,
     progress_callback: Optional[Callable[[float, str, Optional[dict[str, Any]]], None]] = None,
 ) -> Any:
     """Export with GPU-aware target probing and an x264 safety fallback."""
@@ -2321,6 +2398,7 @@ def _compose_montage_impl(
                 montage_encoder=candidate.codec,
                 name_cards=name_cards,
                 framemeld_enabled=framemeld_enabled,
+                radar_segments=radar_segments,
                 encoder_device_args=candidate.ffmpeg_device_args,
                 encoder_adapter=candidate.adapter,
                 rife_device_plan=rife_device_plan,
@@ -2447,7 +2525,7 @@ def _compose_montage_impl(
             )
 
     try:
-        return run_encoder_attempts(
+        result = run_encoder_attempts(
             candidates,
             spec,
             lambda candidate, target: probe_ffmpeg_encoder(
@@ -2462,6 +2540,9 @@ def _compose_montage_impl(
             cancellation_check=_raise_if_montage_cancelled,
             on_attempt=_on_attempt,
         )
+        # Windows：恢复导出成片的继承 ACL，避免受限令牌下生成的成片无法被用户打开
+        _normalize_output_acl(output_path)
+        return result
     except MontageComposerError as exc:
         hinted = add_ffmpeg_compatibility_hint(exc, ffmpeg_bin)
         if hinted is exc:
@@ -2488,6 +2569,7 @@ def compose_montage(
     montage_encoder: str = "auto",
     name_cards: Optional[list[dict | None]] = None,
     framemeld_enabled: bool = False,
+    radar_segments: Optional[list[dict[str, Any]]] = None,
     progress_callback: Optional[Callable[[float, str, Optional[dict[str, Any]]], None]] = None,
     cancel_event: Any | None = None,
 ) -> Any:
@@ -2512,6 +2594,7 @@ def compose_montage(
             montage_encoder=montage_encoder,
             name_cards=name_cards,
             framemeld_enabled=framemeld_enabled,
+            radar_segments=radar_segments,
             progress_callback=progress_callback,
         )
         _raise_if_montage_cancelled()

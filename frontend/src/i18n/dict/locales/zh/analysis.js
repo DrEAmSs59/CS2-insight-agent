@@ -379,4 +379,10 @@ export default {
   "weaponKills.clipTitle": "{weapon} 击杀合集",
   "weaponKills.queueSummary": "{weapon} · {n} 次击杀",
   "weaponKills.contextCount": "{n} 次击杀",
+  "analysis.radarGenerateAll": "自动录制全部玩家雷达图",
+  "analysis.radarGenerateAllTitle": "为对局中的全部玩家生成 cs数据图 雷达图素材，供合辑工作台剪辑使用",
+  "analysis.radarNoPlayers": "本场暂无玩家数据，无法生成雷达图。",
+  "analysis.radarGenerated": "已为 {n} 位玩家生成雷达图，可在合辑工作台「cs数据图」专栏插入到剪辑前。",
+  "analysis.radarGenerateFail": "雷达图生成失败，请稍后重试。",
+  "analysis.radarGoMontage": "前往合辑工作台",
 };

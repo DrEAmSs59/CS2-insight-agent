@@ -12,6 +12,7 @@ import liteCut from "./locales/en/liteCut.js";
 import match from "./locales/en/match.js";
 import app from "./locales/en/app.js";
 import cosmeticsWorkshop from "./locales/en/cosmeticsWorkshop.js";
+import radar from "./locales/en/radar.js";
 
 export default mergeCatalogs("en", {
   common,
@@ -27,4 +28,5 @@ export default mergeCatalogs("en", {
   match,
   app,
   cosmeticsWorkshop,
+  radar,
 });

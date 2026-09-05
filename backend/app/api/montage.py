@@ -47,6 +47,14 @@ class PlayerAvatar(BaseModel):
     enabled: bool = True
 
 
+class RadarSegment(BaseModel):
+    """cs数据图 雷达片段：插入到指定录像片段之前（before_clip_id 为 recorded_clip_id）。"""
+
+    before_clip_id: int
+    image_path: str
+    duration: float = 4.0
+
+
 class MontageProjectBody(BaseModel):
     project_id: Optional[int] = None
     name: str = ""
@@ -64,6 +72,7 @@ class MontageProjectBody(BaseModel):
     player_avatars: list[PlayerAvatar] = Field(default_factory=list)
     name_cards_enabled: bool = False
     framemeld_enabled: bool = False
+    radar_segments: list[RadarSegment] = Field(default_factory=list)
 
 
 class MontageMediaFpsProbeBody(BaseModel):
@@ -126,6 +135,8 @@ async def save_montage_project(body: MontageProjectBody):
     proj_body["player_avatars"] = [pa.model_dump() for pa in body.player_avatars]
     proj_body["name_cards_enabled"] = body.name_cards_enabled
     proj_body["framemeld_enabled"] = body.framemeld_enabled
+    if body.radar_segments:
+        proj_body["radar_segments"] = [rs.model_dump() for rs in body.radar_segments]
     if body.theme_id is not None:
         tid = str(body.theme_id).strip()
         if tid:
@@ -212,6 +223,7 @@ class MontageExportBody(BaseModel):
     player_avatars: list[PlayerAvatar] = Field(default_factory=list)
     name_cards_enabled: Optional[bool] = None  # None = inherit from project extras
     framemeld_enabled: Optional[bool] = None
+    radar_segments: list[RadarSegment] = Field(default_factory=list)
 
 
 async def _run_montage_export_job(job: MontageExportJob, prepared: dict[str, Any]) -> None:
@@ -440,6 +452,39 @@ async def montage_export(body: MontageExportBody):
         else bool(extras.get("framemeld_enabled")) if isinstance(extras, dict) else False
     )
 
+    # cs数据图 雷达片段 — coalesce from request or project extras
+    radar_segments_eff: list[RadarSegment]
+    if body.radar_segments:
+        radar_segments_eff = body.radar_segments
+    else:
+        raw_rs = extras.get("radar_segments") if isinstance(extras, dict) else None
+        if isinstance(raw_rs, list):
+            radar_segments_eff = [RadarSegment(**rs) for rs in raw_rs if isinstance(rs, dict)]
+        else:
+            radar_segments_eff = []
+
+    # 把 before_clip_id（recorded_clip_id）解析成 clip_ids 内的下标；
+    # 找不到目标片段时回退到第一段之前（剪辑前）。
+    clip_id_index: dict[int, int] = {int(cid): i for i, cid in enumerate(clip_ids)}
+    radar_segments_prepared: list[dict[str, Any]] = []
+    for rs in radar_segments_eff:
+        image_raw = str(rs.image_path or "").strip()
+        if not image_raw:
+            continue
+        radar_path = Path(image_raw).expanduser()
+        if not radar_path.is_file():
+            from ..api_errors import error_detail as _ed
+
+            raise HTTPException(400, _ed("RADAR_IMAGE_MISSING", name=radar_path.name))
+        before_index = clip_id_index.get(int(rs.before_clip_id), 0)
+        radar_segments_prepared.append(
+            {
+                "before_clip_index": max(0, min(before_index, max(0, len(clip_ids) - 1))),
+                "image_path": str(radar_path),
+                "duration": max(1.0, min(60.0, float(rs.duration) if rs.duration else 4.0)),
+            }
+        )
+
     try:
         from ..video_composer import MontageComposerError, validate_output_path
 
@@ -532,6 +577,7 @@ async def montage_export(body: MontageExportBody):
     snap["player_avatars"] = [pa.model_dump() for pa in player_avatars_eff]
     snap["name_cards_enabled"] = name_cards_enabled_eff
     snap["framemeld_enabled"] = framemeld_enabled_eff
+    snap["radar_segments"] = radar_segments_prepared
     export_id = await montage_db.create_export(
         project_id=int(body.project_id) if body.project_id is not None else None,
         body=snap,
@@ -572,6 +618,7 @@ async def montage_export(body: MontageExportBody):
         "montage_encoder": cfg.montage_encoder or "auto",
         "name_cards": name_cards_arg,
         "framemeld_enabled": framemeld_enabled_eff,
+        "radar_segments": radar_segments_prepared,
     }
     job.task = asyncio.create_task(_run_montage_export_job(job, prepared))
     return montage_export_job_snapshot(job)

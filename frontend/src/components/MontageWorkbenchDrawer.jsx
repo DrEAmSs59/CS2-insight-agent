@@ -18,6 +18,8 @@ import {
   MontageMaterialPoolCard,
 } from "./montage/MontageWorkbenchPanels";
 import { MontageStyleConsole } from "./montage/MontageStyleConsole";
+import CsDataRadarPanel from "../features/cs-data-radar/CsDataRadarPanel";
+import { listRadarCards, radarImageUrl, radarVideoUrl } from "../features/cs-data-radar/csDataRadarApi";
 import {
   sortClipsByStrategy,
   ensureMp4Filename,
@@ -81,6 +83,12 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
   const [nameCardsEnabled, setNameCardsEnabled] = useState(false);
   const [exportJob, setExportJob] = useState(null);
   const [exportDialog, setExportDialog] = useState({ phase: "idle", result: null, error: "" });
+
+  // ── cs数据图（雷达图专栏）──
+  const [radarCards, setRadarCards] = useState([]);
+  const [radarCardsLoading, setRadarCardsLoading] = useState(false);
+  const [radarCardsError, setRadarCardsError] = useState("");
+  const [radarSegments, setRadarSegments] = useState([]); // { uid, cardId, imagePath, imageUrl, playerName, beforeClipId, duration }
 
   const toastTimer = useRef(null);
 
@@ -244,6 +252,113 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
     void loadClips();
   }, [open, loadClips, isPage, ffmpegGate.loading, ffmpegGate.blocked]);
 
+  // ── cs数据图：加载对局解析后生成的雷达图素材 ──
+  const loadRadarCards = useCallback(async () => {
+    setRadarCardsLoading(true);
+    try {
+      const cards = await listRadarCards();
+      setRadarCards(cards);
+      setRadarCardsError("");
+    } catch (e) {
+      setRadarCardsError(t("radar.cardsLoadFail"));
+      void e;
+    } finally {
+      setRadarCardsLoading(false);
+    }
+  }, [t]);
+
+  useEffect(() => {
+    if (!open && !isPage) return;
+    void loadRadarCards();
+  }, [open, isPage, loadRadarCards]);
+
+  // 草稿恢复的雷达段在卡片加载完成后补齐玩家名
+  useEffect(() => {
+    if (!radarCards.length) return;
+    setRadarSegments((prev) => {
+      let changed = false;
+      const next = prev.map((seg) => {
+        const matched = radarCards.find((card) => String(card.id) === String(seg.cardId));
+        if (matched && seg.playerName === seg.imagePath.split(/[/\\]/).pop()) {
+          const isVideo = Boolean(matched.video_url || matched.video_path);
+          changed = true;
+          return {
+            ...seg,
+            playerName: matched.player_name,
+            isVideo,
+            imageUrl: isVideo
+              ? radarVideoUrl(matched.video_url || matched.video_path)
+              : radarImageUrl(matched.image_url),
+          };
+        }
+        return seg;
+      });
+      return changed ? next : prev;
+    });
+  }, [radarCards]);
+
+  // 时间轴片段变化时，清理指向已删除片段的雷达段
+  useEffect(() => {
+    setRadarSegments((prev) => {
+      const next = prev.filter((seg) => orderedIds.includes(seg.beforeClipId));
+      return next.length === prev.length ? prev : next;
+    });
+  }, [orderedIds]);
+
+  const insertRadarSegment = useCallback((card, beforeClipId) => {
+    const clipId = Number.isFinite(Number(beforeClipId)) ? Number(beforeClipId) : null;
+    if (clipId == null || !orderedIds.includes(clipId)) {
+      showToast(t("radar.noticeNeedTimeline"));
+      return;
+    }
+    const isVideo = Boolean(card?.video_url || card?.video_path);
+    setRadarSegments((prev) => [
+      ...prev,
+      {
+        uid: typeof crypto !== "undefined" && crypto.randomUUID
+          ? crypto.randomUUID()
+          : `radar-${Date.now()}-${prev.length}`,
+        cardId: card?.id,
+        imagePath: card?.video_path || card?.image_path || "",
+        imageUrl: isVideo
+          ? radarVideoUrl(card.video_url || card.video_path)
+          : radarImageUrl(card?.image_url),
+        playerName: card?.player_name || t("radar.unknownPlayer"),
+        beforeClipId: clipId,
+        duration: 4,
+        isVideo,
+      },
+    ]);
+  }, [orderedIds, showToast, t]);
+
+  const removeRadarSegment = useCallback((uid) => {
+    setRadarSegments((prev) => prev.filter((seg) => seg.uid !== uid));
+  }, []);
+
+  const patchRadarSegment = useCallback((uid, patch) => {
+    setRadarSegments((prev) => prev.map((seg) => (seg.uid === uid ? { ...seg, ...patch } : seg)));
+  }, []);
+
+  const radarSegmentsByClipId = useMemo(() => {
+    const map = new Map();
+    for (const seg of radarSegments) {
+      const list = map.get(seg.beforeClipId) || [];
+      list.push(seg);
+      map.set(seg.beforeClipId, list);
+    }
+    return map;
+  }, [radarSegments]);
+
+  const radarSegmentsPayload = useMemo(
+    () =>
+      radarSegments.map((seg) => ({
+        before_clip_id: seg.beforeClipId,
+        image_path: seg.imagePath,
+        duration: seg.duration,
+      })),
+    [radarSegments],
+  );
+
   useEffect(() => {
     if (!open && !isPage) return;
     if (!lastExport?.unread || exporting) return;
@@ -309,6 +424,7 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
     playerAvatars,
     nameCardsEnabled,
     framemeldEnabled,
+    radarSegments,
   ]);
 
   const byId = useMemo(() => {
@@ -728,6 +844,7 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
         player_avatars: playerAvatarsPayload,
         name_cards_enabled: nameCardsEnabled,
         framemeld_enabled: effectiveFrameMeldEnabled,
+        radar_segments: radarSegmentsPayload,
       });
       setProjectId(data.id);
       if (data?.body?.transitions && typeof data.body.transitions === "object") {
@@ -794,6 +911,7 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
     playerAvatars,
     nameCardsEnabled,
     effectiveFrameMeldEnabled,
+    radarSegmentsPayload,
     framemeldCanEnable,
     t,
   ]);
@@ -852,6 +970,40 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
     setPlayerAvatars(nextAvatars);
     setNameCardsEnabled(Boolean(body.name_cards_enabled));
     setFrameMeldEnabled(Boolean(body.framemeld_enabled));
+    // 恢复 cs数据图 雷达段（剪辑前插入）
+    const restoredRadarSegments = [];
+    if (Array.isArray(body.radar_segments)) {
+      for (const raw of body.radar_segments) {
+        if (!raw || typeof raw !== "object") continue;
+        const beforeClipId = Number(raw.before_clip_id);
+        if (!Number.isFinite(beforeClipId) || !availableClipIds.includes(beforeClipId)) continue;
+        const imagePath = String(raw.image_path || "");
+        if (!imagePath) continue;
+        const filename = imagePath.replace(/\\/g, "/").split("/").pop() || "";
+        const isVideo = /\.mp4$/i.test(filename);
+        const matchedCard = radarCards.find(
+          (card) => String(card.image_file || "").replace(/\\/g, "/").split("/").pop() === filename
+            || String(card.video_file || "").replace(/\\/g, "/").split("/").pop() === filename,
+        );
+        restoredRadarSegments.push({
+          uid: typeof crypto !== "undefined" && crypto.randomUUID
+            ? crypto.randomUUID()
+            : `radar-${Date.now()}-${restoredRadarSegments.length}`,
+          cardId: matchedCard?.id || null,
+          imagePath,
+          imageUrl: filename
+            ? isVideo
+              ? radarVideoUrl(filename)
+              : radarImageUrl(filename)
+            : "",
+          playerName: matchedCard?.player_name || String(raw.player_name || filename || t("radar.unknownPlayer")),
+          beforeClipId,
+          duration: Number(raw.duration) > 0 ? Number(raw.duration) : 4,
+          isVideo,
+        });
+      }
+    }
+    setRadarSegments(restoredRadarSegments);
     setSelectedTimelineClipId(null);
     setTimelineMultiSelectedIds(new Set());
     setTransitionEdgeSourceId(null);
@@ -866,7 +1018,7 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
         : t("montage.draftsLoaded"),
     );
     return true;
-  }, [byId, draftDirty, setLastExport, showToast, t]);
+  }, [byId, draftDirty, radarCards, setLastExport, showToast, t]);
 
   const runExport = useCallback(async () => {
     const err = validateExport();
@@ -913,6 +1065,7 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
         player_avatars: playerAvatarsPayload,
         name_cards_enabled: nameCardsEnabled,
         framemeld_enabled: effectiveFrameMeldEnabled,
+        radar_segments: radarSegmentsPayload,
       });
       const next = { ...data, output_path: data?.output_path || outPath };
       setExportJob(next);
@@ -946,6 +1099,7 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
     playerAvatars,
     nameCardsEnabled,
     effectiveFrameMeldEnabled,
+    radarSegmentsPayload,
     showToast,
     t,
   ]);
@@ -1476,6 +1630,9 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
                 onBulkMoveDown={() => shiftTimelineSelection(1)}
                 onClearTimeline={clearTimeline}
                 timelineClipCount={orderedIds.length}
+                radarSegmentsByClipId={radarSegmentsByClipId}
+                onRemoveRadarSegment={removeRadarSegment}
+                onPatchRadarSegment={patchRadarSegment}
               />
             </section>
 
@@ -1531,6 +1688,16 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
                 framemeldRuntimeAvailable={ffmpegGate.framemeldAvailable}
                 framemeldSourceSummary={framemeldSourceSummary}
                 onFrameMeldEnabledChange={handleFrameMeldEnabledChange}
+                radarCards={radarCards}
+                radarCardsLoading={radarCardsLoading}
+                radarCardsError={radarCardsError}
+                onRefreshRadarCards={loadRadarCards}
+                radarSegments={radarSegments}
+                timelineClips={orderedClips}
+                onInsertRadarSegment={insertRadarSegment}
+                onRemoveRadarSegment={removeRadarSegment}
+                onRadarSegmentDurationChange={(uid, duration) => patchRadarSegment(uid, { duration })}
+                onRadarSegmentTargetChange={(uid, beforeClipId) => patchRadarSegment(uid, { beforeClipId })}
               />
             </div>
 
