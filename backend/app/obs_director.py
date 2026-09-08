@@ -64,6 +64,7 @@ from .pov_constants import (
     normalize_pov_voice_mode,
     pov_tail_commands,
 )
+from .obs_legacy_sources import cleanup_legacy_overlay_sources
 from .win_cs2_console import ensure_cs2_foreground, find_cs2_hwnd, inject_console_sequence, send_cs2_space_taps
 
 logger = logging.getLogger(__name__)
@@ -2255,6 +2256,7 @@ class OBSDirector:
                 self.obs_config.password,
             )
             self._ws.connect()
+            cleanup_legacy_overlay_sources(self._ws)
             logger.info("OBS WebSocket connected at %s:%d", self.obs_config.host, self.obs_config.port)
             return True
         except Exception as e:
@@ -2288,6 +2290,7 @@ class OBSDirector:
             else:
                 ws = obsws(self.obs_config.host, self.obs_config.port, self.obs_config.password)
             ws.connect()
+            cleanup_legacy_overlay_sources(ws)
             ver = ws.call(obs_requests.GetVersion())
             ws.disconnect()
             return {"ok": True}
@@ -3728,23 +3731,36 @@ class OBSDirector:
                     _app_cfg = _load_cfg()
                     pov_mgr_v3 = PovHudManager(_app_cfg)
                 except PovHudError as _pov_e:
-                    if visual_layer_on_v3:
-                        raise
-                    logger.error("[RecordingV3][POV] setup failed: %s; continuing without POV HUD", _pov_e)
-                    pov_on_v3 = False
-                    recording_hud_on_v3 = False
-                    recording_vpk_on_v3 = False
+                    raise PovHudError(f"录制 VPK 初始化失败：{_pov_e}") from _pov_e
 
             for job_idx, (demo_key, demo_requests) in enumerate(demo_groups.items()):
                 demo_abs = demo_abs_map[demo_key]
                 demo_name = demo_abs.name
                 logger.info("[RecordingV3] Job %d/%d: %s (%d requests)",
                             job_idx + 1, len(demo_groups), demo_name, len(demo_requests))
+                self._check_abort()
 
                 # The speaking schedule is demo-specific. CS2 is stopped between
                 # groups, so restore/reinstall the package with this demo's data.
                 if recording_vpk_on_v3 and pov_mgr_v3 is not None:
                     try:
+                        if pov_install_attempted:
+                            # Shutdown can finish before Windows releases VPK handles.
+                            # Use the same retry/verification flow as final cleanup
+                            # before installing another demo's voice and map data.
+                            restored = await asyncio.to_thread(
+                                restore_pov_after_cs2_exit,
+                                pov_mgr_v3,
+                                pov_expected_gameinfo_sha256,
+                                is_running=is_cs2_running,
+                                logger=logger,
+                            )
+                            if not restored.get("verified"):
+                                raise PovHudError(
+                                    "上一场录制 VPK 恢复校验失败："
+                                    f"{restored.get('error') or '未通过校验'}"
+                                )
+                            self._check_abort()
                         demo_map_name = str(
                             getattr(demo_requests[0].demo, "map_name", "") or ""
                         ).strip()
@@ -3772,6 +3788,7 @@ class OBSDirector:
                             pov_mgr_v3.install(
                                 map_name=demo_map_name,
                                 demo_path=demo_abs,
+                                require_demo_hud=True,
                                 voice_mode=pov_voice_mode_v3,
                                 pov_visuals_enabled=pov_on_v3,
                                 skybox_id=skybox_id_v3,
@@ -3803,22 +3820,10 @@ class OBSDirector:
                             )
                         self._pov_enabled = pov_on_v3
                     except PovHudError as _pov_e:
-                        if visual_layer_on_v3:
-                            logger.error(
-                                "[RecordingV3][VISUAL] install failed for %s: %s",
-                                demo_name,
-                                _pov_e,
-                            )
-                            raise
-                        logger.error(
-                            "[RecordingV3][POV] install failed for %s: %s; "
-                            "continuing without POV HUD",
-                            demo_name,
-                            _pov_e,
-                        )
-                        pov_on_v3 = False
-                        recording_hud_on_v3 = False
                         self._pov_enabled = False
+                        raise PovHudError(
+                            f"录制 VPK 准备失败（{demo_name}）：{_pov_e}"
+                        ) from _pov_e
 
                 # ── CS2 launch ────────────────────────────────────────────────
                 try:

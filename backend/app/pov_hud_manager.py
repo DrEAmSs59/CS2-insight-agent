@@ -955,6 +955,7 @@ class PovHudManager:
         map_name: Optional[str] = None,
         *,
         demo_path: Optional[str | Path] = None,
+        require_demo_hud: bool = False,
         input_track_report: Optional[Mapping[str, Any]] = None,
         voice_enabled: bool = True,
         voice_mode: str = DEFAULT_POV_VOICE_MODE,
@@ -974,6 +975,7 @@ class PovHudManager:
             return self._install_impl(
                 map_name,
                 demo_path=demo_path,
+                require_demo_hud=require_demo_hud,
                 input_track_report=input_track_report,
                 voice_enabled=voice_enabled,
                 voice_mode=voice_mode,
@@ -996,6 +998,7 @@ class PovHudManager:
         map_name: Optional[str] = None,
         *,
         demo_path: Optional[str | Path] = None,
+        require_demo_hud: bool = False,
         input_track_report: Optional[Mapping[str, Any]] = None,
         voice_enabled: bool = True,
         voice_mode: str = DEFAULT_POV_VOICE_MODE,
@@ -1083,15 +1086,11 @@ class PovHudManager:
             advanced_playback_enabled=advanced_playback_enabled,
             pov_visuals_enabled=pov_visuals_enabled,
         )
-        native_spectator_template_required = (
-            advanced_playback_enabled or not pov_visuals_enabled
+        demo_template_required = (
+            require_demo_hud or advanced_playback_enabled or not pov_visuals_enabled
         )
-        if (
-            demo_path is not None
-            and native_spectator_template_required
-            and not voice_template.is_file()
-        ):
-            raise PovHudError(f"未找到原生观战 HUD 模板：{voice_template}")
+        if demo_path is not None and demo_template_required and not voice_template.is_file():
+            raise PovHudError(f"未找到 Demo HUD 模板：{voice_template}")
         if demo_path is not None and voice_template.is_file():
             try:
                 voice_build = build_demo_voice_hud_vpk(
@@ -1141,8 +1140,8 @@ class PovHudManager:
                     voice_build.payload_bytes,
                 )
             except (DemoVoiceHudError, OSError) as exc:
-                if native_spectator_template_required:
-                    raise PovHudError(f"原生观战 HUD 数据生成失败：{exc}") from exc
+                if demo_template_required:
+                    raise PovHudError(f"Demo HUD 数据生成失败（{Path(demo_path).name}）：{exc}") from exc
                 logger.warning(
                     "Could not build demo-specific voice HUD; using the static POV package: %s",
                     exc,

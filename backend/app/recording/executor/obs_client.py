@@ -14,6 +14,7 @@ from obswebsocket import exceptions as obs_ws_exceptions
 from obswebsocket.core import RecvThread
 
 from ...env_utils import OBSConfig
+from ...obs_legacy_sources import cleanup_legacy_overlay_sources
 
 logger = logging.getLogger(__name__)
 
@@ -68,6 +69,7 @@ class OBSClient:
             )
             client.connect()
             self._ws = client
+            cleanup_legacy_overlay_sources(client)
             logger.info("OBSClient: connected to OBS WebSocket at %s:%s", host, port)
         except obs_ws_exceptions.ConnectionFailure as exc:
             raise OBSConnectionError(f"Failed to connect to OBS: {exc}") from exc

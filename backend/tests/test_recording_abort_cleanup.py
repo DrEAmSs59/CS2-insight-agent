@@ -298,6 +298,7 @@ def test_recording_hud_uses_shared_exit_restore_and_reports_evidence(
             *,
             map_name=None,
             demo_path=None,
+            require_demo_hud=False,
             voice_mode="team",
             pov_visuals_enabled=True,
             skybox_id="default",

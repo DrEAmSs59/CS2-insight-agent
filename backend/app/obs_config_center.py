@@ -18,6 +18,7 @@ from typing import Any, Optional
 from obswebsocket import obsws, requests as obs_requests
 
 from .env_utils import get_data_dir
+from .obs_legacy_sources import cleanup_legacy_overlay_sources
 from .update_info import resolve_local_version_info
 
 logger = logging.getLogger(__name__)
@@ -275,6 +276,7 @@ def _ensure_project_profile_folder(obs_root: Path, project_profile: str) -> Path
 def _ws_connect(obs_cfg, *, timeout: float = 60.0) -> obsws:
     ws = obsws(obs_cfg.host, obs_cfg.port, obs_cfg.password, timeout=timeout)
     ws.connect()
+    cleanup_legacy_overlay_sources(ws)
     return ws
 
 
