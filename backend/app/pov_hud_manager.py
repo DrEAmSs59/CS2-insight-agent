@@ -627,10 +627,11 @@ class PovHudManager:
         self,
         *,
         advanced_playback_enabled: bool = False,
+        pov_visuals_enabled: bool = True,
     ) -> Path:
         filename = (
             "pov_advanced_playback_template.vpk"
-            if advanced_playback_enabled
+            if advanced_playback_enabled or not pov_visuals_enabled
             else "pov_voice_template.vpk"
         )
         return self.get_project_pov_dir() / filename
@@ -954,10 +955,12 @@ class PovHudManager:
         map_name: Optional[str] = None,
         *,
         demo_path: Optional[str | Path] = None,
+        require_demo_hud: bool = False,
         input_track_report: Optional[Mapping[str, Any]] = None,
         voice_enabled: bool = True,
         voice_mode: str = DEFAULT_POV_VOICE_MODE,
         advanced_playback_enabled: bool = False,
+        pov_visuals_enabled: bool = True,
         skybox_id: str = DEFAULT_SKYBOX_ID,
         map_material_id: str = DEFAULT_MAP_MATERIAL_ID,
         input_hud_enabled: bool = True,
@@ -972,10 +975,12 @@ class PovHudManager:
             return self._install_impl(
                 map_name,
                 demo_path=demo_path,
+                require_demo_hud=require_demo_hud,
                 input_track_report=input_track_report,
                 voice_enabled=voice_enabled,
                 voice_mode=voice_mode,
                 advanced_playback_enabled=advanced_playback_enabled,
+                pov_visuals_enabled=pov_visuals_enabled,
                 skybox_id=skybox_id,
                 map_material_id=map_material_id,
                 input_hud_enabled=input_hud_enabled,
@@ -993,10 +998,12 @@ class PovHudManager:
         map_name: Optional[str] = None,
         *,
         demo_path: Optional[str | Path] = None,
+        require_demo_hud: bool = False,
         input_track_report: Optional[Mapping[str, Any]] = None,
         voice_enabled: bool = True,
         voice_mode: str = DEFAULT_POV_VOICE_MODE,
         advanced_playback_enabled: bool = False,
+        pov_visuals_enabled: bool = True,
         skybox_id: str = DEFAULT_SKYBOX_ID,
         map_material_id: str = DEFAULT_MAP_MATERIAL_ID,
         input_hud_enabled: bool = True,
@@ -1077,13 +1084,13 @@ class PovHudManager:
         voice_build: Optional[DemoVoiceHudBuild] = None
         voice_template = self.get_voice_hud_template_path(
             advanced_playback_enabled=advanced_playback_enabled,
+            pov_visuals_enabled=pov_visuals_enabled,
         )
-        if (
-            demo_path is not None
-            and advanced_playback_enabled
-            and not voice_template.is_file()
-        ):
-            raise PovHudError(f"未找到高级播放 HUD 模板：{voice_template}")
+        demo_template_required = (
+            require_demo_hud or advanced_playback_enabled or not pov_visuals_enabled
+        )
+        if demo_path is not None and demo_template_required and not voice_template.is_file():
+            raise PovHudError(f"未找到 Demo HUD 模板：{voice_template}")
         if demo_path is not None and voice_template.is_file():
             try:
                 voice_build = build_demo_voice_hud_vpk(
@@ -1093,6 +1100,7 @@ class PovHudManager:
                     voice_enabled=voice_enabled,
                     voice_mode=resolved_voice_mode,
                     advanced_playback_enabled=advanced_playback_enabled,
+                    pov_visuals_enabled=pov_visuals_enabled,
                     input_hud_enabled=input_hud_enabled,
                     input_hud_display_mode=input_hud_display_mode,
                     input_hud_scale_percent=input_hud_scale_percent,
@@ -1132,8 +1140,8 @@ class PovHudManager:
                     voice_build.payload_bytes,
                 )
             except (DemoVoiceHudError, OSError) as exc:
-                if advanced_playback_enabled:
-                    raise PovHudError(f"高级播放菜单数据生成失败：{exc}") from exc
+                if demo_template_required:
+                    raise PovHudError(f"Demo HUD 数据生成失败（{Path(demo_path).name}）：{exc}") from exc
                 logger.warning(
                     "Could not build demo-specific voice HUD; using the static POV package: %s",
                     exc,
@@ -1665,6 +1673,7 @@ class PovHudManager:
                         voice_build.combat_stats_parse_failed
                     ),
                     "advanced_playback_enabled": bool(voice_build.advanced_playback_enabled),
+                    "pov_visuals_enabled": bool(pov_visuals_enabled),
                     "advanced_playback_players": voice_build.advanced_playback_players,
                     "advanced_playback_events": voice_build.advanced_playback_events,
                     "advanced_playback_rounds": voice_build.advanced_playback_rounds,

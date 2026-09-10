@@ -55,7 +55,9 @@ class DemoVoiceHudError(RuntimeError):
 # 17 carries exact button press/release edges for the input-audio SoundEvents;
 # index 18 stores the per-session input-HUD presentation settings; index 19
 # carries the controller's authoritative K/D/A, current-round damage, and
-# match-damage state at every relevant network update tick.
+# match-damage state at every relevant network update tick; index 20 explicitly
+# selects POV-native HUD visuals. Auxiliary recording overlays leave it disabled
+# so loading their shared Panorama controller preserves CS2's spectator HUD.
 RADAR_PAYLOAD_INDEX = 8
 KILL_FEEDBACK_PAYLOAD_INDEX = 9
 FLASH_BLIND_PAYLOAD_INDEX = 10
@@ -68,6 +70,7 @@ HAND_SWITCH_PAYLOAD_INDEX = 16
 INPUT_AUDIO_EDGE_PAYLOAD_INDEX = 17
 INPUT_PRESENTATION_PAYLOAD_INDEX = 18
 COMBAT_STATS_PAYLOAD_INDEX = 19
+POV_VISUALS_PAYLOAD_INDEX = 20
 WEAPON_SELECT_PAYLOAD_INDEX = 6
 WEAPON_SELECT_ENTITY_INDEX_MASK = 0x3FFF
 WEAPON_SELECT_MATCH_MAX_TICKS = 4
@@ -417,7 +420,7 @@ def _normalize_map_name(raw: Any) -> str:
 
 def _pad_payload_slots(
     packed: list[Any],
-    length: int = COMBAT_STATS_PAYLOAD_INDEX + 1,
+    length: int = POV_VISUALS_PAYLOAD_INDEX + 1,
 ) -> list[Any]:
     if not isinstance(packed, list):
         raise DemoVoiceHudError("voice HUD payload has an unsupported shape")
@@ -4506,6 +4509,7 @@ def build_demo_voice_hud_vpk(
     voice_enabled: bool = True,
     voice_mode: str = DEFAULT_POV_VOICE_MODE,
     advanced_playback_enabled: bool = False,
+    pov_visuals_enabled: bool = True,
     input_hud_enabled: bool = True,
     input_hud_display_mode: str = "hybrid",
     input_hud_scale_percent: int = 100,
@@ -4704,6 +4708,7 @@ def build_demo_voice_hud_vpk(
     packed[SESSION_CONSOLE_COMMANDS_PAYLOAD_INDEX] = (
         _normalize_session_console_commands(session_console_commands)
     )
+    packed[POV_VISUALS_PAYLOAD_INDEX] = 1 if pov_visuals_enabled else 0
     payload = json.dumps(
         packed,
         ensure_ascii=True,

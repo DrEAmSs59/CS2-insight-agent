@@ -9,9 +9,10 @@ payload and rebuilds its VPK entry CRCs before CS2 starts:
 - `pov_voice_template.vpk` is the POV HUD package used by demo POV playback and
   highlight recording. It retains the teamcounter/equipment/radar styles while
   leaving health/ammo to the installed CS2 build.
-- `pov_advanced_playback_template.vpk` is used only by Advanced playback. It
-  omits the four compiled styles that cannot be unloaded during a live HUD
-  profile switch.
+- `pov_advanced_playback_template.vpk` is used by Advanced playback and by
+  ordinary recordings that need only the independent voice/input overlays. It
+  omits the compiled POV styles so those recordings retain CS2's native
+  spectator HUD.
 
 ## Recording skybox layer
 
@@ -153,6 +154,10 @@ The generated Advanced-playback VPK contains only the demo-controller injection
 and the Insight HUD-alert integration. The compiled radar, teamcounter, and
 equipment-info replacements remain in `pov_voice_template.vpk` and its static
 `pov_default.vpk` fallback; health/ammo remains native in every mode.
+
+Payload index 20 explicitly records whether the session requested POV visuals.
+Ordinary recording overlays write `0`, use the style-free template, and keep the
+native spectator health/player panels even when voice or the input HUD is on.
 
 The menu payload is generated only for direct Advanced playback. Highlight
 recording continues to use the same POV assets and tracks but leaves index 12
