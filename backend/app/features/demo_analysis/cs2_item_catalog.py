@@ -511,6 +511,7 @@ def _sample_player_context(
         "item_teams": {},
         "item_accounts": {},
         "player_teams": {},
+        "player_teams_at_tick": {},
         "music_kits": {},
         "item_stickers": {},
         "observed_items": {},
@@ -582,6 +583,16 @@ def _sample_player_context(
         for value in known_steamids or []
         if re.fullmatch(r"\d{15,20}", steamid := _safe_text(value))
     )
+    # A direct drop may never be sampled in the buyer's hands. Resolve the
+    # economy owner's side from their own snapshot, not the recipient's side
+    # (the recipient may be an opponent). Index first so row order is irrelevant.
+    owner_teams_at_tick = {
+        (_safe_text(row.get("steamid")), _safe_int(row.get("tick"))):
+        "t" if _safe_int(row.get("team_num")) == 2 else "ct"
+        for row in rows
+        if _safe_int(row.get("tick")) is not None
+        and _safe_int(row.get("team_num")) in {2, 3}
+    }
     for row in rows:
         steamid = _safe_text(row.get("steamid"))
         team_number = _safe_int(row.get("team_num"))
@@ -669,9 +680,13 @@ def _sample_player_context(
         if item_id is not None:
             account_owner = _steamid64_from_account_id(row.get("Weapon.m_iAccountID"))
             if account_owner in roster_steamids:
+                owner_team = team if account_owner == steamid else ""
+                observed_definition = resolve_cs2_item(row.get("item_def_idx"), 0)
+                if observed_definition and observed_definition.get("type") == "weapon":
+                    owner_team = owner_teams_at_tick.get((account_owner, tick), owner_team)
                 item_account_candidates.setdefault(item_id, set()).add(account_owner)
-                if team and account_owner == steamid:
-                    item_teams.setdefault((account_owner, item_id), set()).add(team)
+                if owner_team:
+                    item_teams.setdefault((account_owner, item_id), set()).add(owner_team)
                 resolved_stickers = _resolve_weapon_stickers(row.get("weapon_stickers"))
                 key = (account_owner, item_id)
                 if len(resolved_stickers) > len(item_stickers.get(key, [])):
@@ -688,7 +703,7 @@ def _sample_player_context(
                     observed_entry.update({
                         "owner_steamid64": account_owner,
                         "ownership_evidence": "weapon_account_id",
-                        "observed_teams": [team] if team and account_owner == steamid else [],
+                        "observed_teams": [owner_team] if owner_team else [],
                         "stickers": resolved_stickers,
                         "evidence_observations": 0,
                         "_owner_observation_ticks": set(),
@@ -719,13 +734,13 @@ def _sample_player_context(
                             previous = observed_entry
                         elif len(resolved_stickers) > len(previous_stickers):
                             previous["stickers"] = resolved_stickers
-                    if team and account_owner == steamid:
+                    if owner_team:
                         previous["observed_teams"] = sorted(
-                            set(previous.get("observed_teams") or []) | {team},
+                            set(previous.get("observed_teams") or []) | {owner_team},
                             key=("t", "ct").index,
                         )
-                        if tick is not None:
-                            previous.setdefault("_owner_observation_ticks", set()).add(tick)
+                    if tick is not None and team and account_owner == steamid:
+                        previous.setdefault("_owner_observation_ticks", set()).add(tick)
 
         pawn_item_id = _compose_item_id(
             row.get("CCSPlayerPawn.m_iItemIDHigh"),
@@ -911,6 +926,7 @@ def _sample_player_context(
         "item_teams": item_teams,
         "item_accounts": item_accounts,
         "player_teams": player_teams,
+        "player_teams_at_tick": owner_teams_at_tick,
         "music_kits": music_kits,
         "item_stickers": item_stickers,
         "observed_items": observed_items,
@@ -1158,6 +1174,11 @@ def build_player_cosmetic_inventory(
             set(int(tick) for tick in live_sample_ticks or []) | set(starter_snapshot_players)
         )
     live_purchase_rows = _live_weapon_purchase_rows(parser, start_tick)
+    if live_purchase_rows:
+        live_sample_ticks = sorted(
+            set(int(tick) for tick in live_sample_ticks or [])
+            | {int(row["tick"]) for row in live_purchase_rows}
+        )
     live_weapon_buys = (
         _live_weapon_purchase_defs(live_purchase_rows) if start_tick > 0 else None
     )
@@ -1288,6 +1309,25 @@ def build_player_cosmetic_inventory(
         observations = int(observed_entry.get("evidence_observations") or 0)
         if item_type == "weapon" or (item_type == "melee" and observations >= 2):
             owner_entries.setdefault(("item", item_id), observed_entry)
+
+    # Direct drops can remain absent from active-weapon snapshots altogether.
+    # A live purchase supplies the buyer's side, but no reliable item ID; only
+    # use it when that buyer has exactly one economy asset of the purchased def.
+    purchase_teams: dict[tuple[str, int], set[str]] = {}
+    for purchase in live_purchase_rows:
+        buyer = _safe_text(purchase.get("steamid"))
+        side = context["player_teams_at_tick"].get((buyer, int(purchase["tick"])))
+        if side:
+            purchase_teams.setdefault((buyer, int(purchase["def_index"])), set()).add(side)
+    for (buyer, definition), sides in purchase_teams.items():
+        candidates = [
+            entry for entry in grouped.get(buyer, {}).values()
+            if entry.get("type") == "weapon"
+            and int(entry.get("def_index") or 0) == definition
+            and int(entry.get("item_id") or 0) > 0
+        ]
+        if len(candidates) == 1 and not candidates[0].get("observed_teams"):
+            candidates[0]["observed_teams"] = sorted(sides, key=("t", "ct").index)
 
     for (steamid, def_index), default_entry in default_weapons.items():
         if not weapon_allowed(steamid, def_index):

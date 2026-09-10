@@ -4,6 +4,8 @@ import gzip
 import json
 import struct
 
+import pytest
+
 from app.features.demo_analysis import cs2_item_catalog as catalog_module
 
 from app.features.demo_analysis.cs2_item_catalog import (
@@ -682,14 +684,14 @@ def test_vanilla_weapon_held_by_non_owner_has_no_observed_team_for_holder():
             }
 
     inventory = build_player_cosmetic_inventory(FakeParser(), sample_ticks=[42])
-    # Attributed to economy owner, but observed_teams empty (owner never held).
+    # The asset stays with its economy owner and uses that owner's T side.
     assert holder not in inventory or not any(
         row.get("item_id") == item_id for row in inventory.get(holder, [])
     )
     owned = inventory.get(owner) or []
     match = next((row for row in owned if row.get("item_id") == item_id), None)
     assert match is not None
-    assert match["observed_teams"] == []
+    assert match["observed_teams"] == ["t"]
 
 
 def test_resolve_cs2_item_treats_non_finite_paint_as_vanilla():
@@ -1145,7 +1147,7 @@ def test_t_side_participation_adds_glock_when_spawn_event_is_missing():
             raise AssertionError(name)
 
         def parse_ticks(self, _wanted, *, ticks):
-            assert ticks == [100, 1000]
+            assert ticks == [100, 500, 1000]
             return {
                 "steamid": [owner],
                 "tick": [1000],
@@ -1290,6 +1292,104 @@ def test_default_buy_path_skips_grenades_and_does_not_steal_roster_owned_account
     assert holder not in inventory or not any(
         row.get("type") == "weapon" for row in inventory.get(holder, [])
     )
-    # Economy owner still receives the asset (no observed_teams if never held).
+    # The owner's own snapshot supplies the side even when an opponent holds it.
     owned = inventory.get(other) or []
     assert any(row.get("item_id") == owned_id for row in owned)
+    assert next(row for row in owned if row.get("item_id") == owned_id)["observed_teams"] == ["t"]
+
+
+@pytest.mark.parametrize("holder_team", [2, 3])
+@pytest.mark.parametrize("owner_team", [2, 3, None])
+@pytest.mark.parametrize("has_skin_table", [False, True])
+def test_directly_dropped_skin_uses_economy_owners_side(holder_team, owner_team, has_skin_table):
+    owner = "76561198000000001"
+    holder = "76561198000000002"
+    item_id = 41090984122
+
+    class FakeParser:
+        def parse_skins(self):
+            return ([{
+                "steamid": owner, "item_id": item_id, "def_index": 7,
+                "paint_index": 282, "paint_seed": 0, "paint_wear": 0.1,
+            }] if has_skin_table else {})
+
+        def parse_event(self, name):
+            if name == "item_purchase":
+                return {"tick": [110], "steamid": [owner], "item_name": ["weapon_ak47"]}
+            return {}
+
+        def parse_ticks(self, _wanted, *, ticks):
+            # Recipient is listed first; the buyer is never sampled holding the gun.
+            return {
+                "steamid": [holder, owner],
+                "tick": [120, 120],
+                "item_id_high": [item_id >> 32, 0],
+                "item_id_low": [item_id & 0xFFFFFFFF, 0],
+                "Weapon.m_iAccountID": [account_id(owner), 0],
+                "item_def_idx": [7, None],
+                "weapon_skin_id": [282, None],
+                "weapon_paint_seed": [0, None],
+                "weapon_float": [0.1, None],
+                "team_num": [holder_team, owner_team],
+            }
+
+    inventory = build_player_cosmetic_inventory(
+        FakeParser(), sample_ticks=[120], match_start_tick=100,
+    )
+    owned = next(row for row in inventory[owner] if row.get("item_id") == item_id)
+    assert owned["owner_steamid64"] == owner
+    assert owned["paint_index"] == 282
+    assert owned["observed_teams"] == (
+        ["t" if owner_team == 2 else "ct"] if owner_team is not None else []
+    )
+    assert owned["evidence_observations"] == 0
+    assert not any(row.get("item_id") == item_id for row in inventory.get(holder, []))
+    if owner_team is not None:
+        from app.cosmetics_skin_plan import build_batch_and_plan
+
+        side = "t" if owner_team == 2 else "ct"
+        batch, _ = build_batch_and_plan(owner, inventory[owner], {
+            f"{side}:id:{item_id}": {
+                "def_index": 7, "paint_index": 282, "paint_seed": 1,
+                "paint_wear": 0.1,
+            },
+        })
+        assert batch[0]["item_id64"] == str(item_id)
+        assert batch[0]["team"] == side.upper()
+
+
+@pytest.mark.parametrize('asset_count', [1, 2])
+@pytest.mark.parametrize('purchase_tick', [90, 110])
+def test_direct_drop_never_active_uses_purchase_side_only_for_unique_asset(asset_count, purchase_tick):
+    owner = '76561198000000001'
+
+    class FakeParser:
+        def parse_skins(self):
+            return [
+                {'steamid': owner, 'item_id': 41000000000 + i,
+                 'def_index': 9, 'paint_index': 1346, 'paint_seed': 86,
+                 'paint_wear': 0.325673}
+                for i in range(asset_count)
+            ]
+
+        def parse_event(self, name):
+            if name == 'item_purchase':
+                return [{'tick': purchase_tick, 'steamid': owner, 'item_name': 'AWP'}]
+            return []
+
+        def parse_ticks(self, _wanted, *, ticks):
+            # The AWP is never active. Later samples are after the side switch;
+            # only the exact purchase snapshot establishes CT provenance.
+            return [{'tick': tick, 'steamid': owner, 'team_num': 3 if tick == 110 else 2}
+                    for tick in ticks]
+
+    inventory = build_player_cosmetic_inventory(
+        FakeParser(), sample_ticks=[200], match_start_tick=100,
+    )
+    awps = [row for row in inventory.get(owner, []) if row['def_index'] == 9]
+    if purchase_tick < 100:
+        assert awps == []
+    else:
+        assert len(awps) == asset_count
+        assert all(row['observed_teams'] == (['ct'] if asset_count == 1 else []) for row in awps)
+        assert all(row['ownership_evidence'] == 'demo_skin_table' for row in awps)
