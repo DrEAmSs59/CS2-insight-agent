@@ -168,6 +168,42 @@ def test_normal_playback_uses_unique_demo_and_cleans_it(monkeypatch, tmp_path: P
     assert process.waited == 1
     assert not session.copied_demo.exists()
     assert service._active is None
+    assert service.exit_blocker() is None
+
+
+@pytest.mark.parametrize("pov_enabled", [False, True])
+def test_exit_protection_lasts_until_every_restore_and_artifact_cleanup(monkeypatch, tmp_path, pov_enabled):
+    cfg, demo, _ = _paths(tmp_path)
+    service = playback.DemoPlaybackService()
+    monkeypatch.setattr(playback.subprocess, "Popen", lambda *_args, **_kwargs: _FakeProcess())
+    result = service.launch(demo, cfg, playback.DemoPlaybackPovOptions(enabled=pov_enabled))
+    session = service._active
+    session.started_at_monotonic = time.monotonic() - 4
+    stages = []
+
+    def restore_player(_snapshot):
+        assert service.exit_blocker()["id"] == result["session_id"]
+        stages.append("player")
+        return {"verified": True}
+
+    def restore_pov(_manager, _sha):
+        assert service.exit_blocker()["cs2_launched"] is True
+        stages.append("pov")
+        return {"verified": True}
+
+    cleanup = service._cleanup_artifacts
+
+    def cleanup_artifacts(current):
+        assert service.exit_blocker() is not None
+        stages.append("artifacts")
+        cleanup(current)
+
+    monkeypatch.setattr(service, "_restore_player_configs", restore_player)
+    monkeypatch.setattr(service, "_restore_pov_after_exit", restore_pov)
+    monkeypatch.setattr(service, "_cleanup_artifacts", cleanup_artifacts)
+    service._monitor_session(session)
+    assert stages == (["player", "pov", "artifacts"] if pov_enabled else ["player", "artifacts"])
+    assert service.exit_blocker() is None
 
 
 @pytest.mark.parametrize("pov_enabled", [False, True])

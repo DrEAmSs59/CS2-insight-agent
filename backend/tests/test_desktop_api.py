@@ -8,6 +8,36 @@ from fastapi import HTTPException
 from app.api import desktop
 
 
+def test_prepare_exit_validates_backend_identity_before_reserving_shutdown(monkeypatch):
+    from app import runtime_session
+
+    monkeypatch.setenv("CS2_INSIGHT_INSTANCE_ID", "our-backend")
+    monkeypatch.setattr(runtime_session, "prepare_app_exit", pytest.fail)
+    with pytest.raises(HTTPException) as exc_info:
+        desktop.prepare_desktop_exit("different-backend")
+    assert exc_info.value.status_code == 409
+
+
+def test_prepare_exit_returns_backend_identity_and_block_reason(monkeypatch):
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from app import runtime_session
+
+    monkeypatch.setenv("CS2_INSIGHT_INSTANCE_ID", "our-backend")
+    monkeypatch.setattr(runtime_session, "prepare_app_exit", lambda: {
+        "allowed": False, "reason": "managed_cs2_running", "message": "请先关闭 CS2",
+    })
+    app = FastAPI()
+    app.include_router(desktop.router)
+    with TestClient(app) as client:
+        response = client.post("/api/app/prepare-exit?instance_id=our-backend")
+    assert response.status_code == 200
+    assert response.json() == {
+        "instance_id": "our-backend", "allowed": False,
+        "reason": "managed_cs2_running", "message": "请先关闭 CS2",
+    }
+
+
 def test_file_picker_supports_multiple_lite_cut_assets(monkeypatch):
     expected = [r"C:\media\one.mp4", r"D:\clips\two.wav"]
 

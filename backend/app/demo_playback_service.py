@@ -85,6 +85,19 @@ class DemoPlaybackService:
         self._session_reports: dict[str, dict[str, Any]] = {}
         self._session_verifiers: dict[str, tuple[PovHudManager, Optional[str]]] = {}
 
+    def exit_blocker(self) -> Optional[dict[str, Any]]:
+        """Expose only this service's owned session, never unrelated CS2s."""
+        with self._lock:
+            session = self._active
+            if session is None:
+                return None
+            return {
+                "operation": "demo_playback",
+                "id": session.session_id,
+                "cs2_launched": True,
+                "cs2_pid": getattr(session.process, "pid", None),
+            }
+
     def _set_session_report(self, session_id: str, **updates: Any) -> None:
         with self._lock:
             current = dict(self._session_reports.get(session_id) or {"session_id": session_id})

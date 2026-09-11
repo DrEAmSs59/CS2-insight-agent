@@ -65,6 +65,7 @@ from .pov_constants import (
     pov_tail_commands,
 )
 from .obs_legacy_sources import cleanup_legacy_overlay_sources
+from .runtime_session import mark_runtime_cs2_launched
 from .win_cs2_console import ensure_cs2_foreground, find_cs2_hwnd, inject_console_sequence, send_cs2_space_taps
 
 logger = logging.getLogger(__name__)
@@ -2522,6 +2523,7 @@ class OBSDirector:
             close_fds=True,
             creationflags=creationflags,
         )
+        mark_runtime_cs2_launched(self._cs2_process.pid)
 
     async def _await_gsi_startup_gate(self) -> bool:
         """等待 CS2 真正进入游戏画面（GSI 上报 map/round 等"非 menu/loading"状态）。

@@ -4,7 +4,10 @@ use std::{
     net::{SocketAddr, TcpStream},
     path::{Path, PathBuf},
     process::{Child, Command, Stdio},
-    sync::Mutex,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Mutex,
+    },
     thread,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
@@ -21,12 +24,16 @@ const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
 struct BackendProcess {
     child: Mutex<Option<ManagedBackend>>,
+    exit_pending: AtomicBool,
+    exit_approved: AtomicBool,
 }
 
 impl BackendProcess {
     fn new() -> Self {
         Self {
             child: Mutex::new(None),
+            exit_pending: AtomicBool::new(false),
+            exit_approved: AtomicBool::new(false),
         }
     }
 }
@@ -38,9 +45,13 @@ struct ManagedBackend {
 }
 
 fn backend_http(method: &str, path: &str) -> Option<String> {
+    backend_http_with_timeout(method, path, Duration::from_secs(2))
+}
+
+fn backend_http_with_timeout(method: &str, path: &str, timeout: Duration) -> Option<String> {
     let address = SocketAddr::from(([127, 0, 0, 1], 19871));
     let mut stream = TcpStream::connect_timeout(&address, Duration::from_millis(350)).ok()?;
-    let _ = stream.set_read_timeout(Some(Duration::from_secs(2)));
+    let _ = stream.set_read_timeout(Some(timeout));
     let _ = stream.set_write_timeout(Some(Duration::from_secs(2)));
     let request = format!(
         "{method} {path} HTTP/1.1\r\nHost: 127.0.0.1:19871\r\nConnection: close\r\nContent-Length: 0\r\n\r\n"
@@ -49,6 +60,139 @@ fn backend_http(method: &str, path: &str) -> Option<String> {
     let mut response = String::new();
     stream.read_to_string(&mut response).ok()?;
     Some(response)
+}
+
+const EXIT_CHECK_FAILED: &str =
+    "暂时无法确认录制／播放及文件恢复状态，Insight 尚未关闭。请稍后重试。";
+
+fn parse_exit_permission(response: &str, instance_id: &str) -> Result<(), String> {
+    let (headers, body) = response
+        .split_once("\r\n\r\n")
+        .ok_or_else(|| EXIT_CHECK_FAILED.to_string())?;
+    if headers.split_whitespace().nth(1) != Some("200") {
+        return Err(EXIT_CHECK_FAILED.to_string());
+    }
+    let state: serde_json::Value =
+        serde_json::from_str(body).map_err(|_| EXIT_CHECK_FAILED.to_string())?;
+    if state.get("instance_id").and_then(|value| value.as_str()) != Some(instance_id) {
+        return Err(EXIT_CHECK_FAILED.to_string());
+    }
+    match state.get("allowed").and_then(|value| value.as_bool()) {
+        Some(true) => Ok(()),
+        Some(false) => Err(state
+            .get("message")
+            .and_then(|value| value.as_str())
+            .filter(|message| !message.trim().is_empty())
+            .unwrap_or(EXIT_CHECK_FAILED)
+            .to_string()),
+        None => Err(EXIT_CHECK_FAILED.to_string()),
+    }
+}
+
+fn check_backend_exit_allowed(app: &AppHandle) -> Result<(), String> {
+    let instance_id = {
+        let state = app.state::<BackendProcess>();
+        let mut guard = state
+            .child
+            .lock()
+            .map_err(|_| EXIT_CHECK_FAILED.to_string())?;
+        let Some(backend) = guard.as_mut() else {
+            return Err("Insight 正在启动，请稍后再关闭。".to_string());
+        };
+        if backend.child.try_wait().ok().flatten().is_some() {
+            // A dead backend can no longer finish recovery; do not trap users
+            // in an unusable window. Persistent backups remain for next launch.
+            return Ok(());
+        }
+        backend.instance_id.clone()
+    };
+    let response = backend_http_with_timeout(
+        "POST",
+        &format!("/api/app/prepare-exit?instance_id={instance_id}"),
+        Duration::from_secs(15),
+    )
+    .ok_or_else(|| EXIT_CHECK_FAILED.to_string())?;
+    parse_exit_permission(&response, &instance_id)
+}
+
+fn request_desktop_exit(handle: &AppHandle, code: i32) {
+    let state = handle.state::<BackendProcess>();
+    if state.exit_pending.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    let handle = handle.clone();
+    thread::spawn(move || {
+        if let Err(message) = check_backend_exit_allowed(&handle) {
+            handle
+                .dialog()
+                .message(message)
+                .title("CS2 Insight Agent — 暂时无法关闭")
+                .kind(MessageDialogKind::Warning)
+                .blocking_show();
+            handle
+                .state::<BackendProcess>()
+                .exit_pending
+                .store(false, Ordering::SeqCst);
+            return;
+        }
+
+        // Only now close renderer connections so uvicorn can stop normally.
+        // The backend has reserved shutdown, so a concurrent launch is refused.
+        if let Some(window) = handle.get_webview_window("main") {
+            let _ = window.destroy();
+        }
+        stop_backend(&handle);
+        handle
+            .state::<BackendProcess>()
+            .exit_approved
+            .store(true, Ordering::SeqCst);
+        handle.exit(code);
+    });
+}
+
+#[cfg(test)]
+mod exit_permission_tests {
+    use super::parse_exit_permission;
+
+    fn response(state: serde_json::Value) -> String {
+        format!("HTTP/1.1 200 OK\r\nConnection: close\r\n\r\n{state}")
+    }
+
+    #[test]
+    fn requires_permission_from_the_owned_backend() {
+        assert!(parse_exit_permission(
+            &response(serde_json::json!({ "instance_id": "ours", "allowed": true })),
+            "ours"
+        )
+        .is_ok());
+        for state in [
+            serde_json::json!({ "instance_id": "other", "allowed": true }),
+            serde_json::json!({ "instance_id": "ours" }),
+            serde_json::json!({ "instance_id": "ours", "allowed": "true" }),
+        ] {
+            assert!(parse_exit_permission(&response(state), "ours").is_err());
+        }
+    }
+
+    #[test]
+    fn preserves_block_reason_and_rejects_failed_checks() {
+        assert_eq!(
+            parse_exit_permission(
+                &response(serde_json::json!({
+                    "instance_id": "ours", "allowed": false, "message": "请先关闭 CS2"
+                })),
+                "ours"
+            ),
+            Err("请先关闭 CS2".to_string())
+        );
+        for raw in [
+            "",
+            "HTTP/1.1 200 OK\r\n\r\n{",
+            "HTTP/1.1 500 Error\r\n\r\n{}",
+        ] {
+            assert!(parse_exit_permission(raw, "ours").is_err());
+        }
+    }
 }
 
 fn new_instance_id() -> String {
@@ -656,6 +800,10 @@ pub fn run() {
                         .title("CS2 Insight Agent — 后端启动失败")
                         .kind(MessageDialogKind::Error)
                         .blocking_show();
+                    handle
+                        .state::<BackendProcess>()
+                        .exit_approved
+                        .store(true, Ordering::SeqCst);
                     handle.exit(1);
                 }
             });
@@ -670,29 +818,24 @@ pub fn run() {
             event: WindowEvent::CloseRequested { api, .. },
             ..
         } if label == "main" => {
-            // Destroy the webview first so EventSource/HTTP connections close
-            // immediately. Otherwise uvicorn waits on the still-live renderer
-            // while this handler waits on uvicorn.
             api.prevent_close();
-            if let Some(window) = handle.get_webview_window(&label) {
-                let _ = window.destroy();
-            }
-            // window.destroy() is only queued on the event loop; blocking on
-            // the backend here would keep a frozen window on screen for the
-            // whole graceful-shutdown wait. Stop the backend on a worker
-            // thread so the window disappears instantly.
-            let handle = handle.clone();
-            thread::spawn(move || {
-                stop_backend(&handle);
-                handle.exit(0);
-            });
+            request_desktop_exit(handle, 0);
         }
         RunEvent::ExitRequested { code, api, .. } => {
-            // The last window closing must not tear down the process while the
-            // worker thread is still stopping the backend; explicit exit()
-            // calls (which carry a code) pass through.
-            if code.is_none() {
+            // Tauri restart requests are not preventable. Ordinary explicit
+            // exits use the same guard as X / Alt+F4. The last window being
+            // destroyed must wait for the shutdown worker's approved exit.
+            if code.is_none()
+                || (code != Some(tauri::RESTART_EXIT_CODE)
+                    && !handle
+                        .state::<BackendProcess>()
+                        .exit_approved
+                        .load(Ordering::SeqCst))
+            {
                 api.prevent_exit();
+                if let Some(code) = code {
+                    request_desktop_exit(handle, code);
+                }
             }
         }
         RunEvent::Exit => stop_backend(handle),
