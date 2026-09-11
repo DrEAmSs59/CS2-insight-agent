@@ -260,7 +260,13 @@ async def app_runtime_state():
 
 @app.post("/api/app/shutdown")
 async def app_shutdown():
-    """Abort owned jobs, flush cleanup and then ask uvicorn to exit normally."""
+    """Refuse active CS2 sessions, flush other jobs, then stop uvicorn."""
+    from .runtime_session import prepare_app_exit
+
+    exit_state = await asyncio.to_thread(prepare_app_exit)
+    if not exit_state["allowed"]:
+        raise HTTPException(409, detail=exit_state)
+
     from .features.lite_cut.api import shutdown_lite_cut_jobs
     from .recording.api import get_queue_abort_event
     from .shutdown_state import request_server_shutdown

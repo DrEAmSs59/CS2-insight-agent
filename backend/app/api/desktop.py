@@ -10,12 +10,23 @@ import subprocess
 import sys
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from ..win_cs2_console import find_cs2_hwnd
 
 router = APIRouter(tags=["desktop"])
+
+
+@router.post("/api/app/prepare-exit")
+def prepare_desktop_exit(instance_id: str = Query(...)):
+    """Check before destroying the webview or stopping any owned work."""
+    expected = (os.getenv("CS2_INSIGHT_INSTANCE_ID") or "").strip()
+    if not expected or instance_id != expected:
+        raise HTTPException(409, "Backend instance does not match this desktop.")
+    from ..runtime_session import prepare_app_exit
+
+    return {"instance_id": expected, **prepare_app_exit()}
 
 
 class FilePickerBody(BaseModel):
