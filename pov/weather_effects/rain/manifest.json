@@ -1780,11 +1780,11 @@
       "status": "validated",
       "main_source": {
         "source_package_relative_path": "maps/de_cache.vpk",
-        "source_package_size": 312857716,
-        "source_package_sha256": "75c7b1eefa5e878797f7777e55761e72fc95df122a919eb1d64116b2b44ff80f",
-        "expected_output_size": 312944510,
-        "expected_output_sha256": "47447360e82f33fb2d869cee85cafe033cc2b846312ae34d7f77b7a8ced55e75",
-        "expected_output_entry_count": 852,
+        "source_package_size": 308800865,
+        "source_package_sha256": "958bfb79888c33704ba3582253bb1244d13ab5a89aa29d1b7842fa0ac0855305",
+        "expected_output_size": 308888610,
+        "expected_output_sha256": "f3e2af313de56e41fcc66c2b01be88cc760951fb9ea221034039aef3a6d764c8",
+        "expected_output_entry_count": 807,
         "output_logical_path": "maps/de_cache.vpk"
       },
       "loose_outer_replacements": [
@@ -1792,22 +1792,40 @@
           "kind": "main_entity_lump",
           "status": "validated",
           "source_package_relative_path": "maps/de_cache.vpk",
-          "source_package_size": 312857716,
-          "source_package_sha256": "75c7b1eefa5e878797f7777e55761e72fc95df122a919eb1d64116b2b44ff80f",
+          "source_package_size": 308800865,
+          "source_package_sha256": "958bfb79888c33704ba3582253bb1244d13ab5a89aa29d1b7842fa0ac0855305",
           "entry_path": "maps/de_cache/entities/default_ents.vents_c",
-          "original_size": 75972,
-          "original_sha256": "d622a470cf3ebefbe2f626f0709d48a333caf1680d4c731246479bb11b4d3b21",
-          "original_crc32": "f599146a",
+          "original_size": 76579,
+          "original_sha256": "98a6968a3604667b9056f17f6247492f3d24fc0ac331719a068b431c5db33b1f",
+          "original_crc32": "e1b7a91a",
           "payload_relative_path": "de_cache/default_ents.vents_c",
-          "payload_size": 96248,
-          "payload_sha256": "9ad3f0dcfd8186f2a8c450ceae4c37280a4d419c88c0d5815c117ba5561e0888",
-          "payload_crc32": "aeb18a39"
+          "payload_size": 97087,
+          "payload_sha256": "f297f0e8fd4b817a13553a73aa03486b367d5bb79d6a75ccf06c955e3d9bc5e0",
+          "payload_crc32": "95092223"
         }
       ],
       "in_game_evidence": {
         "status": "validated",
-        "result": "the user's two-dimensional Cache annotation is compiled; the local map and Demo visual behavior was accepted by the user",
-        "scope": "rain placement, indoor leakage, motion, density, frame rate, and wet ground"
+        "result": "The user confirmed the updated Cache local map and a pre-update Cache Demo play normally with rain on Steam build 25218825.",
+        "scope": "updated map and Demo playback, rain placement, indoor leakage, wet ground, and lighting",
+        "local_map_test": {
+          "status": "passed_user_confirmation",
+          "date": "2026-09-11",
+          "user_feedback": "进地图正常"
+        },
+        "previous_accepted_evidence": {
+          "status": "validated",
+          "result": "the user's two-dimensional Cache annotation is compiled; the local map and Demo visual behavior was accepted by the user",
+          "scope": "rain placement, indoor leakage, motion, density, frame rate, and wet ground"
+        },
+        "demo_test": {
+          "status": "passed_user_confirmation",
+          "date": "2026-09-11",
+          "recorded_before_map_update": true,
+          "source_demo_sha256": "8169c1027ad41179f5c35f64b51f9a25d01b8e5ee5047c7a0eb7598054510de3",
+          "playback_copy_sha256": "659a8f1d9b7d6b8380dd86fab939f030da56412ea3f5b5a5083f7a62594769d9",
+          "user_feedback": "我看了下没问题"
+        }
       },
       "demo_particle_transport": {
         "status": "validated",
@@ -1907,6 +1925,25 @@
         "selected_preview": "pov/weather_effects/regions/de_cache_rain_selected_preview.png",
         "selected_yellow_upper_floor_emitter_count": 2,
         "visual_resources": "resolved from the installed CS2 VPKs"
+      },
+      "map_update_validation": {
+        "date": "2026-09-11",
+        "steam_build_id": "25218825",
+        "previous_source_sha256": "75c7b1eefa5e878797f7777e55761e72fc95df122a919eb1d64116b2b44ff80f",
+        "previous_payload_sha256": "9ad3f0dcfd8186f2a8c450ceae4c37280a4d419c88c0d5815c117ba5561e0888",
+        "retail_entity_count": 424,
+        "output_entity_count": 462,
+        "rain_entity_count": 38,
+        "rain_entities_unchanged": true,
+        "retail_entity_changes": [
+          "info_map_parameters.raintracetoskyenabled",
+          "light_environment.brightness"
+        ],
+        "other_updated_map_data_preserved": true,
+        "structural_validation": "passed",
+        "local_map_validation": "passed_user_confirmation",
+        "in_game_validation": "passed_user_confirmation",
+        "demo_validation": "passed_user_confirmation"
       }
     },
     "de_inferno": {
