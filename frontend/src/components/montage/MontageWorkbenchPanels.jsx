@@ -8,6 +8,7 @@ import {
   GripVertical,
   History,
   Loader2,
+  Play,
   Save,
   Shuffle,
   Trash2,
@@ -499,6 +500,9 @@ export function MontageOrchestrationTimeline({
   onBulkMoveDown,
   onClearTimeline,
   timelineClipCount,
+  radarSegmentsByClipId,
+  onRemoveRadarSegment,
+  onPatchRadarSegment,
 }) {
   const t = useT();
   const locale = useLocaleStore((s) => s.locale);
@@ -675,6 +679,7 @@ export function MontageOrchestrationTimeline({
               const active = primarySelectedId === clip.id;
               const inMulti = multiSelectedIds?.has?.(clip.id);
               const dragging = dragId === clip.id;
+              const radarList = radarSegmentsByClipId?.get(clip.id) || [];
               const vCls = VARIANT_RING[variant] || VARIANT_RING.neutral;
               const killBadge = t(blockShortLabelI18nKey(getMontageBlockShortLabel(clip)));
               const suppressMontageAi = isTimelineSourceClip(clip) || variant === "compilation";
@@ -682,6 +687,51 @@ export function MontageOrchestrationTimeline({
               const outBase = pathBasenameQuick(clip?.output_path);
               return (
                 <li key={clip.id} className="flex flex-col">
+                  {/* cs数据图 雷达段：插入到该片段之前 */}
+                  {radarList.length > 0 ? (
+                    <div className="mb-1.5 flex flex-wrap gap-1.5 pl-6">
+                      {radarList.map((seg) => (
+                        <div
+                          key={seg.uid}
+                          className="flex items-center gap-2 rounded-lg border border-rose-500/25 bg-rose-500/10 px-2 py-1"
+                        >
+                          {seg.imageUrl ? (
+                            seg.isVideo ? (
+                              <span className="relative flex h-6 w-6 shrink-0 items-center justify-center rounded border border-cs2-border bg-black/60 text-white">
+                                <Play className="h-3 w-3 fill-current" />
+                              </span>
+                            ) : (
+                              <img
+                                src={seg.imageUrl}
+                                alt=""
+                                className="h-6 w-6 rounded border border-cs2-border object-cover"
+                              />
+                            )
+                          ) : null}
+                          <span className="text-[11px] font-bold uppercase tracking-wide text-rose-300">
+                            {t("radar.timelineChipLabel")}
+                          </span>
+                          <span className="max-w-[140px] truncate text-[11px] font-semibold text-cs2-text-primary">
+                            {seg.playerName}
+                          </span>
+                          <span className="font-mono text-[10px] text-cs2-text-muted">
+                            {Number(seg.duration || 4).toFixed(1)}s
+                          </span>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onRemoveRadarSegment?.(seg.uid);
+                            }}
+                            className="rounded p-0.5 text-cs2-text-muted transition-colors hover:text-rose-400"
+                            aria-label={t("radar.segmentRemove")}
+                          >
+                            <X className="h-3 w-3" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  ) : null}
                   <div
                     role="button"
                     tabIndex={0}

@@ -54,6 +54,7 @@ from .features.demo_library.ingestion import enqueue_demo_path
 from .features.demo_library.api import router as demo_library_router
 from .features.match_history.api import router as match_history_router
 from .features.demo_analysis.api import router as demo_analysis_router
+from .features.cs_data_radar.api import router as cs_data_radar_router
 
 
 # Compatibility exports for tests and older integrations that call helpers from
@@ -191,6 +192,7 @@ app.include_router(demo_playback_router)
 app.include_router(match_history_router)
 app.include_router(demo_library_router)
 app.include_router(demo_analysis_router)
+app.include_router(cs_data_radar_router)
 app.include_router(config_router)
 app.include_router(obs_router)
 app.include_router(montage_router)

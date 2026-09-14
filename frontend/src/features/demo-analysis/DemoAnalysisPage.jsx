@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { BarChart3, Library, Play, RefreshCw, Users } from "lucide-react";
+import { BarChart3, Library, Play, Radar, RefreshCw, Users } from "lucide-react";
 import ActionBar from "../../components/ActionBar";
 import ClipList from "../../components/ClipList";
 import DemoUpload from "../../components/DemoUpload";
@@ -23,6 +23,7 @@ import { useAppShell } from "../../context/AppShellContext";
 import { useDemoPlaybackDialog } from "../../hooks/useDemoPlaybackDialog.jsx";
 import { useSteamPlayerAvatars } from "../../hooks/useSteamPlayerAvatars.js";
 import useSessionState from "../../hooks/useSessionState";
+import { generateRadarCards, toRadarPlayerPayload } from "../cs-data-radar/csDataRadarApi";
 import { useT } from "../../i18n/useT.js";
 import { useLocaleStore } from "../../i18n/localeStore.js";
 import { labelTag } from "../../utils/tagDescriptions.js";
@@ -126,6 +127,52 @@ export default function DemoAnalysisPage() {
     && Boolean(selectedPlayer)
     && regularClips.length > 0;
 
+  // ── cs数据图：自动录制全部玩家的雷达图，供合辑工作台剪辑使用 ──
+  const [radarGenerating, setRadarGenerating] = useState(false);
+  const [radarNotice, setRadarNotice] = useState(null);
+  const radarNoticeTimer = useRef(null);
+  const showRadarNotice = useMemo(() => (msg) => {
+    if (radarNoticeTimer.current) window.clearTimeout(radarNoticeTimer.current);
+    setRadarNotice(msg);
+    radarNoticeTimer.current = window.setTimeout(() => setRadarNotice(null), 4200);
+  }, []);
+  const handleGenerateAllRadarCards = useCallback(async () => {
+    const players = (workspace.players && workspace.players.length ? workspace.players : s.players) || [];
+    if (!players.length) {
+      showRadarNotice(t("analysis.radarNoPlayers"));
+      return;
+    }
+    setRadarGenerating(true);
+    try {
+      const payloads = players
+        .map((p) => {
+          const payload = toRadarPlayerPayload(p);
+          if (!payload) return null;
+          // workspace 行没有 team_label，用 team_key 补一个可读的阵营标签
+          if (!payload.team_label && (payload.team_key === "2" || String(p.team_key).toLowerCase() === "t")) {
+            payload.team_label = "T";
+          } else if (!payload.team_label && (payload.team_key === "3" || String(p.team_key).toLowerCase() === "ct")) {
+            payload.team_label = "CT";
+          }
+          return payload;
+        })
+        .filter(Boolean);
+      const cards = await generateRadarCards(payloads, {
+        demoId: currentUpload?.id || null,
+        demoName:
+          currentUpload?.demo_filename
+          || currentUpload?.filename
+          || s.currentFilename
+          || "",
+      });
+      showRadarNotice(t("analysis.radarGenerated", { n: cards.length }));
+    } catch {
+      showRadarNotice(t("analysis.radarGenerateFail"));
+    } finally {
+      setRadarGenerating(false);
+    }
+  }, [currentUpload?.demo_filename, currentUpload?.filename, currentUpload?.id, s.currentFilename, s.players, showRadarNotice, t, workspace.players]);
+
   const selectPlayer = (value) => {
     const matched = [...(s.players || []), ...(workspace.players || [])].find((player) => (
       playerIdentityKey(player) === value
@@ -208,6 +255,18 @@ export default function DemoAnalysisPage() {
             <div className="min-w-0"><h1 className="text-[14px] font-black tracking-wide">{t("analysis.workspace.title")}</h1><p className="truncate font-mono text-[9px] text-cs2-text-muted">{s.currentFilename} · {s.currentMatchIndex + 1}/{matches.length}</p></div>
           </div>
           <div className="flex items-center gap-2">
+            <Button
+              variant="secondary"
+              size="sm"
+              disabled={radarGenerating || analysisGateActive}
+              onClick={() => void handleGenerateAllRadarCards()}
+              title={t("analysis.radarGenerateAllTitle")}
+            >
+              {radarGenerating
+                ? <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                : <Radar className="h-3.5 w-3.5" />}
+              {t("analysis.radarGenerateAll")}
+            </Button>
             <Button variant="secondary" size="sm" disabled={!currentUpload?.id && !currentUpload?.path} onClick={playCurrentDemo}>
               <Play className="h-3.5 w-3.5 fill-current" />
               {t("analysis.workspace.playDemo")}
@@ -222,6 +281,15 @@ export default function DemoAnalysisPage() {
       </header>
 
       <main className={`${PAGE_CONTAINER_CLASS} min-h-0 flex-1 py-3`} data-testid="demo-analysis-content-container">
+        {radarNotice ? (
+          <div className="mb-2 flex items-center gap-2 rounded-lg border border-cs2-accent/30 bg-cs2-accent-soft px-3 py-2 text-xs font-medium text-cs2-accent">
+            <Radar className="h-3.5 w-3.5 shrink-0" />
+            <span className="min-w-0 flex-1">{radarNotice}</span>
+            <Link to="/montage" className="shrink-0 rounded-md border border-cs2-accent/40 px-2 py-0.5 text-[11px] font-bold text-cs2-accent hover:bg-cs2-accent hover:text-white transition-all">
+              {t("analysis.radarGoMontage")}
+            </Link>
+          </div>
+        ) : null}
         <div className="analysis-workspace-grid h-full" data-testid="analysis-fixed-workspace">
           <aside className="flex h-full min-h-0 flex-col gap-2 overflow-hidden" data-testid="analysis-scoreboard-panel">
             <MatchRailSummary
