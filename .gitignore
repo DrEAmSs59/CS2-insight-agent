@@ -20,6 +20,9 @@ frontend/dist/
 .vscode/
 .idea/
 
+# Retired CI workflow: prevent untracked local copies from being re-added.
+/.github/workflows/ci.yml
+
 # OS
 .DS_Store
 Thumbs.db
