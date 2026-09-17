@@ -111,7 +111,7 @@ def test_bundled_dust2_rain_profile_tracks_dynamic_object_contact_gate() -> None
         "particles/rain_fx/rain_single_128.vpcf"
     )
     assert profile["demo_particle_transport"]["spawn_radius"] == 64.0
-    assert profile["demo_particle_transport"]["emit_rate"] == 20.0
+    assert profile["demo_particle_transport"]["emit_rate"] == 16.0
     assert profile["demo_particle_transport"]["particle_system_count"] == 385
     assert profile["demo_particle_transport"]["host_class"] == (
         "path_particle_rope_clientside"
@@ -124,8 +124,8 @@ def test_bundled_dust2_rain_profile_tracks_dynamic_object_contact_gate() -> None
         "particles/rain_fx/rain_single_128.vpcf"
     )
     assert profile["injection"]["particle_spawn_radius"] == 64.0
-    assert profile["injection"]["particle_maximum_trail_length"] == 30.0
-    assert profile["injection"]["particle_emit_rate"] == 20.0
+    assert profile["injection"]["particle_maximum_trail_length"] == 20.0
+    assert profile["injection"]["particle_emit_rate"] == 16.0
     assert profile["injection"]["source_particle_system_count"] == 385
     assert profile["injection"]["removed_particle_system_count"] == 0
     assert profile["injection"]["selected_emitter_ids"] == list(range(1, 386))
@@ -267,7 +267,7 @@ def test_bundled_mirage_rain_profile_uses_continuous_clientside_hosts() -> None:
     assert profile["injection"]["networked_puddle_instance_count"] == 0
     assert profile["injection"]["puddle_decal_count"] == 0
     assert profile["injection"]["particle_spawn_radius"] == 64.0
-    assert profile["injection"]["particle_emit_rate"] == 20.0
+    assert profile["injection"]["particle_emit_rate"] == 16.0
     assert profile["injection"]["selection_method"] == (
         "all prevalidated floor-aware emitters"
     )
@@ -328,15 +328,9 @@ def test_bundled_mirage_rain_profile_uses_continuous_clientside_hosts() -> None:
     assert puddles["project_on_water"] is False
 
 
-def test_bundled_cache_rain_profile_follows_user_color_annotation() -> None:
+def test_bundled_cache_rain_profile_uses_refined_exposed_columns() -> None:
     project_root = Path(__file__).resolve().parents[2]
-    region = _load_optional_build_json(
-        project_root
-        / "pov"
-        / "weather_effects"
-        / "regions"
-        / "de_cache_rain_annotated.json"
-    )
+    region = json.loads((project_root / "pov/weather_effects/rain_particles/de_cache_regions.json").read_text(encoding="utf-8"))
     manifest = json.loads(
         (project_root / "pov" / "weather_effects" / "rain" / "manifest.json").read_text(
             encoding="utf-8"
@@ -347,13 +341,14 @@ def test_bundled_cache_rain_profile_follows_user_color_annotation() -> None:
     assert profile["main_source"]["source_package_relative_path"] == "maps/de_cache.vpk"
     assert len(profile["loose_outer_replacements"]) == 1
     assert profile["injection"]["particle"] == (
-        "particles/rain_fx/rain_single_800.vpcf"
+        "particles/rain_fx/rain_single_128.vpcf"
     )
-    assert profile["injection"]["particle_system_count"] == 38
-    assert profile["injection"]["source_particle_system_count"] == 222
-    assert profile["injection"]["selected_yellow_upper_floor_emitter_count"] == 2
-    assert profile["injection"]["maximum_original_emitter_distance"] <= 350.0
-    assert profile["injection"]["annotation_status"] == "compiled"
+    assert profile["injection"]["particle_system_count"] == 969
+    assert profile["injection"]["source_particle_system_count"] == 969
+    assert profile["injection"]["particle_spawn_radius"] == 64.0
+    assert profile["injection"]["particle_emit_rate"] == 16.0
+    assert profile["injection"]["maximum_original_emitter_distance"] == 0.0
+    assert profile["injection"]["annotation_status"] == "native_geometry_refined"
     assert profile["demo_particle_transport"]["host_class"] == (
         "path_particle_rope_clientside"
     )
@@ -374,26 +369,14 @@ def test_bundled_cache_rain_profile_follows_user_color_annotation() -> None:
             "Cache indoor/outdoor materials remain unchanged"
         ),
     }
-    if region is not None:
-        assert region["annotation"]["priority"] == [
-            "yellow_upper_floor_only",
-            "red_no_rain",
-            "magenta_rain",
-        ]
-        assert (
-            region["selection"]["automatic_indoor_outdoor_classification_used"]
-            is False
-        )
-        assert region["selection"]["accepted_by_zone_source"] == {
-            "magenta_rain": 204,
-            "yellow_upper_floor_only": 18,
-        }
-        assert region["selection"]["yellow_multi_surface_emitter_count"] == 8
-        assert all(
-            emitter["layer_policy"] == "highest_nav_surface_only"
-            for emitter in region["rain_emitters"]
-            if emitter["zone_source"] == "yellow_upper_floor_only"
-        )
+    assert region["map_name"] == "de_cache"
+    assert len(region["rain_emitters"]) == 969
+    assert len({tuple(e["origin"]) for e in region["rain_emitters"]}) == 969
+    for emitter in region["rain_emitters"]:
+        x, y, z = emitter["origin"]
+        assert x % 80 == y % 80 == 0
+        assert z - emitter["ground_origin"][2] == pytest.approx(260)
+    assert profile["rain_layout_transfer"]["non_rain_entities_preserved"] == 424
 
 
 def test_bundled_inferno_rain_profile_follows_user_color_annotation() -> None:

@@ -81,6 +81,7 @@ from .weather_particle_vpk import (
     TRAIN_SNOW_PROBE_MAP,
     WeatherParticleVpkError,
     build_train_snow_particle_override_vpk,
+    compose_rain_particle_override_vpk,
 )
 
 logger = logging.getLogger(__name__)
@@ -1474,6 +1475,21 @@ class PovHudManager:
                     ChromaMainMapError,
                 ) as exc:
                     raise PovHudError(f"天气效果运行 VPK 生成失败：{exc}") from exc
+
+            if selected_weather == RAIN_WEATHER_EFFECT_ID:
+                try:
+                    particle_build = compose_rain_particle_override_vpk(
+                        assets_dir=self.get_weather_effect_assets_dir("rain_particles"),
+                        map_name=effective_map_name,
+                        base_vpk_bytes=package_bytes,
+                    )
+                    package_bytes = particle_build.vpk_bytes
+                    weather_particle_metadata = {
+                        **particle_build.metadata,
+                        "effect_id": selected_weather,
+                    }
+                except (OSError, ValueError, TypeError, WeatherParticleVpkError) as exc:
+                    raise PovHudError(f"雨滴粒子 VPK 生成失败：{exc}") from exc
 
         if staged_chroma_swap_files:
             chroma_official_swap_metadata = {
