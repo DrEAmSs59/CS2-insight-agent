@@ -55,8 +55,24 @@ def _death(tick, round_no=1) -> EventInfo:
     )
 
 
-def _req(events: list[EventInfo], rt: SourceType = SourceType.kill) -> NormalizedRequest:
+def _req(
+    events: list[EventInfo],
+    rt: SourceType = SourceType.kill,
+    **option_updates,
+) -> NormalizedRequest:
     from app.recording.models import RequestType
+
+    options = RecordingOptions(
+        timeline_kill_pre_sec=3.0,
+        timeline_kill_post_sec=2.0,
+        death_pre_sec=3.0,
+        death_post_sec=2.0,
+        kill_jump_cut_threshold_sec=THRESHOLD,
+        fail_killer_pre_sec=3.0,
+        fail_killer_post_sec=2.0,
+    )
+    if option_updates:
+        options = options.model_copy(update=option_updates)
 
     return NormalizedRequest(
         request_id="timeline-merge",
@@ -76,13 +92,7 @@ def _req(events: list[EventInfo], rt: SourceType = SourceType.kill) -> Normalize
         target_player=_player(),
         events=events,
         rounds=[],
-        options=RecordingOptions(
-            timeline_kill_pre_sec=3.0,
-            timeline_kill_post_sec=2.0,
-            kill_jump_cut_threshold_sec=THRESHOLD,
-            fail_killer_pre_sec=3.0,
-            fail_killer_post_sec=2.0,
-        ),
+        options=options,
         source_ref=SourceRef(),
         warnings=[],
     )
@@ -134,3 +144,26 @@ def test_timeline_death_single_event_unchanged() -> None:
     assert len(segments) == 1
     assert segments[0].source_type == SourceType.death
     assert segments[0].anchor_ticks == [10_000]
+    assert segments[0].start_tick == 10_000 - int(3.0 * TICK_RATE)
+    assert segments[0].end_tick == 10_000 + int(2.0 * TICK_RATE)
+
+
+def test_timeline_death_main_window_uses_death_pre_not_fail_killer() -> None:
+    req = _req(
+        [_death(10_000)],
+        rt=SourceType.death,
+        death_pre_sec=8.0,
+        death_post_sec=0.5,
+        fail_killer_pre_sec=1.0,
+        fail_killer_post_sec=0.2,
+        enable_fail_killer_pov=True,
+    )
+    segments = plan_event_clip(req)
+    assert len(segments) == 2
+    main, killer = segments
+    assert main.perspective == Perspective.victim
+    assert main.start_tick == 10_000 - int(8.0 * TICK_RATE)
+    assert main.end_tick == 10_000 + int(0.5 * TICK_RATE)
+    assert killer.perspective == Perspective.killer
+    assert killer.start_tick == 10_000 - int(1.0 * TICK_RATE)
+    assert killer.end_tick == 10_000 + int(0.2 * TICK_RATE)
