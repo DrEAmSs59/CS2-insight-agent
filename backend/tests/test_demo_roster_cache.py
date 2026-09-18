@@ -121,6 +121,60 @@ def test_get_or_index_demo_roster_indexes_only_on_cache_miss(monkeypatch):
     index_mock.assert_awaited_once_with(13, "match.dem")
 
 
+def test_get_or_index_demo_roster_can_skip_scan_on_miss(monkeypatch):
+    monkeypatch.setattr(main.demo_db, "get_demo_roster_cache", AsyncMock(return_value=None))
+    index_mock = AsyncMock()
+    monkeypatch.setattr(roster, "index_demo_player_stats", index_mock)
+
+    result = asyncio.run(
+        roster.get_or_index_demo_roster(14, "match.dem", scan_on_miss=False)
+    )
+
+    assert result == {
+        "players": [],
+        "cache_hit": False,
+        "indexed": False,
+        "error": None,
+        "deferred": True,
+    }
+    index_mock.assert_not_awaited()
+
+
+def test_library_analyze_skips_compatibility_scan(monkeypatch):
+    compat_calls: list[object] = []
+
+    def fake_compat(*args, **kwargs):
+        compat_calls.append((args, kwargs))
+        raise AssertionError("analyze must not scan demo compatibility")
+
+    monkeypatch.setattr(demo_library_api, "ensure_demo_compatible", fake_compat)
+    monkeypatch.setattr(
+        demo_library_api.demo_db,
+        "get_demo_by_id",
+        AsyncMock(return_value={"id": 8, "path": "match.dem", "filename": "match.dem"}),
+    )
+    monkeypatch.setattr(
+        demo_library_api,
+        "library_working_demo_path",
+        AsyncMock(return_value=Path("match.dem")),
+    )
+    analyze_mock = AsyncMock(
+        return_value={"players": {"alpha": {"clips": []}}, "analysis_workspace": None}
+    )
+    monkeypatch.setattr(demo_library_api, "run_library_demo_analyze", analyze_mock)
+
+    response = asyncio.run(
+        demo_library_api.analyze_demo_from_library(
+            8,
+            demo_library_api.DemoAnalyzeRequest(target_players=["alpha"]),
+        )
+    )
+
+    assert compat_calls == []
+    analyze_mock.assert_awaited_once()
+    assert response["demo_filename"] == "match.dem"
+
+
 def test_batch_demo_summary_uses_roster_cache(monkeypatch):
     monkeypatch.setattr(
         main.demo_db,
@@ -566,7 +620,8 @@ def test_library_multi_parse_normalizes_targets_and_uses_first_success(monkeypat
         return {"__has_player_keyboard_input__": False, **parsed}
 
     monkeypatch.setattr(demo_parse_isolation, "analyze_multi_isolated", fake_analyze_multi)
-    monkeypatch.setattr(workflows, "get_or_index_demo_roster", AsyncMock(return_value={"error": None}))
+    roster_mock = AsyncMock(return_value={"error": None})
+    monkeypatch.setattr(workflows, "get_or_index_demo_roster", roster_mock)
     monkeypatch.setattr(
         main.demo_db,
         "get_demo_by_id",
@@ -589,6 +644,7 @@ def test_library_multi_parse_normalizes_targets_and_uses_first_success(monkeypat
     )
 
     assert worker_calls == [("match.dem", ["missing", "alpha"], None)]
+    assert roster_mock.await_args.kwargs.get("scan_on_miss") is False
     assert response["players"] == parsed
     composite = save_result.await_args.args[1]
     assert composite["auto_target_player"] == "alpha"

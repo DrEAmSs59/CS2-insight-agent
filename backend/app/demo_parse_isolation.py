@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
-import json
 import os
 import subprocess
 import sys
 import tempfile
 from pathlib import Path
 from typing import Any, Optional
+
+from .parse_worker_ipc import dump_message, load_message
 
 
 class IsolatedParseError(RuntimeError):
@@ -34,10 +35,10 @@ def run_parse_worker(action: str, **payload: Any) -> Any:
     timeout = _timeout_seconds(action)
     tmp_dir = Path(tempfile.gettempdir()) / "cs2_insight_parse_workers"
     tmp_dir.mkdir(parents=True, exist_ok=True)
-    with tempfile.NamedTemporaryFile("w", encoding="utf-8", suffix=".json", dir=tmp_dir, delete=False) as rf:
-        json.dump(req, rf, ensure_ascii=False)
+    with tempfile.NamedTemporaryFile("wb", suffix=".pkl", dir=tmp_dir, delete=False) as rf:
         req_path = Path(rf.name)
-    out_path = tmp_dir / f"{req_path.stem}.out.json"
+    dump_message(req_path, req)
+    out_path = tmp_dir / f"{req_path.stem}.out.pkl"
     err_path = tmp_dir / f"{req_path.stem}.err.txt"
     env = os.environ.copy()
     env.setdefault("PYTHONIOENCODING", "utf-8")
@@ -91,7 +92,7 @@ def run_parse_worker(action: str, **payload: Any) -> Any:
     if not out_path.is_file():
         raise IsolatedParseError("解析 worker 未返回结果")
     try:
-        data = json.loads(out_path.read_text(encoding="utf-8"))
+        data = load_message(out_path)
     finally:
         try:
             out_path.unlink()

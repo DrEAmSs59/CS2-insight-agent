@@ -2,19 +2,20 @@
 
 from __future__ import annotations
 
-import json
 import sys
 import traceback
 from pathlib import Path
 from typing import Any, Optional
 
 if __package__:
+    from .parse_worker_ipc import dump_message, load_message
     from .demo_parser import DemoAnalyzer, get_demo_match_summary, get_player_list, inspect_demo
     from .radar.radar_data_extractor import extract_radar_timeline_impl, extract_replay_effects_impl
 else:
     backend_dir = Path(__file__).resolve().parents[1]
     if str(backend_dir) not in sys.path:
         sys.path.insert(0, str(backend_dir))
+    from app.parse_worker_ipc import dump_message, load_message
     from app.demo_parser import DemoAnalyzer, get_demo_match_summary, get_player_list, inspect_demo
     from app.radar.radar_data_extractor import extract_radar_timeline_impl, extract_replay_effects_impl
 
@@ -81,18 +82,10 @@ def _run(payload: dict) -> object:
         analysis_workspace = analyzer.analysis_workspace
         if isinstance(analysis_workspace, dict) and analysis_workspace.get("rounds"):
             analysis_workspace = dict(analysis_workspace)
-            try:
-                from app.features.demo_analysis.replay_match_cache import materialize_match_replay_parquet_impl
-
-                analysis_workspace["replay_cache"] = materialize_match_replay_parquet_impl(
-                    demo_path=dem_path,
-                    workspace=analysis_workspace,
-                )
-            except Exception as exc:  # noqa: BLE001 - analysis result remains usable
-                analysis_workspace["replay_cache"] = {
-                    "status": "error",
-                    "error": f"{type(exc).__name__}: {exc}",
-                }
+            analysis_workspace["replay_cache"] = {
+                "status": "deferred",
+                "reason": "materialized on first 2D replay open",
+            }
         return {
             "__analysis_workspace__": analysis_workspace,
             "__has_player_keyboard_input__": analyzer.has_player_keyboard_input,
@@ -109,22 +102,19 @@ def _run(payload: dict) -> object:
 
 def main() -> int:
     if len(sys.argv) != 3:
-        print("usage: python -m app.parse_worker <request.json> <output.json>", file=sys.stderr)
+        print("usage: python -m app.parse_worker <request.pkl> <output.pkl>", file=sys.stderr)
         return 2
     req_path = Path(sys.argv[1])
     out_path = Path(sys.argv[2])
     try:
-        payload = json.loads(req_path.read_text(encoding="utf-8-sig"))
+        payload = load_message(req_path)
         result = _run(payload)
-        out_path.write_text(json.dumps({"ok": True, "result": result}, ensure_ascii=False), encoding="utf-8")
+        dump_message(out_path, {"ok": True, "result": result})
         return 0
     except BaseException as e:  # noqa: BLE001 - worker must serialize all failures.
         traceback.print_exc(file=sys.stderr)
         try:
-            out_path.write_text(
-                json.dumps({"ok": False, "error": f"{type(e).__name__}: {e}"}, ensure_ascii=False),
-                encoding="utf-8",
-            )
+            dump_message(out_path, {"ok": False, "error": f"{type(e).__name__}: {e}"})
         except Exception:
             pass
         return 1

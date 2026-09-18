@@ -270,6 +270,7 @@ async def get_or_index_demo_roster(
     *,
     parse_semaphore: asyncio.Semaphore | None = None,
     cached_rows: list[dict[str, Any]] | None = None,
+    scan_on_miss: bool = True,
 ) -> dict[str, Any]:
     """Return a versioned roster cache, parsing the Demo once on a valid miss."""
 
@@ -280,6 +281,14 @@ async def get_or_index_demo_roster(
     )
     if cached is not None:
         return cached
+    if not scan_on_miss:
+        return {
+            "players": [],
+            "cache_hit": False,
+            "indexed": False,
+            "error": None,
+            "deferred": True,
+        }
     lock = _demo_roster_locks.get(demo_id)
     if lock is None:
         lock = asyncio.Lock()

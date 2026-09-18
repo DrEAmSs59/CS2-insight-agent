@@ -1025,18 +1025,31 @@ def build_match_workspace(
     economy_df = shared_events.get("economy_ticks_df")
     name_to_final_team = shared_events.get("name_to_final_team_shared") or {}
     if economy_df is not None and not economy_df.empty and "tick" in economy_df.columns:
-        for _, row in economy_df.iterrows():
-            round_number = economy_tick_to_round.get(_int(row.get("tick")))
-            name = _clean_name(row.get("name"))
+        n_econ = len(economy_df)
+
+        def _econ_col(name: str) -> list[Any]:
+            if name not in economy_df.columns:
+                return [None] * n_econ
+            return economy_df[name].tolist()
+
+        for tick_raw, name_raw, equipment_raw, spent_raw, start_raw in zip(
+            _econ_col("tick"),
+            _econ_col("name"),
+            _econ_col("current_equip_value"),
+            _econ_col("cash_spent_this_round"),
+            _econ_col("start_balance"),
+        ):
+            round_number = economy_tick_to_round.get(_int(tick_raw))
+            name = _clean_name(name_raw)
             if not round_number or not name:
                 continue
             group = name_to_final_team.get(name.lower())
             team_key = _team_key_for_group(group, team_a_group, team_b_group) or player_team.get(name.lower())
             if not team_key:
                 continue
-            equipment = max(0, _int(row.get("current_equip_value")))
-            spent = max(0, _int(row.get("cash_spent_this_round")))
-            start_money = max(0, _int(row.get("start_balance")))
+            equipment = max(0, _int(equipment_raw))
+            spent = max(0, _int(spent_raw))
+            start_money = max(0, _int(start_raw))
             eco_type = _economy_type(
                 equipment_value=equipment,
                 money_spent=spent,

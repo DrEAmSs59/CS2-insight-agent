@@ -549,6 +549,7 @@ def materialize_match_replay_parquet_impl(
     demo_path: str,
     workspace: dict[str, Any],
     fps: float = REPLAY_MATCH_FPS,
+    parser: Any | None = None,
 ) -> dict[str, Any]:
     """Parse all replay ticks once and atomically write Rust-native Parquet."""
     from demoparser2 import DemoParser
@@ -622,7 +623,7 @@ def materialize_match_replay_parquet_impl(
     broad_end = max(item["end_tick"] for item in round_specs)
     parquet_tmp = parquet_path.with_suffix(f"{parquet_path.suffix}.partial")
     meta_tmp = meta_path.with_suffix(f"{meta_path.suffix}.partial")
-    parser = DemoParser(str(demo_path))
+    parser = parser if parser is not None else DemoParser(str(demo_path))
     try:
         player_skin_loadouts = build_player_skin_loadouts(parser)
         native_result = parser.write_replay_parquet(

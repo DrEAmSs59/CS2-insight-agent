@@ -65,7 +65,6 @@ from .clip_builder import (
     round_start_scores_for_target, is_mr12_regulation_decided_score,
 )
 from .spatial_analysis import count_shots_before
-from .input_track import detect_player_keyboard_input
 
 logger = logging.getLogger(__name__)
 
@@ -980,9 +979,9 @@ class DemoAnalyzer:
             shared_events=_shared,
             expected_players=players,
         )
-        self.has_player_keyboard_input = detect_player_keyboard_input(
-            demo_path=self.dem_path,
-        )
+        # Keyboard HUD extraction belongs to play/record, not analysis. Leave
+        # the flag unknown so analyze does not pay for a full UserCmd report.
+        self.has_player_keyboard_input = None
         shared_roster = getattr(shared_facts, "all_players_roster", None)
         if isinstance(shared_roster, list):
             identity_registry.enrich_roster(shared_roster)
@@ -1034,7 +1033,7 @@ class DemoAnalyzer:
         events = _shared["events"]
         c4_world_cluster_keys = _world_self_kill_cluster_c4_surrogate_keys(events, match_start_tick)
 
-        # ── 单遍预处理：按 attacker/victim 分桶，O(D) 替代 O(P×D) iterrows ──
+        # ── 单遍预处理：按 attacker/victim 分桶，O(D) 替代 O(P×D) Row 构造 ──
         _bucket_kills: dict[str, list[dict]] = {}
         _bucket_deaths: dict[str, list[dict]] = {}
         _first_death_tick_shared: dict[int, int] = {}
@@ -1047,15 +1046,49 @@ class DemoAnalyzer:
             except (TypeError, ValueError):
                 return None
 
-        for _, _brow in events.iterrows():
-            _rn   = _int(_brow.get("total_rounds_played")) + 1
-            _atk  = str(_brow.get("attacker_name", "") or "").strip()
-            _vic  = str(_brow.get("user_name", "") or "").strip()
-            _wpn  = _normalize_item(_brow.get("weapon", ""))
-            _tick = _int(_brow.get("tick"))
+        _death_n = 0 if events is None or getattr(events, "empty", True) else len(events)
+
+        def _death_col(name: str, default: object = None) -> list:
+            if _death_n == 0 or name not in events.columns:
+                return [default] * _death_n
+            return events[name].tolist()
+
+        _d_round = _death_col("total_rounds_played")
+        _d_atk = _death_col("attacker_name", "")
+        _d_vic = _death_col("user_name", "")
+        _d_wpn = _death_col("weapon", "")
+        _d_tick = _death_col("tick")
+        _d_atk_team = _death_col("attackerteam")
+        _d_vic_team = _death_col("userteam")
+        _d_hs = _death_col("headshot")
+        _d_noscope = _death_col("noscope")
+        _d_pen = _death_col("penetrated")
+        _d_smoke = _death_col("thrusmoke")
+        _d_blind = _death_col("attackerblind")
+        _d_flash = _death_col("assistedflash")
+        _d_air = _death_col("attackerinair")
+        _d_air_alt = _death_col("attacker_in_air")
+        _d_vic_air = _death_col("inair")
+        _d_pen_obj = _death_col("penetrated_objects")
+        _d_atk_sid = _death_col("attacker_steamid")
+        _d_user_sid = _death_col("user_steamid")
+        _d_assist = _death_col("assister_name")
+        _d_atk_x = _death_col("attacker_X")
+        _d_atk_y = _death_col("attacker_Y")
+        _d_atk_z = _death_col("attacker_Z")
+        _d_vic_x = _death_col("user_X")
+        _d_vic_y = _death_col("user_Y")
+        _d_vic_z = _death_col("user_Z")
+
+        for i in range(_death_n):
+            _rn   = _int(_d_round[i]) + 1
+            _atk  = str(_d_atk[i] or "").strip()
+            _vic  = str(_d_vic[i] or "").strip()
+            _wpn  = _normalize_item(_d_wpn[i])
+            _tick = _int(_d_tick[i])
             _is_team_kill = _is_explicit_team_kill(
-                _brow.get("attackerteam"),
-                _brow.get("userteam"),
+                _d_atk_team[i],
+                _d_vic_team[i],
             )
 
             if (
@@ -1069,27 +1102,26 @@ class DemoAnalyzer:
             _evt: dict = {
                 "round": _rn, "tick": _tick, "weapon": _wpn,
                 "attacker": _atk, "victim": _vic,
-                "headshot":        _bool(_brow.get("headshot")),
-                "noscope":         _bool(_brow.get("noscope")),
-                "penetrated":      _int(_brow.get("penetrated")),
-                "thrusmoke":       _bool(_brow.get("thrusmoke")),
-                "attackerblind":   _bool(_brow.get("attackerblind")),
-                "assistedflash":   _bool(_brow.get("assistedflash")),
-                "attacker_in_air": (_bool(_brow.get("attackerinair")) or
-                                    _bool(_brow.get("attacker_in_air"))),
-                "victim_in_air":   _bool(_brow.get("inair")),
-                "penetrated_objs": _int(_brow.get("penetrated_objects")),
-                "attacker_team":   _brow.get("attackerteam"),
-                "victim_team":     _brow.get("userteam"),
-                "attacker_steamid": str(_brow.get("attacker_steamid") or ""),
-                "user_steamid":    str(_brow.get("user_steamid") or ""),
-                "assister_name":   str(_brow.get("assister_name") or "").strip(),
-                "atk_x": _safe_coord_bucket(_brow.get("attacker_X")),
-                "atk_y": _safe_coord_bucket(_brow.get("attacker_Y")),
-                "atk_z": _safe_coord_bucket(_brow.get("attacker_Z")),
-                "vic_x": _safe_coord_bucket(_brow.get("user_X")),
-                "vic_y": _safe_coord_bucket(_brow.get("user_Y")),
-                "vic_z": _safe_coord_bucket(_brow.get("user_Z")),
+                "headshot":        _bool(_d_hs[i]),
+                "noscope":         _bool(_d_noscope[i]),
+                "penetrated":      _int(_d_pen[i]),
+                "thrusmoke":       _bool(_d_smoke[i]),
+                "attackerblind":   _bool(_d_blind[i]),
+                "assistedflash":   _bool(_d_flash[i]),
+                "attacker_in_air": (_bool(_d_air[i]) or _bool(_d_air_alt[i])),
+                "victim_in_air":   _bool(_d_vic_air[i]),
+                "penetrated_objs": _int(_d_pen_obj[i]),
+                "attacker_team":   _d_atk_team[i],
+                "victim_team":     _d_vic_team[i],
+                "attacker_steamid": str(_d_atk_sid[i] or ""),
+                "user_steamid":    str(_d_user_sid[i] or ""),
+                "assister_name":   str(_d_assist[i] or "").strip(),
+                "atk_x": _safe_coord_bucket(_d_atk_x[i]),
+                "atk_y": _safe_coord_bucket(_d_atk_y[i]),
+                "atk_z": _safe_coord_bucket(_d_atk_z[i]),
+                "vic_x": _safe_coord_bucket(_d_vic_x[i]),
+                "vic_y": _safe_coord_bucket(_d_vic_y[i]),
+                "vic_z": _safe_coord_bucket(_d_vic_z[i]),
             }
             # Friendly fire remains in the victim/death bucket so the existing
             # "痛击队友" fail tag still works, but it must never feed highlight

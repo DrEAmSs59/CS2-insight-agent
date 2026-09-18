@@ -41,8 +41,9 @@ async def run_library_demo_analyze(
     )
     if not target_players:
         raise HTTPException(400, "target_players 不能为空")
-    # 列表筛选 / PlayerSelect 依赖 demo_player_stats；缓存命中时不再重复扫描 Demo。
-    idx = await get_or_index_demo_roster(demo_id, library_path)
+    # PlayerSelect already indexed the roster at ingest. Analyze must not start
+    # a second DemoParser scan just to refresh demo_player_stats.
+    idx = await get_or_index_demo_roster(demo_id, library_path, scan_on_miss=False)
     if idx.get("error"):
         logger.warning(
             "index_demo_player_stats before library analyze demo_id=%s: %s",
