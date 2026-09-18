@@ -6,12 +6,14 @@ import json
 from importlib import metadata
 from typing import Any
 
-REQUIRED_DEMOPARSER_VERSION = "0.41.4+cs2insight9"
+REQUIRED_DEMOPARSER_VERSION = "0.41.4+cs2insight10"
+REQUIRED_CPU_REVISION = "demotracer-21f6a9b-insight-cpu1"
 REQUIRED_DEMOPARSER_METHODS = (
     "decode_smoke_voxel_journal",
     "write_replay_parquet",
     "read_replay_parquet_round",
     "read_replay_parquet_round_binary",
+    "cpu_runtime_revision",
 )
 
 
@@ -20,6 +22,7 @@ def inspect_demoparser_runtime() -> dict[str, Any]:
     installed_version: str | None = None
     import_error: str | None = None
     missing_methods = list(REQUIRED_DEMOPARSER_METHODS)
+    cpu_revision: str | None = None
     try:
         installed_version = metadata.version("demoparser2")
         from demoparser2 import DemoParser
@@ -29,6 +32,8 @@ def inspect_demoparser_runtime() -> dict[str, Any]:
             for method in REQUIRED_DEMOPARSER_METHODS
             if not callable(getattr(DemoParser, method, None))
         ]
+        if callable(getattr(DemoParser, "cpu_runtime_revision", None)):
+            cpu_revision = DemoParser.cpu_runtime_revision()
     except Exception as exc:  # noqa: BLE001 - report the exact broken runtime
         import_error = f"{type(exc).__name__}: {exc}"
 
@@ -37,9 +42,12 @@ def inspect_demoparser_runtime() -> dict[str, Any]:
             import_error is None
             and installed_version == REQUIRED_DEMOPARSER_VERSION
             and not missing_methods
+            and cpu_revision == REQUIRED_CPU_REVISION
         ),
         "installed_version": installed_version,
         "required_version": REQUIRED_DEMOPARSER_VERSION,
+        "cpu_revision": cpu_revision,
+        "required_cpu_revision": REQUIRED_CPU_REVISION,
         "missing_methods": missing_methods,
         "import_error": import_error,
     }
@@ -56,6 +64,7 @@ def require_demoparser_runtime() -> dict[str, Any]:
     raise RuntimeError(
         "Incompatible demoparser2 runtime. "
         f"Required {REQUIRED_DEMOPARSER_VERSION}, installed {installed}; "
+        f"CPU revision: {report['cpu_revision']} (required {REQUIRED_CPU_REVISION}); "
         f"missing Rust methods: {missing}{detail}. "
         "Run packaging/demoparser-lean/setup-backend-dev.ps1 from the repository root."
     )
