@@ -788,6 +788,53 @@ def _normalized_path(path: str) -> str:
     return os.path.normcase(os.path.abspath(os.path.expanduser(str(path))))
 
 
+def _read_cache_identity(meta_path: Path) -> dict[str, Any]:
+    """Read ownership fields without decoding every cached smoke voxel.
+
+    Our writer puts these fields first. Older/reordered metadata still uses the
+    full JSON reader when its identity does not fit in the bounded prefix.
+    """
+    required = {"version", "parser_runtime", "cache_key", "demo_fingerprint"}
+    with meta_path.open("r", encoding="utf-8") as reader:
+        prefix = reader.read(16 * 1024)
+    decoder = json.JSONDecoder()
+    pos = 0
+    identity: dict[str, Any] = {}
+    try:
+        pos = len(prefix) - len(prefix.lstrip())
+        if prefix[pos] != "{":
+            raise ValueError("cache metadata must be an object")
+        pos += 1
+        while required - identity.keys():
+            while prefix[pos].isspace():
+                pos += 1
+            key, pos = decoder.raw_decode(prefix, pos)
+            if not isinstance(key, str):
+                raise ValueError("invalid metadata key")
+            while prefix[pos].isspace():
+                pos += 1
+            if prefix[pos] != ":":
+                raise ValueError("invalid metadata field")
+            pos += 1
+            while prefix[pos].isspace():
+                pos += 1
+            value, pos = decoder.raw_decode(prefix, pos)
+            if key in required:
+                identity[key] = value
+            while prefix[pos].isspace():
+                pos += 1
+            if prefix[pos] not in ",}":
+                raise ValueError("invalid metadata separator")
+            if prefix[pos] == "}":
+                break
+            pos += 1
+        if not required - identity.keys():
+            return identity
+    except (ValueError, IndexError):
+        pass
+    return json.loads(meta_path.read_text(encoding="utf-8"))
+
+
 def _remove_match_caches(
     demo_paths: list[str],
     *,
@@ -809,7 +856,7 @@ def _remove_match_caches(
                 continue
             seen.add(meta_key)
             try:
-                payload = json.loads(meta_path.read_text(encoding="utf-8"))
+                payload = _read_cache_identity(meta_path)
             except Exception as exc:  # noqa: BLE001 - cleanup skips unknown files
                 logger.warning("whole-match replay metadata cleanup read failed for %s: %s", meta_path, exc)
                 continue
