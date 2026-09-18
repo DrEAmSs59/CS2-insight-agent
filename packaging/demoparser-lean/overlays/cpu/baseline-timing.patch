@@ -1,0 +1,210 @@
+diff --git a/src/python/src/lib.rs b/src/python/src/lib.rs
+index 0d0772b2..6269e351 100644
+--- a/src/python/src/lib.rs
++++ b/src/python/src/lib.rs
+@@ -34,6 +34,8 @@ use pyo3::{PyAny, PyResult};
+ use std::collections::{BTreeMap, HashMap, VecDeque};
+ use std::fs::File;
+ use std::sync::Arc;
++use std::sync::atomic::{AtomicU64, Ordering};
++use std::time::Instant;
+ 
+ use pyo3::create_exception;
+ create_exception!(DemoParser, Exception, pyo3::exceptions::PyException);
+@@ -1018,6 +1020,11 @@ impl<'py> FromPyObject<'_, 'py> for WantedPropState {
+ 
+ #[pymethods]
+ impl DemoParser {
++    /// Most recent native parse duration, excluding Python materialization/export.
++    pub fn last_parse_seconds(&self) -> f64 {
++        self.last_parse_nanos.load(Ordering::Relaxed) as f64 / 1e9
++    }
++
+     #[new]
+     pub fn py_new(demo_path: String) -> PyResult<Self> {
+         let mmap = match create_mmap(demo_path.clone()) {
+@@ -1025,7 +1032,7 @@ impl DemoParser {
+             Err(e) => return Err(Exception::new_err(format!("{e}. File name: {demo_path}"))),
+         };
+         let huf = create_huffman_lookup_table();
+-        Ok(Self { mmap, huf })
++        Ok(Self { mmap, huf, last_parse_nanos: AtomicU64::new(0) })
+     }
+ 
+     /// Parses header message (different from the first 16 bytes of the file)
+@@ -1085,10 +1092,12 @@ impl DemoParser {
+             fallback_bytes: None,
+         };
+         let mut parser = Parser::new(settings, parser::parse_demo::ParsingMode::Normal);
++        let parse_started = Instant::now();
+         let output = match parser.parse_demo(&self.mmap) {
+             Ok(output) => output,
+             Err(e) => return Err(Exception::new_err(format!("{e}"))),
+         };
++        self.last_parse_nanos.store(parse_started.elapsed().as_nanos() as u64, Ordering::Relaxed);
+         Ok(output.uniq_prop_names)
+     }
+     pub fn list_game_events(&self, _py: Python<'_>) -> PyResult<Vec<String>> {
+@@ -1112,10 +1121,12 @@ impl DemoParser {
+             fallback_bytes: None,
+         };
+         let mut parser = Parser::new(settings, parser::parse_demo::ParsingMode::Normal);
++        let parse_started = Instant::now();
+         let output = match parser.parse_demo(&self.mmap) {
+             Ok(output) => output,
+             Err(e) => return Err(Exception::new_err(format!("{e}"))),
+         };
++        self.last_parse_nanos.store(parse_started.elapsed().as_nanos() as u64, Ordering::Relaxed);
+         Ok(output.game_events_counter.into_iter().collect_vec())
+     }
+ 
+@@ -1165,10 +1176,12 @@ impl DemoParser {
+         };
+ 
+         let mut parser = Parser::new(settings, parser::parse_demo::ParsingMode::Normal);
++        let parse_started = Instant::now();
+         let output = match parser.parse_demo(&self.mmap) {
+             Ok(output) => output,
+             Err(e) => return Err(Exception::new_err(format!("{e}"))),
+         };
++        self.last_parse_nanos.store(parse_started.elapsed().as_nanos() as u64, Ordering::Relaxed);
+         let mut all_series = vec![];
+         let mut all_pyobjects = vec![];
+         let prop_infos = output.prop_controller.prop_infos;
+@@ -1311,10 +1324,12 @@ impl DemoParser {
+             fallback_bytes: None,
+         };
+         let mut parser = Parser::new(settings, parser::parse_demo::ParsingMode::Normal);
++        let parse_started = Instant::now();
+         let output = match parser.parse_demo(&self.mmap) {
+             Ok(output) => output,
+             Err(e) => return Err(Exception::new_err(format!("{e}"))),
+         };
++        self.last_parse_nanos.store(parse_started.elapsed().as_nanos() as u64, Ordering::Relaxed);
+         demo_output_dataframe(py, &output)
+     }
+ 
+@@ -1366,10 +1381,12 @@ impl DemoParser {
+             fallback_bytes: None,
+         };
+         let mut parser = Parser::new(settings, parser::parse_demo::ParsingMode::Normal);
++        let parse_started = Instant::now();
+         let output = match parser.parse_demo(&self.mmap) {
+             Ok(output) => output,
+             Err(e) => return Err(Exception::new_err(format!("{e}"))),
+         };
++        self.last_parse_nanos.store(parse_started.elapsed().as_nanos() as u64, Ordering::Relaxed);
+         let mut all_series = vec![];
+         let mut all_pyobjects = vec![];
+         let prop_infos = output.prop_controller.prop_infos;
+@@ -1478,10 +1495,12 @@ impl DemoParser {
+             fallback_bytes: None,
+         };
+         let mut parser = Parser::new(settings, parser::parse_demo::ParsingMode::Normal);
++        let parse_started = Instant::now();
+         let output = match parser.parse_demo(&self.mmap) {
+             Ok(output) => output,
+             Err(e) => return Err(Exception::new_err(format!("{e}"))),
+         };
++        self.last_parse_nanos.store(parse_started.elapsed().as_nanos() as u64, Ordering::Relaxed);
+         let steamids: Vec<Option<u64>> = output.player_md.iter().map(|p| p.steamid).collect();
+         let team_numbers: Vec<Option<i32>> =
+             output.player_md.iter().map(|p| p.team_number).collect();
+@@ -1523,10 +1542,12 @@ impl DemoParser {
+             fallback_bytes: None,
+         };
+         let mut parser = Parser::new(settings, parser::parse_demo::ParsingMode::Normal);
++        let parse_started = Instant::now();
+         let output = match parser.parse_demo(&self.mmap) {
+             Ok(output) => output,
+             Err(e) => return Err(Exception::new_err(format!("{e}"))),
+         };
++        self.last_parse_nanos.store(parse_started.elapsed().as_nanos() as u64, Ordering::Relaxed);
+         let def_index: Vec<Option<u32>> = output.item_drops.iter().map(|x| x.def_index).collect();
+         let account_id: Vec<Option<u32>> = output.item_drops.iter().map(|x| x.account_id).collect();
+         let dropreason: Vec<Option<u32>> = output.item_drops.iter().map(|x| x.dropreason).collect();
+@@ -1589,10 +1610,12 @@ impl DemoParser {
+             fallback_bytes: None,
+         };
+         let mut parser = Parser::new(settings, parser::parse_demo::ParsingMode::Normal);
++        let parse_started = Instant::now();
+         let output = match parser.parse_demo(&self.mmap) {
+             Ok(output) => output,
+             Err(e) => return Err(Exception::new_err(format!("{e}"))),
+         };
++        self.last_parse_nanos.store(parse_started.elapsed().as_nanos() as u64, Ordering::Relaxed);
+ 
+         let def_idx_vec: Vec<Option<u32>> = output.skins.iter().map(|s| s.def_index).collect();
+         let item_id: Vec<Option<u64>> = output.skins.iter().map(|s| s.item_id).collect();
+@@ -1678,10 +1701,12 @@ impl DemoParser {
+             fallback_bytes: None,
+         };
+         let mut parser = Parser::new(settings, parser::parse_demo::ParsingMode::Normal);
++        let parse_started = Instant::now();
+         let output = match parser.parse_demo(&self.mmap) {
+             Ok(output) => output,
+             Err(e) => return Err(Exception::new_err(format!("{e}"))),
+         };
++        self.last_parse_nanos.store(parse_started.elapsed().as_nanos() as u64, Ordering::Relaxed);
+         let event_series = match series_from_event(&output.game_events, py) {
+             Ok(ser) => ser,
+             Err(_e) => return Ok(PyList::empty(py).into()),
+@@ -1740,10 +1765,12 @@ impl DemoParser {
+             fallback_bytes: None,
+         };
+         let mut parser = Parser::new(settings, parser::parse_demo::ParsingMode::Normal);
++        let parse_started = Instant::now();
+         let output = match parser.parse_demo(&self.mmap) {
+             Ok(output) => output,
+             Err(e) => return Err(Exception::new_err(format!("{e}"))),
+         };
++        self.last_parse_nanos.store(parse_started.elapsed().as_nanos() as u64, Ordering::Relaxed);
+         let event_series = match series_from_multiple_events(&output.game_events, py) {
+             Ok(ser) => ser,
+             Err(e) => return Err(Exception::new_err(format!("{e}"))),
+@@ -1771,10 +1798,12 @@ impl DemoParser {
+             fallback_bytes: None,
+         };
+         let mut parser = Parser::new(settings, parser::parse_demo::ParsingMode::Normal);
++        let parse_started = Instant::now();
+         let output = match parser.parse_demo(&self.mmap) {
+             Ok(output) => output,
+             Err(e) => return Err(PyValueError::new_err(format!("{e}"))),
+         };
++        self.last_parse_nanos.store(parse_started.elapsed().as_nanos() as u64, Ordering::Relaxed);
+         let mut hm: Vec<Bound<'_, PyDict>> = vec![];
+ 
+         for (tick, packet) in output.voice_data {
+@@ -1832,9 +1861,11 @@ impl DemoParser {
+             fallback_bytes: None,
+         };
+         let mut parser = Parser::new(settings, parser::parse_demo::ParsingMode::Normal);
++        let parse_started = Instant::now();
+         let output = parser
+             .parse_demo(&self.mmap)
+             .map_err(|error| Exception::new_err(format!("{error}")))?;
++        self.last_parse_nanos.store(parse_started.elapsed().as_nanos() as u64, Ordering::Relaxed);
+ 
+         let tick_to_round: AHashMap<i32, i32> = ticks.into_iter().zip(round_numbers).collect();
+         let tick_values = match output
+@@ -2134,10 +2165,12 @@ impl DemoParser {
+             fallback_bytes: None,
+         };
+         let mut parser = Parser::new(settings, parser::parse_demo::ParsingMode::Normal);
++        let parse_started = Instant::now();
+         let output = match parser.parse_demo(&self.mmap) {
+             Ok(output) => output,
+             Err(e) => return Err(Exception::new_err(format!("{e}"))),
+         };
++        self.last_parse_nanos.store(parse_started.elapsed().as_nanos() as u64, Ordering::Relaxed);
+         let mut all_series = vec![];
+         let mut all_pyobjects = vec![];
+         let prop_infos = output.prop_controller.prop_infos;
+@@ -2274,6 +2307,7 @@ impl DemoParser {
+ 
+ #[pyclass]
+ struct DemoParser {
++    last_parse_nanos: AtomicU64,
+     mmap: Mmap,
+     huf: Vec<(u8, u8)>,
+ }

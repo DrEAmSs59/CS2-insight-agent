@@ -11,9 +11,12 @@ param(
     [Parameter(Mandatory = $false)]
     [string]$UvExe = "uv",
 
-    # Optional local demoparser checkout (must be at metadata.commit). Skips git clone.
+    # Optional local demoparser checkout containing metadata.commit. Skips git clone.
     [Parameter(Mandatory = $false)]
-    [string]$SourceDir = ""
+    [string]$SourceDir = "",
+
+    # Historical Insight 9 plus exactly the same coarse native timing boundary.
+    [switch]$BenchmarkBaseline
 )
 
 $ErrorActionPreference = "Stop"
@@ -21,6 +24,7 @@ $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
 $metadataPath = Join-Path $PSScriptRoot "demoparser-runtime.json"
 $patchPath = Join-Path $PSScriptRoot "demoparser2-v0.41.4.patch"
 $metadata = Get-Content -LiteralPath $metadataPath -Raw | ConvertFrom-Json
+if ($BenchmarkBaseline) { $metadata.distribution_version = '0.41.4+cs2insight9' }
 $outputPath = if ([IO.Path]::IsPathRooted($OutputDir)) {
     [IO.Path]::GetFullPath($OutputDir)
 } else {
@@ -37,26 +41,44 @@ if ($patchHash -ne ([string]$metadata.patch_sha256).ToLowerInvariant()) {
 
 & $UvExe --version
 if ($LASTEXITCODE -ne 0) { throw "uv is required to build the patched demoparser wheel." }
-# Install maturin without removing the project's other locked dependencies.
-& $UvExe sync --project $repoRoot --frozen --group parser-build
-if ($LASTEXITCODE -ne 0) { throw "Installing the locked parser-build environment with uv failed." }
+# Bootstrap independently: the project's local wheel does not exist on a fresh checkout.
 
 New-Item -ItemType Directory -Path $outputPath -Force | Out-Null
-$tempRoot = Join-Path ([IO.Path]::GetTempPath()) ("cs2insight-demoparser-" + [Guid]::NewGuid().ToString("n"))
+$tempRoot = Join-Path $repoRoot ("tmp\cs2insight-demoparser-" + [Guid]::NewGuid().ToString("n"))
 $sourceRoot = Join-Path $tempRoot "demoparser"
 New-Item -ItemType Directory -Path $tempRoot -Force | Out-Null
+$releaseEnvironment = @{
+    CARGO_PROFILE_RELEASE_OPT_LEVEL = '3'
+    CARGO_PROFILE_RELEASE_LTO = 'fat'
+    CARGO_PROFILE_RELEASE_CODEGEN_UNITS = '1'
+    CARGO_PROFILE_RELEASE_DEBUG = '0'
+    CARGO_PROFILE_RELEASE_STRIP = 'symbols'
+}
+$previousEnvironment = @{}
+foreach ($name in $releaseEnvironment.Keys) {
+    $previousEnvironment[$name] = [Environment]::GetEnvironmentVariable($name, 'Process')
+    [Environment]::SetEnvironmentVariable($name, $releaseEnvironment[$name], 'Process')
+}
 
 try {
     if ($SourceDir.Trim()) {
         $localSource = (Resolve-Path -LiteralPath $SourceDir).Path
-        & git -C $localSource worktree add --detach $sourceRoot $metadata.commit
-        if ($LASTEXITCODE -ne 0) { throw "git worktree add from SourceDir failed with exit code $LASTEXITCODE" }
+        $actualCommit = (& git -C $localSource rev-parse $metadata.commit).Trim()
+        $archive = Join-Path $tempRoot 'source.tar'
+        & git -C $localSource archive --format=tar --output=$archive $metadata.commit
+        if ($LASTEXITCODE -ne 0) { throw "git archive from SourceDir failed" }
+        New-Item -ItemType Directory -Path $sourceRoot -Force | Out-Null
+        & tar -xf $archive -C $sourceRoot
+        if ($LASTEXITCODE -ne 0) { throw "Extracting local parser source failed" }
+        # Keep git apply rooted here, rather than in Insight's parent worktree.
+        & git -C $sourceRoot init --quiet
+        if ($LASTEXITCODE -ne 0) { throw 'Initializing isolated parser patch root failed' }
     } else {
         & git clone --quiet --depth 1 --branch $metadata.tag $metadata.upstream_url $sourceRoot
         if ($LASTEXITCODE -ne 0) { throw "git clone demoparser failed with exit code $LASTEXITCODE" }
+        $actualCommit = (& git -C $sourceRoot rev-parse HEAD).Trim()
     }
 
-    $actualCommit = (& git -C $sourceRoot rev-parse HEAD).Trim()
     if ($LASTEXITCODE -ne 0 -or $actualCommit -ne [string]$metadata.commit) {
         throw "demoparser commit mismatch: expected $($metadata.commit), got $actualCommit"
     }
@@ -86,6 +108,17 @@ try {
     & git -C $sourceRoot apply $entityVectorPatch
     if ($LASTEXITCODE -ne 0) { throw "Applying entity vector-length patch failed" }
 
+    $cpuPatchName = if ($BenchmarkBaseline) { 'baseline-timing.patch' } else { 'demotracer-21f6a9b.patch' }
+    $cpuHash = if ($BenchmarkBaseline) { $metadata.baseline_timing_patch_sha256 } else { $metadata.cpu_patch_sha256 }
+    $cpuPatch = Join-Path $PSScriptRoot "overlays\cpu\$cpuPatchName"
+    if ((Get-FileHash -LiteralPath $cpuPatch -Algorithm SHA256).Hash.ToLowerInvariant() -ne $cpuHash) {
+        throw 'CPU overlay SHA256 mismatch'
+    }
+    & git -C $sourceRoot apply --check $cpuPatch
+    if ($LASTEXITCODE -ne 0) { throw 'CPU overlay no longer applies cleanly' }
+    & git -C $sourceRoot apply $cpuPatch
+    if ($LASTEXITCODE -ne 0) { throw 'Applying CPU overlay failed' }
+
     $manifest = Join-Path $sourceRoot "src\python\Cargo.toml"
     $lockPath = Join-Path $sourceRoot "src\python\Cargo.lock"
     $versionQuoted = '"' + [string]$metadata.distribution_version + '"'
@@ -99,7 +132,7 @@ try {
         $text = [regex]::Replace($text, '(?m)^version\s*=\s*"0\.41\.4\+cs2insight\d+"', ('version = ' + $versionQuoted))
         Set-Content -LiteralPath $path -Value $text -NoNewline
     }
-    & $UvExe run --project $repoRoot --frozen --group parser-build python -m maturin build --release --locked --manifest-path $manifest --interpreter $PythonExe --out $outputPath
+    & $UvExe run --no-project --with maturin==1.14.1 --python $PythonExe maturin build --release --locked --manifest-path $manifest --interpreter $PythonExe --out $outputPath
     if ($LASTEXITCODE -ne 0) { throw "maturin build failed with exit code $LASTEXITCODE" }
 
     $wheel = Get-ChildItem -LiteralPath $outputPath -File -Filter "demoparser2-$($metadata.distribution_version)-*.whl" |
@@ -110,10 +143,15 @@ try {
     }
     Write-Host ("Lean demoparser wheel: {0}" -f $wheel.FullName)
 } finally {
-    if ($SourceDir.Trim() -and (Test-Path -LiteralPath $sourceRoot -PathType Container)) {
-        & git -C (Resolve-Path -LiteralPath $SourceDir).Path worktree remove --force $sourceRoot 2>$null
+    foreach ($name in $previousEnvironment.Keys) {
+        [Environment]::SetEnvironmentVariable($name, $previousEnvironment[$name], 'Process')
     }
     if (Test-Path -LiteralPath $tempRoot) {
-        Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue
+        $resolvedTemp = (Resolve-Path -LiteralPath $tempRoot).Path
+        $safePrefix = [IO.Path]::GetFullPath((Join-Path $repoRoot 'tmp')).TrimEnd('\') + '\'
+        if (-not $resolvedTemp.StartsWith($safePrefix, [StringComparison]::OrdinalIgnoreCase)) {
+            throw "Refusing to remove parser build outside workspace tmp: $resolvedTemp"
+        }
+        Remove-Item -LiteralPath $resolvedTemp -Recurse -Force -ErrorAction SilentlyContinue
     }
 }

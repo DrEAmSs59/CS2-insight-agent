@@ -10,6 +10,7 @@ on:
       - "packaging/demoparser-lean/build-wheel.ps1"
       - "packaging/demoparser-lean/demoparser-runtime.json"
       - "packaging/demoparser-lean/demoparser2-v0.41.4.patch"
+      - "packaging/demoparser-lean/overlays/**"
 
 permissions:
   contents: write
@@ -43,7 +44,7 @@ jobs:
           $wheel = Get-ChildItem "dist/wheels/demoparser2-$($meta.distribution_version)-cp312-cp312-win_amd64.whl" |
             Select-Object -First 1
           if (-not $wheel) { throw "Expected patched demoparser wheel was not produced" }
-          uv run --no-project --with $wheel.FullName python -c "import importlib.metadata as m, importlib.util as u; from demoparser2 import DemoParser; assert m.version('demoparser2') == '$($meta.distribution_version)'; assert hasattr(DemoParser, 'decode_smoke_voxel_journal'); assert hasattr(DemoParser, 'write_replay_parquet'); assert hasattr(DemoParser, 'read_replay_parquet_round_binary'); assert all(u.find_spec(name) is None for name in ('numpy', 'pandas', 'polars', 'pyarrow'))"
+          uv run --no-project --with $wheel.FullName python -c "import importlib.metadata as m, importlib.util as u; from demoparser2 import DemoParser; assert m.version('demoparser2') == '$($meta.distribution_version)'; assert DemoParser.cpu_runtime_revision() == '$($meta.runtime_revision)'; assert hasattr(DemoParser, 'decode_smoke_voxel_journal'); assert hasattr(DemoParser, 'write_replay_parquet'); assert hasattr(DemoParser, 'read_replay_parquet_round_binary'); assert all(u.find_spec(name) is None for name in ('numpy', 'pandas', 'polars', 'pyarrow'))"
           if ($LASTEXITCODE -ne 0) { throw "Built demoparser wheel verification failed" }
           $hash = (Get-FileHash -LiteralPath $wheel.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
           [IO.File]::WriteAllText(
@@ -66,8 +67,9 @@ jobs:
           body: |
             Patched CPython 3.12 x64 runtime used by CS2 Insight Agent.
 
-            The accompanying SHA256 file is verified by
-            `packaging/demoparser-lean/setup-backend-dev.ps1` before installation.
+            The accompanying SHA256 file identifies the wheel bytes.
+            `packaging/demoparser-lean/setup-backend-dev.ps1` installs this
+            pre-release and verifies the native CPU revision.
           files: |
             dist/wheels/demoparser2-*.whl
             dist/wheels/demoparser2-SHA256SUMS.txt
