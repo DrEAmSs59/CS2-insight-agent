@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from app import native_table as pd
 
 from app.features.demo_analysis.match_workspace import (
+    MATCH_WORKSPACE_ALGORITHM_VERSION,
     _build_round_windows,
     _enrich_grenade_events,
     _extract_grenade_trajectories,
@@ -275,6 +276,7 @@ def test_build_match_workspace_reuses_shared_parse_for_all_views():
     )
 
     assert result["version"] == 1
+    assert result["algorithm_version"] == MATCH_WORKSPACE_ALGORITHM_VERSION
     assert result["team_a_name"] == "Alpha Team"
     assert result["team_b_name"] == "Bravo Team"
     assert len(result["players"]) == 2

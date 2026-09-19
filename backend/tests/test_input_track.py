@@ -1,10 +1,12 @@
 import os
 import sys
+from pathlib import Path
 
 import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
+from app import demo_playback_compat as compat
 from app import input_command
 from app.features.demo_analysis import input_track
 
@@ -207,20 +209,131 @@ def test_matched_identity_without_button_track_is_an_error():
         )
 
 
-def test_detect_player_keyboard_input_uses_native_report_when_path_is_available(monkeypatch):
-    monkeypatch.setattr(input_track, "load_input_report", lambda _path: _report())
-    assert input_track.detect_player_keyboard_input(
-        demo_path="match.dem",
-    ) is True
+def _append_bits(bits: list[int], value: int, count: int) -> None:
+    bits.extend((value >> index) & 1 for index in range(count))
 
 
-def test_detect_player_keyboard_input_returns_unknown_without_native_report(monkeypatch):
-    def fail_native_report(_path):
-        raise input_track.InputCommandError("native decoder unavailable")
+def _append_ubitvar(bits: list[int], value: int) -> None:
+    if value < 16:
+        _append_bits(bits, value, 6)
+    elif value < 256:
+        _append_bits(bits, (value & 0x0F) | 0x10, 6)
+        _append_bits(bits, value >> 4, 4)
+    else:
+        raise AssertionError(f"unsupported ubitvar in test fixture: {value}")
 
-    monkeypatch.setattr(input_track, "load_input_report", fail_native_report)
 
-    assert input_track.detect_player_keyboard_input(demo_path="match.dem") is None
+def _bits_to_bytes(bits: list[int]) -> bytes:
+    out = bytearray((len(bits) + 7) // 8)
+    for index, bit in enumerate(bits):
+        if bit:
+            out[index >> 3] |= 1 << (index & 7)
+    return bytes(out)
+
+
+def _packet_data(messages: list[tuple[int, bytes]]) -> bytes:
+    bits: list[int] = []
+    for message_type, payload in messages:
+        _append_ubitvar(bits, message_type)
+        for byte in compat._encode_varint(len(payload)):
+            _append_bits(bits, byte, 8)
+        for byte in payload:
+            _append_bits(bits, byte, 8)
+    return _bits_to_bytes(bits)
+
+
+def _packet_proto(packet_data: bytes) -> bytes:
+    return b"\x1a" + compat._encode_varint(len(packet_data)) + packet_data
+
+
+def _full_packet_proto(packet_proto: bytes) -> bytes:
+    string_table = b"opaque-string-table"
+    return (
+        b"\x0a"
+        + compat._encode_varint(len(string_table))
+        + string_table
+        + b"\x12"
+        + compat._encode_varint(len(packet_proto))
+        + packet_proto
+    )
+
+
+def _frame(command: int, tick: int, payload: bytes, *, compressed: bool = False) -> bytes:
+    raw_command = command | (64 if compressed else 0)
+    stored = compat._snappy_compress(payload) if compressed else payload
+    return (
+        compat._encode_varint(raw_command)
+        + compat._encode_varint(tick)
+        + compat._encode_varint(len(stored))
+        + stored
+    )
+
+
+def _write_demo(tmp_path: Path, frames: list[bytes], name: str = "match.dem") -> Path:
+    path = tmp_path / name
+    path.write_bytes(b"PBDEMS2\x00" + (0).to_bytes(8, "little") + b"".join(frames))
+    return path
+
+
+def test_detect_player_keyboard_input_finds_svc_usercmds_in_packet(tmp_path, monkeypatch):
+    def boom(_path):
+        raise AssertionError("must not extract the full UserCmd report")
+
+    monkeypatch.setattr(input_track, "load_input_report", boom)
+    demo = _write_demo(
+        tmp_path,
+        [_frame(7, 42, _packet_proto(_packet_data([(76, b"cmd")])))],
+    )
+    assert input_track.detect_player_keyboard_input(demo_path=demo) is True
+
+
+def test_detect_player_keyboard_input_finds_outer_dem_usercmd(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        input_track,
+        "load_input_report",
+        lambda _path: (_ for _ in ()).throw(AssertionError("must not extract")),
+    )
+    demo = _write_demo(tmp_path, [_frame(12, 8, b"usercmd-bytes")])
+    assert input_track.detect_player_keyboard_input(demo_path=demo) is True
+
+
+def test_detect_player_keyboard_input_finds_compressed_and_full_packet_carriers(tmp_path):
+    compressed = _write_demo(
+        tmp_path,
+        [_frame(8, 1, _packet_proto(_packet_data([(76, b"cmd")])), compressed=True)],
+        name="compressed.dem",
+    )
+    full_packet = _write_demo(
+        tmp_path,
+        [_frame(13, 2, _full_packet_proto(_packet_proto(_packet_data([(76, b"cmd")]))))],
+        name="full.dem",
+    )
+    assert input_track.detect_player_keyboard_input(demo_path=compressed) is True
+    assert input_track.detect_player_keyboard_input(demo_path=full_packet) is True
+
+
+def test_detect_player_keyboard_input_is_false_without_input_carriers(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        input_track,
+        "load_input_report",
+        lambda _path: (_ for _ in ()).throw(AssertionError("must not extract")),
+    )
+    demo = _write_demo(
+        tmp_path,
+        [
+            _frame(7, 1, _packet_proto(_packet_data([(8, b"tick")]))),
+            _frame(0, 2, b"stop"),
+        ],
+    )
+    assert input_track.detect_player_keyboard_input(demo_path=demo) is False
+
+
+def test_detect_player_keyboard_input_returns_unknown_for_unreadable_demos(tmp_path):
+    missing = tmp_path / "missing.dem"
+    invalid = tmp_path / "invalid.dem"
+    invalid.write_bytes(b"not-a-demo")
+    assert input_track.detect_player_keyboard_input(demo_path=missing) is None
+    assert input_track.detect_player_keyboard_input(demo_path=invalid) is None
 
 
 def test_prepared_batch_loads_native_report_once(monkeypatch):

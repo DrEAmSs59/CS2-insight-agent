@@ -1386,9 +1386,9 @@ class DemoAnalyzer:
                 freeze_to_death_rounds=freeze_to_death_rounds,
             )
 
-        try:
-            from .match_workspace import build_match_workspace
+        from .match_workspace import MATCH_WORKSPACE_ALGORITHM_VERSION, build_match_workspace
 
+        try:
             raw_tick_rate = header.get("tick_rate") or header.get("tickrate") or TICK_RATE
             try:
                 tick_rate = float(raw_tick_rate)
@@ -1410,7 +1410,7 @@ class DemoAnalyzer:
             logger.exception("build_match_workspace failed for %s", self.dem_path)
             self.analysis_workspace = {
                 "version": 1,
-                "algorithm_version": "match-workspace-2026.08.15-keyboard-input-v1",
+                "algorithm_version": MATCH_WORKSPACE_ALGORITHM_VERSION,
                 "data_source": "demo_parser_with_derived_metrics",
                 "team_assignment_source": "unavailable",
                 "derived_fields": [],

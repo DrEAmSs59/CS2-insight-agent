@@ -67,3 +67,64 @@ def test_analyze_batch_defers_replay_parquet(monkeypatch):
         "status": "deferred",
         "reason": "materialized on first 2D replay open",
     }
+
+
+def _fake_analyzer_class():
+    class _FakeResult:
+        def to_dict(self):
+            return {"clips": [{"id": "a"}]}
+
+    class _FakeAnalyzer:
+        has_player_keyboard_input = None
+        analysis_workspace = {"rounds": [{"round_number": 1, "start_tick": 1, "end_tick": 64}]}
+
+        def __init__(self, _path):
+            pass
+
+        def analyze(self, _target, freeze_to_death_rounds=None):
+            return _FakeResult()
+
+        def analyze_multi_players(self, _players, freeze_to_death_rounds=None):
+            return {"alpha": _FakeResult()}
+
+    return _FakeAnalyzer
+
+
+def test_analyze_batch_records_missing_keyboard_carriers(monkeypatch, tmp_path):
+    from app import parse_worker
+    import test_input_track as fixtures
+
+    demo = fixtures._write_demo(
+        tmp_path,
+        [fixtures._frame(7, 1, fixtures._packet_proto(fixtures._packet_data([(8, b"tick")])))],
+    )
+    monkeypatch.setattr(parse_worker, "DemoAnalyzer", _fake_analyzer_class())
+    result = parse_worker._run(
+        {
+            "action": "analyze_batch",
+            "dem_path": str(demo),
+            "target_players": ["alpha"],
+        }
+    )
+    assert result["__has_player_keyboard_input__"] is False
+    assert result["alpha"] == {"clips": [{"id": "a"}]}
+
+
+def test_analyze_records_svc_usercmd_carriers(monkeypatch, tmp_path):
+    from app import parse_worker
+    import test_input_track as fixtures
+
+    demo = fixtures._write_demo(
+        tmp_path,
+        [fixtures._frame(7, 42, fixtures._packet_proto(fixtures._packet_data([(76, b"cmd")])))],
+    )
+    monkeypatch.setattr(parse_worker, "DemoAnalyzer", _fake_analyzer_class())
+    result = parse_worker._run(
+        {
+            "action": "analyze",
+            "dem_path": str(demo),
+            "target_player": "alpha",
+        }
+    )
+    assert result["has_player_keyboard_input"] is True
+    assert result["clips"] == [{"id": "a"}]

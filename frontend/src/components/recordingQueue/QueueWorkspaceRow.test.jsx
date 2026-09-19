@@ -41,9 +41,9 @@ describe("QueueWorkspaceRow in-game input HUD warning", () => {
   test("shows the warning only when input data is confirmed missing", () => {
     const missing = renderRow(false);
     const warning = screen.getByTestId("queue-input-hud-warning");
-    expect(screen.getByText("该 Demo 缺少权威玩家输入数据")).toBeTruthy();
-    expect(screen.getByText("该片段的局内 VPK 按键 HUD 可能保持为空。")).toBeTruthy();
-    expect(screen.getByText("其他局内 HUD 功能不受影响。")).toBeTruthy();
+    expect(screen.getByText("该 Demo 缺少玩家键鼠数据")).toBeTruthy();
+    expect(screen.getByText("无法显示键鼠可视化")).toBeTruthy();
+    expect(screen.getByText("这可能与游戏平台有关")).toBeTruthy();
     expect(warning.className).toContain("w-fit");
     expect(warning.className).toContain("max-w-[290px]");
     missing.unmount();

@@ -37,6 +37,10 @@ _NON_BULLET_WEAPONS = {
 }
 _KILL_NUMERALS = {2: "双", 3: "三", 4: "四", 5: "五"}
 
+# Bump this together with DEMO_ANALYSIS_WORKSPACE_ALGORITHM_VERSION so cached
+# analysis results are rebuilt (keyboard carrier probe, clip/workspace changes).
+MATCH_WORKSPACE_ALGORITHM_VERSION = "match-workspace-2026.09.19-keyboard-input-v2"
+
 
 def _clean_name(value: object) -> str:
     if value is None or (isinstance(value, float) and pd.isna(value)):
@@ -1280,7 +1284,7 @@ def build_match_workspace(
 
     return {
         "version": 1,
-        "algorithm_version": "match-workspace-2026.08.15-keyboard-input-v1",
+        "algorithm_version": MATCH_WORKSPACE_ALGORITHM_VERSION,
         "data_source": "demo_parser_with_derived_metrics",
         "team_assignment_source": (
             "round_side_groups" if group_side_by_round else "roster_order_fallback"
