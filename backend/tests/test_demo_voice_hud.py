@@ -8,12 +8,15 @@ import pytest
 from app.demo_voice_hud import (
     DemoVoiceHudBuild,
     DemoVoiceHudError,
+    RADAR_FLAG_CAN_BUY,
     VOICE_DATA_BEGIN,
     VOICE_DATA_END,
     VOICE_SCRIPT_PATH,
     _advanced_round_starts,
     _build_player_sound_track,
     _kill_cash_award,
+    _radar_can_buy,
+    _reconstructed_buy_time_elapsed,
     _weapon_fire_sound_radius,
     add_advanced_playback_track_to_payload,
     add_combat_stats_track_to_payload,
@@ -892,6 +895,9 @@ def test_checked_in_voice_template_contains_only_an_empty_payload():
     assert b"if (!hud || state.bIsPaused || tick <= transientHudSuppressUntilTick)" in script
     assert b"$.Schedule(0.016, watchDemoTimeJumps)" in script
     assert b"$.Schedule(0, watchDemoTimeJumps)" in script
+    jump_start = script.index(b"function watchDemoTimeJumps()")
+    jump_end = script.index(b"function findTeamCounterRoot()", jump_start)
+    assert b'ConsoleCommand("mp_forcecamera 0")' in script[jump_start:jump_end]
     assert b'findHudTraverse("AlertText")' in script
     assert b"armStockHudAlertSeekSuppress(state, tick)" in script
     assert b"updateStockHudAlertSeekSuppress(state, tick)" in script
@@ -950,8 +956,8 @@ def test_checked_in_voice_template_contains_only_an_empty_payload():
     assert b'["H", 234, 76, 38, 34, 18, 5, -1, true, 0, "hand"]' in script
     assert b'["SPACE", 66, 114' in script
     assert b'["R", 192, 38' in script
-    assert b'["M1", 276, 38, 39, 44, 11, 13, 8' in script
-    assert b'["M2", 315, 38, 39, 44, 11, 13, 9' in script
+    assert b'["M1", 253, 38, 39, 44, 11, 13, 8' in script
+    assert b'["M2", 292, 38, 39, 44, 11, 13, 9' in script
     assert b'key.text = mouseButton ? "" : spec[0]' in script
     assert b'key.style.borderRadius = "39px 0px 0px 0px"' in script
     assert b'key.style.borderRadius = "0px 39px 0px 0px"' in script
@@ -963,7 +969,9 @@ def test_checked_in_voice_template_contains_only_an_empty_payload():
     assert b'["SHIFT", 4, 76, 58, 34, 12, 8, 6, false, 0]' in script
     assert b'["CTRL", 4, 114, 58, 34, 13, 8, 5, false, 0]' in script
     assert b'["SPACE", 66, 114, 164, 34, 12, 8, 4, false, 0]' in script
-    assert b'pad.style.position = "276px 82px 0px"' in script
+    assert b'pad.style.position = "253px 82px 0px"' in script
+    assert b"const INPUT_HUD_WIDTH = 367" in script
+    assert b"const INPUT_HUD_CONTENT_RIGHT_PX = 331" in script
     assert b"const MOUSE_PAD_WIDTH = 78" in script
     assert b"const MOUSE_PAD_HEIGHT = 70" in script
     assert b'pad.style.border = "0px solid #00000000"' in script
@@ -1008,6 +1016,10 @@ def test_checked_in_voice_template_contains_only_an_empty_payload():
     assert b'damageStrip, "CS2InsightTotalDamage", 88, 112, 5, "DMG"' in script
     assert b'const mount = findHudTraverse("HudLowerLeft")' in script
     assert b'combatMoneyPanel = findHudTraverse("HudMoney")' in script
+    assert b"function updateBuyIconHud()" in script
+    assert b"canBuy: (flags & 32) !== 0" in script
+    assert b"radarTrack.canBuyAuthoritative" in script
+    assert b"applyNativeBuyIconVisible" in script
     assert b'$.CreatePanel("Panel", mount, "CS2InsightCombatStatsHud")' in script
     assert b'setCombatDigitPanel(combatKdaKillsPanel, visibleState.kills, true)' in script
     assert b'setCombatDigitPanel(combatRoundDamagePanel, visibleState.roundDamage, instant)' in script
@@ -1081,11 +1093,23 @@ def test_checked_in_voice_template_contains_only_an_empty_payload():
     assert b'inputHud.style.height = "190px"' in script
     assert b'inputHud.style.marginBottom = "139px"' not in script
     assert b"function applyInputHudPlacement(panel)" in script
-    assert b"vh * 0.05" in script
-    assert b"vh * 0.14" in script
-    assert b"vh * 0.48" in script
-    assert b'position === "minimap_below"' in script
-    assert b'position === "weapon_right"' in script
+    placement_start = script.index(b"function applyInputHudPlacement(panel)")
+    placement_end = script.index(b"function hideInputHud()", placement_start)
+    placement = script[placement_start:placement_end]
+    assert b"vh * 0.05" not in placement
+    assert b"Math.round(vh * 0.14) - INPUT_HUD_CENTER_DROP_PX" in placement
+    assert b"const INPUT_HUD_CENTER_DROP_PX = 50" in script
+    assert b"Math.round(vh * 0.48) - INPUT_HUD_SIDE_DROP_PX" in placement
+    assert b"const INPUT_HUD_SIDE_DROP_PX = 150" in script
+    assert b"matchingRightInset" in placement
+    assert b"marginLeft = sideInset" in placement
+    assert b"marginRight = matchingRightInset" in placement
+    assert b"marginLeft = inset" not in placement
+    assert b"marginRight = inset" not in placement
+    assert b'transformOrigin = "0% 100%"' in placement
+    assert b'transformOrigin = "100% 100%"' in placement
+    assert b'position === "minimap_below"' in placement
+    assert b'position === "weapon_right"' in placement
     assert b'inputHud.style.flowChildren = "none"' in script
     assert b'inputHud.style.overflow = "noclip"' not in script
     assert b'inputHud.style.zIndex = "1000"' in script
@@ -2485,6 +2509,120 @@ def test_radar_spotted_side_follows_live_team_and_any_current_pov(monkeypatch):
     assert live_team("222", 64) == 3
     assert current_pov_sees_enemy("111", "222", 64)
     assert current_pov_sees_enemy("222", "111", 64)
+
+
+def test_radar_can_buy_requires_zone_and_open_buy_time():
+    assert _radar_can_buy(
+        alive=True,
+        in_buy_zone=True,
+        buy_time_ended=False,
+        team_cant_buy=False,
+        reconstructed_buy_time_elapsed=False,
+    )
+    assert not _radar_can_buy(
+        alive=True,
+        in_buy_zone=False,
+        buy_time_ended=False,
+        team_cant_buy=False,
+        reconstructed_buy_time_elapsed=False,
+    )
+    assert not _radar_can_buy(
+        alive=True,
+        in_buy_zone=True,
+        buy_time_ended=True,
+        team_cant_buy=False,
+        reconstructed_buy_time_elapsed=False,
+    )
+    assert not _radar_can_buy(
+        alive=True,
+        in_buy_zone=True,
+        buy_time_ended=None,
+        team_cant_buy=False,
+        reconstructed_buy_time_elapsed=True,
+    )
+    assert not _radar_can_buy(
+        alive=False,
+        in_buy_zone=True,
+        buy_time_ended=False,
+        team_cant_buy=False,
+        reconstructed_buy_time_elapsed=False,
+    )
+
+
+def test_reconstructed_buy_time_leaves_warmup_open():
+    assert _reconstructed_buy_time_elapsed(100, [], 64.0) is False
+    assert _reconstructed_buy_time_elapsed(100, [200], 64.0) is False
+    assert _reconstructed_buy_time_elapsed(200, [200], 64.0) is False
+    assert _reconstructed_buy_time_elapsed(200 + 20 * 64, [200], 64.0) is True
+
+
+def test_radar_can_buy_bit_clears_outside_zone_and_after_buy_time(monkeypatch):
+    class _BuyParser(_FakeParser):
+        @staticmethod
+        def parse_header():
+            return {"map_name": "de_dust2", "tick_rate": 64}
+
+        @staticmethod
+        def parse_event(name):
+            if name == "round_start":
+                return {"tick": [8]}
+            return {"tick": []}
+
+        @staticmethod
+        def parse_ticks(fields, ticks=None):
+            if fields == ["last_place_name"]:
+                return _FakeParser.parse_ticks(fields)
+            sample_ticks = ticks or []
+            out = {
+                "tick": [],
+                "steamid": [],
+                "X": [],
+                "Y": [],
+                "yaw": [],
+                "is_alive": [],
+                "player_color": [],
+                "team_num": [],
+                "CCSPlayerPawn.m_bInBuyZone": [],
+                "CCSGameRulesProxy.CCSGameRules.m_bBuyTimeEnded": [],
+            }
+            for tick in sample_ticks:
+                out["tick"].append(tick)
+                out["steamid"].append(111)
+                out["X"].append(100)
+                out["Y"].append(200)
+                out["yaw"].append(45)
+                out["is_alive"].append(True)
+                out["player_color"].append("yellow")
+                out["team_num"].append(2)
+                out["CCSPlayerPawn.m_bInBuyZone"].append(tick < 24)
+                out["CCSGameRulesProxy.CCSGameRules.m_bBuyTimeEnded"].append(tick >= 40)
+            return out
+
+    monkeypatch.setattr(
+        "app.radar.radar_map_assets.lookup_map_data",
+        lambda _map: {"pos_x": -2476, "pos_y": 3239, "scale": 4.4},
+    )
+    voice_payload, _ = build_voice_payload("match.dem", parser_factory=_BuyParser)
+    payload, _ = add_radar_track_to_payload(
+        voice_payload,
+        "match.dem",
+        parser_factory=_BuyParser,
+    )
+    radar = json.loads(payload)[8]
+    assert radar[8] == 1
+    stride = radar[2]
+    xuid, _color, start_token, encoded = radar[3][0]
+    assert xuid == "111"
+    tick = int(start_token, 36)
+    can_buy_by_tick = {}
+    for token in encoded.split(","):
+        can_buy_by_tick[tick] = bool(int(token.split(".")[3], 36) & RADAR_FLAG_CAN_BUY)
+        tick += stride
+
+    assert can_buy_by_tick[8] is True
+    assert can_buy_by_tick[16] is True
+    assert can_buy_by_tick[24] is False
+    assert can_buy_by_tick[40] is False
 
 
 def test_kill_feedback_track_is_appended_at_payload_index_nine():
