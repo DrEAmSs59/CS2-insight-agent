@@ -2006,6 +2006,8 @@ _VOICE_CVAR_NAMES: frozenset[str] = frozenset({
     "tv_listen_voice_indices",
     "tv_listen_voice_indices_h",
 })
+_FORCECAMERA_CVAR_NAME = "mp_forcecamera"
+_OBSERVE_ALL_FORCECAMERA_COMMAND = "mp_forcecamera 0"
 
 
 def _filter_post_spec_console_lines(lines) -> list[str]:
@@ -2033,6 +2035,23 @@ def _without_voice_console_lines(lines) -> list[str]:
         if value.split()[0].lower() not in _VOICE_CVAR_NAMES:
             out.append(value)
     return out
+
+
+def _without_forcecamera_console_lines(lines) -> list[str]:
+    """Drop client mp_forcecamera rows so recording can force observe-all."""
+    out: list[str] = []
+    for line in lines or ():
+        value = str(line).strip()
+        if not value:
+            continue
+        if value.split(maxsplit=1)[0].rstrip(";").lower() != _FORCECAMERA_CVAR_NAME:
+            out.append(value)
+    return out
+
+
+def _apply_recording_forcecamera_policy(lines) -> list[str]:
+    """GOTV demos replay mp_forcecamera=1; keep native radar on the observed team."""
+    return [*_without_forcecamera_console_lines(lines), _OBSERVE_ALL_FORCECAMERA_COMMAND]
 
 
 def _apply_recording_voice_policy(
@@ -3542,11 +3561,13 @@ class OBSDirector:
             lines = self._append_config_warmup_console_lines(
                 [*_RECORDING_KEYBIND_RESET_LINES, *cmds]
             )
-            return _apply_recording_voice_policy(
-                lines,
-                pov_enabled=pov_enabled,
-                pov_voice_mode=getattr(w, "pov_voice_mode", None),
-                pov_voice_disabled=bool(getattr(w, "pov_voice_disabled", False)),
+            return _apply_recording_forcecamera_policy(
+                _apply_recording_voice_policy(
+                    lines,
+                    pov_enabled=pov_enabled,
+                    pov_voice_mode=getattr(w, "pov_voice_mode", None),
+                    pov_voice_disabled=bool(getattr(w, "pov_voice_disabled", False)),
+                )
             )
         lines: list[str] = []
         lines.extend(_RECORDING_KEYBIND_RESET_LINES)
@@ -3599,11 +3620,13 @@ class OBSDirector:
             lines.append("cl_grenadepreview 0")
             lines.append("sv_grenade_trajectory_time_spectator 0")
         lines = self._append_config_warmup_console_lines(lines)
-        return _apply_recording_voice_policy(
-            lines,
-            pov_enabled=pov_enabled,
-            pov_voice_mode=getattr(w, "pov_voice_mode", None),
-            pov_voice_disabled=bool(getattr(w, "pov_voice_disabled", False)),
+        return _apply_recording_forcecamera_policy(
+            _apply_recording_voice_policy(
+                lines,
+                pov_enabled=pov_enabled,
+                pov_voice_mode=getattr(w, "pov_voice_mode", None),
+                pov_voice_disabled=bool(getattr(w, "pov_voice_disabled", False)),
+            )
         )
 
     async def execute_plan_queue(
@@ -3947,7 +3970,11 @@ class OBSDirector:
                 else:
                     # POV cannot be enabled without a warmup object. The non-POV
                     # default intentionally mutes only the global voice volume.
-                    effective_warmup_cmds = [*_V3_DEMO_KEY_BINDINGS, "snd_voipvolume 0"]
+                    effective_warmup_cmds = [
+                        *_V3_DEMO_KEY_BINDINGS,
+                        "snd_voipvolume 0",
+                        "mp_forcecamera 0",
+                    ]
                     try:
                         _warmup_inject_ok = bool(await asyncio.to_thread(
                             inject_console_sequence,

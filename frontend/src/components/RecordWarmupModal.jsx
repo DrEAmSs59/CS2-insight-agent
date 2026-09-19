@@ -43,6 +43,10 @@ export function buildWarmupConsoleCommands(o) {
       ? "cl_draw_only_deathnotices true"
       : "cl_draw_only_deathnotices false"
   );
+  // GOTV demos replay the recorded mp_forcecamera=1 NetSetConVar. The local
+  // controller stays on spectator team, so 1 hides teammates on the native
+  // radar; 0 lets CCSGO_HudRadar follow the observed player's relationship.
+  lines.push("mp_forcecamera 0");
   lines.push(o.hud_showtargetid_hide ? "hud_showtargetid 0" : "hud_showtargetid 1");
   lines.push(o.tv_nochat ? "tv_nochat 1" : "tv_nochat 0");
   if (o.hide_demo_playback_ui) {
