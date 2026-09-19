@@ -72,6 +72,8 @@ INPUT_PRESENTATION_PAYLOAD_INDEX = 18
 COMBAT_STATS_PAYLOAD_INDEX = 19
 POV_VISUALS_PAYLOAD_INDEX = 20
 WEAPON_SELECT_PAYLOAD_INDEX = 6
+INPUT_HUD_POSITIONS = ("bottom_center", "minimap_below", "weapon_right")
+DEFAULT_INPUT_HUD_POSITION = "bottom_center"
 WEAPON_SELECT_ENTITY_INDEX_MASK = 0x3FFF
 WEAPON_SELECT_MATCH_MAX_TICKS = 4
 HAND_SWITCH_PULSE_TICKS = 4
@@ -80,6 +82,40 @@ _INPUT_RAW_TO_COMPACT_BIT = {
     for compact_bit, raw_bit in enumerate((3, 9, 4, 10, 1, 2, 16, 13, 0, 11, 5, 35, 33))
 }
 RADAR_SAMPLE_HZ = 8
+RADAR_FLAG_CAN_BUY = 32
+DEFAULT_BUY_TIME_SECONDS = 20.0
+_IN_BUY_ZONE_FIELDS = (
+    "CCSPlayerPawn.m_bInBuyZone",
+    "in_buy_zone",
+)
+_BUY_TIME_ENDED_FIELDS = (
+    "CCSGameRulesProxy.CCSGameRules.m_bBuyTimeEnded",
+    "m_bBuyTimeEnded",
+)
+_T_CANT_BUY_FIELDS = (
+    "CCSGameRulesProxy.CCSGameRules.m_bTCantBuy",
+    "m_bTCantBuy",
+)
+_CT_CANT_BUY_FIELDS = (
+    "CCSGameRulesProxy.CCSGameRules.m_bCTCantBuy",
+    "m_bCTCantBuy",
+)
+_BUY_TICK_FIELD_SETS = (
+    [
+        "steamid",
+        "CCSPlayerPawn.m_bInBuyZone",
+        "CCSGameRulesProxy.CCSGameRules.m_bBuyTimeEnded",
+        "CCSGameRulesProxy.CCSGameRules.m_bTCantBuy",
+        "CCSGameRulesProxy.CCSGameRules.m_bCTCantBuy",
+    ],
+    [
+        "steamid",
+        "CCSPlayerPawn.m_bInBuyZone",
+        "CCSGameRulesProxy.CCSGameRules.m_bBuyTimeEnded",
+    ],
+    ["steamid", "CCSPlayerPawn.m_bInBuyZone"],
+    ["steamid", "in_buy_zone"],
+)
 _GROUND_ENTITY_FIELD = "CCSPlayerPawn.m_hGroundEntity"
 _LAST_JUMP_TICK_FIELD = (
     "CCSPlayerPawn.CCSPlayer_MovementServices.m_nLastJumpTick"
@@ -390,6 +426,151 @@ def _as_int(value: Any) -> int | None:
         return int(value)
     except (TypeError, ValueError, OverflowError):
         return None
+
+
+def _column_bool_at(rows: Mapping[str, Any], names: tuple[str, ...], index: int) -> bool | None:
+    for name in names:
+        column = rows.get(name)
+        if not isinstance(column, list) or index >= len(column):
+            continue
+        value = column[index]
+        if value is None:
+            continue
+        return bool(value)
+    return None
+
+
+def _radar_can_buy(
+    *,
+    alive: bool,
+    in_buy_zone: bool | None,
+    buy_time_ended: bool | None,
+    team_cant_buy: bool | None,
+    reconstructed_buy_time_elapsed: bool | None,
+) -> bool:
+    """Native cart rule: alive, in buy zone, and buy time still open."""
+    if not alive or in_buy_zone is False:
+        return False
+    if buy_time_ended is True or team_cant_buy is True:
+        return False
+    if buy_time_ended is None and reconstructed_buy_time_elapsed is True:
+        return False
+    return True
+
+
+def _reconstructed_buy_time_elapsed(
+    tick: int,
+    round_starts: list[int],
+    tick_rate: float,
+    buy_time_seconds: float = DEFAULT_BUY_TIME_SECONDS,
+) -> bool:
+    """Fallback when game-rules buy-time props are missing.
+
+    Warmup ticks before the first ``round_start`` stay open: official buy time
+    starts with the round, not the demo file.
+    """
+    if not round_starts or tick_rate <= 0:
+        return False
+    start: int | None = None
+    for candidate in sorted(round_starts):
+        if candidate <= tick:
+            start = candidate
+        else:
+            break
+    if start is None:
+        return False
+    deadline = start + int(round(buy_time_seconds * tick_rate))
+    return tick >= deadline
+
+
+def _round_start_ticks(parser: Any) -> list[int]:
+    try:
+        rows = parser.parse_event("round_start")
+    except Exception:  # noqa: BLE001 - buy-time reconstruction is best effort
+        return []
+    ticks = rows.get("tick") if isinstance(rows, Mapping) else None
+    if not isinstance(ticks, list):
+        return []
+    return sorted({
+        tick
+        for tick in (_as_int(raw_tick) for raw_tick in ticks)
+        if tick is not None and tick >= 0
+    })
+
+
+def _try_parse_ticks(
+    parser: Any,
+    fields: list[str],
+    sample_ticks: list[int],
+) -> Mapping[str, Any] | None:
+    try:
+        rows = parser.parse_ticks(fields, ticks=sample_ticks)
+    except Exception:  # noqa: BLE001 - optional buy-state columns
+        return None
+    return rows if isinstance(rows, Mapping) else None
+
+
+def _buy_states_from_rows(
+    rows: Mapping[str, Any] | None,
+) -> dict[tuple[int, int], tuple[bool | None, bool | None, bool | None, bool | None]]:
+    if not isinstance(rows, Mapping):
+        return {}
+    ticks = rows.get("tick", [])
+    xuids = rows.get("steamid", [])
+    if not isinstance(ticks, list) or not isinstance(xuids, list):
+        return {}
+    states: dict[tuple[int, int], tuple[bool | None, bool | None, bool | None, bool | None]] = {}
+    for index in range(min(len(ticks), len(xuids))):
+        tick = _as_int(ticks[index])
+        xuid = _as_positive_int(xuids[index])
+        if tick is None or xuid is None:
+            continue
+        states[(tick, xuid)] = (
+            _column_bool_at(rows, _IN_BUY_ZONE_FIELDS, index),
+            _column_bool_at(rows, _BUY_TIME_ENDED_FIELDS, index),
+            _column_bool_at(rows, _T_CANT_BUY_FIELDS, index),
+            _column_bool_at(rows, _CT_CANT_BUY_FIELDS, index),
+        )
+    return states
+
+
+def _merge_buy_states(
+    current: dict[tuple[int, int], tuple[bool | None, bool | None, bool | None, bool | None]],
+    extra: dict[tuple[int, int], tuple[bool | None, bool | None, bool | None, bool | None]],
+) -> dict[tuple[int, int], tuple[bool | None, bool | None, bool | None, bool | None]]:
+    merged = dict(current)
+    for key, extra_state in extra.items():
+        existing = merged.get(key, (None, None, None, None))
+        merged[key] = tuple(
+            extra_value if extra_value is not None else existing_value
+            for extra_value, existing_value in zip(extra_state, existing)
+        )
+    return merged
+
+
+def _load_buy_states(
+    parser: Any,
+    rows: Mapping[str, Any],
+    sample_ticks: list[int],
+) -> dict[tuple[int, int], tuple[bool | None, bool | None, bool | None, bool | None]]:
+    states = _buy_states_from_rows(rows)
+    needs_extra = not states or any(
+        in_buy_zone is None or buy_time_ended is None
+        for in_buy_zone, buy_time_ended, _t_cant, _ct_cant in states.values()
+    )
+    if not needs_extra:
+        return states
+    for fields in _BUY_TICK_FIELD_SETS:
+        extra_rows = _try_parse_ticks(parser, fields, sample_ticks)
+        extra_states = _buy_states_from_rows(extra_rows)
+        if extra_states:
+            states = _merge_buy_states(states, extra_states)
+            if states and not any(
+                in_buy_zone is None
+                for in_buy_zone, _ended, _t_cant, _ct_cant in states.values()
+            ):
+                break
+    return states
 
 
 def _zigzag_encode(value: int) -> int:
@@ -1642,6 +1823,7 @@ def _encode_radar_samples(
     ``flags`` bit0 = alive, bit1 = carrying C4,
     bit2 = spotted by any T (team 2), bit3 = spotted by any CT (team 3),
     bit4 = current side is CT (team 3); clear means T (team 2). Tracks half swaps.
+    bit5 = can buy (in buy zone and buy time still open).
     """
     if not samples:
         return ""
@@ -1782,6 +1964,8 @@ def _build_radar_payload(
     move_types = rows.get("move_type", [])
     ground_entities = rows.get(_GROUND_ENTITY_FIELD, [])
     last_jump_ticks = rows.get(_LAST_JUMP_TICK_FIELD, [])
+    buy_states = _load_buy_states(parser, rows, sample_ticks)
+    round_starts = _round_start_ticks(parser)
     column_lengths = [len(col) for col in (ticks, xuids, xs, ys, yaws) if isinstance(col, list)]
     if not column_lengths or len(set(column_lengths)) != 1:
         raise DemoVoiceHudError("radar tick columns are missing or misaligned")
@@ -1885,11 +2069,28 @@ def _build_radar_payload(
             else False
         )
         spotted_bits = _spotted_team_bits(raw_spotted_by, raw_spotted, team)
+        in_buy_zone, buy_time_ended, t_cant_buy, ct_cant_buy = buy_states.get(
+            (tick, xuid),
+            (None, None, None, None),
+        )
+        team_cant_buy = t_cant_buy if team == 2 else ct_cant_buy if team == 3 else None
+        can_buy = _radar_can_buy(
+            alive=bool(alive_raw),
+            in_buy_zone=in_buy_zone,
+            buy_time_ended=buy_time_ended,
+            team_cant_buy=team_cant_buy,
+            reconstructed_buy_time_elapsed=_reconstructed_buy_time_elapsed(
+                tick,
+                round_starts,
+                tick_rate,
+            ),
+        )
         flags = (
             (1 if bool(alive_raw) else 0)
             | (2 if has_c4 else 0)
             | spotted_bits
             | (16 if team == 3 else 0)
+            | (RADAR_FLAG_CAN_BUY if can_buy else 0)
         )
         samples_by_xuid[xuid][tick] = (x, y, yaw, flags)
 
@@ -2132,6 +2333,7 @@ def _build_radar_payload(
         player_sounds,
         dropped_bombs,
         occlusion,
+        1,
     ]
     stats = {
         "radar_players": len(encoded_players),
@@ -3661,6 +3863,16 @@ def add_input_tracks_to_payload(
     }
 
 
+def normalize_input_hud_position(
+    value: object,
+    *,
+    default: str = DEFAULT_INPUT_HUD_POSITION,
+) -> str:
+    """Return a supported OBS-overlay-compatible input HUD anchor."""
+    text = str(value or "").strip().lower()
+    return text if text in INPUT_HUD_POSITIONS else default
+
+
 def add_input_presentation_to_payload(
     voice_payload: bytes,
     *,
@@ -3670,6 +3882,7 @@ def add_input_presentation_to_payload(
     audio_enabled: bool,
     audio_volume_percent: int,
     combat_stats_enabled: bool = True,
+    position: str = DEFAULT_INPUT_HUD_POSITION,
 ) -> bytes:
     """Append validated per-session keyboard/mouse presentation settings."""
     try:
@@ -3687,6 +3900,9 @@ def add_input_presentation_to_payload(
     volume = int(audio_volume_percent)
     if volume not in {25, 50, 75, 100}:
         raise DemoVoiceHudError("input audio volume must be one of 25, 50, 75, or 100 percent")
+    hud_position = str(position or "").strip().lower()
+    if hud_position not in INPUT_HUD_POSITIONS:
+        raise DemoVoiceHudError(f"unsupported input HUD position: {position}")
 
     packed[INPUT_PRESENTATION_PAYLOAD_INDEX] = [
         int(bool(enabled)),
@@ -3695,6 +3911,7 @@ def add_input_presentation_to_payload(
         int(bool(audio_enabled)),
         volume,
         int(bool(combat_stats_enabled)),
+        hud_position,
     ]
     return json.dumps(packed, ensure_ascii=True, separators=(",", ":")).encode("ascii")
 
@@ -4513,6 +4730,7 @@ def build_demo_voice_hud_vpk(
     input_hud_enabled: bool = True,
     input_hud_display_mode: str = "hybrid",
     input_hud_scale_percent: int = 100,
+    input_hud_position: str = DEFAULT_INPUT_HUD_POSITION,
     input_audio_enabled: bool = False,
     input_audio_volume_percent: int = 100,
     combat_stats_enabled: bool = True,
@@ -4557,6 +4775,7 @@ def build_demo_voice_hud_vpk(
         audio_enabled=input_audio_enabled,
         audio_volume_percent=input_audio_volume_percent,
         combat_stats_enabled=combat_stats_enabled,
+        position=normalize_input_hud_position(input_hud_position),
     )
     stats["payload_bytes"] = len(payload)
 

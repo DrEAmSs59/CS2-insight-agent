@@ -2,21 +2,35 @@
 
 from __future__ import annotations
 
-import json
 import sys
 import traceback
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from typing import Any, Optional
+from typing import Callable, Optional, TypeVar
+
+_T = TypeVar("_T")
 
 if __package__:
+    from .parse_worker_ipc import dump_message, load_message
     from .demo_parser import DemoAnalyzer, get_demo_match_summary, get_player_list, inspect_demo
+    from .features.demo_analysis.input_track import detect_player_keyboard_input
     from .radar.radar_data_extractor import extract_radar_timeline_impl, extract_replay_effects_impl
 else:
     backend_dir = Path(__file__).resolve().parents[1]
     if str(backend_dir) not in sys.path:
         sys.path.insert(0, str(backend_dir))
+    from app.parse_worker_ipc import dump_message, load_message
     from app.demo_parser import DemoAnalyzer, get_demo_match_summary, get_player_list, inspect_demo
+    from app.features.demo_analysis.input_track import detect_player_keyboard_input
     from app.radar.radar_data_extractor import extract_radar_timeline_impl, extract_replay_effects_impl
+
+
+def _analyze_with_keyboard_probe(dem_path: str, analyze: Callable[[], _T]) -> tuple[_T, bool | None]:
+    """Run the cheap input-carrier probe beside analysis so wall-clock stays analyze-bound."""
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        probe = pool.submit(detect_player_keyboard_input, demo_path=dem_path)
+        result = analyze()
+        return result, probe.result()
 
 
 def _run(payload: dict) -> object:
@@ -57,9 +71,13 @@ def _run(payload: dict) -> object:
                 except (TypeError, ValueError) as e:
                     raise ValueError(f"freeze_to_death_rounds must be integers: {x!r}") from e
             ftd_list = out_ftd
-        analyzer = DemoAnalyzer(dem_path)
-        result = analyzer.analyze(target, freeze_to_death_rounds=ftd_list).to_dict()
-        result["has_player_keyboard_input"] = analyzer.has_player_keyboard_input
+
+        def run_analyze():
+            analyzer = DemoAnalyzer(dem_path)
+            return analyzer.analyze(target, freeze_to_death_rounds=ftd_list).to_dict()
+
+        result, has_keyboard_input = _analyze_with_keyboard_probe(dem_path, run_analyze)
+        result["has_player_keyboard_input"] = has_keyboard_input
         return result
     if action == "analyze_batch":
         raw_players = payload.get("target_players") or []
@@ -74,28 +92,30 @@ def _run(payload: dict) -> object:
             if not isinstance(ftd_raw, list):
                 raise ValueError("freeze_to_death_rounds must be a list of integers or null")
             ftd_list = [int(x) for x in ftd_raw]
-        analyzer = DemoAnalyzer(dem_path)
-        results = analyzer.analyze_multi_players(
-            target_players, freeze_to_death_rounds=ftd_list
+        analyzer_holder: dict[str, DemoAnalyzer] = {}
+
+        def run_analyze_batch():
+            analyzer = DemoAnalyzer(dem_path)
+            analyzer_holder["analyzer"] = analyzer
+            return analyzer.analyze_multi_players(
+                target_players, freeze_to_death_rounds=ftd_list
+            )
+
+        results, has_keyboard_input = _analyze_with_keyboard_probe(
+            dem_path,
+            run_analyze_batch,
         )
+        analyzer = analyzer_holder["analyzer"]
         analysis_workspace = analyzer.analysis_workspace
         if isinstance(analysis_workspace, dict) and analysis_workspace.get("rounds"):
             analysis_workspace = dict(analysis_workspace)
-            try:
-                from app.features.demo_analysis.replay_match_cache import materialize_match_replay_parquet_impl
-
-                analysis_workspace["replay_cache"] = materialize_match_replay_parquet_impl(
-                    demo_path=dem_path,
-                    workspace=analysis_workspace,
-                )
-            except Exception as exc:  # noqa: BLE001 - analysis result remains usable
-                analysis_workspace["replay_cache"] = {
-                    "status": "error",
-                    "error": f"{type(exc).__name__}: {exc}",
-                }
+            analysis_workspace["replay_cache"] = {
+                "status": "deferred",
+                "reason": "materialized on first 2D replay open",
+            }
         return {
             "__analysis_workspace__": analysis_workspace,
-            "__has_player_keyboard_input__": analyzer.has_player_keyboard_input,
+            "__has_player_keyboard_input__": has_keyboard_input,
             **{player: result.to_dict() for player, result in results.items()},
         }
     if action == "players":
@@ -109,22 +129,19 @@ def _run(payload: dict) -> object:
 
 def main() -> int:
     if len(sys.argv) != 3:
-        print("usage: python -m app.parse_worker <request.json> <output.json>", file=sys.stderr)
+        print("usage: python -m app.parse_worker <request.pkl> <output.pkl>", file=sys.stderr)
         return 2
     req_path = Path(sys.argv[1])
     out_path = Path(sys.argv[2])
     try:
-        payload = json.loads(req_path.read_text(encoding="utf-8-sig"))
+        payload = load_message(req_path)
         result = _run(payload)
-        out_path.write_text(json.dumps({"ok": True, "result": result}, ensure_ascii=False), encoding="utf-8")
+        dump_message(out_path, {"ok": True, "result": result})
         return 0
     except BaseException as e:  # noqa: BLE001 - worker must serialize all failures.
         traceback.print_exc(file=sys.stderr)
         try:
-            out_path.write_text(
-                json.dumps({"ok": False, "error": f"{type(e).__name__}: {e}"}, ensure_ascii=False),
-                encoding="utf-8",
-            )
+            dump_message(out_path, {"ok": False, "error": f"{type(e).__name__}: {e}"})
         except Exception:
             pass
         return 1

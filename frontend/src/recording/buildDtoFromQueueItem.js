@@ -14,6 +14,7 @@ import { stripGlobalPacingMetaKeys } from "../stores/recordingQueueStore";
 /**
  * Map pacing_override fields to RecordingOptions keys.
  * item.pacing_override takes priority over globalPacing.
+ * pre_first_sec / post_last_sec (击杀段/死亡段前后预留) apply to kill and death windows.
  *
  * @param {import("../stores/recordingQueueStore").PacingOverride} pacing
  * @returns {Partial<typeof DEFAULT_RECORDING_OPTIONS>}
@@ -26,11 +27,15 @@ function pacingOverrideToOptions(pacing) {
     opts.highlight_pre_sec = pacing.pre_first_sec;
     opts.kill_compilation_pre_sec = pacing.pre_first_sec;
     opts.timeline_kill_pre_sec = pacing.pre_first_sec;
+    opts.death_pre_sec = pacing.pre_first_sec;
+    opts.death_compilation_pre_sec = pacing.pre_first_sec;
   }
   if (pacing.post_last_sec != null) {
     opts.highlight_post_sec = pacing.post_last_sec;
     opts.kill_compilation_post_sec = pacing.post_last_sec;
     opts.timeline_kill_post_sec = pacing.post_last_sec;
+    opts.death_post_sec = pacing.post_last_sec;
+    opts.death_compilation_post_sec = pacing.post_last_sec;
   }
   if (pacing.max_gap_sec != null) {
     opts.kill_jump_cut_threshold_sec = pacing.max_gap_sec;

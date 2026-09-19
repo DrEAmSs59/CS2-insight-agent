@@ -198,6 +198,35 @@ check("4c: end_tick", plan.segments[0].end_tick == exp_end,
       f"got {plan.segments[0].end_tick}")
 check("4d: perspective=victim", plan.segments[0].perspective == Perspective.victim)
 
+print("\nTest 4b: Timeline death follows death_pre/post, not fail_killer")
+req = dto(
+    request_type=RequestType.timeline_death,
+    source_type=SourceType.death,
+    options=RecordingOptions(
+        death_pre_sec=8.0,
+        death_post_sec=0.5,
+        fail_killer_pre_sec=1.0,
+        fail_killer_post_sec=0.2,
+        enable_fail_killer_pov=True,
+    ),
+    events=[make_death_event(10_000)],
+)
+plan = build_plan(req)
+opts = req.options
+check("4b-i: 2 segments (death + killer POV)", len(plan.segments) == 2, f"got {len(plan.segments)}")
+check("4b-ii: main start uses death_pre_sec",
+      plan.segments[0].start_tick == 10_000 - int(opts.death_pre_sec * TICK_RATE),
+      f"got {plan.segments[0].start_tick}")
+check("4b-iii: main end uses death_post_sec",
+      plan.segments[0].end_tick == 10_000 + int(opts.death_post_sec * TICK_RATE),
+      f"got {plan.segments[0].end_tick}")
+check("4b-iv: killer POV start uses fail_killer_pre_sec",
+      plan.segments[1].start_tick == 10_000 - int(opts.fail_killer_pre_sec * TICK_RATE),
+      f"got {plan.segments[1].start_tick}")
+check("4b-v: killer POV end uses fail_killer_post_sec",
+      plan.segments[1].end_tick == 10_000 + int(opts.fail_killer_post_sec * TICK_RATE),
+      f"got {plan.segments[1].end_tick}")
+
 
 # ── Test 5: Fail death window ─────────────────────────────────────────────
 print("\nTest 5: Fail death — correct window")

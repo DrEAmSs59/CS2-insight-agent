@@ -47,6 +47,14 @@ class PlayerAvatar(BaseModel):
     enabled: bool = True
 
 
+class RadarSegment(BaseModel):
+    """旧版：插入到指定录像片段之前。新时间线用 radar_items + timeline_ids。"""
+
+    before_clip_id: int
+    image_path: str
+    duration: float = 4.0
+
+
 class MontageProjectBody(BaseModel):
     project_id: Optional[int] = None
     name: str = ""
@@ -64,6 +72,11 @@ class MontageProjectBody(BaseModel):
     player_avatars: list[PlayerAvatar] = Field(default_factory=list)
     name_cards_enabled: bool = False
     framemeld_enabled: bool = False
+    radar_segments: list[RadarSegment] = Field(default_factory=list)
+    timeline_ids: list[str] = Field(default_factory=list)
+    radar_enabled: bool = True
+    radar_items: dict[str, Any] = Field(default_factory=dict)
+    radar_candidate_state: dict[str, Any] = Field(default_factory=dict)
 
 
 class MontageMediaFpsProbeBody(BaseModel):
@@ -126,6 +139,12 @@ async def save_montage_project(body: MontageProjectBody):
     proj_body["player_avatars"] = [pa.model_dump() for pa in body.player_avatars]
     proj_body["name_cards_enabled"] = body.name_cards_enabled
     proj_body["framemeld_enabled"] = body.framemeld_enabled
+    if body.radar_segments:
+        proj_body["radar_segments"] = [rs.model_dump() for rs in body.radar_segments]
+    proj_body["timeline_ids"] = [str(x) for x in (body.timeline_ids or [])]
+    proj_body["radar_enabled"] = bool(body.radar_enabled)
+    proj_body["radar_items"] = dict(body.radar_items or {})
+    proj_body["radar_candidate_state"] = dict(body.radar_candidate_state or {})
     if body.theme_id is not None:
         tid = str(body.theme_id).strip()
         if tid:
@@ -212,11 +231,17 @@ class MontageExportBody(BaseModel):
     player_avatars: list[PlayerAvatar] = Field(default_factory=list)
     name_cards_enabled: Optional[bool] = None  # None = inherit from project extras
     framemeld_enabled: Optional[bool] = None
+    radar_segments: list[RadarSegment] = Field(default_factory=list)
+    radar_enabled: Optional[bool] = None
+    radar_items: Optional[dict[str, Any]] = None
+    radar_candidate_state: Optional[dict[str, Any]] = None
+    timeline_ids: Optional[list[str]] = None
 
 
 async def _run_montage_export_job(job: MontageExportJob, prepared: dict[str, Any]) -> None:
     from ..montage_errors import montage_detail_from_exception
     from ..video_composer import MontageComposerError, compose_montage
+    from ..features.cs_data_radar.export_bake import RadarBakeError
 
     async def finish_cancelled() -> None:
         job.status = "cancelled"
@@ -268,13 +293,118 @@ async def _run_montage_export_job(job: MontageExportJob, prepared: dict[str, Any
             if detail.get("stage_progress") is not None:
                 job.stage_progress = max(0.0, min(1.0, float(detail["stage_progress"])))
 
+    bake_dir: Optional[Path] = None
     try:
+        radar_spec = prepared.pop("radar_spec", None)
+        clip_path_by_id = prepared.pop("clip_path_by_id", None) or {}
+        name_cards_by_clip_id = prepared.pop("name_cards_by_clip_id", None)
+        if radar_spec and radar_spec.get("use_new"):
+            from ..features.cs_data_radar.export_bake import (
+                bake_candidate_videos,
+                collect_portraits_for_keys,
+                fit_instance_videos,
+            )
+            from ..video_composer import probe_video_audio_summary, resolve_ffprobe_binary
+
+            segments = list(radar_spec.get("segments") or [])
+            if not any(seg.get("kind") == "clip" for seg in segments):
+                raise MontageComposerError("MONTAGE_NO_CLIPS")
+            used_keys = list(radar_spec.get("used_keys") or [])
+            first_clip_id = next(int(seg["clip_id"]) for seg in segments if seg.get("kind") == "clip")
+            first_path = Path(clip_path_by_id[first_clip_id])
+            fitted: dict[str, Path] = {}
+            baked: dict[str, Path] = {}
+            if used_keys:
+                job.stage = "radar_bake"
+                job.progress = max(job.progress, 0.04)
+                ffprobe = resolve_ffprobe_binary(prepared["ffmpeg_bin"])
+                info = await asyncio.to_thread(probe_video_audio_summary, first_path, ffprobe)
+                fps = max(1, int(round(float(info.get("fps") or 24))))
+                width = int(info.get("width") or 1920)
+                height = int(info.get("height") or 1080)
+                bake_dir = Path(job.output_path).parent / f".radar_bake_{job.export_id}"
+                portraits = await collect_portraits_for_keys(
+                    used_keys=used_keys,
+                    candidates_by_key=radar_spec.get("candidates_by_key") or {},
+                    candidate_state=radar_spec.get("candidate_state") or {},
+                    dest_dir=bake_dir / "portraits",
+                )
+
+                def _bake() -> tuple[dict[str, Path], dict[str, Path]]:
+                    baked_videos = bake_candidate_videos(
+                        ffmpeg_bin=prepared["ffmpeg_bin"],
+                        used_keys=used_keys,
+                        candidates_by_key=radar_spec.get("candidates_by_key") or {},
+                        candidate_state=radar_spec.get("candidate_state") or {},
+                        portraits=portraits,
+                        out_dir=bake_dir,
+                        fps=fps,
+                        width=width,
+                        height=height,
+                    )
+                    fitted_videos = fit_instance_videos(
+                        ffmpeg_bin=prepared["ffmpeg_bin"],
+                        segments=segments,
+                        baked_by_key=baked_videos,
+                        out_dir=bake_dir / "fit",
+                        fps=float(fps),
+                    )
+                    return baked_videos, fitted_videos
+
+                baked, fitted = await asyncio.to_thread(_bake)
+
+            clip_paths: list[Path] = []
+            clip_row_ids: list[Any] = []
+            name_cards_list: list[Optional[dict]] = []
+            for seg in segments:
+                if seg.get("kind") == "radar":
+                    row_id = str(seg.get("row_id") or "")
+                    video = fitted.get(row_id) or baked.get(str(seg.get("candidate_key") or ""))
+                    if video is None or not Path(video).is_file():
+                        raise RadarBakeError("MONTAGE_RADAR_BAKE_FAILED", name=str(seg.get("candidate_key") or row_id))
+                    clip_paths.append(Path(video))
+                    clip_row_ids.append(row_id)
+                    name_cards_list.append(None)
+                    continue
+                cid = int(seg["clip_id"])
+                clip_paths.append(Path(clip_path_by_id[cid]))
+                clip_row_ids.append(cid)
+                if name_cards_by_clip_id is not None:
+                    name_cards_list.append(name_cards_by_clip_id.get(cid))
+            prepared["clip_paths"] = clip_paths
+            prepared["clip_row_ids"] = clip_row_ids
+            prepared["radar_segments"] = []
+            if name_cards_by_clip_id is not None:
+                prepared["name_cards"] = name_cards_list if any(x is not None for x in name_cards_list) else None
+
         await asyncio.to_thread(
             compose_montage,
             **prepared,
             progress_callback=on_progress,
             cancel_event=job.cancel_event,
         )
+    except RadarBakeError as e:
+        error_code = str(e.code or "MONTAGE_RADAR_BAKE_FAILED")
+        job.status = "error"
+        job.stage = "error"
+        job.error = error_code
+        await montage_db.update_export(
+            job.export_id,
+            status="error",
+            error_msg=error_code,
+        )
+        export_event(
+            "pipeline_failed",
+            level=logging.ERROR,
+            status="error",
+            error_code=error_code,
+        )
+        logger.error(
+            "video export summary feature=montage export_id=%s status=error code=%s",
+            job.export_id,
+            error_code,
+        )
+        return
     except MontageComposerError as e:
         if e.code == "MONTAGE_EXPORT_CANCELLED" or job.cancel_event.is_set():
             await finish_cancelled()
@@ -315,6 +445,11 @@ async def _run_montage_export_job(job: MontageExportJob, prepared: dict[str, Any
             error_msg=job.error,
         )
         return
+    finally:
+        if bake_dir is not None:
+            import shutil
+
+            shutil.rmtree(bake_dir, ignore_errors=True)
 
     job.status = "done"
     job.stage = "done"
@@ -363,7 +498,23 @@ async def montage_export(body: MontageExportBody):
         extras = proj.get("body") if isinstance(proj.get("body"), dict) else {}
 
     clip_ids = list(body.recorded_clip_ids) if body.recorded_clip_ids is not None else list(extras.get("recorded_clip_ids") or [])
-    if not clip_ids:
+    timeline_raw = body.timeline_ids if body.timeline_ids is not None else (
+        body.ordered_ids if body.ordered_ids is not None else (
+            extras.get("timeline_ids") if extras.get("timeline_ids") is not None else extras.get("ordered_ids")
+        )
+    )
+    radar_enabled_eff = (
+        bool(body.radar_enabled)
+        if body.radar_enabled is not None
+        else (bool(extras.get("radar_enabled")) if extras.get("radar_enabled") is not None else True)
+    )
+    radar_items_eff = body.radar_items if body.radar_items is not None else (extras.get("radar_items") or {})
+    radar_candidate_state_eff = (
+        body.radar_candidate_state
+        if body.radar_candidate_state is not None
+        else (extras.get("radar_candidate_state") or {})
+    )
+    if not clip_ids and not timeline_raw:
         from ..api_errors import error_detail
 
         raise HTTPException(400, error_detail("MONTAGE_NO_CLIPS"))
@@ -440,6 +591,55 @@ async def montage_export(body: MontageExportBody):
         else bool(extras.get("framemeld_enabled")) if isinstance(extras, dict) else False
     )
 
+    # cs数据图：统一时间线（新）或旧版 before_clip 段
+    radar_segments_eff: list[RadarSegment]
+    if body.radar_segments:
+        radar_segments_eff = body.radar_segments
+    else:
+        raw_rs = extras.get("radar_segments") if isinstance(extras, dict) else None
+        if isinstance(raw_rs, list):
+            radar_segments_eff = [RadarSegment(**rs) for rs in raw_rs if isinstance(rs, dict)]
+        else:
+            radar_segments_eff = []
+
+    from ..features.cs_data_radar.export_bake import RadarBakeError
+    from ..features.cs_data_radar.montage_export import resolve_radar_timeline, validate_radar_parse_data
+    from ..features.cs_data_radar.timeline import clip_ids_from_timeline
+
+    radar_plan = resolve_radar_timeline(
+        recorded_clip_ids=[int(x) for x in clip_ids] if clip_ids else [],
+        ordered_ids=list(timeline_raw) if timeline_raw is not None else None,
+        radar_items=radar_items_eff,
+        radar_segments=[rs.model_dump() for rs in radar_segments_eff],
+        radar_enabled=radar_enabled_eff,
+    )
+    clip_ids = clip_ids_from_timeline(radar_plan["ordered_ids"]) or [int(x) for x in clip_ids]
+    if not clip_ids:
+        from ..api_errors import error_detail
+
+        raise HTTPException(400, error_detail("MONTAGE_NO_CLIPS"))
+
+    radar_segments_prepared: list[dict[str, Any]] = []
+    if not radar_plan["use_new"]:
+        clip_id_index: dict[int, int] = {int(cid): i for i, cid in enumerate(clip_ids)}
+        for rs in radar_segments_eff:
+            image_raw = str(rs.image_path or "").strip()
+            if not image_raw:
+                continue
+            radar_path = Path(image_raw).expanduser()
+            if not radar_path.is_file():
+                from ..api_errors import error_detail as _ed
+
+                raise HTTPException(400, _ed("RADAR_IMAGE_MISSING", name=radar_path.name))
+            before_index = clip_id_index.get(int(rs.before_clip_id), 0)
+            radar_segments_prepared.append(
+                {
+                    "before_clip_index": max(0, min(before_index, max(0, len(clip_ids) - 1))),
+                    "image_path": str(radar_path),
+                    "duration": max(1.0, min(60.0, float(rs.duration) if rs.duration else 4.0)),
+                }
+            )
+
     try:
         from ..video_composer import MontageComposerError, validate_output_path
 
@@ -451,13 +651,33 @@ async def montage_export(body: MontageExportBody):
 
     rows = await montage_db.get_recorded_clips_by_ids([int(x) for x in clip_ids])
     clip_paths: list[Path] = []
+    clip_path_by_id: dict[int, Path] = {}
     for cid in clip_ids:
         row = rows.get(int(cid))
         if not row:
             from ..api_errors import error_detail
 
             raise HTTPException(400, error_detail("MONTAGE_CLIP_NOT_FOUND", id=str(cid)))
-        clip_paths.append(Path(str(row["output_path"])))
+        path = Path(str(row["output_path"]))
+        clip_paths.append(path)
+        clip_path_by_id[int(cid)] = path
+
+    radar_candidates_by_key: dict[str, dict[str, Any]] = {}
+    if radar_plan["use_new"] and radar_plan["used_keys"]:
+        from ..databases import demo_db
+
+        try:
+            radar_candidates_by_key = await validate_radar_parse_data(
+                clips=[rows[int(cid)] for cid in clip_ids if int(cid) in rows],
+                used_keys=list(radar_plan["used_keys"]),
+                candidate_state=radar_candidate_state_eff if isinstance(radar_candidate_state_eff, dict) else {},
+                demo_db=demo_db,
+                radar_items=radar_plan.get("radar_items") or {},
+            )
+        except RadarBakeError as e:
+            from ..api_errors import error_detail as _ed
+
+            raise HTTPException(400, _ed(e.code, **e.params)) from e
 
     intro_p = Path(intro_s).expanduser() if intro_s else None
     outro_p = Path(outro_s).expanduser() if outro_s else None
@@ -468,10 +688,12 @@ async def montage_export(body: MontageExportBody):
     _pa_lookup: dict[str, PlayerAvatar] = {pa.player_key: pa for pa in player_avatars_eff}
 
     name_cards_list: list[Optional[dict]] = []
+    name_cards_by_clip_id: dict[int, Optional[dict]] = {}
     for cid in clip_ids:
         row = rows.get(int(cid))
         if row is None:
             name_cards_list.append(None)
+            name_cards_by_clip_id[int(cid)] = None
             continue
         # Determine player_key for this clip row (steamid takes priority)
         steamid_val = (
@@ -487,22 +709,23 @@ async def montage_export(body: MontageExportBody):
         matched_pa = _pa_lookup.get(pk)
         if matched_pa is None or not matched_pa.enabled:
             name_cards_list.append(None)
+            name_cards_by_clip_id[int(cid)] = None
         else:
             display_name = matched_pa.player_name or str(row.get("player_name") or "")
             category = resolve_name_card_category(row)
             eyebrow = resolve_name_card_eyebrow(row, category)
             tags, result_tag = build_name_card_tags_and_result(row, category)
-            name_cards_list.append(
-                {
-                    "avatar_path": matched_pa.avatar_path,
-                    "display_name": display_name,
-                    "category": category,
-                    "eyebrow": eyebrow,
-                    "result": result_tag,
-                    "tags": tags,
-                    "enabled": True,
-                }
-            )
+            card = {
+                "avatar_path": matched_pa.avatar_path,
+                "display_name": display_name,
+                "category": category,
+                "eyebrow": eyebrow,
+                "result": result_tag,
+                "tags": tags,
+                "enabled": True,
+            }
+            name_cards_list.append(card)
+            name_cards_by_clip_id[int(cid)] = card
 
     name_cards_arg = name_cards_list if name_cards_enabled_eff else None
 
@@ -532,6 +755,11 @@ async def montage_export(body: MontageExportBody):
     snap["player_avatars"] = [pa.model_dump() for pa in player_avatars_eff]
     snap["name_cards_enabled"] = name_cards_enabled_eff
     snap["framemeld_enabled"] = framemeld_enabled_eff
+    snap["radar_segments"] = radar_segments_prepared
+    snap["timeline_ids"] = [str(x) for x in radar_plan["ordered_ids"]]
+    snap["radar_enabled"] = radar_enabled_eff
+    snap["radar_items"] = radar_plan.get("radar_items") or {}
+    snap["radar_candidate_state"] = radar_candidate_state_eff if isinstance(radar_candidate_state_eff, dict) else {}
     export_id = await montage_db.create_export(
         project_id=int(body.project_id) if body.project_id is not None else None,
         body=snap,
@@ -572,6 +800,14 @@ async def montage_export(body: MontageExportBody):
         "montage_encoder": cfg.montage_encoder or "auto",
         "name_cards": name_cards_arg,
         "framemeld_enabled": framemeld_enabled_eff,
+        "radar_segments": radar_segments_prepared,
+        "radar_spec": {
+            **radar_plan,
+            "candidates_by_key": radar_candidates_by_key,
+            "candidate_state": radar_candidate_state_eff if isinstance(radar_candidate_state_eff, dict) else {},
+        },
+        "clip_path_by_id": clip_path_by_id,
+        "name_cards_by_clip_id": name_cards_by_clip_id if name_cards_enabled_eff else None,
     }
     job.task = asyncio.create_task(_run_montage_export_job(job, prepared))
     return montage_export_job_snapshot(job)

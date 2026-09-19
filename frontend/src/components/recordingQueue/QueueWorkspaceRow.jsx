@@ -148,7 +148,7 @@ export default function QueueWorkspaceRow({
           <div className="min-w-0 text-[11px] leading-4">
             <p className="font-semibold">{t("queue.inputHudMissingTitle")}</p>
             <p className="text-cs2-text-secondary">{t("queue.inputHudMissingBody")}</p>
-            <p className="text-cs2-text-secondary">{t("queue.inputHudMissingUnaffected")}</p>
+            <p className="text-cs2-text-secondary">{t("queue.inputHudMissingHint")}</p>
           </div>
         </div>
       ) : null}

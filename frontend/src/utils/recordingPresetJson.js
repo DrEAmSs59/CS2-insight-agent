@@ -12,6 +12,7 @@ import {
   RAIN_RECORDING_WEATHER_EFFECT,
 } from "./recordingWeatherEffect.js";
 import { isPovVoiceMode, normalizePovVoiceMode } from "./povVoiceMode.js";
+import { isInputHudPosition, normalizeInputHudPosition } from "./inputHudPlacement.js";
 
 export const RECORDING_PRESET_FORMAT = "cs2-insight-recording-preset";
 export const RECORDING_PRESET_VERSION = 7;
@@ -93,6 +94,10 @@ function parseWarmup(value, defaults) {
       const text = requireString(value[key], field, 16);
       if (!["hybrid", "always", "active"].includes(text)) invalid(field, "range");
       result[key] = "hybrid";
+    } else if (key === "input_hud_position") {
+      const text = requireString(value[key], field, 32);
+      if (!isInputHudPosition(text)) invalid(field, "range");
+      result[key] = normalizeInputHudPosition(text);
     } else if (key === "aspect_ratio") {
       const text = requireString(value[key], field, 8);
       if (!["", "4:3", "16:9", "16:10"].includes(text)) invalid(field, "range");

@@ -11,6 +11,10 @@ import {
 import ExperimentalPovSection from "./ExperimentalPovSection";
 import PlayerAliasesSection from "./PlayerAliasesSection.jsx";
 import {
+  DEFAULT_INPUT_HUD_POSITION,
+  normalizeInputHudPosition,
+} from "../utils/inputHudPlacement.js";
+import {
   hasInvalidPlayerAliases,
   PLAYER_ALIAS_ENTRY_VISIBLE,
   playerAliasMaps,
@@ -39,6 +43,10 @@ export function buildWarmupConsoleCommands(o) {
       ? "cl_draw_only_deathnotices true"
       : "cl_draw_only_deathnotices false"
   );
+  // GOTV demos replay the recorded mp_forcecamera=1 NetSetConVar. The local
+  // controller stays on spectator team, so 1 hides teammates on the native
+  // radar; 0 lets CCSGO_HudRadar follow the observed player's relationship.
+  lines.push("mp_forcecamera 0");
   lines.push(o.hud_showtargetid_hide ? "hud_showtargetid 0" : "hud_showtargetid 1");
   lines.push(o.tv_nochat ? "tv_nochat 1" : "tv_nochat 0");
   if (o.hide_demo_playback_ui) {
@@ -105,6 +113,8 @@ export const RECORD_WARMUP_DEFAULT_OPTIONS = {
   pov_voice_mode: DEFAULT_POV_VOICE_MODE,
   /** Whether to render the authoritative in-game keyboard/mouse HUD. */
   input_hud_enabled: true,
+  /** OBS overlay-compatible on-screen anchor for the in-game keyboard/mouse HUD. */
+  input_hud_position: DEFAULT_INPUT_HUD_POSITION,
   /** Visibility policy for the in-game keyboard/mouse HUD. */
   input_hud_display_mode: "hybrid",
   /** Preserved while its editor is temporarily hidden; default off. */
@@ -194,6 +204,7 @@ export default function RecordWarmupModal({
   const [obsTransDurationMs, setObsTransDurationMs] = useState(null);
   const [sessionPovEnabled, setSessionPovEnabled] = useState(false);
   const [sessionInputHudEnabled, setSessionInputHudEnabled] = useState(true);
+  const [sessionInputHudPosition, setSessionInputHudPosition] = useState(DEFAULT_INPUT_HUD_POSITION);
   const [sessionInputHudDisplayMode, setSessionInputHudDisplayMode] = useState("hybrid");
   const [sessionInputAudioEnabled, setSessionInputAudioEnabled] = useState(false);
   const [sessionCombatStatsHudEnabled, setSessionCombatStatsHudEnabled] = useState(true);
@@ -234,6 +245,7 @@ export default function RecordWarmupModal({
     setObsTransDurationMs(Number(initObsTransDurationMs) || 200);
     setSessionPovEnabled(!!experimentalPovEnabled);
     setSessionInputHudEnabled(o?.input_hud_enabled !== false);
+    setSessionInputHudPosition(normalizeInputHudPosition(o?.input_hud_position));
     setSessionInputHudDisplayMode("hybrid");
     setSessionInputAudioEnabled(false);
     setSessionCombatStatsHudEnabled(o?.combat_stats_hud_enabled !== false);
@@ -319,6 +331,7 @@ export default function RecordWarmupModal({
         obs_transition_name: obsTransName,
         obs_transition_duration_ms: obsTransDurationMs,
         input_hud_enabled: sessionInputHudEnabled,
+        input_hud_position: sessionInputHudPosition,
         input_hud_display_mode: sessionInputHudDisplayMode,
         input_audio_enabled: sessionInputAudioEnabled,
         combat_stats_hud_enabled: sessionCombatStatsHudEnabled,
@@ -632,8 +645,10 @@ export default function RecordWarmupModal({
             povVoiceMode={opts.pov_voice_mode}
             onPovVoiceModeChange={(v) => set({ pov_voice_mode: v })}
             inputHudEnabled={sessionInputHudEnabled}
+            inputHudPosition={sessionInputHudPosition}
             inputHudDisplayMode={sessionInputHudDisplayMode}
             onInputHudEnabledChange={setSessionInputHudEnabled}
+            onInputHudPositionChange={setSessionInputHudPosition}
             onInputHudDisplayModeChange={setSessionInputHudDisplayMode}
             recordingSkybox={sessionSkybox}
             onRecordingSkyboxChange={setSessionSkybox}

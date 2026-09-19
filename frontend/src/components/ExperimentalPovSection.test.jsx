@@ -102,19 +102,22 @@ describe("ExperimentalPovSection POV recovery", () => {
     expect(onSkyboxChange).toHaveBeenCalledWith("cartoon4");
   });
 
-  it("places the in-game input selector above map material and supports hiding it", () => {
+  it("places the in-game input selector above map material and supports overlay positions", () => {
     API.get.mockReturnValue(new Promise(() => {}));
     const onInputHudEnabledChange = vi.fn();
     const onInputHudDisplayModeChange = vi.fn();
+    const onInputHudPositionChange = vi.fn();
     render(
       <ExperimentalPovSection
         visible
         experimentalPovEnabled
         onExperimentalPovChange={() => {}}
         inputHudEnabled
+        inputHudPosition="bottom_center"
         inputHudDisplayMode="hybrid"
         onInputHudEnabledChange={onInputHudEnabledChange}
         onInputHudDisplayModeChange={onInputHudDisplayModeChange}
+        onInputHudPositionChange={onInputHudPositionChange}
         recordingMapMaterial="default"
         onRecordingMapMaterialChange={() => {}}
       />,
@@ -126,13 +129,14 @@ describe("ExperimentalPovSection POV recovery", () => {
     expect(inputCard.compareDocumentPosition(materialCard) & Node.DOCUMENT_POSITION_FOLLOWING)
       .toBeTruthy();
     expect(Array.from(selector.options).map(({ value }) => value))
-      .toEqual(["visible", "hidden"]);
+      .toEqual(["hidden", "bottom_center", "minimap_below", "weapon_right"]);
     expect(screen.queryByText("虚拟按键音")).toBeNull();
 
     fireEvent.change(selector, { target: { value: "hidden" } });
     expect(onInputHudEnabledChange).toHaveBeenCalledWith(false);
-    fireEvent.change(selector, { target: { value: "visible" } });
+    fireEvent.change(selector, { target: { value: "minimap_below" } });
     expect(onInputHudEnabledChange).toHaveBeenCalledWith(true);
+    expect(onInputHudPositionChange).toHaveBeenCalledWith("minimap_below");
     expect(onInputHudDisplayModeChange).toHaveBeenCalledWith("hybrid");
   });
 
@@ -151,6 +155,7 @@ describe("ExperimentalPovSection POV recovery", () => {
         inputHudDisplayMode="hybrid"
         onInputHudEnabledChange={() => {}}
         onInputHudDisplayModeChange={onInputModeChange}
+        onInputHudPositionChange={() => {}}
         recordingMapMaterial="default"
         onRecordingMapMaterialChange={() => {}}
         recordingSkybox="default"
@@ -177,7 +182,7 @@ describe("ExperimentalPovSection POV recovery", () => {
     expect(materialCard.compareDocumentPosition(skyboxCard) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 
     fireEvent.change(voiceSelect, { target: { value: "enemy" } });
-    fireEvent.change(inputSelect, { target: { value: "visible" } });
+    fireEvent.change(inputSelect, { target: { value: "weapon_right" } });
     expect(onVoiceChange).toHaveBeenCalledWith("enemy");
     expect(onInputModeChange).toHaveBeenCalledWith("hybrid");
   });
@@ -302,6 +307,7 @@ describe("ExperimentalPovSection POV recovery", () => {
         inputHudDisplayMode="active"
         onInputHudEnabledChange={() => {}}
         onInputHudDisplayModeChange={() => {}}
+        onInputHudPositionChange={() => {}}
         recordingSkybox="default"
         onRecordingSkyboxChange={() => {}}
         omitEyebrow

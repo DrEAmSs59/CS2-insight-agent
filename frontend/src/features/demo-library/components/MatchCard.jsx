@@ -32,7 +32,7 @@ const SOURCE_LOGOS = {
   "Matchmaking": { light: "/images/sources/valve-black.png", dark: "/images/sources/valve-white.png" },
   "ESL": { light: "/images/sources/esl-black.png", dark: "/images/sources/esl-white.png" },
   "ESEA": { light: "/images/sources/esea-black.png", dark: "/images/sources/esea-white.png" },
-  "Blast": { light: "/images/sources/matchzy.png", dark: "/images/sources/matchzy.png" },
+  "Blast": { light: "/images/sources/blast.png", dark: "/images/sources/blast.png" },
   "Local/Other": { light: "/images/sources/unknown.png", dark: "/images/sources/unknown.png" },
 };
 

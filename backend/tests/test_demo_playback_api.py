@@ -14,6 +14,7 @@ from app.features.demo_playback import api as playback_api
 def test_playback_pov_defaults_virtual_key_sounds_off():
     body = playback_api.DemoPlaybackPovBody(enabled=True)
     assert body.input_hud_enabled is True
+    assert body.input_hud_position == "bottom_center"
     assert body.input_audio_enabled is False
 
 

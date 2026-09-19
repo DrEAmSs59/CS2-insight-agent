@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   num, ratio, percent, detectPhaseMeta, isValidEnemyKill, buildPlayerTeamMap,
+  buildRoundHeadline, rewriteStoredRoundHeadline,
 } from "./overviewUtils";
 
 describe("overviewUtils", () => {
@@ -47,5 +48,61 @@ describe("overviewUtils", () => {
     expect(isValidEnemyKill({ type: "kill", actor: "A1", target: "A1" }, map)).toBe(false);
     expect(isValidEnemyKill({ type: "kill", actor: "A1", target: "A2" }, map)).toBe(false);
     expect(isValidEnemyKill({ type: "kill", actor: "A1", target: "B1" }, map)).toBe(true);
+  });
+
+  it("keeps help-winner copy, except losing triples", () => {
+    const playerTeamMap = buildPlayerTeamMap([
+      { name: "狩猎的瞬间的心态", team_key: "a" },
+      { name: "XTangRay", team_key: "b" },
+    ]);
+
+    expect(buildRoundHeadline({
+      events: [
+        { type: "kill", actor: "狩猎的瞬间的心态" },
+        { type: "kill", actor: "狩猎的瞬间的心态" },
+        { type: "kill", actor: "狩猎的瞬间的心态" },
+        { type: "kill", actor: "XTangRay" },
+      ],
+      playerTeamMap,
+      winnerKey: "b",
+      winnerLabel: "Team B",
+      site: "A",
+      roundNumber: 12,
+    })).toBe("狩猎的瞬间的心态 三杀未能赢下回合，Team B 获胜");
+
+    expect(buildRoundHeadline({
+      events: [
+        { type: "kill", actor: "XTangRay" },
+        { type: "kill", actor: "XTangRay" },
+        { type: "kill", actor: "XTangRay" },
+      ],
+      playerTeamMap,
+      winnerKey: "b",
+      winnerLabel: "Team B",
+      site: "B",
+      roundNumber: 1,
+    })).toBe("XTangRay 三杀帮助 Team B 拿下回合");
+
+    expect(rewriteStoredRoundHeadline("狩猎的瞬间的心态 三杀帮助 Team B 拿下回合", {
+      events: [
+        { type: "kill", actor: "狩猎的瞬间的心态" },
+        { type: "kill", actor: "狩猎的瞬间的心态" },
+        { type: "kill", actor: "狩猎的瞬间的心态" },
+      ],
+      playerTeamMap,
+      winnerKey: "b",
+      winnerLabel: "Team B",
+      site: "A",
+      roundNumber: 12,
+    })).toBe("狩猎的瞬间的心态 三杀未能赢下回合，Team B 获胜");
+
+    expect(rewriteStoredRoundHeadline("ZywOo 双杀守住 B 区", {
+      events: [{ type: "kill", actor: "ZywOo" }, { type: "kill", actor: "ZywOo" }],
+      playerTeamMap: buildPlayerTeamMap([{ name: "ZywOo", team_key: "a" }]),
+      winnerKey: "a",
+      winnerLabel: "Vitality",
+      site: "B",
+      roundNumber: 4,
+    })).toBe("ZywOo 双杀守住 B 区");
   });
 });

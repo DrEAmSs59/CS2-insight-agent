@@ -609,7 +609,6 @@ async def analyze_demo_from_library(demo_id: int, req: DemoAnalyzeRequest):
     if not row:
         raise HTTPException(404, f"Demo not found: {demo_id}")
     dem_path = await library_working_demo_path(row)
-    await asyncio.to_thread(ensure_demo_compatible, dem_path)
     out = await run_library_demo_analyze(
         demo_id,
         dem_path,

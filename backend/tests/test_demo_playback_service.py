@@ -43,6 +43,7 @@ class _FakePovManager:
         input_hud_enabled=True,
         input_hud_display_mode="hybrid",
         input_hud_scale_percent=100,
+        input_hud_position="bottom_center",
         input_audio_enabled=False,
         input_audio_volume_percent=100,
         weather_effect_id="default",
@@ -57,6 +58,7 @@ class _FakePovManager:
                 input_hud_enabled,
                 input_hud_display_mode,
                 input_hud_scale_percent,
+                input_hud_position,
                 input_audio_enabled,
                 input_audio_volume_percent,
             )
@@ -287,7 +289,7 @@ def test_pov_playback_installs_cfg_and_restores_after_exit(monkeypatch, tmp_path
     assert manager.advanced_playback_flags == [True]
     assert manager.skybox_ids == ["cartoon3"]
     assert manager.map_material_ids == ["waxed_reflection"]
-    assert manager.input_options == [(True, "active", 115, False, 50)]
+    assert manager.input_options == [(True, "active", 115, "bottom_center", False, 50)]
     assert result["recording_skybox_id"] == "cartoon3"
     assert result["recording_map_material_id"] == "waxed_reflection"
     assert result["input_hud_display_mode"] == "active"

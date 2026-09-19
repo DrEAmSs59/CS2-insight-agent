@@ -1,14 +1,17 @@
 from __future__ import annotations
 
+from collections import Counter
 from dataclasses import dataclass
 
 from app import native_table as pd
 
 from app.features.demo_analysis.match_workspace import (
+    MATCH_WORKSPACE_ALGORITHM_VERSION,
     _build_round_windows,
     _enrich_grenade_events,
     _extract_grenade_trajectories,
     _player_stats,
+    _round_headline,
     build_match_workspace,
 )
 
@@ -273,6 +276,7 @@ def test_build_match_workspace_reuses_shared_parse_for_all_views():
     )
 
     assert result["version"] == 1
+    assert result["algorithm_version"] == MATCH_WORKSPACE_ALGORITHM_VERSION
     assert result["team_a_name"] == "Alpha Team"
     assert result["team_b_name"] == "Bravo Team"
     assert len(result["players"]) == 2
@@ -399,3 +403,43 @@ def test_player_stats_records_clutch_max_opponents_and_multikill():
     assert "rating" not in by_name["Alice"]
     assert by_name["Alice"]["clutch_wins"] == 1
     assert by_name["Alice"]["four_kill_rounds"] == 1
+
+
+def test_round_headline_keeps_help_copy_except_losing_triple():
+    player_team = {"zywoo": "a", "s1mple": "b"}
+
+    assert _round_headline(
+        kill_counts=Counter({"ZywOo": 3, "s1mple": 1}),
+        player_team=player_team,
+        winner_key="a",
+        winner_label="Team A",
+        site="B",
+        round_number=12,
+    ) == "ZywOo 三杀帮助 Team A 拿下回合"
+
+    assert _round_headline(
+        kill_counts=Counter({"狩猎的瞬间的心态": 3, "XTangRay": 1}),
+        player_team={"狩猎的瞬间的心态": "a", "xtangray": "b"},
+        winner_key="b",
+        winner_label="Team B",
+        site="A",
+        round_number=12,
+    ) == "狩猎的瞬间的心态 三杀未能赢下回合，Team B 获胜"
+
+    assert _round_headline(
+        kill_counts=Counter({"XTangRay": 2, "ZywOo": 1}),
+        player_team={"xtangray": "b", "zywoo": "a"},
+        winner_key="a",
+        winner_label="Team A",
+        site="A",
+        round_number=5,
+    ) == "Team A 在 A 区下包后赢下回合"
+
+    assert _round_headline(
+        kill_counts=Counter({"ZywOo": 2}),
+        player_team=player_team,
+        winner_key="a",
+        winner_label="Team A",
+        site=None,
+        round_number=1,
+    ) == "ZywOo 双杀帮助 Team A 拿下回合"

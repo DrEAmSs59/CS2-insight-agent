@@ -205,7 +205,12 @@ export default function DemoPlayOptionsModal({
                       <PreviewControl active>POV HUD</PreviewControl>
                       <PreviewControl>DEMO HUD</PreviewControl>
                       <PreviewControl>{t("playDemo.previewHudHidden")}</PreviewControl>
-                      <PreviewControl active>{t("playDemo.previewInputHudOn")}</PreviewControl>
+                    </PreviewHudRow>
+                    <PreviewHudRow label={t("playDemo.previewInputHud")}>
+                      <PreviewControl>{t("playDemo.previewInputHudHide")}</PreviewControl>
+                      <PreviewControl active>{t("playDemo.previewInputHudBottom")}</PreviewControl>
+                      <PreviewControl>{t("playDemo.previewInputHudMinimap")}</PreviewControl>
+                      <PreviewControl>{t("playDemo.previewInputHudWeapon")}</PreviewControl>
                     </PreviewHudRow>
                     <PreviewHudRow label={t("playDemo.previewVoice")}>
                       <PreviewControl active>{t("playDemo.previewVoiceAll")}</PreviewControl>

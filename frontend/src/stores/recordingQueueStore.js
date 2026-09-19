@@ -2,8 +2,8 @@ import { create } from "zustand";
 
 /**
  * @typedef {Object} PacingOverride
- * @property {number} [pre_first_sec]   击杀段前预留（秒），每段首杀前回拨
- * @property {number} [post_last_sec]   击杀段后预留（秒），每段末杀后收束（含智能跳剪中段；非每个击杀各加一段尾垫）
+ * @property {number} [pre_first_sec]   击杀段/死亡段前预留（秒），每段首次击杀或死亡前回拨
+ * @property {number} [post_last_sec]   击杀段/死亡段后预留（秒），每段末次击杀或死亡后收束（含智能跳剪中段；非每个事件各加一段尾垫）
  * @property {number} [max_gap_sec]     跳剪间隔阈值（秒），超过则拆成新击杀段
  * @property {boolean} [victim_pov]     是否追加 POV（高光→受害者、失误→击杀者）
  * @property {boolean} [pov_interleaved] 连贯 POV：每事件后立即切对方视角（否则先全部主视角再全部 POV）
@@ -248,7 +248,7 @@ export const useRecordingQueue = create((set, get) => ({
   },
 
   /**
-   * 重置「智能分段」数值（击杀段前预留 / 击杀段后预留 / 跳剪间隔阈值），保留入队默认开关与 POV 时序默认值。
+   * 重置「智能分段」数值（击杀段/死亡段前预留 / 击杀段/死亡段后预留 / 跳剪间隔阈值），保留入队默认开关与 POV 时序默认值。
    */
   resetGlobalPacing() {
     set((s) => {

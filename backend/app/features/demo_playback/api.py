@@ -50,6 +50,7 @@ class DemoPlaybackPovBody(BaseModel):
     input_hud_enabled: bool = True
     input_hud_display_mode: Literal["hybrid", "always", "active"] = "hybrid"
     input_hud_scale_percent: int = Field(default=100, ge=75, le=125)
+    input_hud_position: Literal["bottom_center", "minimap_below", "weapon_right"] = "bottom_center"
     input_audio_enabled: bool = False
     input_audio_volume_percent: Literal[25, 50, 75, 100] = 100
 
@@ -141,6 +142,7 @@ def launch_cs2_play_demo(
                 input_hud_enabled=bool(pov.input_hud_enabled),
                 input_hud_display_mode=pov.input_hud_display_mode,
                 input_hud_scale_percent=int(pov.input_hud_scale_percent),
+                input_hud_position=pov.input_hud_position,
                 input_audio_enabled=bool(pov.input_audio_enabled),
                 input_audio_volume_percent=int(pov.input_audio_volume_percent),
                 player_aliases=dict(body.player_aliases),

@@ -1,4 +1,4 @@
-"""Build narrow weather particle aliases from the installed CS2 VPKs.
+"""Build narrow weather particle overrides without changing map environments.
 
 This route deliberately reuses an existing map-created particle entity.  For
 the Train probe, the map still creates its native ``rain_volume`` systems; the
@@ -37,6 +37,21 @@ TRAIN_RAIN_PARTICLE_PATHS = (
 )
 OFFICIAL_SNOW_PARTICLE_PATH = "particles/rain_fx/snow.vpcf_c"
 
+# All seven maps use the refined small rain hosts. Only this accepted particle
+# may enter the normal rain package; map environment resources stay separate.
+RAIN_PARTICLE_MAP_PATHS = {
+    name: "particles/rain_fx/rain_single_128.vpcf_c"
+    for name in (
+        "de_dust2", "de_mirage", "de_cache", "de_inferno",
+        "de_anubis", "de_ancient", "de_nuke",
+    )
+}
+_RAIN_PARTICLE_IDENTITIES = {
+    "rain_single_128.vpcf_c": (
+        2359, "8886c3d877b41a27b14dcce350f1839dd14d2a7802783c24a2be99e466382191",
+    ),
+}
+
 
 class WeatherParticleVpkError(RuntimeError):
     """An installed particle could not be verified or safely aliased."""
@@ -46,6 +61,52 @@ class WeatherParticleVpkError(RuntimeError):
 class WeatherParticleVpkBuild:
     vpk_bytes: bytes
     metadata: dict[str, Any]
+
+
+def compose_rain_particle_override_vpk(
+    *,
+    assets_dir: Path,
+    map_name: object,
+    base_vpk_bytes: bytes | None = None,
+) -> WeatherParticleVpkBuild:
+    """Override only the rain resource already referenced by this map's hosts."""
+    normalized_map = normalize_skybox_map_name(map_name)
+    target = RAIN_PARTICLE_MAP_PATHS.get(normalized_map)
+    if target is None:
+        raise WeatherParticleVpkError(
+            f"accepted rain particles do not support map: {normalized_map}"
+        )
+    filename = Path(target).name
+    source = Path(assets_dir) / filename
+    if not source.is_file() or source.is_symlink():
+        raise WeatherParticleVpkError(f"rain particle resource is unavailable: {source}")
+    payload = source.read_bytes()
+    identity = (len(payload), hashlib.sha256(payload).hexdigest())
+    if identity != _RAIN_PARTICLE_IDENTITIES[filename]:
+        raise WeatherParticleVpkError(f"rain particle failed integrity validation: {source}")
+    entries = read_inline_vpk(base_vpk_bytes) if base_vpk_bytes is not None else {}
+    existing = entries.get(target)
+    if existing is not None and existing != payload:
+        raise WeatherParticleVpkError(f"temporary VPK already overrides rain: {target}")
+    entries[target] = payload
+    output = write_inline_vpk(entries)
+    return WeatherParticleVpkBuild(
+        vpk_bytes=output,
+        metadata={
+            "schema_version": 1,
+            "route": "accepted_rain_particle_override",
+            "map_name": normalized_map,
+            "appearance_profile": "mirage-rain-master-v1",
+            "target_particle": target,
+            "source_size": identity[0],
+            "source_sha256": identity[1],
+            "output_size": len(output),
+            "output_sha256": hashlib.sha256(output).hexdigest(),
+            "native_particle_entity_reused": True,
+            "new_particle_entity_created": False,
+            "official_visual_resources_only": False,
+        },
+    )
 
 
 def _archive_path(directory_vpk: Path, archive_index: int) -> Path:

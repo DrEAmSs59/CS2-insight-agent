@@ -29,4 +29,11 @@ describe("recording warmup voice ownership", () => {
   it("leaves voice commands to the backend when POV is enabled", () => {
     expect(voiceCommands({ experimental_pov_enabled: true })).toEqual([]);
   });
+
+  it("forces mp_forcecamera 0 so native radar can show teammates", () => {
+    const commands = buildWarmupConsoleCommands(RECORD_WARMUP_DEFAULT_OPTIONS);
+    expect(commands.filter((command) => command.startsWith("mp_forcecamera"))).toEqual([
+      "mp_forcecamera 0",
+    ]);
+  });
 });

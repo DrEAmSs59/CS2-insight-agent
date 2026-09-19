@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import { CollapsibleSection } from "./MontageWorkbenchPanels";
 import { MontagePlayerAssetsPanel } from "./MontagePlayerAssetsPanel";
+import CsDataRadarPanel from "../../features/cs-data-radar/CsDataRadarPanel";
 import { useT } from "../../i18n/useT.js";
 import { humanizeMontageError } from "../../utils/formatMontageApiError.js";
 import { summarizeFrameMeldSources } from "../../utils/framemeld.js";
@@ -204,6 +205,24 @@ export function MontageStyleConsole({
   framemeldRuntimeAvailable = false,
   framemeldSourceSummary: providedFrameMeldSourceSummary,
   onFrameMeldEnabledChange,
+  // 数据雷达图专栏
+  radarCandidates = [],
+  radarCandidatesLoading = false,
+  radarCandidatesError = "",
+  onRefreshRadarCandidates,
+  radarEnabled = true,
+  onRadarEnabledChange,
+  radarItems = [],
+  candidateState = {},
+  onCandidateRatingChange,
+  onCandidateMedianRatingChange,
+  onCandidatePortraitChange,
+  timelineClips = [],
+  selectedTimelineId = null,
+  onInsertRadarBefore,
+  onInsertRadarAfter,
+  onRemoveRadarItem,
+  onRadarDurationChange,
 }) {
   const t = useT();
   const framemeldSourceSummary = providedFrameMeldSourceSummary || summarizeFrameMeldSources(clips || []);
@@ -235,6 +254,7 @@ export function MontageStyleConsole({
     { id: "intro", active: introFilled, label: t("montage.exportChecklistIntro") },
     { id: "outro", active: outroFilled, label: t("montage.exportChecklistOutro") },
     { id: "cards", active: nameCardsFilled, label: t("montage.consoleExportOptionalNameCards") },
+    { id: "radar", active: radarItems.length > 0, label: t("radar.consoleTabTitle") },
   ];
   const optionalActiveCount = optionalItems.filter((item) => item.active).length;
 
@@ -255,6 +275,7 @@ export function MontageStyleConsole({
   const tabItems = [
     { id: "media", label: t("montage.consoleTabMedia") },
     { id: "players", label: t("montage.consoleTabPlayers") },
+    { id: "radar", label: t("radar.consoleTabTitle") },
     { id: "export", label: t("montage.consoleTabExport") },
   ];
 
@@ -465,6 +486,28 @@ export function MontageStyleConsole({
               nameCardsEnabled={nameCardsEnabled || false}
               onPlayerAvatarChange={onPlayerAvatarChange}
               onNameCardsEnabledChange={onNameCardsEnabledChange}
+            />
+          )}
+
+          {activeTab === "radar" && (
+            <CsDataRadarPanel
+              candidates={radarCandidates}
+              loading={radarCandidatesLoading}
+              error={radarCandidatesError}
+              onRefresh={onRefreshRadarCandidates}
+              radarEnabled={radarEnabled}
+              onRadarEnabledChange={onRadarEnabledChange}
+              radarItems={radarItems}
+              candidateState={candidateState}
+              onCandidateRatingChange={onCandidateRatingChange}
+              onCandidateMedianRatingChange={onCandidateMedianRatingChange}
+              onCandidatePortraitChange={onCandidatePortraitChange}
+              timelineClips={timelineClips}
+              selectedTimelineId={selectedTimelineId}
+              onInsertBefore={onInsertRadarBefore}
+              onInsertAfter={onInsertRadarAfter}
+              onRemoveRadarItem={onRemoveRadarItem}
+              onRadarDurationChange={onRadarDurationChange}
             />
           )}
 

@@ -50,7 +50,11 @@ describe("DemoPlayOptionsModal", () => {
     expect(screen.getAllByTestId("advanced-preview-player-row")).toHaveLength(10);
     expect(screen.queryByText("自定义玩家昵称")).toBeNull();
     expect(screen.queryByRole("checkbox", { name: "启用改名" })).toBeNull();
-    expect(screen.getByText("键鼠开")).toBeTruthy();
+    expect(screen.getByText("键鼠")).toBeTruthy();
+    expect(screen.getByText("底部中央")).toBeTruthy();
+    expect(screen.getByText("小地图下")).toBeTruthy();
+    expect(screen.getByText("武器HUD上")).toBeTruthy();
+    expect(screen.queryByText("键鼠开")).toBeNull();
     expect(screen.queryByText("内置按键 + 键鼠可视化")).toBeNull();
     expect(screen.queryByRole("combobox", { name: "按键显示方式" })).toBeNull();
     expect(screen.queryByRole("slider")).toBeNull();

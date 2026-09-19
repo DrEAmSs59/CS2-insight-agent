@@ -1862,6 +1862,7 @@ class RecordingWarmupExtras:
     # are session choices.
     input_hud_enabled: bool = True
     input_hud_display_mode: Literal["hybrid", "always", "active"] = "hybrid"
+    input_hud_position: Literal["bottom_center", "minimap_below", "weapon_right"] = "bottom_center"
     input_audio_enabled: bool = False
     # Presentation-only switch. The authoritative combat track remains in the
     # demo-specific payload so this never changes truth extraction or Pawn switching.
@@ -2005,6 +2006,8 @@ _VOICE_CVAR_NAMES: frozenset[str] = frozenset({
     "tv_listen_voice_indices",
     "tv_listen_voice_indices_h",
 })
+_FORCECAMERA_CVAR_NAME = "mp_forcecamera"
+_OBSERVE_ALL_FORCECAMERA_COMMAND = "mp_forcecamera 0"
 
 
 def _filter_post_spec_console_lines(lines) -> list[str]:
@@ -2032,6 +2035,23 @@ def _without_voice_console_lines(lines) -> list[str]:
         if value.split()[0].lower() not in _VOICE_CVAR_NAMES:
             out.append(value)
     return out
+
+
+def _without_forcecamera_console_lines(lines) -> list[str]:
+    """Drop client mp_forcecamera rows so recording can force observe-all."""
+    out: list[str] = []
+    for line in lines or ():
+        value = str(line).strip()
+        if not value:
+            continue
+        if value.split(maxsplit=1)[0].rstrip(";").lower() != _FORCECAMERA_CVAR_NAME:
+            out.append(value)
+    return out
+
+
+def _apply_recording_forcecamera_policy(lines) -> list[str]:
+    """GOTV demos replay mp_forcecamera=1; keep native radar on the observed team."""
+    return [*_without_forcecamera_console_lines(lines), _OBSERVE_ALL_FORCECAMERA_COMMAND]
 
 
 def _apply_recording_voice_policy(
@@ -3541,11 +3561,13 @@ class OBSDirector:
             lines = self._append_config_warmup_console_lines(
                 [*_RECORDING_KEYBIND_RESET_LINES, *cmds]
             )
-            return _apply_recording_voice_policy(
-                lines,
-                pov_enabled=pov_enabled,
-                pov_voice_mode=getattr(w, "pov_voice_mode", None),
-                pov_voice_disabled=bool(getattr(w, "pov_voice_disabled", False)),
+            return _apply_recording_forcecamera_policy(
+                _apply_recording_voice_policy(
+                    lines,
+                    pov_enabled=pov_enabled,
+                    pov_voice_mode=getattr(w, "pov_voice_mode", None),
+                    pov_voice_disabled=bool(getattr(w, "pov_voice_disabled", False)),
+                )
             )
         lines: list[str] = []
         lines.extend(_RECORDING_KEYBIND_RESET_LINES)
@@ -3598,11 +3620,13 @@ class OBSDirector:
             lines.append("cl_grenadepreview 0")
             lines.append("sv_grenade_trajectory_time_spectator 0")
         lines = self._append_config_warmup_console_lines(lines)
-        return _apply_recording_voice_policy(
-            lines,
-            pov_enabled=pov_enabled,
-            pov_voice_mode=getattr(w, "pov_voice_mode", None),
-            pov_voice_disabled=bool(getattr(w, "pov_voice_disabled", False)),
+        return _apply_recording_forcecamera_policy(
+            _apply_recording_voice_policy(
+                lines,
+                pov_enabled=pov_enabled,
+                pov_voice_mode=getattr(w, "pov_voice_mode", None),
+                pov_voice_disabled=bool(getattr(w, "pov_voice_disabled", False)),
+            )
         )
 
     async def execute_plan_queue(
@@ -3679,9 +3703,14 @@ class OBSDirector:
         input_hud_enabled_v3 = bool(
             getattr(warmup, "input_hud_enabled", True) if warmup else True
         )
-        # Recording exposes a binary show/hide choice. A visible input HUD
-        # always uses the high-frequency resident (hybrid) presentation.
+        # Recording exposes show/hide plus the three OBS overlay anchors.
+        # A visible input HUD always uses the high-frequency resident (hybrid) presentation.
         input_hud_display_mode_v3 = "hybrid"
+        input_hud_position_v3 = str(
+            getattr(warmup, "input_hud_position", "bottom_center") if warmup else "bottom_center"
+        ).strip().lower()
+        if input_hud_position_v3 not in {"bottom_center", "minimap_below", "weapon_right"}:
+            input_hud_position_v3 = "bottom_center"
         input_audio_enabled_v3 = bool(
             getattr(warmup, "input_audio_enabled", False) if warmup else False
         )
@@ -3799,6 +3828,7 @@ class OBSDirector:
                                 input_hud_enabled=input_hud_enabled_v3,
                                 input_hud_display_mode=input_hud_display_mode_v3,
                                 input_hud_scale_percent=100,
+                                input_hud_position=input_hud_position_v3,
                                 input_audio_enabled=input_audio_enabled_v3,
                                 input_audio_volume_percent=100,
                                 combat_stats_enabled=(
@@ -3940,7 +3970,11 @@ class OBSDirector:
                 else:
                     # POV cannot be enabled without a warmup object. The non-POV
                     # default intentionally mutes only the global voice volume.
-                    effective_warmup_cmds = [*_V3_DEMO_KEY_BINDINGS, "snd_voipvolume 0"]
+                    effective_warmup_cmds = [
+                        *_V3_DEMO_KEY_BINDINGS,
+                        "snd_voipvolume 0",
+                        "mp_forcecamera 0",
+                    ]
                     try:
                         _warmup_inject_ok = bool(await asyncio.to_thread(
                             inject_console_sequence,

@@ -18,6 +18,16 @@ import {
   MontageMaterialPoolCard,
 } from "./montage/MontageWorkbenchPanels";
 import { MontageStyleConsole } from "./montage/MontageStyleConsole";
+import { fetchRadarCandidates } from "../features/cs-data-radar/csDataRadarApi";
+import {
+  ANIMATION_DURATION_SEC,
+  clipIdsFromTimeline,
+  hydrateTimelineFromDraft,
+  insertRelativeTo,
+  isRadarTimelineId,
+  makeRadarTimelineId,
+  sortTimelineKeepingRadar,
+} from "../features/cs-data-radar/radarTimeline.js";
 import {
   sortClipsByStrategy,
   ensureMp4Filename,
@@ -81,6 +91,14 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
   const [nameCardsEnabled, setNameCardsEnabled] = useState(false);
   const [exportJob, setExportJob] = useState(null);
   const [exportDialog, setExportDialog] = useState({ phase: "idle", result: null, error: "" });
+
+  // ── 数据雷达图 ──
+  const [radarCandidates, setRadarCandidates] = useState([]);
+  const [radarCandidatesLoading, setRadarCandidatesLoading] = useState(false);
+  const [radarCandidatesError, setRadarCandidatesError] = useState("");
+  const [radarEnabled, setRadarEnabled] = useState(true);
+  const [radarItems, setRadarItems] = useState({});
+  const [radarCandidateState, setRadarCandidateState] = useState({});
 
   const toastTimer = useRef(null);
 
@@ -263,14 +281,14 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
   }, [open, isPage]);
 
   useEffect(() => {
-    if (selectedTimelineClipId != null && !orderedIds.includes(selectedTimelineClipId)) {
+    if (selectedTimelineClipId != null && !orderedIds.some((id) => String(id) === String(selectedTimelineClipId))) {
       setSelectedTimelineClipId(null);
     }
     setTimelineMultiSelectedIds((prev) => {
       const next = new Set(prev);
       let changed = false;
       for (const id of prev) {
-        if (!orderedIds.includes(id)) {
+        if (!orderedIds.some((itemId) => String(itemId) === String(id))) {
           next.delete(id);
           changed = true;
         }
@@ -281,7 +299,7 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
 
   useEffect(() => {
     if (transitionEdgeSourceId == null) return;
-    const idx = orderedIds.indexOf(transitionEdgeSourceId);
+    const idx = orderedIds.findIndex((id) => String(id) === String(transitionEdgeSourceId));
     if (idx < 0 || idx >= orderedIds.length - 1) {
       setTransitionEdgeSourceId(null);
     }
@@ -309,6 +327,9 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
     playerAvatars,
     nameCardsEnabled,
     framemeldEnabled,
+    radarEnabled,
+    radarItems,
+    radarCandidateState,
   ]);
 
   const byId = useMemo(() => {
@@ -319,7 +340,127 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
 
   const orderedIdSet = useMemo(() => new Set(orderedIds), [orderedIds]);
 
-  const orderedClips = useMemo(() => orderedIds.map((id) => byId.get(id)).filter(Boolean), [orderedIds, byId]);
+  const orderedClips = useMemo(
+    () => clipIdsFromTimeline(orderedIds).map((id) => byId.get(id)).filter(Boolean),
+    [orderedIds, byId],
+  );
+
+  const timelineClipIdKey = useMemo(
+    () => clipIdsFromTimeline(orderedIds).join(","),
+    [orderedIds],
+  );
+
+  useEffect(() => {
+    if (!open && !isPage) return;
+    const ids = clipIdsFromTimeline(orderedIds);
+    if (!ids.length) {
+      setRadarCandidates([]);
+      setRadarCandidatesError("");
+      return undefined;
+    }
+    let cancelled = false;
+    setRadarCandidatesLoading(true);
+    fetchRadarCandidates(ids)
+      .then((list) => {
+        if (cancelled) return;
+        setRadarCandidates(list);
+        setRadarCandidatesError("");
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setRadarCandidatesError(t("radar.cardsLoadFail"));
+      })
+      .finally(() => {
+        if (!cancelled) setRadarCandidatesLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, isPage, timelineClipIdKey, orderedIds, t]);
+
+  const radarItemList = useMemo(
+    () => orderedIds.filter(isRadarTimelineId).map((id) => radarItems[id]).filter(Boolean),
+    [orderedIds, radarItems],
+  );
+
+  const orchestrationItems = useMemo(() => {
+    const liveKeys = new Set((radarCandidates || []).map((row) => row.key));
+    return orderedIds
+      .map((id) => {
+        if (isRadarTimelineId(id)) {
+          const radar = radarItems[id] || { id, playerName: "", duration: ANIMATION_DURATION_SEC, candidateKey: "" };
+          return {
+            kind: "radar",
+            id,
+            radar: {
+              ...radar,
+              orphan: radar.candidateKey ? !liveKeys.has(radar.candidateKey) : true,
+            },
+          };
+        }
+        const clip = byId.get(id);
+        return clip ? { kind: "clip", id, clip } : null;
+      })
+      .filter(Boolean);
+  }, [orderedIds, radarItems, radarCandidates, byId]);
+
+  const insertRadarCandidate = useCallback((candidate, where) => {
+    if (!candidate?.key) return;
+    if (!orderedIds.length) {
+      showToast(t("radar.noticeNeedTimeline"));
+      return;
+    }
+    const radarId = makeRadarTimelineId(
+      typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `r-${Date.now()}`,
+    );
+    setRadarItems((prev) => ({
+      ...prev,
+      [radarId]: {
+        id: radarId,
+        candidateKey: candidate.key,
+        playerName: candidate.player_name || t("radar.unknownPlayer"),
+        duration: ANIMATION_DURATION_SEC,
+      },
+    }));
+    const selected = selectedTimelineClipId;
+    const opts = where === "after"
+      ? { afterId: selected ?? orderedIds[orderedIds.length - 1] }
+      : { beforeId: selected ?? orderedIds[0] };
+    setOrderedIds((prev) => insertRelativeTo(prev, radarId, opts));
+    showToast(t("radar.noticeInserted", { player: candidate.player_name || "" }));
+  }, [orderedIds, selectedTimelineClipId, showToast, t]);
+
+  const removeRadarItem = useCallback((radarId) => {
+    setOrderedIds((prev) => prev.filter((id) => String(id) !== String(radarId)));
+    setRadarItems((prev) => {
+      const next = { ...prev };
+      delete next[radarId];
+      return next;
+    });
+  }, []);
+
+  const onRadarDurationChange = useCallback((radarId, duration) => {
+    setRadarItems((prev) => {
+      const cur = prev[radarId];
+      if (!cur) return prev;
+      return { ...prev, [radarId]: { ...cur, duration } };
+    });
+  }, []);
+
+  const radarItemsPayload = useMemo(() => {
+    const out = {};
+    for (const id of orderedIds) {
+      if (!isRadarTimelineId(id) || !radarItems[id]) continue;
+      const item = radarItems[id];
+      out[id] = {
+        id,
+        candidate_key: item.candidateKey,
+        player_name: item.playerName,
+        duration: item.duration,
+      };
+    }
+    return out;
+  }, [orderedIds, radarItems]);
 
   const supplementalFrameMeldPaths = useMemo(
     () => [introPath, outroPath]
@@ -400,16 +541,20 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
     if (orderedClips.length === 0) return null;
     const anyUnknown = orderedClips.some((c) => getClipDurationSeconds(c) == null);
     return anyUnknown ? t("montage.unknownDurationHint") : null;
-  }, [orderedClips]);
+  }, [orderedClips, t]);
 
   const totalKnownSeconds = useMemo(() => {
     let s = 0;
-    for (const c of orderedClips) {
-      const d = getClipDurationSeconds(c);
+    for (const id of orderedIds) {
+      if (isRadarTimelineId(id)) {
+        s += Number(radarItems[id]?.duration) > 0 ? Number(radarItems[id].duration) : ANIMATION_DURATION_SEC;
+        continue;
+      }
+      const d = getClipDurationSeconds(byId.get(id));
       if (d != null) s += d;
     }
     return s;
-  }, [orderedClips]);
+  }, [orderedIds, radarItems, byId]);
 
   const filteredLibrary = useMemo(() => {
     return items.filter((clip) => {
@@ -455,7 +600,14 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
   }, [filteredLibrary, showToast]);
 
   const removeFromSequence = useCallback((id) => {
-    setOrderedIds((prev) => prev.filter((x) => x !== id));
+    setOrderedIds((prev) => prev.filter((x) => String(x) !== String(id)));
+    if (isRadarTimelineId(id)) {
+      setRadarItems((prev) => {
+        const next = { ...prev };
+        delete next[id];
+        return next;
+      });
+    }
     setTransitionByClipId((prev) => {
       const next = { ...prev };
       delete next[String(id)];
@@ -550,9 +702,9 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
 
   const handleSort = useCallback(
     (strategy) => {
-      const clips = orderedIds.map((id) => byId.get(id)).filter(Boolean);
+      const clips = clipIdsFromTimeline(orderedIds).map((id) => byId.get(id)).filter(Boolean);
       const sorted = sortClipsByStrategy(clips, strategy);
-      setOrderedIds(sorted.map((c) => c.id));
+      setOrderedIds(sortTimelineKeepingRadar(orderedIds, sorted.map((c) => c.id)));
     },
     [orderedIds, byId],
   );
@@ -680,7 +832,7 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
   }, [orderedIds, byId, showToast, t]);
 
   const validateExport = useCallback(() => {
-    if (orderedIds.length < 1) {
+    if (clipIdsFromTimeline(orderedIds).length < 1) {
       return t("montage.exportValidNoClips");
     }
     const name = outputFilename.trim();
@@ -691,7 +843,7 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
       return t("montage.exportValidNoDir");
     }
     return null;
-  }, [orderedIds.length, outputFilename, effectiveOutputDir, t]);
+  }, [orderedIds, outputFilename, effectiveOutputDir, t]);
 
   const saveDraft = useCallback(async (nameOverride = "") => {
     const requestedName = String(nameOverride || "").trim();
@@ -714,7 +866,8 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
       const { data } = await API.post("/montage/projects", {
         project_id: projectId,
         name: effectiveName,
-        recorded_clip_ids: orderedIds,
+        recorded_clip_ids: clipIdsFromTimeline(orderedIds),
+        timeline_ids: orderedIds.map(String),
         bgm_path: bgmPath.trim() || null,
         bgm_start_sec: bgmStartSec > 0 ? bgmStartSec : undefined,
         intro_path: introPath.trim() || null,
@@ -728,6 +881,9 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
         player_avatars: playerAvatarsPayload,
         name_cards_enabled: nameCardsEnabled,
         framemeld_enabled: effectiveFrameMeldEnabled,
+        radar_enabled: radarEnabled,
+        radar_items: radarItemsPayload,
+        radar_candidate_state: radarCandidateState,
       });
       setProjectId(data.id);
       if (data?.body?.transitions && typeof data.body.transitions === "object") {
@@ -794,6 +950,9 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
     playerAvatars,
     nameCardsEnabled,
     effectiveFrameMeldEnabled,
+    radarEnabled,
+    radarItemsPayload,
+    radarCandidateState,
     framemeldCanEnable,
     t,
   ]);
@@ -838,7 +997,29 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
     draftDirtyBoot.current = true;
     setProjectId(Number(draft.id));
     setDraftName(String(draft.name || ""));
-    setOrderedIds(availableClipIds);
+    const hydrated = hydrateTimelineFromDraft({
+      recordedClipIds: draftClipIds,
+      timelineIds: body.timeline_ids || body.ordered_ids,
+      radarSegments: body.radar_segments,
+      radarItems: body.radar_items,
+      availableClipIds,
+    });
+    setOrderedIds(hydrated.orderedIds);
+    setRadarItems(hydrated.radarItems);
+    setRadarEnabled(body.radar_enabled !== false);
+    const nextCandidateState = {};
+    if (body.radar_candidate_state && typeof body.radar_candidate_state === "object") {
+      for (const [key, value] of Object.entries(body.radar_candidate_state)) {
+        if (!value || typeof value !== "object") continue;
+        nextCandidateState[key] = {
+          rating: value.rating ?? value.Rating ?? "",
+          avg_rating: value.avg_rating ?? value.avgRating ?? value.median_rating ?? value.medianRating ?? "",
+          portrait_path: value.portrait_path || value.portraitPath || "",
+          portrait_url: value.portrait_url || value.portraitUrl || "",
+        };
+      }
+    }
+    setRadarCandidateState(nextCandidateState);
     setTransitionByClipId(hydrateTransitionsFromApi(body.transitions));
     setBgmPath(String(body.bgm_path || ""));
     setBgmStartSec(numberOr(body.bgm_start_sec, 0));
@@ -898,8 +1079,9 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
       }));
       const { data } = await API.post("/montage/export", {
         project_id: projectId,
-        recorded_clip_ids: orderedIds.length ? orderedIds : undefined,
+        recorded_clip_ids: clipIdsFromTimeline(orderedIds),
         ordered_ids: orderedIdsAsStrings,
+        timeline_ids: orderedIdsAsStrings,
         transitions: transitionsPayload,
         bgm_path: bgmPath.trim() || null,
         ...(bgmPath.trim() ? { bgm_volume: bgmVolume / 100 } : {}),
@@ -913,6 +1095,9 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
         player_avatars: playerAvatarsPayload,
         name_cards_enabled: nameCardsEnabled,
         framemeld_enabled: effectiveFrameMeldEnabled,
+        radar_enabled: radarEnabled,
+        radar_items: radarItemsPayload,
+        radar_candidate_state: radarCandidateState,
       });
       const next = { ...data, output_path: data?.output_path || outPath };
       setExportJob(next);
@@ -946,6 +1131,9 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
     playerAvatars,
     nameCardsEnabled,
     effectiveFrameMeldEnabled,
+    radarEnabled,
+    radarItemsPayload,
+    radarCandidateState,
     showToast,
     t,
   ]);
@@ -1029,6 +1217,7 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
 
   const clearTimeline = useCallback(() => {
     setOrderedIds([]);
+    setRadarItems({});
     setTransitionByClipId({});
     setSelectedTimelineClipId(null);
     setTimelineMultiSelectedIds(new Set());
@@ -1037,11 +1226,18 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
 
   const removeTimelineMulti = useCallback(() => {
     if (timelineMultiSelectedIds.size === 0) return;
-    const drop = new Set(timelineMultiSelectedIds);
-    setOrderedIds((prev) => prev.filter((id) => !drop.has(id)));
+    const drop = new Set([...timelineMultiSelectedIds].map((id) => String(id)));
+    setOrderedIds((prev) => prev.filter((id) => !drop.has(String(id))));
+    setRadarItems((prev) => {
+      const next = { ...prev };
+      for (const id of timelineMultiSelectedIds) {
+        if (isRadarTimelineId(id)) delete next[id];
+      }
+      return next;
+    });
     setTransitionByClipId((prev) => {
       const next = { ...prev };
-      for (const id of drop) delete next[String(id)];
+      for (const id of drop) delete next[id];
       return next;
     });
     setTimelineMultiSelectedIds(new Set());
@@ -1112,14 +1308,14 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
 
   /** Timeline rail / canvas drop: library → insert; timeline → reorder */
   const onTimelineCanvasDrop = useCallback((draggedId, targetId) => {
-    if (!Number.isFinite(draggedId)) return;
-    const onTimeline = orderedIds.includes(draggedId);
+    if (draggedId == null) return;
+    const onTimeline = orderedIds.some((id) => String(id) === String(draggedId));
     if (!onTimeline) {
       setOrderedIds((prev) => {
-        if (prev.includes(draggedId)) return prev;
+        if (prev.some((id) => String(id) === String(draggedId))) return prev;
         if (targetId == null) return [...prev, draggedId];
         const next = [...prev];
-        const ti = next.indexOf(targetId);
+        const ti = next.findIndex((id) => String(id) === String(targetId));
         if (ti < 0) return [...prev, draggedId];
         next.splice(ti, 0, draggedId);
         return next;
@@ -1128,11 +1324,11 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
       showToast(t("montage.toastAddedToTimeline"));
       return;
     }
-    if (draggedId === targetId) return;
+    if (String(draggedId) === String(targetId)) return;
     setOrderedIds((prev) => {
-      const next = prev.filter((x) => x !== draggedId);
+      const next = prev.filter((x) => String(x) !== String(draggedId));
       if (targetId == null) return [...next, draggedId];
-      const ti = next.indexOf(targetId);
+      const ti = next.findIndex((id) => String(id) === String(targetId));
       if (ti < 0) return [...next, draggedId];
       next.splice(ti, 0, draggedId);
       return next;
@@ -1448,6 +1644,7 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
               ) : null}
               <MontageOrchestrationTimeline
                 clips={orderedClips}
+                items={orchestrationItems}
                 primarySelectedId={selectedTimelineClipId}
                 multiSelectedIds={timelineMultiSelectedIds}
                 onRowPointerDown={onOrchestrationRowClick}
@@ -1476,6 +1673,7 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
                 onBulkMoveDown={() => shiftTimelineSelection(1)}
                 onClearTimeline={clearTimeline}
                 timelineClipCount={orderedIds.length}
+                onRadarDurationChange={onRadarDurationChange}
               />
             </section>
 
@@ -1501,7 +1699,7 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
                 onOutroDurationChange={setOutroDuration}
                 onMediaDropHint={showToast}
                 onFilePick={pickFile}
-                clipCount={orderedIds.length}
+                clipCount={clipIdsFromTimeline(orderedIds).length}
                 durationText={durationText}
                 resolutionLabel={t("montage.resolutionLabel")}
                 exporting={exporting}
@@ -1531,6 +1729,52 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
                 framemeldRuntimeAvailable={ffmpegGate.framemeldAvailable}
                 framemeldSourceSummary={framemeldSourceSummary}
                 onFrameMeldEnabledChange={handleFrameMeldEnabledChange}
+                radarCandidates={radarCandidates}
+                radarCandidatesLoading={radarCandidatesLoading}
+                radarCandidatesError={radarCandidatesError}
+                onRefreshRadarCandidates={() => {
+                  const ids = clipIdsFromTimeline(orderedIds);
+                  if (!ids.length) {
+                    setRadarCandidates([]);
+                    return;
+                  }
+                  setRadarCandidatesLoading(true);
+                  fetchRadarCandidates(ids)
+                    .then((list) => {
+                      setRadarCandidates(list);
+                      setRadarCandidatesError("");
+                    })
+                    .catch(() => setRadarCandidatesError(t("radar.cardsLoadFail")))
+                    .finally(() => setRadarCandidatesLoading(false));
+                }}
+                radarEnabled={radarEnabled}
+                onRadarEnabledChange={setRadarEnabled}
+                radarItems={radarItemList}
+                candidateState={radarCandidateState}
+                onCandidateRatingChange={(key, rating) => {
+                  setRadarCandidateState((prev) => ({
+                    ...prev,
+                    [key]: { ...(prev[key] || {}), rating },
+                  }));
+                }}
+                onCandidateMedianRatingChange={(key, avg_rating) => {
+                  setRadarCandidateState((prev) => ({
+                    ...prev,
+                    [key]: { ...(prev[key] || {}), avg_rating },
+                  }));
+                }}
+                onCandidatePortraitChange={(key, patch) => {
+                  setRadarCandidateState((prev) => ({
+                    ...prev,
+                    [key]: { ...(prev[key] || {}), ...patch },
+                  }));
+                }}
+                timelineClips={orderedClips}
+                selectedTimelineId={selectedTimelineClipId}
+                onInsertRadarBefore={(candidate) => insertRadarCandidate(candidate, "before")}
+                onInsertRadarAfter={(candidate) => insertRadarCandidate(candidate, "after")}
+                onRemoveRadarItem={removeRadarItem}
+                onRadarDurationChange={onRadarDurationChange}
               />
             </div>
 

@@ -55,7 +55,7 @@ jobs:
           $wheel = Get-ChildItem "dist/wheels/demoparser2-*-cp312-*.whl" | Select-Object -First 1
           if (-not $wheel) { throw "CPython 3.12 patched demoparser wheel not found" }
           $runtime = Get-Content "packaging/demoparser-lean/demoparser-runtime.json" -Raw | ConvertFrom-Json
-          uv run --no-project --with $wheel.FullName python -c "import importlib.metadata as m, sys; from demoparser2 import DemoParser; assert m.version('demoparser2') == sys.argv[1]; assert hasattr(DemoParser, 'write_replay_parquet'); assert hasattr(DemoParser, 'read_replay_parquet_round_binary')" $runtime.distribution_version
+          uv run --no-project --with $wheel.FullName python -c "import importlib.metadata as m, sys; from demoparser2 import DemoParser; assert m.version('demoparser2') == sys.argv[1]; assert DemoParser.cpu_runtime_revision() == sys.argv[2]; assert hasattr(DemoParser, 'write_replay_parquet'); assert hasattr(DemoParser, 'read_replay_parquet_round_binary')" $runtime.distribution_version $runtime.runtime_revision
           if ($LASTEXITCODE -ne 0) { throw "Built demoparser wheel verification failed" }
           $hash = (Get-FileHash -LiteralPath $wheel.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
           [IO.File]::WriteAllText(

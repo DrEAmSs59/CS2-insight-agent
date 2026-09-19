@@ -15,6 +15,7 @@ describe("recording dialog skybox override", () => {
     expect(result.session.recording_map_material).toBe("waxed_reflection");
     expect(result.session).toMatchObject({
       input_hud_enabled: true,
+      input_hud_position: "bottom_center",
       input_hud_display_mode: "hybrid",
       input_audio_enabled: false,
       combat_stats_hud_enabled: true,
@@ -24,6 +25,7 @@ describe("recording dialog skybox override", () => {
   it("keeps in-game input choices in the recording session payload", () => {
     const result = splitRecordWarmupConfirmPayload({
       input_hud_enabled: false,
+      input_hud_position: "weapon_right",
       input_hud_display_mode: "active",
       input_audio_enabled: false,
       combat_stats_hud_enabled: false,
@@ -33,6 +35,7 @@ describe("recording dialog skybox override", () => {
     expect(result.warmupForApi).toEqual({ tv_nochat: true });
     expect(result.session).toMatchObject({
       input_hud_enabled: false,
+      input_hud_position: "weapon_right",
       input_hud_display_mode: "hybrid",
       input_audio_enabled: false,
       combat_stats_hud_enabled: false,
@@ -52,9 +55,11 @@ describe("recording dialog skybox override", () => {
   it("persists in-game input HUD defaults for the recording preset", () => {
     expect(warmupUiOptsToPersisted({
       input_hud_enabled: false,
+      input_hud_position: "minimap_below",
       input_hud_display_mode: "hybrid",
     })).toMatchObject({
       input_hud_enabled: false,
+      input_hud_position: "minimap_below",
       input_hud_display_mode: "hybrid",
       input_audio_enabled: false,
     });

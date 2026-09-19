@@ -35,6 +35,11 @@ _NON_BULLET_WEAPONS = {
     "", "c4", "knife", "knife_t", "taser", "hegrenade", "flashbang",
     "smokegrenade", "molotov", "incgrenade", "incendiary", "decoy",
 }
+_KILL_NUMERALS = {2: "双", 3: "三", 4: "四", 5: "五"}
+
+# Bump this together with DEMO_ANALYSIS_WORKSPACE_ALGORITHM_VERSION so cached
+# analysis results are rebuilt (keyboard carrier probe, clip/workspace changes).
+MATCH_WORKSPACE_ALGORITHM_VERSION = "match-workspace-2026.09.19-keyboard-input-v2"
 
 
 def _clean_name(value: object) -> str:
@@ -84,6 +89,49 @@ def _first_side_groups(group_side_by_round: dict[int, dict[int, int]]) -> tuple[
     team_a_group = next((group for group, side in first.items() if int(side) == 2), None)
     team_b_group = next((group for group, side in first.items() if int(side) == 3), None)
     return team_a_group, team_b_group
+
+
+def _kill_numeral(count: int) -> str:
+    return _KILL_NUMERALS.get(min(5, int(count)), str(count))
+
+
+def _top_killer(counts: Counter) -> tuple[str, int]:
+    if not counts:
+        return "", 0
+    return counts.most_common(1)[0]
+
+
+def _round_headline(
+    *,
+    kill_counts: Counter,
+    player_team: dict[str, str],
+    winner_key: Optional[str],
+    winner_label: str,
+    site: Optional[str],
+    round_number: int,
+) -> str:
+    winner_counts: Counter = Counter()
+    loser_counts: Counter = Counter()
+    for player, count in kill_counts.items():
+        name = _clean_name(player)
+        if not name:
+            continue
+        team = player_team.get(name.lower())
+        if winner_key and team == winner_key:
+            winner_counts[name] = int(count)
+        elif team:
+            loser_counts[name] = int(count)
+
+    winner_player, winner_kills = _top_killer(winner_counts)
+    loser_player, loser_kills = _top_killer(loser_counts)
+    if loser_kills >= 3 and loser_kills > winner_kills:
+        return f"{loser_player} {_kill_numeral(loser_kills)}杀未能赢下回合，{winner_label} 获胜"
+    if winner_kills >= 2:
+        return f"{winner_player} {_kill_numeral(winner_kills)}杀帮助 {winner_label} 拿下回合"
+
+    if site:
+        return f"{winner_label} 在 {site} 区下包后赢下回合"
+    return f"{winner_label} 赢下第 {round_number} 回合"
 
 
 def _team_key_for_group(group: object, team_a_group: Optional[int], team_b_group: Optional[int]) -> Optional[str]:
@@ -1025,18 +1073,31 @@ def build_match_workspace(
     economy_df = shared_events.get("economy_ticks_df")
     name_to_final_team = shared_events.get("name_to_final_team_shared") or {}
     if economy_df is not None and not economy_df.empty and "tick" in economy_df.columns:
-        for _, row in economy_df.iterrows():
-            round_number = economy_tick_to_round.get(_int(row.get("tick")))
-            name = _clean_name(row.get("name"))
+        n_econ = len(economy_df)
+
+        def _econ_col(name: str) -> list[Any]:
+            if name not in economy_df.columns:
+                return [None] * n_econ
+            return economy_df[name].tolist()
+
+        for tick_raw, name_raw, equipment_raw, spent_raw, start_raw in zip(
+            _econ_col("tick"),
+            _econ_col("name"),
+            _econ_col("current_equip_value"),
+            _econ_col("cash_spent_this_round"),
+            _econ_col("start_balance"),
+        ):
+            round_number = economy_tick_to_round.get(_int(tick_raw))
+            name = _clean_name(name_raw)
             if not round_number or not name:
                 continue
             group = name_to_final_team.get(name.lower())
             team_key = _team_key_for_group(group, team_a_group, team_b_group) or player_team.get(name.lower())
             if not team_key:
                 continue
-            equipment = max(0, _int(row.get("current_equip_value")))
-            spent = max(0, _int(row.get("cash_spent_this_round")))
-            start_money = max(0, _int(row.get("start_balance")))
+            equipment = max(0, _int(equipment_raw))
+            spent = max(0, _int(spent_raw))
+            start_money = max(0, _int(start_raw))
             eco_type = _economy_type(
                 equipment_value=equipment,
                 money_spent=spent,
@@ -1139,7 +1200,7 @@ def build_match_workspace(
             event["time_text"] = _time_text(event.get("tick") or 0, window["freeze_end_tick"], tick_rate)
         kills = [event for event in events if event.get("type") == "kill" and event.get("actor") not in {"", "World"}]
         kill_counts = Counter(_clean_name(event.get("actor")) for event in kills)
-        top_player, top_kills = (kill_counts.most_common(1)[0] if kill_counts else ("", 0))
+        top_kills = kill_counts.most_common(1)[0][1] if kill_counts else 0
         plant = next((event for event in events if event.get("type") == "plant"), None)
         site = _clean_name((plant or {}).get("site"))
         winner_label = (
@@ -1147,13 +1208,14 @@ def build_match_workspace(
             else team_b_label if winner_key == "b"
             else "本回合胜方"
         )
-        if top_kills >= 2:
-            numeral = {2: "双", 3: "三", 4: "四", 5: "五"}.get(min(5, top_kills), str(top_kills))
-            headline = f"{top_player} {numeral}杀帮助 {winner_label} 拿下回合"
-        elif plant and site:
-            headline = f"{winner_label} 在 {site} 区下包后赢下回合"
-        else:
-            headline = f"{winner_label} 赢下第 {round_number} 回合"
+        headline = _round_headline(
+            kill_counts=kill_counts,
+            player_team=player_team,
+            winner_key=winner_key,
+            winner_label=winner_label,
+            site=site or None,
+            round_number=round_number,
+        )
         tags: list[str] = []
         if kills:
             tags.append("首杀")
@@ -1222,7 +1284,7 @@ def build_match_workspace(
 
     return {
         "version": 1,
-        "algorithm_version": "match-workspace-2026.08.15-keyboard-input-v1",
+        "algorithm_version": MATCH_WORKSPACE_ALGORITHM_VERSION,
         "data_source": "demo_parser_with_derived_metrics",
         "team_assignment_source": (
             "round_side_groups" if group_side_by_round else "roster_order_fallback"

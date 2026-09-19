@@ -63,7 +63,8 @@ const _KILLER_POV_POST_DEFAULT = 1.5;
  *
  * 路径一（kill_ticks 可用）：按 max_gap_sec 分组，每组 = (last-first)/64 + pre + post。
  * 路径二（source_ticks 合集）：各段跨度之和 + N × (pre + post)。
- * 路径三（兜底）：(end_tick - start_tick)/64，不额外叠加 pre/post（已含于 parser 输出的 tick 窗口中）。
+ * 路径三（下饭 / 时间线死亡）：death_tick ± 击杀段/死亡段前后预留，即 pre + post。
+ * 路径四（兜底）：(end_tick - start_tick)/64，不额外叠加 pre/post（已含于 parser 输出的 tick 窗口中）。
  *
  * @param {import("../stores/recordingQueueStore").RecordingQueueItem} item
  * @param {Record<string, unknown>} globalPacing
@@ -89,6 +90,7 @@ export function estimateItemRecordSeconds(item, globalPacing) {
 
   const compilationKind = String(clip.compilation_kind || "");
   const isKillCompilation = ["rival_kills", "all_kills", "weapon_kills"].includes(compilationKind);
+  const isFailClip = String(clip.category || "") === "fail";
   const sourceTicks = clip.source_ticks;
   const killTicks = Array.isArray(clip.kill_ticks)
     ? clip.kill_ticks.filter((t) => Number.isFinite(Number(t)))
@@ -110,7 +112,10 @@ export function estimateItemRecordSeconds(item, globalPacing) {
 
   let sec = 0;
 
-  if (isKillCompilation && Array.isArray(sourceTicks) && sourceTicks.length > 0) {
+  if (isFailClip) {
+    // 路径三：下饭 / 时间线死亡主段 = 死亡锚点 ± 击杀段/死亡段前后预留
+    sec = pre + post;
+  } else if (isKillCompilation && Array.isArray(sourceTicks) && sourceTicks.length > 0) {
     // 路径二：合集 — 累加各段原始 tick 跨度，每段各加一份 pre+post
     let spans = 0;
     for (const p of sourceTicks) {
@@ -132,7 +137,7 @@ export function estimateItemRecordSeconds(item, globalPacing) {
       sec += span + pre + post;
     }
   } else {
-    // 路径三：兜底 — tick 窗口已含 parser 的 pre/post，直接用
+    // 路径四：兜底 — tick 窗口已含 parser 的 pre/post，直接用
     const st = Number(clip.start_tick);
     const et = Number(clip.end_tick);
     if (Number.isFinite(st) && Number.isFinite(et) && et > st) {

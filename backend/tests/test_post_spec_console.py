@@ -96,6 +96,7 @@ def test_builtin_recording_options_also_flow_through_post_spec_allowlist():
     assert _filter_post_spec_console_lines(warmup_lines) == [
         "hud_showtargetid 0",
         "viewmodel_fov 68",
+        "mp_forcecamera 0",
     ]
 
 

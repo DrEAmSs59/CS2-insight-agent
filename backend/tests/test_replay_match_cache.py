@@ -1,10 +1,46 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
+
+import pytest
 
 from app import native_table as pd
 
 from app.features.demo_analysis import replay_match_cache
+
+
+def test_cleanup_reads_identity_without_decoding_large_effect_tracks(monkeypatch, tmp_path):
+    demo = tmp_path / "match.dem"
+    demo.write_bytes(b"demo")
+    fingerprint = replay_match_cache._demo_fingerprint(str(demo))
+    root = tmp_path / "cache"
+    root.mkdir()
+    for key, version in [("current", replay_match_cache.REPLAY_MATCH_CACHE_VERSION), ("old", -1)]:
+        (root / f"{key}.parquet").write_bytes(b"PAR1")
+        (root / f"{key}.meta.json").write_text(json.dumps({
+            "version": version,
+            "parser_runtime": replay_match_cache.REQUIRED_DEMOPARSER_VERSION,
+            "cache_key": key,
+            "demo_fingerprint": fingerprint,
+            "effect_tracks": [{"cells": [[1, 2, 3, 1]] * 10000}],
+        }), encoding="utf-8")
+    monkeypatch.setattr(replay_match_cache, "_cache_roots", lambda: (root,))
+    def no_full_read(*_args, **_kwargs):
+        raise AssertionError("cleanup must not load full effect payloads")
+    monkeypatch.setattr(Path, "read_text", no_full_read)
+    removed = replay_match_cache.remove_match_cache_for_demo(str(demo), keep_cache_key="current")
+    assert removed["removed_files"] == 2
+    assert (root / "current.parquet").is_file()
+    assert not (root / "old.parquet").exists()
+
+
+@pytest.mark.parametrize("prefix", [{}, {"effect_tracks": ["x" * 20000]}])
+def test_cleanup_identity_supports_legacy_key_order(tmp_path, prefix):
+    payload = {**prefix, "cache_key": "legacy", "demo_fingerprint": {"path": "demo.dem"}}
+    path = tmp_path / "legacy.meta.json"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    assert replay_match_cache._read_cache_identity(path) == payload
 
 
 def _workspace() -> dict:

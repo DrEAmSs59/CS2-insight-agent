@@ -1,1 +1,2 @@
 packaging/demoparser-lean/*.patch text eol=lf -whitespace
+packaging/demoparser-lean/overlays/cpu/*.patch text eol=lf -whitespace

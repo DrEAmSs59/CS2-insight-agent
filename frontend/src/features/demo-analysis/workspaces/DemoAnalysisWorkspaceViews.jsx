@@ -24,6 +24,7 @@ import BombObjectiveCard from "./overview/BombObjectiveCard";
 import PlayerEventsCard from "./overview/PlayerEventsCard";
 import KeyRoundsTimeline from "./overview/KeyRoundsTimeline";
 import { playerIdentityKey } from "../../../utils/playerIdentity.js";
+import { buildPlayerTeamMap, rewriteStoredRoundHeadline } from "./overview/overviewUtils";
 
 export function Panel({ title, eyebrow, action, children, className = "" }) {
   return (
@@ -119,6 +120,7 @@ export function useWorkspaceData(workspace, fallback) {
     let teamAScore = 0;
     let teamBScore = 0;
     const sourceRounds = Array.isArray(base.rounds) ? base.rounds : [];
+    const playerTeamMap = buildPlayerTeamMap(base.players);
     const rounds = sourceRounds.map((round, index) => {
       const nextStartTick = Number(sourceRounds[index + 1]?.start_tick || 0);
       const formalEndTick = Number(round.round_end_tick ?? round.end_tick ?? 0);
@@ -136,11 +138,16 @@ export function useWorkspaceData(workspace, fallback) {
       const teamAName = base.team_a_name || fallback.teamAName || "Team A";
       const teamBName = base.team_b_name || fallback.teamBName || "Team B";
       const winnerLabel = winnerKey === "a" ? teamAName : winnerKey === "b" ? teamBName : "本回合胜方";
-      const rawHeadline = String(round.headline || "");
-      const headline = rawHeadline
-        .replaceAll("本回合胜方", winnerLabel)
-        .replaceAll("A 队", teamAName)
-        .replaceAll("B 队", teamBName);
+      const headline = rewriteStoredRoundHeadline(round.headline || "", {
+        events: round.events,
+        playerTeamMap,
+        winnerKey,
+        winnerLabel,
+        teamAName,
+        teamBName,
+        site: round.site,
+        roundNumber: round.round_number,
+      });
       return {
         ...round,
         round_end_tick: formalEndTick,

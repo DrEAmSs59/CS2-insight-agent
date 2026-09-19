@@ -2,15 +2,23 @@
   "upstream_url": "https://github.com/LaihoE/demoparser.git",
   "tag": "v0.41.4",
   "commit": "db3ba5f7a1b02b8cb27d0063d52649883a98469c",
-  "distribution_version": "0.41.4+cs2insight9",
+  "distribution_version": "0.41.4+cs2insight10",
   "release_repo": "DrEAmSs59/CS2-insight-agent",
-  "release_tag": "demoparser-runtime-v0.41.4-cs2insight9-r1",
+  "release_tag": "demoparser-runtime-v0.41.4-cs2insight10-r1",
   "checksum_asset": "demoparser2-SHA256SUMS.txt",
   "patch_sha256": "0d096ea3b5bf1607e45adf4b0b4f65c3d53f92aa7f2b363cd56f28f10dd31746",
   "overlays": [
     {
       "name": "sticker-attrs",
       "source": "unicbm/demotracer attribute-indexed sticker decode (author permission)"
+    },
+    {
+      "name": "cpu",
+      "source": "DemoTracer 21f6a9b (authoritative parser and protocol), Insight smoke/Parquet/Python adapters",
+      "commit": "21f6a9b555c57a30640691fee9594cc4729500bf"
     }
-  ]
+  ],
+  "runtime_revision": "demotracer-21f6a9b-insight-cpu1",
+  "cpu_patch_sha256": "71958234d8a36b14f1388c73af221e189c862c6908292d85bc95c4f5dae94029",
+  "baseline_timing_patch_sha256": "ed0d9c0556245a6efb7d7b6a1fe57d34ee58019c31b1b4904c141e8201422925"
 }

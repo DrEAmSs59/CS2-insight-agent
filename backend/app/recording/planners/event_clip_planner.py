@@ -382,8 +382,8 @@ def _plan_timeline_death(req: NormalizedRequest) -> list[RecordingSegment]:
     _mask = _voice_mask(req)
     _mask_enemy = _voice_mask_enemy(req)
 
-    pre_ticks = sec_to_ticks(opts.fail_killer_pre_sec, tick_rate)
-    post_ticks = sec_to_ticks(opts.fail_killer_post_sec, tick_rate)
+    pre_ticks = sec_to_ticks(opts.death_pre_sec, tick_rate)
+    post_ticks = sec_to_ticks(opts.death_post_sec, tick_rate)
     threshold_ticks = sec_to_ticks(opts.kill_jump_cut_threshold_sec, tick_rate)
 
     sorted_events = sorted(req.events, key=lambda e: e.tick)

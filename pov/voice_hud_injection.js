@@ -60,6 +60,10 @@
             : "hybrid");
     const requestedInputHudScalePercent = Number(encodedInputPresentation[2] || 100);
     const inputHudScalePercent = Math.max(75, Math.min(125, requestedInputHudScalePercent));
+    const requestedInputHudPosition = String(encodedInputPresentation[6] || "bottom_center");
+    const inputHudPosition = ["bottom_center", "minimap_below", "weapon_right"].indexOf(requestedInputHudPosition) >= 0
+        ? requestedInputHudPosition
+        : "bottom_center";
     const inputAudioEnabled = encodedInputPresentation.length > 3
         ? Boolean(encodedInputPresentation[3])
         : true;
@@ -140,7 +144,11 @@
     const MOUSE_PAD_EDGE_INSET = 6;
     const MOUSE_PATH_VISUAL_SCALE = 1.2;
     const MOUSE_PATH_MAX_VISUAL_STEP = 26;
-    const INPUT_HUD_WIDTH = 390;
+    const INPUT_HUD_WIDTH = 367;
+    const INPUT_HUD_CONTENT_LEFT_PX = 4;
+    const INPUT_HUD_CONTENT_RIGHT_PX = 331;
+    const INPUT_HUD_CENTER_DROP_PX = 50;
+    const INPUT_HUD_SIDE_DROP_PX = 150;
     const INPUT_HUD_REFRESH_SECONDS = 0.016;
     const INPUT_HUD_WEAPON_SELECT_HOLD_TICKS = 12;
     const INPUT_AUDIO_KEY_DOWN_EVENT = "CS2Insight.Input.Keyboard.Down";
@@ -387,6 +395,7 @@
                     spottedByCT: (flags & 8) !== 0,
                     // bit4 tracks live side across half-time swaps (roster team is static).
                     team: (flags & 16) !== 0 ? 3 : 2,
+                    canBuy: (flags & 32) !== 0,
                 };
             });
             return {
@@ -470,6 +479,7 @@
             nativeSoundComplete: nativeSoundComplete,
             droppedBombs: droppedBombs,
             occlusion: occlusion,
+            canBuyAuthoritative: Number(raw[8] || 0) === 1,
         };
     }
 
@@ -772,6 +782,7 @@
     let inputMousePathPoints = [];
     let inputHudRenderedXuid = "";
     let inputHudRenderedTick = -1;
+    let inputHudAppliedSignature = "";
     let inputAudioXuid = "";
     let inputAudioLastTick = -1;
     let inputAudioEdgeIndex = -1;
@@ -783,6 +794,9 @@
     let combatRoundDamagePanel = null;
     let combatTotalDamagePanel = null;
     let combatMoneyPanel = null;
+    let nativeBuyIconPanels = [];
+    let nativeBuyIconMoneyPanel = null;
+    let buyIconForced = false;
     let combatStatsRenderedXuid = "";
     let combatStatsRenderedTick = -1;
     let radarHud = null;
@@ -867,6 +881,8 @@
     const advancedFilterButtons = {};
     const advancedOptionButtons = {};
     const advancedOptionLabels = {};
+    const advancedInputHudButtons = {};
+    let advancedInputHudPosition = "bottom_center";
     const ADVANCED_EVENT_ICON_HEIGHT = 16;
     const ADVANCED_EVENT_ICON_TRACK_HEIGHT = 20;
     const ADVANCED_FILTER_ICON_SIZE = 14;
@@ -889,7 +905,6 @@
         xray: false,
         radar: true,
         overhead: true,
-        inputHud: advancedPlayback ? true : inputHudEnabled,
     };
     // Stock-ish radar intel timings (no public convar; matched to live feel).
     const RADAR_DEATH_ICON_SECONDS = 2.0;
@@ -1468,7 +1483,10 @@
                     || tick - transientHudLastTick > TRANSIENT_HUD_TICK_JUMP_THRESHOLD);
             if (jumped) {
                 // A full demo seek can replay the recorded mp_forcecamera=1
-                // NetSetConVar. Re-arm the native TeamID override afterwards.
+                // NetSetConVar. Native radar then treats spectator-local as the
+                // only visible teammate. Re-apply observe-all even when the POV
+                // overhead loop is not running, then re-arm TeamID afterwards.
+                try { GameInterfaceAPI.ConsoleCommand("mp_forcecamera 0"); } catch (errForceCamera) {}
                 overheadNativeCvarApplyAttempts = 0;
                 overheadNativeCvarRetryFrames = 0;
                 if (radioTrack) {
@@ -2482,7 +2500,7 @@
     function createMouseMotionPad(parent) {
         const pad = $.CreatePanel("Panel", parent, "CS2InsightMouseMotionPad");
         pad.hittest = false;
-        pad.style.position = "276px 82px 0px";
+        pad.style.position = "253px 82px 0px";
         pad.style.width = MOUSE_PAD_WIDTH + "px";
         pad.style.height = MOUSE_PAD_HEIGHT + "px";
         pad.style.flowChildren = "none";
@@ -2721,13 +2739,88 @@
             + mouseCssPx(head.y - 3) + " 0px";
     }
 
+    function inputHudViewportHeight() {
+        const root = findHudRoot();
+        if (root && root.IsValid()) {
+            const height = Number(root.actuallayoutheight || 0);
+            if (height > 0) {
+                return height;
+            }
+        }
+        return 1080;
+    }
+
+    function runtimeInputHudPosition() {
+        return advancedPlayback ? advancedInputHudPosition : inputHudPosition;
+    }
+
+    function runtimeInputHudVisible() {
+        if (advancedPlayback) {
+            return !advancedHudHidden && advancedInputHudPosition !== "hidden";
+        }
+        return inputHudEnabled;
+    }
+
+    function applyInputHudPlacement(panel) {
+        if (!panel || !panel.IsValid()) {
+            return;
+        }
+        const position = runtimeInputHudPosition();
+        const vh = inputHudViewportHeight();
+        const bottomCenter = Math.max(0, Math.round(vh * 0.14) - INPUT_HUD_CENTER_DROP_PX);
+        const sideBottom = Math.max(0, Math.round(vh * 0.48) - INPUT_HUD_SIDE_DROP_PX);
+        const sideInset = 0;
+        const matchingRightInset = sideInset + INPUT_HUD_CONTENT_LEFT_PX
+            - (INPUT_HUD_WIDTH - INPUT_HUD_CONTENT_RIGHT_PX);
+        const inputHudScale = (inputHudScalePercent / 100).toFixed(2);
+        const signature = position + ":" + vh + ":" + inputHudScale;
+        if (signature === inputHudAppliedSignature) {
+            return;
+        }
+        inputHudAppliedSignature = signature;
+        panel.style.position = "0px 0px 0px";
+        panel.style.marginTop = "0px";
+        panel.style.marginLeft = "0px";
+        panel.style.marginRight = "0px";
+        panel.style.marginBottom = "0px";
+        if (position === "minimap_below") {
+            panel.style.horizontalAlign = "left";
+            panel.style.verticalAlign = "bottom";
+            panel.style.marginLeft = sideInset + "px";
+            panel.style.marginBottom = sideBottom + "px";
+            panel.style.transformOrigin = "0% 100%";
+        } else if (position === "weapon_right") {
+            panel.style.horizontalAlign = "right";
+            panel.style.verticalAlign = "bottom";
+            panel.style.marginRight = matchingRightInset + "px";
+            panel.style.marginBottom = sideBottom + "px";
+            panel.style.transformOrigin = "100% 100%";
+        } else {
+            panel.style.horizontalAlign = "center";
+            panel.style.verticalAlign = "bottom";
+            panel.style.marginBottom = bottomCenter + "px";
+            panel.style.transformOrigin = "50% 100%";
+        }
+        panel.style.transform = "scale3d(" + inputHudScale + ", " + inputHudScale + ", 1)";
+    }
+
+    function hideInputHud() {
+        if (inputHud && inputHud.IsValid()) {
+            inputHud.visible = false;
+        }
+        inputHudRenderedXuid = "";
+        inputHudRenderedTick = -1;
+    }
+
     function ensureInputHud() {
         if (inputHud && inputHud.IsValid()) {
+            applyInputHudPlacement(inputHud);
             return inputHud;
         }
         const root = findHudRoot();
         inputHud = root.FindChildTraverse("CS2InsightInputHud");
         if (inputHud && inputHud.IsValid()) {
+            applyInputHudPlacement(inputHud);
             return inputHud;
         }
 
@@ -2735,16 +2828,11 @@
         inputHud.hittest = false;
         inputHud.style.width = INPUT_HUD_WIDTH + "px";
         inputHud.style.height = "190px";
-        inputHud.style.horizontalAlign = "center";
-        inputHud.style.verticalAlign = "bottom";
-        inputHud.style.position = "0px 0px 0px";
-        inputHud.style.marginBottom = "139px";
         inputHud.style.flowChildren = "none";
         inputHud.style.zIndex = "1000";
         inputHud.style.opacity = "0.92";
-        const inputHudScale = (inputHudScalePercent / 100).toFixed(2);
-        inputHud.style.transformOrigin = "50% 100%";
-        inputHud.style.transform = "scale3d(" + inputHudScale + ", " + inputHudScale + ", 1)";
+        inputHudAppliedSignature = "";
+        applyInputHudPlacement(inputHud);
 
         const specs = [
             ["1", 66, 0, 38, 34, 18, 5, -1, false, 1],
@@ -2764,8 +2852,8 @@
             ["H", 234, 76, 38, 34, 18, 5, -1, true, 0, "hand"],
             ["CTRL", 4, 114, 58, 34, 13, 8, 5, false, 0],
             ["SPACE", 66, 114, 164, 34, 12, 8, 4, false, 0],
-            ["M1", 276, 38, 39, 44, 11, 13, 8, false, 0],
-            ["M2", 315, 38, 39, 44, 11, 13, 9, false, 0],
+            ["M1", 253, 38, 39, 44, 11, 13, 8, false, 0],
+            ["M2", 292, 38, 39, 44, 11, 13, 9, false, 0],
         ];
         createMouseMotionPad(inputHud);
         inputKeyPanels = specs.map(function (spec, index) {
@@ -3260,11 +3348,7 @@
         $.Schedule(INPUT_HUD_REFRESH_SECONDS, updateInputHud);
         const state = controller.GetDemoControllerState();
         if (!state) {
-            if (inputHud && inputHud.IsValid()) {
-                inputHud.visible = false;
-            }
-            inputHudRenderedXuid = "";
-            inputHudRenderedTick = -1;
+            hideInputHud();
             clearInputAudio();
             releaseMirroredScoreboard();
             return;
@@ -3273,11 +3357,7 @@
         const xuid = currentPovXuid(state);
         const changes = inputTracksByXuid[xuid];
         if (!changes) {
-            if (inputHud && inputHud.IsValid()) {
-                inputHud.visible = false;
-            }
-            inputHudRenderedXuid = "";
-            inputHudRenderedTick = -1;
+            hideInputHud();
             clearInputAudio();
             releaseMirroredScoreboard();
             return;
@@ -3288,15 +3368,8 @@
         // Keep this ahead of the rendered-tick short circuit. The advanced HUD
         // profile can change while a demo is paused on the same tick.
         updateMirroredScoreboard(mask);
-        const runtimeInputHudEnabled = advancedPlayback
-            ? (!advancedHudHidden && advancedQuickOptions.inputHud)
-            : inputHudEnabled;
-        if (!runtimeInputHudEnabled) {
-            if (inputHud && inputHud.IsValid()) {
-                inputHud.visible = false;
-            }
-            inputHudRenderedXuid = "";
-            inputHudRenderedTick = -1;
+        if (!runtimeInputHudVisible()) {
+            hideInputHud();
             clearInputAudio();
             return;
         }
@@ -3395,6 +3468,7 @@
                 spottedByT: first.spottedByT,
                 spottedByCT: first.spottedByCT,
                 team: first.team,
+                canBuy: Boolean(first.canBuy),
             };
         }
         const exact = offset / stride;
@@ -3410,6 +3484,7 @@
                 spottedByT: last.spottedByT,
                 spottedByCT: last.spottedByCT,
                 team: last.team,
+                canBuy: Boolean(last.canBuy),
             };
         }
         const t = exact - index;
@@ -3424,6 +3499,7 @@
             spottedByT: a.spottedByT,
             spottedByCT: a.spottedByCT,
             team: a.team || 0,
+            canBuy: Boolean(a.canBuy),
         };
     }
 
@@ -4044,6 +4120,127 @@
         });
         setNativeSoundRingsVisible(nativeRadar, true);
         advancedNativeRadarRestored = true;
+    }
+
+    function panelLooksLikeBuyIcon(panel) {
+        if (!panel || !panel.IsValid()) {
+            return false;
+        }
+        const id = String(panel.id || "").toLowerCase();
+        if (id.indexOf("buymenu") >= 0 || id === "hudmoney") {
+            return false;
+        }
+        if (id.indexOf("buy") >= 0 || id.indexOf("cart") >= 0 || id.indexOf("shop") >= 0) {
+            return true;
+        }
+        try {
+            if (panel.BHasClass
+                    && (panel.BHasClass("hud-money__buy-icon")
+                        || panel.BHasClass("hud-money__buy-zone")
+                        || panel.BHasClass("buy-icon"))) {
+                return true;
+            }
+        } catch (errClass) {}
+        try {
+            const src = String(panel.src || "").toLowerCase();
+            if (src.indexOf("cart") >= 0 || src.indexOf("shop") >= 0) {
+                return true;
+            }
+        } catch (errSrc) {}
+        return false;
+    }
+
+    function collectBuyIconPanels(root, into, depth) {
+        if (!root || !root.IsValid() || depth > 8) {
+            return;
+        }
+        if (panelLooksLikeBuyIcon(root) && into.indexOf(root) < 0) {
+            into.push(root);
+        }
+        const count = root.GetChildCount ? root.GetChildCount() : 0;
+        for (let index = 0; index < count; index += 1) {
+            collectBuyIconPanels(root.GetChild(index), into, depth + 1);
+        }
+    }
+
+    function nativeBuyIconTargets() {
+        const money = findHudTraverse("HudMoney");
+        if (nativeBuyIconMoneyPanel !== money || !nativeBuyIconPanels.length) {
+            nativeBuyIconPanels = [];
+            nativeBuyIconMoneyPanel = money;
+            [
+                money,
+                findHudTraverse("HudShoppingCart"),
+            ].forEach(function (root) {
+                collectBuyIconPanels(root, nativeBuyIconPanels, 0);
+            });
+        }
+        return nativeBuyIconPanels.filter(function (panel) {
+            return panel && panel.IsValid();
+        });
+    }
+
+    function applyNativeBuyIconVisible(canBuy) {
+        const money = findHudTraverse("HudMoney");
+        if (money && money.IsValid()) {
+            ["hud-money--in-buy-zone", "in-buy-zone"].forEach(function (className) {
+                try { money.SetHasClass(className, canBuy); } catch (errClass) {}
+            });
+        }
+        nativeBuyIconTargets().forEach(function (panel) {
+            try { panel.visible = canBuy; } catch (errVisible) {}
+            try {
+                panel.style.opacity = canBuy ? "1" : "0";
+                panel.style.visibility = canBuy ? "visible" : "collapse";
+            } catch (errStyle) {}
+        });
+        buyIconForced = true;
+    }
+
+    function restoreNativeBuyIcon() {
+        if (!buyIconForced) {
+            return;
+        }
+        const money = findHudTraverse("HudMoney");
+        if (money && money.IsValid()) {
+            ["hud-money--in-buy-zone", "in-buy-zone"].forEach(function (className) {
+                try { money.SetHasClass(className, false); } catch (errClass) {}
+            });
+        }
+        nativeBuyIconTargets().forEach(function (panel) {
+            try { panel.visible = true; } catch (errVisible) {}
+            try {
+                panel.style.opacity = null;
+                panel.style.visibility = null;
+            } catch (errStyle) {}
+        });
+        buyIconForced = false;
+        nativeBuyIconPanels = [];
+        nativeBuyIconMoneyPanel = null;
+    }
+
+    function updateBuyIconHud() {
+        $.Schedule(0.1, updateBuyIconHud);
+        if (!radarTrack || !radarTrack.canBuyAuthoritative || !advancedPovVisualsActive()
+                || (advancedPlayback && advancedHudHidden)) {
+            restoreNativeBuyIcon();
+            return;
+        }
+        const state = controller.GetDemoControllerState();
+        if (!state) {
+            restoreNativeBuyIcon();
+            return;
+        }
+        const povXuid = currentPovXuid(state);
+        let sample = null;
+        for (let index = 0; index < radarTrack.players.length; index += 1) {
+            const player = radarTrack.players[index];
+            if (sameXuid(player.xuid, povXuid)) {
+                sample = radarSampleAt(player, state.nTick, radarTrack.stride);
+                break;
+            }
+        }
+        applyNativeBuyIconVisible(Boolean(sample && sample.alive && sample.canBuy));
     }
 
     function updateRadarHud() {
@@ -5840,23 +6037,31 @@
         advancedRefreshQuickOptionButtons();
     }
 
+    function advancedRefreshInputHudButtons() {
+        Object.keys(advancedInputHudButtons).forEach(function (key) {
+            advancedStyleButton(advancedInputHudButtons[key], key === advancedInputHudPosition);
+        });
+    }
+
+    function advancedSetInputHudPosition(position) {
+        if (["hidden", "bottom_center", "minimap_below", "weapon_right"].indexOf(position) < 0) {
+            return;
+        }
+        advancedInputHudPosition = position;
+        hideInputHud();
+        if (position === "hidden") {
+            clearInputAudio();
+        } else if (inputHud && inputHud.IsValid()) {
+            applyInputHudPlacement(inputHud);
+        }
+        advancedRefreshInputHudButtons();
+    }
+
     function advancedToggleQuickOption(key) {
         if (!Object.prototype.hasOwnProperty.call(advancedQuickOptions, key)) {
             return;
         }
         advancedQuickOptions[key] = !advancedQuickOptions[key];
-        if (key === "inputHud") {
-            if (!advancedQuickOptions.inputHud) {
-                if (inputHud && inputHud.IsValid()) {
-                    inputHud.visible = false;
-                }
-                inputHudRenderedXuid = "";
-                inputHudRenderedTick = -1;
-                clearInputAudio();
-            }
-            advancedRefreshQuickOptionButtons();
-            return;
-        }
         if (key === "overhead") {
             advancedNativeOverheadRestored = false;
         }
@@ -7233,6 +7438,7 @@
             advancedStyleButton(advancedFollowRoundButton, advancedFollowCurrentRound);
         }
         advancedRefreshQuickOptionButtons();
+        advancedRefreshInputHudButtons();
         advancedRenderPlayers();
         advancedRenderEvents();
         advancedApplyMenuCollapsedState();
@@ -7635,24 +7841,47 @@
         advancedProfileButtons.pov = pov;
         advancedProfileButtons.demo = demo;
         advancedProfileButtons.hidden = hidden;
-        advancedOptionLabels.inputHud = advancedCopy("键鼠", "INPUT");
-        const inputHudToggle = advancedCreateButton(
-            viewRow,
-            "",
-            function () { advancedToggleQuickOption("inputHud"); },
-            "76px",
-        );
-        inputHudToggle.style.height = "25px";
-        advancedOptionButtons.inputHud = inputHudToggle;
         pov.style.marginRight = "5px";
         demo.style.marginRight = "5px";
-        hidden.style.marginRight = "5px";
-        inputHudToggle.style.marginRight = "0px";
+        hidden.style.marginRight = "0px";
         advancedStyleButton(pov, advancedPovVisualsEnabled && !advancedHudHidden);
         advancedStyleButton(demo, !advancedPovVisualsEnabled && !advancedHudHidden);
         advancedStyleButton(hidden, advancedHudHidden);
-        advancedStyleButton(inputHudToggle, advancedQuickOptions.inputHud);
         [pov, demo, hidden].forEach(function (button) { button.style.height = "25px"; });
+
+        const inputHudRow = advancedCreatePanel("Panel", advancedMenuBody, "");
+        inputHudRow.style.width = "100%";
+        inputHudRow.style.height = "30px";
+        inputHudRow.style.flowChildren = "right";
+        advancedCreateSectionLabel(inputHudRow, advancedCopy("键鼠", "INPUT"));
+        [
+            ["hidden", advancedCopy("不显示", "Hide")],
+            ["bottom_center", advancedCopy("底部中央", "Bottom")],
+            ["minimap_below", advancedCopy("小地图下", "Minimap")],
+            ["weapon_right", advancedCopy("武器HUD上", "Weapon")],
+        ].forEach(function (entry, index, choices) {
+            const button = advancedCreateButton(
+                inputHudRow,
+                entry[1],
+                function () { advancedSetInputHudPosition(entry[0]); },
+                "96px",
+            );
+            button.style.height = "25px";
+            button.style.paddingLeft = "4px";
+            button.style.paddingRight = "4px";
+            if (index === choices.length - 1) {
+                button.style.marginRight = "0px";
+            }
+            const label = button.GetChild ? button.GetChild(0) : null;
+            if (label && label.IsValid()) {
+                label.style.width = "100%";
+                label.style.textAlign = "center";
+                label.style.textOverflow = "shrink";
+                label.style.fontSize = advancedChinese() ? "11px" : "10px";
+            }
+            advancedInputHudButtons[entry[0]] = button;
+        });
+        advancedRefreshInputHudButtons();
 
         const voiceRow = advancedCreatePanel("Panel", advancedMenuBody, "");
         voiceRow.style.width = "100%";
@@ -7894,6 +8123,7 @@
     suppressNativeLowerLeft();
     if (povHudFeaturesEnabled && radarTrack) {
         $.Schedule(0, updateRadarHud);
+        $.Schedule(0, updateBuyIconHud);
     }
     if (povHudFeaturesEnabled && killFeedbackEvents) {
         $.Schedule(0, updateKillFeedback);

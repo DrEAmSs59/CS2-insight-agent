@@ -30,6 +30,7 @@ def _director(inject_lines: str) -> OBSDirector:
 def test_recording_warmup_defaults_virtual_key_sounds_off():
     warmup = RecordingWarmupExtras()
     assert warmup.input_hud_enabled is True
+    assert warmup.input_hud_position == "bottom_center"
     assert warmup.input_audio_enabled is False
 
 
@@ -97,6 +98,52 @@ def test_non_pov_only_mutes_global_voice_volume():
     )
 
     assert _voice_lines(lines) == ["snd_voipvolume 0"]
+
+
+def _forcecamera_lines(lines):
+    return [
+        line
+        for line in lines
+        if line.split()[0].lower().rstrip(";") == "mp_forcecamera"
+    ]
+
+
+def test_non_pov_warmup_forces_mp_forcecamera_zero():
+    director = _director("")
+    lines = director._recording_warmup_console_lines(
+        RecordingWarmupExtras(),
+        pov_enabled=False,
+    )
+
+    assert _forcecamera_lines(lines) == ["mp_forcecamera 0"]
+
+
+def test_frontend_console_cmds_still_force_mp_forcecamera_zero():
+    director = _director("")
+    lines = director._recording_warmup_console_lines(
+        RecordingWarmupExtras(
+            console_cmds=(
+                "cl_draw_only_deathnotices true",
+                "hud_showtargetid 0",
+            ),
+        ),
+        pov_enabled=False,
+    )
+
+    assert "cl_draw_only_deathnotices true" in lines
+    assert _forcecamera_lines(lines) == ["mp_forcecamera 0"]
+
+
+def test_stale_mp_forcecamera_one_cannot_override_observe_all():
+    director = _director("mp_forcecamera 1")
+    lines = director._recording_warmup_console_lines(
+        RecordingWarmupExtras(
+            console_cmds=("cl_draw_only_deathnotices true", "mp_forcecamera 1"),
+        ),
+        pov_enabled=False,
+    )
+
+    assert _forcecamera_lines(lines) == ["mp_forcecamera 0"]
 
 
 def test_pov_warmup_leaves_voice_to_pov_pipeline():

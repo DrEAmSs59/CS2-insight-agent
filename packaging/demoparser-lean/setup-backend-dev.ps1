@@ -4,6 +4,7 @@
 param(
     [string]$UvExe = "uv",
     [string]$WheelPath = "",
+    [string]$SourceDir = "",
     [switch]$BuildFromSource
 )
 
@@ -57,7 +58,7 @@ if ($WheelPath.Trim() -or $BuildFromSource) {
         $runtimeWheel = (Resolve-Path -LiteralPath $WheelPath).Path
     } else {
         $wheelDir = Join-Path $repoRoot "dist\wheels"
-        & (Join-Path $PSScriptRoot "build-wheel.ps1") -PythonExe $python -OutputDir $wheelDir -UvExe $UvExe
+        & (Join-Path $PSScriptRoot "build-wheel.ps1") -PythonExe $python -OutputDir $wheelDir -UvExe $UvExe -SourceDir $SourceDir
         if ($LASTEXITCODE -ne 0) { throw "Building the patched demoparser wheel failed." }
         $runtimeWheel = (
             Get-ChildItem -LiteralPath $wheelDir -File `

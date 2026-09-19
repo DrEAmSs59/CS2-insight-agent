@@ -7,6 +7,7 @@ use anyhow::{Context as AnyhowContext, Result};
 use clap::Parser as ClapParser;
 use demo_cosmetic_rewriter::input_command::extract_input_report;
 use std::fs::{self, File};
+use std::io::{BufWriter, Write};
 use std::path::PathBuf;
 
 const WORKER_STACK_SIZE: usize = 64 * 1024 * 1024;
@@ -47,8 +48,14 @@ fn run(cli: Cli) -> Result<()> {
     }
     let output = File::create(&cli.output)
         .with_context(|| format!("failed to create {}", cli.output.display()))?;
-    serde_json::to_writer_pretty(output, &report)
+    // serde_json emits small writes for each token. Buffer them before crossing
+    // the filesystem boundary; a full input report contains millions of tokens.
+    let mut output = BufWriter::new(output);
+    serde_json::to_writer_pretty(&mut output, &report)
         .with_context(|| format!("failed to write {}", cli.output.display()))?;
+    output
+        .flush()
+        .with_context(|| format!("failed to flush {}", cli.output.display()))?;
 
     println!("report={}", cli.output.display());
     println!("elapsed_seconds={:.3}", report.elapsed_seconds);

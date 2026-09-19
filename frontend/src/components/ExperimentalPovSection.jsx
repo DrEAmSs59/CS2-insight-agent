@@ -28,6 +28,12 @@ import {
   DEFAULT_RECORDING_WEATHER_EFFECT,
   normalizeRecordingWeatherEffectId,
 } from "../utils/recordingWeatherEffect.js";
+import {
+  DEFAULT_INPUT_HUD_POSITION,
+  INPUT_HUD_PLACEMENTS,
+  inputHudPlacementFromState,
+  inputHudStateFromPlacement,
+} from "../utils/inputHudPlacement.js";
 
 /**
  * 实验性 POV：与常用参数 / 录制前观战弹窗共用；勾选写入 experimental.pov_enabled。
@@ -43,8 +49,10 @@ export default function ExperimentalPovSection({
   povVoiceMode = "team",
   onPovVoiceModeChange,
   inputHudEnabled = true,
+  inputHudPosition = DEFAULT_INPUT_HUD_POSITION,
   onInputHudEnabledChange,
   onInputHudDisplayModeChange,
+  onInputHudPositionChange,
   recordingSkybox = "default",
   onRecordingSkyboxChange,
   recordingMapMaterial = DEFAULT_RECORDING_MAP_MATERIAL,
@@ -91,7 +99,7 @@ export default function ExperimentalPovSection({
     selectedMapMaterial,
     selectedWeatherEffect,
   );
-  const inputHudSelection = inputHudEnabled ? "visible" : "hidden";
+  const inputHudSelection = inputHudPlacementFromState(inputHudEnabled, inputHudPosition);
   const rainSelected = selectedMapAppearance === RAIN_RECORDING_MAP_APPEARANCE;
   const waxedSelected = selectedMapAppearance === WAXED_RECORDING_MAP_APPEARANCE;
   const canChangeMapAppearance = Boolean(
@@ -307,7 +315,7 @@ export default function ExperimentalPovSection({
         </div>
       ) : null}
 
-      {onInputHudEnabledChange && onInputHudDisplayModeChange ? (
+      {onInputHudEnabledChange && onInputHudDisplayModeChange && onInputHudPositionChange ? (
         <div
           className="mt-4 border-t border-amber-500/20 pt-4"
           data-testid="experimental-input-hud-card"
@@ -331,13 +339,18 @@ export default function ExperimentalPovSection({
                   onInputHudEnabledChange(false);
                   return;
                 }
+                const next = inputHudStateFromPlacement(value);
                 onInputHudEnabledChange(true);
+                onInputHudPositionChange(next.position);
                 onInputHudDisplayModeChange("hybrid");
               }}
-              className="min-w-44 max-w-[48%] rounded border border-cs2-border bg-cs2-bg-input px-2 py-1.5 text-xs font-semibold text-cs2-text-primary outline-none focus:border-cs2-accent/50 disabled:cursor-not-allowed disabled:opacity-40"
+              className="min-w-[17.5rem] max-w-[62%] rounded border border-cs2-border bg-cs2-bg-input px-2 py-1.5 text-xs font-semibold text-cs2-text-primary outline-none focus:border-cs2-accent/50 disabled:cursor-not-allowed disabled:opacity-40"
             >
-              <option value="visible">{t("record.warmupInputHudShow")}</option>
-              <option value="hidden">{t("record.warmupInputHudHide")}</option>
+              {INPUT_HUD_PLACEMENTS.map((placement) => (
+                <option key={placement} value={placement}>
+                  {t(`record.warmupInputHudPlacement.${placement}`)}
+                </option>
+              ))}
             </select>
           </div>
           {/* Virtual key sounds stay supported by the VPK but are temporarily hidden. */}

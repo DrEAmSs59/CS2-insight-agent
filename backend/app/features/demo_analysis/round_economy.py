@@ -71,12 +71,15 @@ def build_round_economy_shared(
 
     round_freeze_end_ticks: dict[int, int] = {}
     tick_to_round: dict[int, int] = {}
+    freeze_rows = fr.sort_values("tick", kind="mergesort")
+    freeze_ticks = freeze_rows["tick"].tolist()
     if trc is not None:
-        for _, row in fr.sort_values("tick", kind="mergesort").iterrows():
-            tick = _int(row.get("tick"))
+        freeze_rounds = freeze_rows[trc].tolist()
+        for tick_raw, round_raw in zip(freeze_ticks, freeze_rounds):
+            tick = _int(tick_raw)
             if tick <= 0:
                 continue
-            rn_here = _int(row.get(trc)) + 1
+            rn_here = _int(round_raw) + 1
             tick_to_round[tick] = rn_here
             if rn_here not in round_freeze_end_ticks or tick < round_freeze_end_ticks[rn_here]:
                 round_freeze_end_ticks[rn_here] = tick
@@ -85,8 +88,8 @@ def build_round_economy_shared(
         # 此时按 tick 先后顺序顺序编号回合（已按 match_start_tick 过滤掉热身/拼刀）。
         seq = 0
         seen_ticks: set[int] = set()
-        for _, row in fr.sort_values("tick", kind="mergesort").iterrows():
-            tick = _int(row.get("tick"))
+        for tick_raw in freeze_ticks:
+            tick = _int(tick_raw)
             if tick <= 0 or tick in seen_ticks:
                 continue
             seen_ticks.add(tick)
@@ -175,15 +178,18 @@ def build_round_economy_shared(
             alive = grp
         sums: dict[int, int] = {2: 0, 3: 0}
         if "team_num" in alive.columns and "current_equip_value" in alive.columns:
-            for _, r in alive.iterrows():
+            for tm_raw, value_raw in zip(
+                alive["team_num"].tolist(),
+                alive["current_equip_value"].tolist(),
+            ):
                 try:
-                    tm = int(float(r["team_num"]))
+                    tm = int(float(tm_raw))
                 except (TypeError, ValueError):
                     continue
                 if tm not in sums:
                     continue
                 try:
-                    v = int(float(r["current_equip_value"]))
+                    v = int(float(value_raw))
                 except (TypeError, ValueError):
                     continue
                 sums[tm] += v
