@@ -684,6 +684,11 @@ async def execute_recording_queue(
         ).strip().lower()
         if input_hud_display_mode not in {"hybrid", "always", "active"}:
             input_hud_display_mode = "hybrid"
+        input_hud_position = str(
+            pov_hud_cfg.get("input_hud_position", warmup_extras.input_hud_position)
+        ).strip().lower()
+        if input_hud_position not in {"bottom_center", "minimap_below", "weapon_right"}:
+            input_hud_position = "bottom_center"
         input_hud_enabled = bool(
             pov_hud_cfg.get("input_hud_enabled", warmup_extras.input_hud_enabled)
         )
@@ -708,6 +713,7 @@ async def execute_recording_queue(
             pov_voice_disabled=False,
             input_hud_enabled=input_hud_enabled,
             input_hud_display_mode=input_hud_display_mode,
+            input_hud_position=input_hud_position,
             input_audio_enabled=bool(pov_hud_cfg.get("input_audio_enabled", False)),
             combat_stats_hud_enabled=bool(
                 pov_hud_cfg.get("combat_stats_hud_enabled", True)
@@ -716,7 +722,7 @@ async def execute_recording_queue(
         logger.info(
             "[RecordingV3] in-game HUD choices: pov=%s, recording_hud=%s, "
             "radar_mode=%s, teamcounter_numeric=%s, "
-            "voice_mode=%s, input_hud=%s, input_mode=%s, input_audio=%s, combat_stats=%s",
+            "voice_mode=%s, input_hud=%s, input_mode=%s, input_pos=%s, input_audio=%s, combat_stats=%s",
             warmup_extras.pov_hud_enabled,
             warmup_extras.recording_hud_enabled,
             warmup_extras.pov_radar_mode,
@@ -724,6 +730,7 @@ async def execute_recording_queue(
             warmup_extras.pov_voice_mode,
             warmup_extras.input_hud_enabled,
             warmup_extras.input_hud_display_mode,
+            warmup_extras.input_hud_position,
             warmup_extras.input_audio_enabled,
             warmup_extras.combat_stats_hud_enabled,
         )

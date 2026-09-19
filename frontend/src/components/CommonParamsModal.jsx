@@ -823,8 +823,10 @@ export default function CommonParamsModal({
                 povVoiceMode={warmupOpts.pov_voice_mode}
                 onPovVoiceModeChange={(v) => patchWarmup({ pov_voice_mode: v })}
                 inputHudEnabled={warmupOpts.input_hud_enabled}
+                inputHudPosition={warmupOpts.input_hud_position}
                 inputHudDisplayMode={warmupOpts.input_hud_display_mode}
                 onInputHudEnabledChange={(v) => patchWarmup({ input_hud_enabled: v })}
+                onInputHudPositionChange={(v) => patchWarmup({ input_hud_position: v })}
                 onInputHudDisplayModeChange={(v) => patchWarmup({ input_hud_display_mode: v })}
                 recordingSkybox={skyboxId}
                 onRecordingSkyboxChange={setSkyboxId}

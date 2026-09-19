@@ -2,6 +2,7 @@ import { normalizeRecordingSkyboxId } from "./recordingSkybox.js";
 import { normalizeRecordingMapMaterialId } from "./recordingMapMaterial.js";
 import { normalizeRecordingWeatherEffectId } from "./recordingWeatherEffect.js";
 import { normalizePovVoiceMode } from "./povVoiceMode.js";
+import { normalizeInputHudPosition } from "./inputHudPlacement.js";
 
 function gcdInt(a, b) {
   let x = Math.abs(a);
@@ -127,6 +128,7 @@ export function warmupUiOptsToPersisted(opts) {
     pov_teamcounter_numeric: !!opts.pov_teamcounter_numeric,
     pov_voice_mode: normalizePovVoiceMode(opts.pov_voice_mode, opts.pov_voice_disabled === true),
     input_hud_enabled: opts.input_hud_enabled !== false,
+    input_hud_position: normalizeInputHudPosition(opts.input_hud_position),
     input_hud_display_mode: "hybrid",
     input_audio_enabled: opts.input_audio_enabled === true,
     combat_stats_hud_enabled: opts.combat_stats_hud_enabled !== false,
@@ -227,6 +229,7 @@ export function splitRecordWarmupConfirmPayload(payload) {
     obs_transition_name,
     obs_transition_duration_ms,
     input_hud_enabled,
+    input_hud_position,
     input_hud_display_mode,
     input_audio_enabled,
     combat_stats_hud_enabled,
@@ -253,6 +256,7 @@ export function splitRecordWarmupConfirmPayload(payload) {
       obs_transition_name,
       obs_transition_duration_ms,
       input_hud_enabled: typeof input_hud_enabled === "boolean" ? input_hud_enabled : true,
+      input_hud_position: normalizeInputHudPosition(input_hud_position),
       input_hud_display_mode: "hybrid",
       input_audio_enabled: typeof input_audio_enabled === "boolean" ? input_audio_enabled : false,
       combat_stats_hud_enabled:

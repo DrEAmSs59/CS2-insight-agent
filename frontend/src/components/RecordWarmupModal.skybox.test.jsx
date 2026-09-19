@@ -43,9 +43,9 @@ describe("RecordWarmupModal skybox override", () => {
     const voiceSelector = screen.getByRole("combobox", { name: "语音控制" });
     expect(inputModeSelector.disabled).toBe(false);
     expect(voiceSelector.disabled).toBe(false);
-    expect(inputModeSelector.value).toBe("visible");
+    expect(inputModeSelector.value).toBe("bottom_center");
     expect(Array.from(inputModeSelector.options).map(({ value }) => value))
-      .toEqual(["visible", "hidden"]);
+      .toEqual(["hidden", "bottom_center", "minimap_below", "weapon_right"]);
     expect(screen.queryByText("虚拟按键音")).toBeNull();
     expect(screen.queryByRole("checkbox", { name: "实时 KDA / 伤害" })).toBeNull();
     expect(screen.getByText(/此处修改仅作用于本次录制/)).toBeTruthy();
@@ -86,6 +86,7 @@ describe("RecordWarmupModal skybox override", () => {
         experimental_pov_enabled: false,
         pov_voice_mode: "enemy",
         input_hud_enabled: true,
+        input_hud_position: "bottom_center",
         input_hud_display_mode: "hybrid",
         input_audio_enabled: false,
         combat_stats_hud_enabled: true,
@@ -179,6 +180,7 @@ describe("RecordWarmupModal skybox override", () => {
         experimental_pov_enabled: true,
         pov_voice_mode: "enemy",
         input_hud_enabled: false,
+        input_hud_position: "bottom_center",
         input_hud_display_mode: "hybrid",
         input_audio_enabled: false,
         combat_stats_hud_enabled: true,
@@ -196,6 +198,7 @@ describe("RecordWarmupModal skybox override", () => {
         experimentalPovEnabled
         defaultOverrides={{
           input_hud_enabled: false,
+          input_hud_position: "weapon_right",
           input_hud_display_mode: "active",
           input_audio_enabled: true,
         }}
@@ -204,11 +207,12 @@ describe("RecordWarmupModal skybox override", () => {
 
     const inputModeSelect = screen.getByRole("combobox", { name: "按键显示方式" });
     expect(inputModeSelect.value).toBe("hidden");
-    fireEvent.change(inputModeSelect, { target: { value: "visible" } });
+    fireEvent.change(inputModeSelect, { target: { value: "bottom_center" } });
     fireEvent.click(screen.getByRole("button", { name: "开始录制" }));
 
     expect(onConfirm).toHaveBeenCalledWith(expect.objectContaining({
       input_hud_enabled: true,
+      input_hud_position: "bottom_center",
       input_hud_display_mode: "hybrid",
       input_audio_enabled: false,
     }));

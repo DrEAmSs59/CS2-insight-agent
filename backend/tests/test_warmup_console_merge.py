@@ -30,6 +30,7 @@ def _director(inject_lines: str) -> OBSDirector:
 def test_recording_warmup_defaults_virtual_key_sounds_off():
     warmup = RecordingWarmupExtras()
     assert warmup.input_hud_enabled is True
+    assert warmup.input_hud_position == "bottom_center"
     assert warmup.input_audio_enabled is False
 
 

@@ -46,6 +46,7 @@ export async function playDemoInCs2({ id = null, path = null, advancedPlayback =
       skybox_id: normalizeRecordingSkyboxId(playback?.skybox_id),
       ...(playback?.enabled ? {
         input_hud_enabled: true,
+        input_hud_position: "bottom_center",
         input_hud_display_mode: "hybrid",
         input_hud_scale_percent: 100,
         input_audio_enabled: playback?.input_audio_enabled === true,

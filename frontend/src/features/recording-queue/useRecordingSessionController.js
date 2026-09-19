@@ -16,6 +16,7 @@ import {
 } from "../../utils/recordingBatch";
 import { splitRecordWarmupConfirmPayload } from "../../utils/warmupDefaults";
 import { normalizePovVoiceMode } from "../../utils/povVoiceMode.js";
+import { normalizeInputHudPosition } from "../../utils/inputHudPlacement.js";
 import { applyRecordingPlayerAliases, recordingAliasDemoTargets } from "../../utils/playerAliases.js";
 
 /** Owns one recording session from preflight through recovery and result reporting. */
@@ -153,6 +154,7 @@ export function useRecordingSessionController({
         teamcounter_numeric: Boolean(warmupForApi?.pov_teamcounter_numeric),
         voice_mode: normalizePovVoiceMode(warmupForApi?.pov_voice_mode),
         input_hud_enabled: session.input_hud_enabled !== false,
+        input_hud_position: normalizeInputHudPosition(session.input_hud_position),
         input_hud_display_mode: "hybrid",
         input_audio_enabled: session.input_audio_enabled === true,
         combat_stats_hud_enabled: session.combat_stats_hud_enabled !== false,

@@ -72,6 +72,8 @@ INPUT_PRESENTATION_PAYLOAD_INDEX = 18
 COMBAT_STATS_PAYLOAD_INDEX = 19
 POV_VISUALS_PAYLOAD_INDEX = 20
 WEAPON_SELECT_PAYLOAD_INDEX = 6
+INPUT_HUD_POSITIONS = ("bottom_center", "minimap_below", "weapon_right")
+DEFAULT_INPUT_HUD_POSITION = "bottom_center"
 WEAPON_SELECT_ENTITY_INDEX_MASK = 0x3FFF
 WEAPON_SELECT_MATCH_MAX_TICKS = 4
 HAND_SWITCH_PULSE_TICKS = 4
@@ -3661,6 +3663,16 @@ def add_input_tracks_to_payload(
     }
 
 
+def normalize_input_hud_position(
+    value: object,
+    *,
+    default: str = DEFAULT_INPUT_HUD_POSITION,
+) -> str:
+    """Return a supported OBS-overlay-compatible input HUD anchor."""
+    text = str(value or "").strip().lower()
+    return text if text in INPUT_HUD_POSITIONS else default
+
+
 def add_input_presentation_to_payload(
     voice_payload: bytes,
     *,
@@ -3670,6 +3682,7 @@ def add_input_presentation_to_payload(
     audio_enabled: bool,
     audio_volume_percent: int,
     combat_stats_enabled: bool = True,
+    position: str = DEFAULT_INPUT_HUD_POSITION,
 ) -> bytes:
     """Append validated per-session keyboard/mouse presentation settings."""
     try:
@@ -3687,6 +3700,9 @@ def add_input_presentation_to_payload(
     volume = int(audio_volume_percent)
     if volume not in {25, 50, 75, 100}:
         raise DemoVoiceHudError("input audio volume must be one of 25, 50, 75, or 100 percent")
+    hud_position = str(position or "").strip().lower()
+    if hud_position not in INPUT_HUD_POSITIONS:
+        raise DemoVoiceHudError(f"unsupported input HUD position: {position}")
 
     packed[INPUT_PRESENTATION_PAYLOAD_INDEX] = [
         int(bool(enabled)),
@@ -3695,6 +3711,7 @@ def add_input_presentation_to_payload(
         int(bool(audio_enabled)),
         volume,
         int(bool(combat_stats_enabled)),
+        hud_position,
     ]
     return json.dumps(packed, ensure_ascii=True, separators=(",", ":")).encode("ascii")
 
@@ -4513,6 +4530,7 @@ def build_demo_voice_hud_vpk(
     input_hud_enabled: bool = True,
     input_hud_display_mode: str = "hybrid",
     input_hud_scale_percent: int = 100,
+    input_hud_position: str = DEFAULT_INPUT_HUD_POSITION,
     input_audio_enabled: bool = False,
     input_audio_volume_percent: int = 100,
     combat_stats_enabled: bool = True,
@@ -4557,6 +4575,7 @@ def build_demo_voice_hud_vpk(
         audio_enabled=input_audio_enabled,
         audio_volume_percent=input_audio_volume_percent,
         combat_stats_enabled=combat_stats_enabled,
+        position=normalize_input_hud_position(input_hud_position),
     )
     stats["payload_bytes"] = len(payload)
 

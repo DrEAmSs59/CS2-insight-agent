@@ -33,7 +33,9 @@ from .cs2_config_backup import is_cs2_running
 from .demo_voice_hud import (
     DemoVoiceHudBuild,
     DemoVoiceHudError,
+    DEFAULT_INPUT_HUD_POSITION,
     build_demo_voice_hud_vpk,
+    normalize_input_hud_position,
     read_inline_vpk,
 )
 from .demo_playback_compat import detect_demo_map_name_from_spawn_groups
@@ -967,6 +969,7 @@ class PovHudManager:
         input_hud_enabled: bool = True,
         input_hud_display_mode: str = "hybrid",
         input_hud_scale_percent: int = 100,
+        input_hud_position: str = DEFAULT_INPUT_HUD_POSITION,
         input_audio_enabled: bool = False,
         input_audio_volume_percent: int = 100,
         combat_stats_enabled: bool = True,
@@ -987,6 +990,7 @@ class PovHudManager:
                 input_hud_enabled=input_hud_enabled,
                 input_hud_display_mode=input_hud_display_mode,
                 input_hud_scale_percent=input_hud_scale_percent,
+                input_hud_position=input_hud_position,
                 input_audio_enabled=input_audio_enabled,
                 input_audio_volume_percent=input_audio_volume_percent,
                 combat_stats_enabled=combat_stats_enabled,
@@ -1010,6 +1014,7 @@ class PovHudManager:
         input_hud_enabled: bool = True,
         input_hud_display_mode: str = "hybrid",
         input_hud_scale_percent: int = 100,
+        input_hud_position: str = DEFAULT_INPUT_HUD_POSITION,
         input_audio_enabled: bool = False,
         input_audio_volume_percent: int = 100,
         combat_stats_enabled: bool = True,
@@ -1052,6 +1057,7 @@ class PovHudManager:
             and selected_weather != DEFAULT_WEATHER_EFFECT_ID
         ):
             raise PovHudError("打蜡与天气效果不能同时启用。")
+        selected_input_hud_position = normalize_input_hud_position(input_hud_position)
         effective_map_material = (
             RAIN_PUDDLES_MAP_MATERIAL_ID
             if selected_weather == RAIN_WEATHER_EFFECT_ID
@@ -1105,6 +1111,7 @@ class PovHudManager:
                     input_hud_enabled=input_hud_enabled,
                     input_hud_display_mode=input_hud_display_mode,
                     input_hud_scale_percent=input_hud_scale_percent,
+                    input_hud_position=selected_input_hud_position,
                     input_audio_enabled=input_audio_enabled,
                     input_audio_volume_percent=input_audio_volume_percent,
                     combat_stats_enabled=combat_stats_enabled,
@@ -1711,6 +1718,7 @@ class PovHudManager:
             "input_hud_enabled": bool(input_hud_enabled),
             "input_hud_display_mode": str(input_hud_display_mode),
             "input_hud_scale_percent": int(input_hud_scale_percent),
+            "input_hud_position": selected_input_hud_position,
             "input_audio_enabled": bool(input_audio_enabled),
             "input_audio_volume_percent": int(input_audio_volume_percent),
             "combat_stats_enabled": bool(combat_stats_enabled),

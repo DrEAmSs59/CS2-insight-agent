@@ -57,6 +57,7 @@ class DemoPlaybackPovOptions:
     input_hud_enabled: bool = True
     input_hud_display_mode: str = "hybrid"
     input_hud_scale_percent: int = 100
+    input_hud_position: str = "bottom_center"
     input_audio_enabled: bool = False
     input_audio_volume_percent: int = 100
     player_aliases: dict[str, str] = field(default_factory=dict)
@@ -427,6 +428,7 @@ class DemoPlaybackService:
                         input_hud_enabled=options.input_hud_enabled,
                         input_hud_display_mode=options.input_hud_display_mode,
                         input_hud_scale_percent=options.input_hud_scale_percent,
+                        input_hud_position=options.input_hud_position,
                         input_audio_enabled=options.input_audio_enabled,
                         input_audio_volume_percent=options.input_audio_volume_percent,
                         weather_effect_id=options.weather_effect_id,
@@ -496,6 +498,7 @@ class DemoPlaybackService:
                     input_hud_enabled=options.input_hud_enabled,
                     input_hud_display_mode=options.input_hud_display_mode,
                     input_hud_scale_percent=options.input_hud_scale_percent,
+                    input_hud_position=options.input_hud_position,
                     input_audio_enabled=options.input_audio_enabled,
                     input_audio_volume_percent=options.input_audio_volume_percent,
                     weather_effect_id=options.weather_effect_id,
@@ -520,6 +523,7 @@ class DemoPlaybackService:
                     "input_hud_enabled": options.input_hud_enabled,
                     "input_hud_display_mode": options.input_hud_display_mode,
                     "input_hud_scale_percent": options.input_hud_scale_percent,
+                    "input_hud_position": options.input_hud_position,
                     "input_audio_enabled": options.input_audio_enabled,
                     "input_audio_volume_percent": options.input_audio_volume_percent,
                     "weather_effect_id": options.weather_effect_id,

@@ -95,6 +95,7 @@ describe("recording preset share JSON", () => {
       default_record_warmup: {
         ...preset.default_record_warmup,
         input_hud_enabled: false,
+        input_hud_position: "weapon_right",
         input_hud_display_mode: "active",
       },
     };
@@ -114,6 +115,31 @@ describe("recording preset share JSON", () => {
       default_record_warmup: {
         ...preset.default_record_warmup,
         input_hud_display_mode: "sometimes",
+      },
+    };
+    expect(() => parseRecordingPresetFile(buildRecordingPresetFile(next), RECORD_WARMUP_DEFAULT_OPTIONS))
+      .toThrow();
+  });
+
+  test("round trips the in-game input HUD overlay position", () => {
+    const next = {
+      ...preset,
+      default_record_warmup: {
+        ...preset.default_record_warmup,
+        input_hud_enabled: true,
+        input_hud_position: "minimap_below",
+      },
+    };
+    expect(parseRecordingPresetFile(buildRecordingPresetFile(next), RECORD_WARMUP_DEFAULT_OPTIONS))
+      .toEqual(next);
+  });
+
+  test("rejects an unknown in-game input HUD position", () => {
+    const next = {
+      ...preset,
+      default_record_warmup: {
+        ...preset.default_record_warmup,
+        input_hud_position: "top_left",
       },
     };
     expect(() => parseRecordingPresetFile(buildRecordingPresetFile(next), RECORD_WARMUP_DEFAULT_OPTIONS))

@@ -639,9 +639,10 @@ def test_input_presentation_payload_uses_explicit_session_settings():
         audio_enabled=True,
         audio_volume_percent=50,
         combat_stats_enabled=False,
+        position="weapon_right",
     )
 
-    assert json.loads(payload)[18] == [1, "active", 115, 1, 50, 0]
+    assert json.loads(payload)[18] == [1, "active", 115, 1, 50, 0, "weapon_right"]
 
     with pytest.raises(DemoVoiceHudError, match="display mode"):
         add_input_presentation_to_payload(
@@ -651,6 +652,17 @@ def test_input_presentation_payload_uses_explicit_session_settings():
             scale_percent=100,
             audio_enabled=True,
             audio_volume_percent=100,
+        )
+
+    with pytest.raises(DemoVoiceHudError, match="position"):
+        add_input_presentation_to_payload(
+            b"[[],[],[],[]]",
+            enabled=True,
+            display_mode="hybrid",
+            scale_percent=100,
+            audio_enabled=False,
+            audio_volume_percent=100,
+            position="top_left",
         )
 
 
@@ -1067,7 +1079,13 @@ def test_checked_in_voice_template_contains_only_an_empty_payload():
     assert b"$.Schedule(0, updateInputHud)" not in script
     assert b'inputHud.style.width = INPUT_HUD_WIDTH + "px"' in script
     assert b'inputHud.style.height = "190px"' in script
-    assert b'inputHud.style.marginBottom = "139px"' in script
+    assert b'inputHud.style.marginBottom = "139px"' not in script
+    assert b"function applyInputHudPlacement(panel)" in script
+    assert b"vh * 0.05" in script
+    assert b"vh * 0.14" in script
+    assert b"vh * 0.48" in script
+    assert b'position === "minimap_below"' in script
+    assert b'position === "weapon_right"' in script
     assert b'inputHud.style.flowChildren = "none"' in script
     assert b'inputHud.style.overflow = "noclip"' not in script
     assert b'inputHud.style.zIndex = "1000"' in script
@@ -1090,7 +1108,7 @@ def test_checked_in_voice_template_contains_only_an_empty_payload():
     input_hud_end = script.index(b"function combatStatAt", input_hud_start)
     for label in (b'"1"', b'"2"', b'"3"', b'"4"', b'"5"', b'"E"', b'"F"', b'"H"', b'"TAB"'):
         assert label in script[input_hud_start:input_hud_end]
-    assert b'inputHud.style.position = "0px 0px 0px"' in script
+    assert b'panel.style.position = "0px 0px 0px"' in script
     assert b"function stockHudAlertClaimsInputLane()" not in script
     assert b"function stockHudAlertHorizontalMetrics(panel, root, rootWidth)" not in script
     assert b"positionInputHudForStockAlert(panel)" not in script
@@ -1109,9 +1127,12 @@ def test_checked_in_voice_template_contains_only_an_empty_payload():
     assert b'inputHudDisplayMode === "always"' in script
     assert b'inputHudDisplayMode === "hybrid" && !onlyWhenActive' in script
     assert b'inputHudDisplayMode === "hybrid" && !key.onlyWhenActive' in script
-    assert b"const runtimeInputHudEnabled = advancedPlayback" in script
-    assert b"!advancedHudHidden && advancedQuickOptions.inputHud" in script
-    assert b"if (!runtimeInputHudEnabled)" in script
+    assert b"function hideInputHud()" in script
+    assert b"const runtimeInputHudEnabled = advancedPlayback" not in script
+    assert b"!advancedHudHidden && advancedQuickOptions.inputHud" not in script
+    assert b"function runtimeInputHudVisible()" in script
+    assert b'advancedInputHudPosition !== "hidden"' in script
+    assert b"if (!runtimeInputHudVisible())" in script
     assert b"if (inputAudioEnabled)" in script
     assert b'key.semanticTrack === "hand"' in script
     assert b'findHudTraverse("VisiblePlayerIDs")' in script
@@ -1324,10 +1345,17 @@ def test_checked_in_voice_template_contains_only_an_empty_payload():
     assert b"advancedProgressSlider.max = 1" not in script
     assert b"advancedQuickOptions.messages" not in script
     assert b'["messages", advancedCopy(' not in script
-    assert b"inputHud: advancedPlayback ? true : inputHudEnabled" in script
-    assert 'advancedOptionLabels.inputHud = advancedCopy("键鼠", "INPUT")'.encode() in script
-    assert b'advancedToggleQuickOption("inputHud")' in script
-    assert b"advancedOptionButtons.inputHud = inputHudToggle" in script
+    assert b"inputHud: advancedPlayback ? true : inputHudEnabled" not in script
+    assert 'advancedOptionLabels.inputHud = advancedCopy("键鼠", "INPUT")'.encode() not in script
+    assert b'advancedToggleQuickOption("inputHud")' not in script
+    assert b"advancedOptionButtons.inputHud = inputHudToggle" not in script
+    assert b"function advancedSetInputHudPosition(position)" in script
+    assert b"advancedRefreshInputHudButtons()" in script
+    assert 'advancedCreateSectionLabel(inputHudRow, advancedCopy("键鼠", "INPUT"))'.encode() in script
+    assert 'advancedCopy("不显示", "Hide")'.encode() in script
+    assert 'advancedCopy("底部中央", "Bottom")'.encode() in script
+    assert 'advancedCopy("小地图下", "Minimap")'.encode() in script
+    assert 'advancedCopy("武器HUD上", "Weapon")'.encode() in script
     assert b'"tv_nochat 0"' in script
     assert b"advancedNativeMessagesRestored" in script
     assert b'"cl_drawhud_force_radar " + radarMode' in script
@@ -1754,7 +1782,7 @@ def test_session_console_commands_are_embedded_in_the_payload():
     payload = json.loads(script[start:end].rstrip())
 
     assert payload[14] == commands
-    assert payload[18] == [1, "active", 115, 0, 50, 0]
+    assert payload[18] == [1, "active", 115, 0, 50, 0, "bottom_center"]
     assert payload[20] == 0
 
 
@@ -2764,6 +2792,7 @@ def test_pov_manager_installs_generated_voice_package(monkeypatch, tmp_path: Pat
         input_hud_enabled=True,
         input_hud_display_mode="hybrid",
         input_hud_scale_percent=100,
+        input_hud_position="bottom_center",
         input_audio_enabled=False,
         input_audio_volume_percent=100,
         combat_stats_enabled=True,
@@ -2781,6 +2810,7 @@ def test_pov_manager_installs_generated_voice_package(monkeypatch, tmp_path: Pat
                 input_hud_enabled,
                 input_hud_display_mode,
                 input_hud_scale_percent,
+                input_hud_position,
                 input_audio_enabled,
                 input_audio_volume_percent,
                 combat_stats_enabled,
@@ -2799,7 +2829,7 @@ def test_pov_manager_installs_generated_voice_package(monkeypatch, tmp_path: Pat
 
     assert result is built
     assert calls == [
-        (demo, template, input_report, True, "team", False, True, True, "hybrid", 100, False, 100, True, ())
+        (demo, template, input_report, True, "team", False, True, True, "hybrid", 100, "bottom_center", False, 100, True, ())
     ]
     assert (csgo / "pov.vpk").read_bytes() == b"generated"
     manifest = json.loads(manager.get_manifest_path().read_text(encoding="utf-8"))
@@ -2821,6 +2851,7 @@ def test_pov_manager_installs_generated_voice_package(monkeypatch, tmp_path: Pat
         True,
         "hybrid",
         100,
+        "bottom_center",
         False,
         100,
         True,
@@ -2857,6 +2888,7 @@ def test_pov_manager_installs_generated_voice_package(monkeypatch, tmp_path: Pat
         True,
         "hybrid",
         100,
+        "bottom_center",
             False,
             100,
             True,
