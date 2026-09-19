@@ -1085,6 +1085,7 @@ function buildKeyRoundCandidates(
   const firstFreezeTick = num(rounds[0]?.freeze_end_tick);
 
   let winStreak = { teamKey: "", length: 0 };
+  const playerTeamMap = buildPlayerTeamMap(data.players);
 
   for (let i = 0; i < rounds.length; i += 1) {
     const round = rounds[i];
@@ -1259,7 +1260,12 @@ function buildKeyRoundCandidates(
       if (!description) {
         const winnerName = teamName(data, winner);
         if (playerName && title) {
-          description = `${playerName} 完成${title}，帮助 ${winnerName} 拿下本回合`;
+          const playerTeam = playerTeamMap.get(String(playerName).trim().toLowerCase());
+          if (playerTeam && winner && playerTeam !== winner) {
+            description = `${playerName} 完成${title}，未能赢下回合，${winnerName} 获胜`;
+          } else {
+            description = `${playerName} 完成${title}，帮助 ${winnerName} 拿下本回合`;
+          }
         } else if (types.includes("force_upset")) {
           description = `${winnerName} 强起翻盘`;
         } else if (types.includes("economy_upset")) {
