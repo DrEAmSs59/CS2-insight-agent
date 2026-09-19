@@ -77,6 +77,10 @@ export const API_ERROR_I18N_KEYS = {
   MONTAGE_BGM_MIX_FAILED: "montage.err.bgmMixFailed",
   MONTAGE_IMAGE_TO_VIDEO_FAILED: "montage.err.imageToVideoFailed",
   MONTAGE_FIRST_CLIP_NO_RESOLUTION: "montage.err.firstClipNoResolution",
+  MONTAGE_RADAR_PARSE_MISSING: "montage.err.radarParseMissing",
+  MONTAGE_RADAR_BAKE_FAILED: "montage.err.radarBakeFailed",
+  MONTAGE_RADAR_IMAGE_MISSING: "montage.err.radarImageMissing",
+  RADAR_IMAGE_MISSING: "montage.err.radarImageMissing",
 };
 
 export const API_ERROR_SUBTITLE_KEYS = {

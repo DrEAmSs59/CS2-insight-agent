@@ -137,7 +137,9 @@ def _card_payload(
         "assists": int(player.get("assists") or 0),
         "stats": dict(player),
         "radar": radar,
-        "match_avg": None,  # 本场全部玩家的六维平均值（红色基准线），生成时填充
+        "match_avg": None,  # 本场全部玩家自动维度的平均值（外圈刻度）
+        "match_median": None,  # 兼容旧字段，与 match_avg 相同
+        "demo_source": str(player.get("demo_source") or ""),
         "image_file": image_file,
         "video_file": None,  # 开场动画 MP4（按需生成），生成后供合辑作为动画视频段插入
         "portrait_file": None,
@@ -156,7 +158,6 @@ def create_cards_from_players(
     from .radar_model import compute_match_avg_radar
 
     players_list = [p for p in (players or []) if isinstance(p, dict)]
-    # 全场平均值基准线：本场所有玩家六维派生值的平均，作为红色参考六边形
     match_avg = compute_match_avg_radar(players_list)
     created: list[dict[str, Any]] = []
     with _LOCK:
@@ -164,6 +165,7 @@ def create_cards_from_players(
         for player in players_list:
             card = _card_payload(demo_id=demo_id, demo_name=demo_name, player=player)
             card["match_avg"] = dict(match_avg)
+            card["match_median"] = dict(match_avg)
             image_path = get_data_dir() / str(card["image_file"])
             render_radar_card(
                 player_name=card["player_name"],
@@ -171,7 +173,10 @@ def create_cards_from_players(
                 out_path=image_path,
                 team_key=card["team_key"],
                 team_label=card["team_label"],
-                match_avg_radar=match_avg,
+                match_median_radar=match_avg,
+                demo_source=str(card.get("demo_source") or ""),
+                map_name=str(card.get("map_name") or demo_name or ""),
+                kda=f"{int(player.get('kills') or 0)} / {int(player.get('deaths') or 0)} / {int(player.get('assists') or 0)}",
             )
             index["cards"].append(card)
             created.append(card)
@@ -230,7 +235,10 @@ def _render_card(
         team_logo_path=team_logo_path,
         team_key=card["team_key"],
         team_label=card["team_label"],
-        match_avg_radar=card.get("match_avg") or None,
+        match_median_radar=card.get("match_median") or card.get("match_avg") or None,
+        demo_source=str(card.get("demo_source") or ""),
+        map_name=str(card.get("map_name") or ""),
+        kda=str(card.get("kda") or ""),
     )
 
 
@@ -400,11 +408,15 @@ def generate_card_animation(
     generate_radar_animation(
         player_name=card["player_name"],
         radar=card["radar"],
-        match_avg_radar=card.get("match_avg") or None,
+        match_avg_radar=card.get("match_median") or card.get("match_avg") or None,
+        match_median_radar=card.get("match_median") or card.get("match_avg") or None,
         portrait_path=portrait,
         team_logo_path=team_logo,
         team_key=card.get("team_key"),
         team_label=card.get("team_label") or "",
+        demo_source=str(card.get("demo_source") or ""),
+        map_name=str(card.get("map_name") or ""),
+        kda=str(card.get("kda") or ""),
         ffmpeg_bin=ffmpeg_bin,
         out_path=out_path,
         workers=workers,

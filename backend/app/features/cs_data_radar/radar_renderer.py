@@ -15,30 +15,30 @@ from __future__ import annotations
 import hashlib
 import math
 import random
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Optional
 
 from PIL import Image, ImageDraw, ImageFilter, ImageFont  # type: ignore[import]
 
 from .radar_model import (
-    RADAR_DIMENSIONS,
-    average_radar_value,
+    active_radar_dimensions,
     format_radar_value,
-    normalize_radar_values,
+    normalize_radar_values_by_median,
 )
+from .source_assets import display_demo_source, format_map_label, resolve_source_logo_path
 
 # ─── 画布与字体常量（16:9 左右分割构图）────────────────────────────
 CANVAS_W = 2560
 CANVAS_H = 1440
-RADAR_CENTER = (640, 730)  # 雷达：左半部正中央
-MAX_R = 400  # 蓝色外圈（最高刻度）半径；溢出上限 1.6 → 640px 仍留在画布内
+RADAR_CENTER = (660, 730)  # 雷达：左半部；右移 20px 避免左侧标签贴边
+MAX_R = 360  # 蓝色外圈半径；为四行标签留出空间
 GRID_LEVELS = 5
 GRID_LINE_WIDTH = 3
-GRID_LINE_OPACITY = 0.2
+GRID_LINE_OPACITY = 0.22
 VERTEX_COUNT = 6
-LABEL_MARGIN = 54
-LABEL_FONT_SIZE = 46
-SCORE_FONT_SIZE = 40
+LABEL_MARGIN = 10
+TEXT_STACK_GAP = 21  # 头像→玩家名→地图→KDA 的字脚到字顶间距
 
 # 右半部人物肖像
 PORTRAIT_CENTER = (1890, 600)
@@ -52,6 +52,7 @@ _FONTS_DIR = _BACKEND_DIR / "assets" / "fonts"
 _RAJDHANI_BOLD = _FONTS_DIR / "Rajdhani-Bold.ttf"
 _RAJDHANI_SEMI = _FONTS_DIR / "Rajdhani-SemiBold.ttf"
 _NOTO_MEDIUM = _FONTS_DIR / "NotoSansSC-Medium.ttf"
+_NOTO_BOLD = _FONTS_DIR / "NotoSansSC-Bold.ttf"
 
 # Rock-Radar-main 的 20 套主题色 (color, bg1, bg2)
 COLOR_PRESETS: list[tuple[str, str, str]] = [
@@ -114,14 +115,19 @@ def _theme_for_player(player_name: str, team_key: Any = None) -> tuple[str, str,
     return COLOR_PRESETS[idx]
 
 
-def _load_font(path: Path, size: int) -> ImageFont.FreeTypeFont:
+@lru_cache(maxsize=64)
+def _load_font_cached(path: str, size: int):
     try:
-        return ImageFont.truetype(str(path), size)
+        return ImageFont.truetype(path, size)
     except Exception:
         try:
             return ImageFont.truetype(str(_RAJDHANI_BOLD), size)
         except Exception:
             return ImageFont.load_default()
+
+
+def _load_font(path: Path, size: int):
+    return _load_font_cached(str(path), int(size))
 
 
 def _font_latin(size: int) -> ImageFont.FreeTypeFont:
@@ -136,6 +142,21 @@ def _font_cjk(size: int) -> ImageFont.FreeTypeFont:
     return _load_font(_NOTO_MEDIUM, size)
 
 
+def _font_cjk_bold(size: int) -> ImageFont.FreeTypeFont:
+    if _NOTO_BOLD.is_file():
+        return _load_font(_NOTO_BOLD, size)
+    return _font_cjk(size)
+
+
+def _text_needs_cjk(text: str) -> bool:
+    return any("\u4e00" <= ch <= "\u9fff" for ch in str(text or ""))
+
+
+def _font_for_name(text: str, size: int) -> ImageFont.FreeTypeFont:
+    """玩家名含汉字时用思源黑体，否则用 Rajdhani（无汉字字形会显示方框）。"""
+    return _font_cjk_bold(size) if _text_needs_cjk(text) else _font_latin(size)
+
+
 def _text_size(font: ImageFont.FreeTypeFont, text: str) -> tuple[int, int]:
     try:
         bbox = font.getbbox(text)
@@ -144,10 +165,17 @@ def _text_size(font: ImageFont.FreeTypeFont, text: str) -> tuple[int, int]:
         return (len(text) * 8, font.size or 16)
 
 
-def _hex_vertices(cx: float, cy: float, radius: float, rotation_deg: float = -90.0) -> list[tuple[float, float]]:
+def _hex_vertices(
+    cx: float,
+    cy: float,
+    radius: float,
+    rotation_deg: float = -90.0,
+    count: Optional[int] = None,
+) -> list[tuple[float, float]]:
+    n = max(3, int(count) if count else VERTEX_COUNT)
     pts: list[tuple[float, float]] = []
-    for i in range(VERTEX_COUNT):
-        angle = (i * (360.0 / VERTEX_COUNT) + rotation_deg) * math.pi / 180.0
+    for i in range(n):
+        angle = (i * (360.0 / n) + rotation_deg) * math.pi / 180.0
         pts.append((cx + radius * math.cos(angle), cy + radius * math.sin(angle)))
     return pts
 
@@ -157,13 +185,17 @@ def _draw_gradient_bg(canvas: Image.Image, color: str, bg1: str, bg2: str) -> No
     w, h = canvas.size
     top = _hex_to_rgb(bg1)
     bottom = _hex_to_rgb(bg2)
-    for y in range(h):
-        t = y / max(1, h - 1)
-        r = int(top[0] + (bottom[0] - top[0]) * t)
-        g = int(top[1] + (bottom[1] - top[1]) * t)
-        b = int(top[2] + (bottom[2] - top[2]) * t)
-        draw = ImageDraw.Draw(canvas)
-        draw.line([(0, y), (w, y)], fill=(r, g, b))
+    samples = 64
+    strip = Image.new("RGB", (1, samples))
+    px = strip.load()
+    for y in range(samples):
+        t = y / max(1, samples - 1)
+        px[0, y] = (
+            int(top[0] + (bottom[0] - top[0]) * t),
+            int(top[1] + (bottom[1] - top[1]) * t),
+            int(top[2] + (bottom[2] - top[2]) * t),
+        )
+    canvas.paste(strip.resize((w, h), Image.BILINEAR))
 
 
 def _build_ambient_layer(color: str) -> Image.Image:
@@ -325,15 +357,21 @@ def _draw_particles(canvas: Image.Image, color: str, seed_text: str) -> None:
     canvas.alpha_composite(layer)
 
 
-def _draw_grid_and_axes(canvas: Image.Image, color: str) -> None:
-    """网格：最外圈 = 最高刻度（发亮蓝色描线），内圈灰色线条 = 等级区间。"""
+def _vertex_count(radar: Optional[dict[str, Any]] = None, values: Optional[list[float]] = None) -> int:
+    if values is not None:
+        return max(3, len(values))
+    return max(3, len(active_radar_dimensions(radar)))
+
+
+def _draw_grid_and_axes(canvas: Image.Image, color: str, vertex_count: int = VERTEX_COUNT) -> None:
+    """刻度圈常现：最外圈是本局平均值刻度线，内圈为平均值的等级圈。"""
     draw = ImageDraw.Draw(canvas, "RGBA")
     cx, cy = RADAR_CENTER
+    n = max(3, int(vertex_count))
     for layer in range(1, GRID_LEVELS + 1):
         r = (layer / GRID_LEVELS) * MAX_R
-        pts = _hex_vertices(cx, cy, r)
+        pts = _hex_vertices(cx, cy, r, count=n)
         if layer == GRID_LEVELS:
-            # 蓝色辉光描边（最高刻度）
             glow = Image.new("RGBA", canvas.size, (0, 0, 0, 0))
             gdraw = ImageDraw.Draw(glow)
             gdraw.line([*pts, pts[0]], fill=_hex_to_rgba(BLUE_OUTER_COLOR, 1.0), width=5, joint="curve")
@@ -341,26 +379,22 @@ def _draw_grid_and_axes(canvas: Image.Image, color: str) -> None:
             canvas.alpha_composite(glow.filter(ImageFilter.GaussianBlur(radius=6)))
             draw.line([*pts, pts[0]], fill=_hex_to_rgba(BLUE_OUTER_COLOR, 1.0), width=3, joint="curve")
         else:
-            # 内层灰色等级区间线
             draw.line(
                 [*pts, pts[0]],
                 fill=(*GRID_GRAY, int(round(255 * GRID_LINE_OPACITY * 1.3))),
                 width=GRID_LINE_WIDTH,
                 joint="curve",
             )
-    for i in range(VERTEX_COUNT):
-        x1, y1 = _hex_vertices(cx, cy, MAX_R)[i]
-        draw.line([(cx, cy), (x1, y1)], fill=(*GRID_GRAY, int(round(255 * GRID_LINE_OPACITY))), width=2)
 
 
 def _glow_polygon(canvas: Image.Image, color: str, values: list[float]) -> None:
     """玩家实际数据多边形：主题色（青蓝=CT / 橙红=T）填充 + 多层霓虹辉光描边。"""
     cx, cy = RADAR_CENTER
+    n = _vertex_count(values=values)
     pts: list[tuple[float, float]] = []
     for i, norm in enumerate(values):
-        # 超过满分刻度的顶点允许溢出到蓝色外圈之外（上限 1.6）
         r = max(0.0, min(1.6, norm)) * MAX_R
-        pts.append(_hex_vertices(cx, cy, r)[i])
+        pts.append(_hex_vertices(cx, cy, r, count=n)[i])
 
     layer = Image.new("RGBA", canvas.size, (0, 0, 0, 0))
     draw = ImageDraw.Draw(layer)
@@ -384,44 +418,98 @@ def _glow_polygon(canvas: Image.Image, color: str, values: list[float]) -> None:
     canvas.alpha_composite(core)
 
 
-def _format_max_value(dim: dict[str, Any]) -> str:
-    """蓝色外圈（最高刻度）满分数值的展示文本。"""
-    if dim["percentage"]:
-        return f"{int(round(float(dim['max_score']) * 100))}%"
-    key = str(dim["key"])
-    digits = 2 if key in {"kpr", "rating"} else (1 if key == "adr" else 0)
-    return f"{float(dim['max_score']):.{digits}f}"
+def _aligned_reference(player_radar: dict[str, Any], reference: Optional[dict[str, Any]]) -> dict[str, Any]:
+    """把平均值对齐到当前展示维度（缺的维用 0，避免多边形顶点数对不上）。"""
+    src = reference if isinstance(reference, dict) else {}
+    out: dict[str, Any] = {}
+    for dim in active_radar_dimensions(player_radar):
+        key = dim["key"]
+        out[key] = src.get(key, 0.0)
+    return out
 
 
-def _draw_labels(canvas: Image.Image, color: str, radar: dict[str, Any]) -> None:
-    """每个维度显示：名称 + 玩家数值（主题色），并在最外圈标注满分数值（最高刻度）。"""
+def _draw_labels(
+    canvas: Image.Image,
+    color: str,
+    radar: dict[str, Any],
+    median_radar: Optional[dict[str, Any]] = None,
+) -> None:
+    """每个维度：大字数值、中文、英文、平均值。整组贴着顶点外侧，数值在最靠近角的一侧。"""
     draw = ImageDraw.Draw(canvas, "RGBA")
     cx, cy = RADAR_CENTER
-    f_name = _font_latin(LABEL_FONT_SIZE)
-    f_score = _font_latin_semi(SCORE_FONT_SIZE)
-    f_max = _font_cjk(26)  # 「满分」为中文，必须用 CJK 字体（Rajdhani 无中文字形）
-    for i, dim in enumerate(RADAR_DIMENSIONS):
-        angle = (i * (360.0 / VERTEX_COUNT) - 90.0) * math.pi / 180.0
+    f_value = _font_latin(54)
+    f_zh = _font_cjk(26)
+    f_en = _font_latin_semi(20)
+    f_med = _font_cjk(20)
+    dims = active_radar_dimensions(radar)
+    median = _aligned_reference(radar, median_radar)
+    n = max(3, len(dims))
+    offsets = (-30, 2, 24, 46)
+    values = normalize_radar_values_by_median(radar, median_radar)
+    for i, dim in enumerate(dims):
+        angle = (i * (360.0 / n) - 90.0) * math.pi / 180.0
         cos_a = math.cos(angle)
-        x = cx + (MAX_R + LABEL_MARGIN) * cos_a
-        y = cy + (MAX_R + LABEL_MARGIN) * math.sin(angle)
-        if abs(cos_a) < 0.1:
-            anchor_x = "mm"
-        elif cos_a > 0:
-            anchor_x = "lm"
+        sin_a = math.sin(angle)
+        player_r = max(0.0, min(1.6, values[i] if i < len(values) else 1.0)) * MAX_R
+        outer_r = max(MAX_R, player_r)
+        # 最近一行文字离多边形顶点 LABEL_MARGIN（当前 10px）
+        if sin_a < -0.7:
+            radial = LABEL_MARGIN + 10 + offsets[3]
+        elif sin_a > 0.7:
+            radial = LABEL_MARGIN + 10 - offsets[0]
         else:
-            anchor_x = "rm"
-        name = dim["name"]
-        value = format_radar_value(dim["key"], radar.get(dim["key"], 0.0))
-        # 名称
-        nw, nh = _text_size(f_name, name)
-        draw.text((x, y - 16), name, font=f_name, fill=(255, 255, 255, 235), anchor=anchor_x)
-        # 玩家数值（主题色，与数据多边形呼应）
-        vw, vh = _text_size(f_score, value)
-        draw.text((x, y + 16), value, font=f_score, fill=_hex_to_rgba(color, 0.95), anchor=anchor_x)
-        # 蓝色外圈满分数值（最高刻度标注）
-        max_text = f"满分 {_format_max_value(dim)}"
-        draw.text((x, y + 40), max_text, font=f_max, fill=(210, 220, 235, 150), anchor=anchor_x)
+            radial = LABEL_MARGIN
+        x = cx + (outer_r + radial) * cos_a
+        y = cy + (outer_r + radial) * sin_a
+        if abs(cos_a) < 0.18:
+            anchor = "mm"
+        elif cos_a > 0:
+            anchor = "lm"
+        else:
+            anchor = "rm"
+        key = dim["key"]
+        value = format_radar_value(key, radar.get(key, 0.0))
+        zh = str(dim.get("label_zh") or dim["name"])
+        en = str(dim["name"]).upper()
+        has_ref = isinstance(median_radar, dict) and key in median_radar
+        avg_text = (
+            f"平均值 {format_radar_value(key, median.get(key, 0.0))}" if has_ref else "平均值 —"
+        )
+        draw.text((x, y + offsets[0]), value, font=f_value, fill=_hex_to_rgba(color, 0.98), anchor=anchor)
+        draw.text((x, y + offsets[1]), zh, font=f_zh, fill=(255, 255, 255, 230), anchor=anchor)
+        draw.text((x, y + offsets[2]), en, font=f_en, fill=(210, 220, 235, 160), anchor=anchor)
+        draw.text((x, y + offsets[3]), avg_text, font=f_med, fill=(*GOLD, 190), anchor=anchor)
+
+
+def _draw_median_polygon(
+    canvas: Image.Image,
+    player_radar: dict[str, Any],
+    median_radar: Optional[dict[str, Any]] = None,
+    alpha: float = 1.0,
+) -> None:
+    """本局中位数多边形：作为底板多维图，刻度圈之下、玩家数据之上。"""
+    a = max(0.0, min(1.0, float(alpha)))
+    if a <= 0.01 or not median_radar:
+        return
+    aligned = _aligned_reference(player_radar, median_radar)
+    values = normalize_radar_values(aligned)
+    if not values:
+        return
+    cx, cy = RADAR_CENTER
+    n = max(3, len(values))
+    pts: list[tuple[float, float]] = []
+    for i, norm in enumerate(values):
+        r = max(0.0, min(1.6, norm)) * MAX_R
+        pts.append(_hex_vertices(cx, cy, r, count=n)[i])
+    layer = Image.new("RGBA", canvas.size, (0, 0, 0, 0))
+    draw = ImageDraw.Draw(layer)
+    draw.polygon(pts, fill=(168, 178, 196, int(round(72 * a))))
+    draw.line([*pts, pts[0]], fill=(230, 236, 245, int(round(210 * a))), width=3, joint="curve")
+    canvas.alpha_composite(layer)
+    glow = Image.new("RGBA", canvas.size, (0, 0, 0, 0))
+    gdraw = ImageDraw.Draw(glow)
+    gdraw.line([*pts, pts[0]], fill=(255, 255, 255, int(round(90 * a))), width=5, joint="curve")
+    canvas.alpha_composite(glow.filter(ImageFilter.GaussianBlur(radius=8)))
 
 
 def _draw_match_avg_reference(
@@ -430,47 +518,8 @@ def _draw_match_avg_reference(
     match_avg_radar: Optional[dict[str, Any]] = None,
     alpha: float = 1.0,
 ) -> None:
-    """全场平均线：红色六边形（每个顶点 = 该维度全场平均值）。
-
-    - 有全场均值（match_avg_radar）时：按维度绘制不规则红色六边形；
-    - 无全场均值（单卡兜底）时：以小六边形展示该玩家六维归一化平均值。
-    内部标注 AVG 数值与「全场均值」说明。alpha∈[0,1] 控制整体淡入。
-    """
-    a = max(0.0, min(1.0, float(alpha)))
-    if a <= 0.01:
-        return
-    cx, cy = RADAR_CENTER
-    if match_avg_radar:
-        values = normalize_radar_values(match_avg_radar)
-        pts: list[tuple[float, float]] = []
-        for i, norm in enumerate(values):
-            r = max(0.0, min(1.6, norm)) * MAX_R
-            pts.append(_hex_vertices(cx, cy, r)[i])
-        avg = round(sum(values) / max(1, len(values)), 3)
-    else:
-        avg = average_radar_value(radar)
-        radius = max(46.0, avg * MAX_R * 0.55)
-        pts = _hex_vertices(cx, cy, radius)
-
-    # 红色描线 + 辉光（无填充），按 alpha 淡入
-    glow = Image.new("RGBA", canvas.size, (0, 0, 0, 0))
-    gdraw = ImageDraw.Draw(glow)
-    gdraw.line([*pts, pts[0]], fill=_hex_to_rgba(RED_HEX_COLOR, 0.9 * a), width=4, joint="curve")
-    canvas.alpha_composite(glow.filter(ImageFilter.GaussianBlur(radius=12)))
-    layer = Image.new("RGBA", canvas.size, (0, 0, 0, 0))
-    draw = ImageDraw.Draw(layer)
-    draw.line([*pts, pts[0]], fill=_hex_to_rgba(RED_HEX_COLOR, 1.0 * a), width=3, joint="curve")
-    canvas.alpha_composite(layer)
-    canvas.alpha_composite(glow)
-
-    # 内部文字：AVG 数值（白色） + 「全场均值」说明（红色）
-    f_avg = _font_latin(40)
-    f_tag = _font_cjk(24)
-    draw = ImageDraw.Draw(canvas, "RGBA")
-    avg_text = f"{avg:.2f}"
-    draw.text((cx, cy - 10), avg_text, font=f_avg, fill=(255, 255, 255, int(round(235 * a))), anchor="mm")
-    tag = "全场均值" if match_avg_radar else "AVG"
-    draw.text((cx, cy + 26), tag, font=f_tag, fill=_hex_to_rgba(RED_HEX_COLOR, 0.95 * a), anchor="mm")
+    """兼容旧调用名：现在画本局中位数多边形。"""
+    _draw_median_polygon(canvas, radar, match_avg_radar, alpha=alpha)
 
 
 def _draw_team_logo_backdrop(canvas: Image.Image, logo_path: Path, cx: float, cy: float) -> None:
@@ -542,11 +591,13 @@ def _draw_portrait(
     if source is not None:
         avatar.paste(source, box, mask)
     else:
-        initial = (str(player_name or "?").strip()[:1] or "?").upper()
+        initial = (str(player_name or "?").strip()[:1] or "?")
+        if initial.isascii():
+            initial = initial.upper()
         draw = ImageDraw.Draw(avatar)
         draw.ellipse(box, fill=_hex_to_rgba(color, 0.16))
         draw.ellipse(box, outline=_hex_to_rgba(color, 0.85), width=8)
-        f_initial = _font_latin(300)
+        f_initial = _font_for_name(initial, 300)
         draw.text((cx, cy), initial, font=f_initial, fill=(255, 255, 255, 235), anchor="mm")
     canvas.alpha_composite(avatar)
 
@@ -559,6 +610,38 @@ def _draw_portrait(
     canvas.alpha_composite(ring)
 
 
+def _draw_source_badge(canvas: Image.Image, demo_source: str, cx: float, y: float) -> None:
+    """玩家名与画布底部之间：Demo 库来源 logo + 文字。"""
+    if not str(demo_source or "").strip():
+        return
+    label = display_demo_source(demo_source)
+    logo_path = resolve_source_logo_path(demo_source)
+    f_label = _font_latin(40)
+    tw, th = _text_size(f_label, label)
+    logo_h = 52
+    gap = 14
+    logo_w = 0
+    logo_im: Optional[Image.Image] = None
+    if logo_path is not None:
+        try:
+            raw = Image.open(str(logo_path)).convert("RGBA")
+            ratio = logo_h / max(1, raw.size[1])
+            logo_w = max(24, int(raw.size[0] * ratio))
+            logo_im = raw.resize((logo_w, logo_h), Image.LANCZOS)
+        except Exception:
+            logo_im = None
+            logo_w = 0
+    total_w = logo_w + (gap if logo_im is not None else 0) + tw
+    x0 = int(cx - total_w / 2)
+    if logo_im is not None:
+        canvas.alpha_composite(logo_im, (x0, int(y - logo_h / 2)))
+        text_x = x0 + logo_w + gap
+    else:
+        text_x = int(cx - tw / 2)
+    draw = ImageDraw.Draw(canvas, "RGBA")
+    draw.text((text_x, y), label, font=f_label, fill=(255, 255, 255, 220), anchor="lm")
+
+
 def _draw_right_info(
     canvas: Image.Image,
     *,
@@ -566,54 +649,37 @@ def _draw_right_info(
     player_name: str,
     radar: dict[str, Any],
     team_label: str,
+    demo_source: str = "",
+    map_name: str = "",
+    kda: str = "",
 ) -> None:
-    """右半部信息：标题「CS数据图」、玩家名、队伍、六维构成（肖像下方）。"""
+    """右半部：玩家名；其下地图与 KDA；来源 logo 再居中于这段文字与底部之间。"""
     draw = ImageDraw.Draw(canvas, "RGBA")
     cx = PORTRAIT_CENTER[0]
-    left = PORTRAIT_CENTER[0] - PORTRAIT_SIZE // 2 - 60
+    ring_bottom = PORTRAIT_CENTER[1] + PORTRAIT_SIZE // 2 + 12
+    y = ring_bottom + TEXT_STACK_GAP
 
-    # 标题「CS数据图」
-    f_title = _font_cjk(64)
-    draw.text((cx, 110), "CS数据图", font=f_title, fill=(255, 255, 255, 200), anchor="mm")
-
-    # 玩家名（主题色，带辉光）
-    f_name = _font_latin(96)
-    name_y = PORTRAIT_CENTER[1] + PORTRAIT_SIZE // 2 + 80
+    f_name = _font_for_name(player_name, 86)
     glow = Image.new("RGBA", canvas.size, (0, 0, 0, 0))
     gd = ImageDraw.Draw(glow)
-    gd.text((cx, name_y), player_name, font=f_name, fill=_hex_to_rgba(color, 0.9), anchor="mm")
+    gd.text((cx, y), player_name, font=f_name, fill=_hex_to_rgba(color, 0.9), anchor="mt")
     canvas.alpha_composite(glow.filter(ImageFilter.GaussianBlur(radius=16)))
-    draw.text((cx, name_y), player_name, font=f_name, fill=_hex_to_rgba(color, 1.0), anchor="mm")
+    draw.text((cx, y), player_name, font=f_name, fill=_hex_to_rgba(color, 1.0), anchor="mt")
+    y = int(draw.textbbox((cx, y), player_name, font=f_name, anchor="mt")[3]) + TEXT_STACK_GAP
 
-    # 队伍标签
-    if team_label:
-        f_team = _font_cjk(40)
-        draw.text((cx, name_y + 78), team_label, font=f_team, fill=(255, 255, 255, 150), anchor="mm")
+    map_label = format_map_label(map_name)
+    if map_label:
+        f_map = _font_latin(42)
+        draw.text((cx, y), map_label, font=f_map, fill=(255, 255, 255, 210), anchor="mt")
+        y = int(draw.textbbox((cx, y), map_label, font=f_map, anchor="mt")[3]) + TEXT_STACK_GAP
+    if str(kda or "").strip():
+        f_kda = _font_latin(40)
+        kda_text = f"KDA  {str(kda).strip()}"
+        draw.text((cx, y), kda_text, font=f_kda, fill=(210, 220, 235, 200), anchor="mt")
+        y = int(draw.textbbox((cx, y), kda_text, font=f_kda, anchor="mt")[3]) + TEXT_STACK_GAP
 
-    # 六维构成（右半部底部横条）
-    f_stat = _font_latin_semi(40)
-    stat_parts: list[str] = []
-    for dim in RADAR_DIMENSIONS:
-        stat_parts.append(f"{dim['name']} {format_radar_value(dim['key'], radar.get(dim['key'], 0.0))}")
-    stat_line = "   ·   ".join(stat_parts)
-    max_w = CANVAS_W - left - 40
-    lines: list[str] = []
-    current = ""
-    for token in stat_line.split("  ·  "):
-        candidate = (current + "  ·  " + token).strip() if current else token
-        cw, _ = _text_size(f_stat, candidate)
-        if cw > max_w and current:
-            lines.append(current)
-            current = token
-        else:
-            current = candidate
-    if current:
-        lines.append(current)
-    line_h = 52
-    stat_y = CANVAS_H - 96 - (len(lines) - 1) * line_h
-    for line in lines:
-        draw.text((cx, stat_y), line, font=f_stat, fill=(255, 255, 255, 205), anchor="mm")
-        stat_y += line_h
+    source_y = (y + CANVAS_H - 56) / 2.0
+    _draw_source_badge(canvas, demo_source, cx, source_y)
 
 
 def render_radar_card(
@@ -629,34 +695,34 @@ def render_radar_card(
     theme_bg1: Optional[str] = None,
     theme_bg2: Optional[str] = None,
     match_avg_radar: Optional[dict[str, Any]] = None,
+    match_median_radar: Optional[dict[str, Any]] = None,
+    demo_source: str = "",
+    map_name: str = "",
+    kda: str = "",
 ) -> Path:
-    """渲染一张 2560×1440（16:9）的 cs数据图 雷达卡片 PNG。
+    """渲染一张 2560×1440（16:9）的雷达数据图 PNG。
 
-    构图（左右分割式）：左半部 = 雷达数据面板（雷达正中央 + 背后 CNCS 水印），
-    右半部 = 人物大肖像（垂直中线偏右）；深灰偏黑底 + 金色节点射线「立体星空」网，
-    四边发光几何牢笼，左右以暗金色线条连接。队伍标志放大显示在头像后面。
+    左：平均值刻度圈 + 玩家数据多边形。
+    右：肖像 + 玩家名 + 地图/KDA；来源 logo 居中于这段文字与底部之间。
     """
     color, bg1, bg2 = (
         (theme_color, theme_bg1, theme_bg2)
         if theme_color and theme_bg1 and theme_bg2
         else _theme_for_player(player_name, team_key)
     )
+    median = match_median_radar if match_median_radar is not None else match_avg_radar
 
     canvas = Image.new("RGBA", (CANVAS_W, CANVAS_H), (0, 0, 0, 255))
-    # 深灰偏黑基础色调（16:9）
     for y in range(CANVAS_H):
         t = y / max(1, CANVAS_H - 1)
         v = int(17 + (8 - 17) * t)
         ImageDraw.Draw(canvas).line([(0, y), (CANVAS_W, y)], fill=(v, v, v + 4))
     canvas.alpha_composite(_build_ambient_layer(color))
     canvas.alpha_composite(_build_starfield_web())
-    _draw_cncs_watermark(canvas)
-    _draw_connection_line(canvas, color)
-    _draw_grid_and_axes(canvas, color)
-    values = normalize_radar_values(radar)
+    values = normalize_radar_values_by_median(radar, median)
+    _draw_grid_and_axes(canvas, color, vertex_count=_vertex_count(radar, values))
     _glow_polygon(canvas, color, values)
-    _draw_labels(canvas, color, radar)
-    _draw_match_avg_reference(canvas, radar, match_avg_radar)
+    _draw_labels(canvas, color, radar, median)
     _draw_portrait(canvas, portrait_path, player_name, color, team_logo_path=team_logo_path)
     _draw_right_info(
         canvas,
@@ -664,6 +730,9 @@ def render_radar_card(
         player_name=player_name,
         radar=radar,
         team_label=team_label,
+        demo_source=demo_source,
+        map_name=map_name,
+        kda=kda,
     )
 
     out_path.parent.mkdir(parents=True, exist_ok=True)

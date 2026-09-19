@@ -715,8 +715,8 @@ def _xfade_transition_name(trans_type: str) -> str:
     return mapping.get(trans_type, "fade")
 
 
-def _parse_transition_for_edge(transitions: dict[str, Any], clip_row_id: int) -> tuple[str, float]:
-    raw = transitions.get(str(int(clip_row_id)))
+def _parse_transition_for_edge(transitions: dict[str, Any], clip_row_id: Any) -> tuple[str, float]:
+    raw = transitions.get(str(clip_row_id))
     if not isinstance(raw, dict):
         return "cut", 0.25
     t = str(raw.get("type") or "cut").strip().lower()
@@ -757,7 +757,7 @@ def _montage_xfade_chain_to_ts(
     ffmpeg_bin: Path,
     ffprobe: Path,
     clip_ts_paths: list[Path],
-    clip_row_ids: list[int],
+    clip_row_ids: list[Any],
     transitions: dict[str, Any],
     fps: float,
     out_ts: Path,
@@ -789,7 +789,7 @@ def _montage_xfade_chain_to_ts(
     out_len = durs[0]
 
     for i in range(1, n):
-        tid = int(clip_row_ids[i - 1])
+        tid = clip_row_ids[i - 1]
         t_type, t_req = _parse_transition_for_edge(transitions, tid)
         td = _clamp_xfade_duration(t_type, t_req, out_len, durs[i], fps)
         if t_type in ("cut", "fade"):
@@ -1584,7 +1584,7 @@ def _compose_montage_once(
     bgm_path: Optional[Path],
     output_path: Path,
     transitions: Optional[dict[str, Any]] = None,
-    clip_row_ids: Optional[list[int]] = None,
+    clip_row_ids: Optional[list[Any]] = None,
     bgm_volume: Optional[float] = None,
     bgm_start_sec: Optional[float] = None,
     intro_image_duration: Optional[float] = None,
@@ -1911,18 +1911,17 @@ def _compose_montage_once(
             # 按硬切边界（duration=0 或 type=none）拆成若干组；
             # 组内片段用 xfade 连接，组间直接 concat——这样 0s 转场就是真正的硬切。
             clip_norm = [normed[clip_segment_index[ci]] for ci in range(n_clips)]
-            ids = [int(x) for x in clip_row_ids]
+            ids = list(clip_row_ids)
 
             grp_clips: list[Path] = [clip_norm[0]]
-            grp_ids: list[int] = [ids[0]]
-            groups: list[tuple[list[Path], list[int]]] = []
+            grp_ids: list[Any] = [ids[0]]
+            groups: list[tuple[list[Path], list[Any]]] = []
 
             for i in range(1, n_clips):
                 t_type, t_dur = _parse_transition_for_edge(transitions, ids[i - 1])
                 # 片段前插入了雷达动画/图片段 → 强制硬切分组，
                 # 保证雷达段能落在转场组之间（组内片段会被 xfade 合并成单文件）。
-                radar_boundary = i in _radar_by_clip
-                if _is_hard_cut(t_type, t_dur, fps) or radar_boundary:
+                if _is_hard_cut(t_type, t_dur, fps):
                     groups.append((grp_clips, grp_ids))
                     grp_clips = [clip_norm[i]]
                     grp_ids = [ids[i]]
@@ -1932,8 +1931,8 @@ def _compose_montage_once(
             groups.append((grp_clips, grp_ids))
 
             processed: list[Path] = []
-            clip_to_processed: dict[int, Path] = {}
-            first_row_of_group: set[int] = set()
+            clip_to_processed: dict[Any, Path] = {}
+            first_row_of_group: set[Any] = set()
             for gi, (g_clips, g_ids) in enumerate(groups):
                 if len(g_clips) == 1:
                     processed.append(g_clips[0])
@@ -1970,7 +1969,7 @@ def _compose_montage_once(
                     continue
                 _ci = seg_to_clip_ordinal.get(_i, -1)
                 if _ci >= 0 and _ci < n_clips and clip_row_ids is not None:
-                    _rid = int(clip_row_ids[_ci])
+                    _rid = clip_row_ids[_ci]
                     if _rid in first_row_of_group:
                         concat_paths.append(clip_to_processed.get(_rid, normed[_i]))
                 else:
@@ -2207,7 +2206,7 @@ def _compose_montage_impl(
     bgm_path: Optional[Path],
     output_path: Path,
     transitions: Optional[dict[str, Any]] = None,
-    clip_row_ids: Optional[list[int]] = None,
+    clip_row_ids: Optional[list[Any]] = None,
     bgm_volume: Optional[float] = None,
     bgm_start_sec: Optional[float] = None,
     intro_image_duration: Optional[float] = None,
@@ -2561,7 +2560,7 @@ def compose_montage(
     bgm_path: Optional[Path],
     output_path: Path,
     transitions: Optional[dict[str, Any]] = None,
-    clip_row_ids: Optional[list[int]] = None,
+    clip_row_ids: Optional[list[Any]] = None,
     bgm_volume: Optional[float] = None,
     bgm_start_sec: Optional[float] = None,
     intro_image_duration: Optional[float] = None,

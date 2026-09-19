@@ -4,11 +4,15 @@ import math
 
 from app.features.cs_data_radar.radar_model import (
     RADAR_DIMENSIONS,
+    active_radar_dimensions,
     average_radar_value,
     compute_match_avg_radar,
+    compute_match_median_radar,
     derive_radar_stats,
     format_radar_value,
+    has_manual_rating,
     normalize_radar_values,
+    normalize_radar_values_by_median,
 )
 
 
@@ -41,14 +45,16 @@ def test_derive_radar_stats_full():
     assert radar["survival_rate"] == 0.34  # 百分数 → 0-1
     assert radar["adr"] == 101.4
     assert radar["kast"] == 0.78  # 百分数 → 0-1
-    assert radar["multi_kill"] == round((6 + 2) / 30, 2)  # 多杀回合 = 2 杀以上回合数 / 回合数
-    assert radar["rating"] > 0
+    assert radar["multi_kill"] == 8  # 多杀回合 = 2 杀以上回合数合计
+    assert "rating" not in radar
     assert all(v >= 0 for v in radar.values())
+    with_rating = derive_radar_stats(stats, rating=1.12)
+    assert with_rating["rating"] == 1.12
 
 
 def test_derive_radar_stats_empty():
     radar = derive_radar_stats({})
-    assert set(radar.keys()) == {"kpr", "survival_rate", "adr", "kast", "multi_kill", "rating"}
+    assert set(radar.keys()) == {"kpr", "survival_rate", "adr", "kast", "multi_kill"}
     assert all(v == 0 for v in radar.values())
 
 
@@ -61,7 +67,30 @@ def test_derive_radar_stats_kpr_fallback():
     # 无 kpr 字段时用 kills/rounds 反推
     radar = derive_radar_stats({"kills": 20, "deaths": 10, "assists": 4, "rounds": 25})
     assert abs(radar["kpr"] - 0.8) < 1e-9
-    assert radar["rating"] > 0  # 有实际数据时才给出非零评分
+    assert "rating" not in radar
+
+
+def test_active_dimensions_drop_rating_when_missing():
+    five = {
+        "kpr": 0.425,
+        "survival_rate": 0.22,
+        "adr": 42.5,
+        "kast": 0.39,
+        "multi_kill": 4.0,
+    }
+    assert [d["key"] for d in active_radar_dimensions(five)] == [
+        "kpr",
+        "survival_rate",
+        "adr",
+        "kast",
+        "multi_kill",
+    ]
+    assert has_manual_rating(five) is False
+    six = {**five, "rating": 1.04}
+    assert [d["key"] for d in active_radar_dimensions(six)][-1] == "rating"
+    assert has_manual_rating(six) is True
+    assert len(normalize_radar_values(five)) == 5
+    assert len(normalize_radar_values(six)) == 6
 
 
 def test_normalize_radar_values():
@@ -71,7 +100,7 @@ def test_normalize_radar_values():
         "survival_rate": 0.22,   # 0.44 * 0.5
         "adr": 42.5,         # 85 * 0.5
         "kast": 0.39,        # 0.78 * 0.5
-        "multi_kill": 0.1,   # 0.2 * 0.5
+        "multi_kill": 4.0,   # 8 * 0.5
         "rating": 0.65,      # 1.3 * 0.5
     }
     norm = normalize_radar_values(radar)
@@ -86,7 +115,7 @@ def test_normalize_radar_values_overflow_beyond_ring():
         "survival_rate": 0.8,   # 0.8/0.44 ≈ 1.82 → 封顶 1.6
         "adr": 220.0,        # 220/85 ≈ 2.59 → 封顶 1.6
         "kast": 1.0,         # 1.0/0.78 ≈ 1.28
-        "multi_kill": 3.0,   # 3.0/0.2 = 15 → 封顶 1.6
+        "multi_kill": 20.0,  # 20/8 = 2.5 → 封顶 1.6
         "rating": 2.5,       # 2.5/1.3 ≈ 1.92 → 封顶 1.6
     }
     norm = normalize_radar_values(radar)
@@ -102,11 +131,33 @@ def test_average_radar_value():
         "survival_rate": 0.22,
         "adr": 42.5,
         "kast": 0.39,
-        "multi_kill": 0.1,
+        "multi_kill": 4.0,
         "rating": 0.65,
     }
     avg = average_radar_value(radar)
     assert abs(avg - 0.5) < 1e-3
+
+
+def test_normalize_radar_values_by_median():
+    radar = {
+        "kpr": 0.80,
+        "survival_rate": 0.45,
+        "adr": 82.4,
+        "kast": 0.95,
+        "multi_kill": 4,
+    }
+    median = {
+        "kpr": 0.80,
+        "survival_rate": 0.45,
+        "adr": 82.4,
+        "kast": 0.95,
+        "multi_kill": 4,
+    }
+    assert all(abs(v - 1.0) < 1e-9 for v in normalize_radar_values_by_median(radar, median))
+    above = {**radar, "kpr": 1.60}
+    norm = normalize_radar_values_by_median(above, median)
+    assert abs(norm[0] - 1.6) < 1e-9
+    assert abs(norm[1] - 1.0) < 1e-9
 
 
 def test_format_radar_value():
@@ -115,6 +166,7 @@ def test_format_radar_value():
     assert format_radar_value("kast", 0.78) == "78%"
     assert format_radar_value("adr", 101.4) == "101.4"
     assert format_radar_value("rating", 1.04) == "1.04"
+    assert format_radar_value("multi_kill", 8) == "8"
 
 
 def test_compute_match_avg_radar():
@@ -123,13 +175,32 @@ def test_compute_match_avg_radar():
         {"kills": 20, "deaths": 15, "assists": 9, "kpr": 0.71, "dpr": 0.53, "adr": 88.1, "kast": 71.5, "survival_rate": 40.0},
     ]
     avg = compute_match_avg_radar(players)
-    assert set(avg.keys()) == {"kpr", "survival_rate", "adr", "kast", "multi_kill", "rating"}
+    assert set(avg.keys()) >= {"kpr", "survival_rate", "adr", "kast", "multi_kill"}
     assert abs(avg["kpr"] - (0.99 + 0.71) / 2) < 1e-9
-    assert abs(avg["adr"] - (101.4 + 88.1) / 2) < 1e-9
+    assert abs(avg["adr"] - round((101.4 + 88.1) / 2, 1)) < 0.01
     assert avg["multi_kill"] == 0  # 样例无多杀回合字段
-    assert avg["rating"] > 0
-    # 空列表 → 全部为 0
-    assert all(v == 0 for v in compute_match_avg_radar([]).values())
+    assert "rating" not in avg
+    # 空列表 → 自动维度为 0
+    empty = compute_match_avg_radar([])
+    assert empty["kpr"] == 0
+
+
+def test_compute_match_median_radar():
+    players = [
+        {"kpr": 0.50, "adr": 70.0, "kast": 60.0, "survival_rate": 30.0, "two_kill_rounds": 1},
+        {"kpr": 0.70, "adr": 80.0, "kast": 70.0, "survival_rate": 40.0, "two_kill_rounds": 3},
+        {"kpr": 0.90, "adr": 90.0, "kast": 80.0, "survival_rate": 50.0, "two_kill_rounds": 5},
+    ]
+    median = compute_match_median_radar(players)
+    assert median["kpr"] == 0.70
+    assert median["adr"] == 80.0
+    assert median["multi_kill"] == 3
+    assert "rating" not in median
+    with_rating = compute_match_median_radar(players, rating_median=1.05)
+    assert with_rating["rating"] == 1.05
+    empty = compute_match_median_radar([])
+    assert empty["kpr"] == 0.0
+    assert "rating" not in empty
 
 
 def test_animation_easing_curves():

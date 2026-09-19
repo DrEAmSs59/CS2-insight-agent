@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
   RADAR_DIMENSIONS,
+  activeRadarDimensions,
   averageRadarValue,
   compareToMatchAvg,
   deriveRadarStats,
   formatRadarValue,
+  hasManualRating,
   matchAvgRadarValue,
   normalizeRadarValues,
 } from "./radarDimensions";
@@ -44,8 +46,21 @@ describe("radarDimensions (cs数据图)", () => {
     expect(radar.survival_rate).toBe(0.34); // percent → 0..1
     expect(radar.adr).toBe(101.4);
     expect(radar.kast).toBe(0.78);
-    expect(radar.multi_kill).toBeCloseTo((6 + 2) / 30, 2); // multi-kill rounds / rounds
-    expect(radar.rating).toBeGreaterThan(0);
+    expect(radar.multi_kill).toBe(8); // 2+ kill rounds counted directly
+    expect(radar.rating).toBeUndefined();
+    expect(deriveRadarStats({
+      kills: 28,
+      deaths: 12,
+      assists: 7,
+      kpr: 0.99,
+      dpr: 0.42,
+      adr: 101.4,
+      kast: 78.2,
+      survival_rate: 34.0,
+      two_kill_rounds: 6,
+      three_kill_rounds: 2,
+      rounds: 30,
+    }, 1.12).rating).toBe(1.12);
   });
 
   it("zeroes rating when there is no data", () => {
@@ -56,9 +71,29 @@ describe("radarDimensions (cs数据图)", () => {
       "adr",
       "kast",
       "multi_kill",
-      "rating",
     ]);
     expect(Object.values(radar).every((v) => v === 0)).toBe(true);
+  });
+
+  it("drops rating from active dimensions when it was not filled in", () => {
+    const five = {
+      kpr: 0.425,
+      survival_rate: 0.22,
+      adr: 42.5,
+      kast: 0.39,
+      multi_kill: 4,
+    };
+    expect(activeRadarDimensions(five).map((d) => d.key)).toEqual([
+      "kpr",
+      "survival_rate",
+      "adr",
+      "kast",
+      "multi_kill",
+    ]);
+    expect(hasManualRating(five)).toBe(false);
+    expect(normalizeRadarValues(five)).toHaveLength(5);
+    expect(hasManualRating({ ...five, rating: 1.04 })).toBe(true);
+    expect(normalizeRadarValues({ ...five, rating: 1.04 })).toHaveLength(6);
   });
 
   it("normalizes values against the max-scale (outer blue ring) values", () => {
@@ -68,7 +103,7 @@ describe("radarDimensions (cs数据图)", () => {
       survival_rate: 0.22, // 0.44 * 0.5
       adr: 42.5, // 85 * 0.5
       kast: 0.39, // 0.78 * 0.5
-      multi_kill: 0.1, // 0.2 * 0.5
+      multi_kill: 4, // 8 * 0.5
       rating: 0.65, // 1.3 * 0.5
     };
     const norm = normalizeRadarValues(radar);
@@ -82,7 +117,7 @@ describe("radarDimensions (cs数据图)", () => {
       survival_rate: 0.8, // ≈ 1.82 → 1.6
       adr: 220, // ≈ 2.59 → 1.6
       kast: 1.0, // ≈ 1.28
-      multi_kill: 3.0, // 3.0/0.2 = 15 → 1.6
+      multi_kill: 20, // 20/8 = 2.5 → 1.6
       rating: 2.5, // ≈ 1.92 → 1.6
     };
     const norm = normalizeRadarValues(radar);
@@ -98,7 +133,7 @@ describe("radarDimensions (cs数据图)", () => {
       survival_rate: 0.22,
       adr: 42.5,
       kast: 0.39,
-      multi_kill: 0.1,
+      multi_kill: 4,
       rating: 0.65,
     };
     expect(Math.abs(averageRadarValue(radar) - 0.5)).toBeLessThan(1e-3);
@@ -108,7 +143,7 @@ describe("radarDimensions (cs数据图)", () => {
     expect(formatRadarValue("kpr", 0.99)).toBe("0.99");
     expect(formatRadarValue("survival_rate", 0.34)).toBe("34%");
     expect(formatRadarValue("kast", 0.78)).toBe("78%");
-    expect(formatRadarValue("multi_kill", 0.15)).toBe("15%");
+    expect(formatRadarValue("multi_kill", 8)).toBe("8");
     expect(formatRadarValue("adr", 101.4)).toBe("101.4");
   });
 
@@ -118,14 +153,14 @@ describe("radarDimensions (cs数据图)", () => {
       survival_rate: 0.22,
       adr: 42.5,
       kast: 0.39,
-      multi_kill: 0.1,
+      multi_kill: 4,
       rating: 0.65,
     };
     expect(Math.abs(matchAvgRadarValue(matchAvg) - 0.5)).toBeLessThan(1e-3);
     expect(matchAvgRadarValue(null)).toBeNull();
 
-    const above = { kpr: 0.85, survival_rate: 0.44, adr: 85, kast: 0.78, multi_kill: 0.2, rating: 1.3 };
-    const below = { kpr: 0.1, survival_rate: 0.05, adr: 20, kast: 0.2, multi_kill: 0.02, rating: 0.2 };
+    const above = { kpr: 0.85, survival_rate: 0.44, adr: 85, kast: 0.78, multi_kill: 8, rating: 1.3 };
+    const below = { kpr: 0.1, survival_rate: 0.05, adr: 20, kast: 0.2, multi_kill: 1, rating: 0.2 };
     expect(compareToMatchAvg(above, matchAvg)).toBe(1);
     expect(compareToMatchAvg(below, matchAvg)).toBe(-1);
     expect(compareToMatchAvg(matchAvg, matchAvg)).toBe(0);

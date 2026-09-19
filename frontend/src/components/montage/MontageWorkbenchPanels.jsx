@@ -3,6 +3,7 @@ import {
   Archive,
   ArrowDown,
   ArrowUp,
+  BarChart3,
   ChevronDown,
   Clapperboard,
   GripVertical,
@@ -44,6 +45,7 @@ import { useLocaleStore } from "../../i18n/localeStore";
 import { labelTag } from "../../utils/tagDescriptions";
 import { weaponUsedTokens } from "../../i18n/weaponNames.js";
 import { getFrameMeldSourceFps } from "../../utils/framemeld.js";
+import { parseTimelineDragId } from "../../features/cs-data-radar/radarTimeline.js";
 
 function montageAiExplainText(clip, t) {
   const c = getClipComment(clip);
@@ -472,6 +474,7 @@ function MontageTransitionEdgeEditor({
 
 export function MontageOrchestrationTimeline({
   clips,
+  items,
   primarySelectedId,
   multiSelectedIds,
   onRowPointerDown,
@@ -500,16 +503,30 @@ export function MontageOrchestrationTimeline({
   onBulkMoveDown,
   onClearTimeline,
   timelineClipCount,
-  radarSegmentsByClipId,
-  onRemoveRadarSegment,
-  onPatchRadarSegment,
+  onRadarDurationChange,
 }) {
   const t = useT();
   const locale = useLocaleStore((s) => s.locale);
+  const timelineItems = useMemo(() => {
+    if (Array.isArray(items)) return items;
+    return (clips || []).map((clip) => ({ kind: "clip", id: clip.id, clip }));
+  }, [items, clips]);
   const rows = useMemo(() => {
-    return clips.map((clip, idx) => {
-      const next = clips[idx + 1];
-      const trLine = next ? formatTransitionLine?.(transitionByClipId, clip.id) : null;
+    return timelineItems.map((item, idx) => {
+      const nextItem = timelineItems[idx + 1];
+      const trLine = nextItem ? formatTransitionLine?.(transitionByClipId, item.id) : null;
+      if (item.kind === "radar") {
+        return {
+          kind: "radar",
+          id: item.id,
+          radar: item.radar,
+          next: nextItem,
+          nextClip: nextItem?.kind === "clip" ? nextItem.clip : { player_name: nextItem?.radar?.playerName || "", output_path: "" },
+          trLine,
+          rowIndex: idx + 1,
+        };
+      }
+      const clip = item.clip;
       const variant = getMontageTimelineVariant(clip);
       const dur = getClipDurationSeconds(clip);
       const weapon = weaponUsedTokens(clip.weapon_used, locale)[0];
@@ -523,8 +540,11 @@ export function MontageOrchestrationTimeline({
       const victimSegCount = getMontageExtraVictimPovCount(clip);
       const povTip = victimSegCount > 0 ? getVictimPovSegmentsTooltip(clip, t) : "";
       return {
+        kind: "clip",
+        id: item.id,
         clip,
-        next,
+        next: nextItem,
+        nextClip: nextItem?.kind === "clip" ? nextItem.clip : { player_name: nextItem?.radar?.playerName || "", output_path: "" },
         trLine,
         variant,
         dur,
@@ -541,7 +561,7 @@ export function MontageOrchestrationTimeline({
         victimSegCount,
       };
     });
-  }, [clips, transitionByClipId, formatTransitionLine, locale, t]);
+  }, [timelineItems, transitionByClipId, formatTransitionLine, locale, t]);
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-transparent">
@@ -643,12 +663,12 @@ export function MontageOrchestrationTimeline({
         onDrop={(e) => {
           e.preventDefault();
           const raw = e.dataTransfer.getData("text/plain");
-          const id = Number(raw);
-          if (!Number.isFinite(id)) return;
+          const id = parseTimelineDragId(raw);
+          if (id == null) return;
           onDropOnRow?.(id, null);
         }}
       >
-        {clips.length === 0 ? (
+        {timelineItems.length === 0 ? (
           <div className="flex min-h-[220px] flex-col items-center justify-center rounded-xl border border-dashed border-cs2-border-subtle bg-cs2-surface-1 p-8 text-center">
             <p className="text-sm font-bold text-cs2-text-secondary">{t("montage.orchEmptyTitle")}</p>
             <p className="mt-2 max-w-md text-xs leading-relaxed text-cs2-text-muted">
@@ -657,17 +677,20 @@ export function MontageOrchestrationTimeline({
           </div>
         ) : (
           <ul className="flex flex-col gap-1.5">
-            {rows.map(
-              ({
+            {rows.map((row) => {
+              const {
+                kind,
+                id,
                 clip,
+                radar,
                 next,
+                nextClip,
                 trLine,
                 variant,
                 dur,
                 weapon,
                 tags,
                 mapName,
-                perspectiveZh,
                 perspectivePrimary,
                 factLine,
                 rowIndex,
@@ -675,76 +698,137 @@ export function MontageOrchestrationTimeline({
                 rnd,
                 povTip,
                 victimSegCount,
-              }) => {
-              const active = primarySelectedId === clip.id;
-              const inMulti = multiSelectedIds?.has?.(clip.id);
-              const dragging = dragId === clip.id;
-              const radarList = radarSegmentsByClipId?.get(clip.id) || [];
+              } = row;
+              const active = primarySelectedId != null && String(primarySelectedId) === String(id);
+              const inMulti = multiSelectedIds?.has?.(id);
+              const dragging = dragId != null && String(dragId) === String(id);
+              if (kind === "radar") {
+                return (
+                  <li key={String(id)} className="flex flex-col">
+                    <div
+                      role="button"
+                      tabIndex={0}
+                      draggable
+                      onDragStart={(e) => onDragStart(e, id)}
+                      onDragEnd={onDragEnd}
+                      onDragOver={onDragOver}
+                      onDrop={(e) => onDropOnItem(e, id, onDropOnRow)}
+                      onClick={(e) => onRowPointerDown(e, id)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault();
+                          onRowPointerDown(e, id);
+                        }
+                      }}
+                      className={`relative flex cursor-grab gap-2.5 rounded-xl border p-3.5 text-left transition-all active:cursor-grabbing ${
+                        inMulti
+                          ? "border-cs2-accent bg-cs2-surface-2 shadow-glow-accent"
+                          : "border-rose-500/25 bg-rose-500/10 hover:border-rose-400/40"
+                      } ${active ? "ring-2 ring-cs2-accent" : ""} ${dragging ? "opacity-40 scale-[0.99]" : ""}`}
+                    >
+                      <div className="absolute left-0 top-3 bottom-3 w-1.5 rounded-r-md bg-rose-400" />
+                      <GripVertical className="mt-1 h-4 w-4 shrink-0 text-cs2-text-muted cursor-grab" aria-hidden />
+                      <div className="min-w-0 flex-1 pl-1">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-mono text-xs font-semibold text-cs2-text-muted shrink-0">#{rowIndex}</span>
+                          <span className="inline-flex items-center gap-1 rounded-md bg-rose-500/20 px-2 py-0.5 text-xs font-bold uppercase tracking-wider text-rose-200">
+                            <BarChart3 className="h-3 w-3" />
+                            {t("radar.timelineChipLabel")}
+                          </span>
+                          <span className="truncate text-sm font-bold text-cs2-text-primary">
+                            {radar?.playerName || t("radar.unknownPlayer")}
+                          </span>
+                          {radar?.orphan ? (
+                            <span className="rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-bold text-amber-200">
+                              {t("radar.timelineOrphan")}
+                            </span>
+                          ) : null}
+                          <label className="ml-auto inline-flex items-center gap-1 font-mono text-xs font-bold text-cs2-accent">
+                            <input
+                              type="number"
+                              min={0.5}
+                              max={60}
+                              step={0.5}
+                              value={radar?.duration ?? 4}
+                              onClick={(e) => e.stopPropagation()}
+                              onChange={(e) => {
+                                const v = parseFloat(e.target.value);
+                                if (Number.isFinite(v) && v >= 0.5) onRadarDurationChange?.(id, v);
+                              }}
+                              className="w-14 rounded-md border border-cs2-border-subtle bg-cs2-bg-input px-1.5 py-0.5 text-right text-cs2-text-primary outline-none focus:border-cs2-accent"
+                            />
+                            s
+                          </label>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={(ev) => {
+                          ev.stopPropagation();
+                          onRemoveOne(id);
+                        }}
+                        className="shrink-0 self-start rounded-lg p-2 text-cs2-text-muted hover:bg-rose-500/15 hover:text-rose-400 transition-colors"
+                        aria-label={t("radar.segmentRemove")}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    </div>
+                    {next ? (
+                      <>
+                        <div className="relative flex justify-center py-2">
+                          <div className="absolute inset-y-0 left-6 w-0.5 bg-gradient-to-b from-cs2-accent via-cs2-accent-soft to-cs2-accent" />
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onTransitionEdgeFocusChange?.(String(transitionEdgeSourceId) === String(id) ? null : id);
+                            }}
+                            className={`relative z-[1] flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-bold transition-all shadow-sm ${
+                              String(transitionEdgeSourceId) === String(id)
+                                ? "border-cs2-accent bg-cs2-accent text-cs2-text-on-accent shadow-glow-accent scale-105"
+                                : "border-cs2-border-subtle bg-cs2-surface-1 text-cs2-text-secondary hover:border-cs2-accent hover:text-cs2-text-primary"
+                            }`}
+                          >
+                            <span className="text-[11px] uppercase tracking-wider font-semibold opacity-75">{t("montage.orchTransConnectLabel")}</span>
+                            <span>{trLine || t("montage.orchTransDefaultCut")}</span>
+                          </button>
+                        </div>
+                        {String(transitionEdgeSourceId) === String(id) ? (
+                          <MontageTransitionEdgeEditor
+                            sourceClipId={id}
+                            nextClip={nextClip}
+                            transitionByClipId={transitionByClipId}
+                            getEffectiveTransition={getEffectiveTransition}
+                            patchTransition={patchTransition}
+                            transitionTypeOptions={transitionTypeOptions}
+                            formatTransitionLine={formatTransitionLine}
+                          />
+                        ) : null}
+                      </>
+                    ) : null}
+                  </li>
+                );
+              }
               const vCls = VARIANT_RING[variant] || VARIANT_RING.neutral;
               const killBadge = t(blockShortLabelI18nKey(getMontageBlockShortLabel(clip)));
               const suppressMontageAi = isTimelineSourceClip(clip) || variant === "compilation";
               const aiLine = suppressMontageAi ? "" : montageAiExplainText(clip, t);
               const outBase = pathBasenameQuick(clip?.output_path);
               return (
-                <li key={clip.id} className="flex flex-col">
-                  {/* cs数据图 雷达段：插入到该片段之前 */}
-                  {radarList.length > 0 ? (
-                    <div className="mb-1.5 flex flex-wrap gap-1.5 pl-6">
-                      {radarList.map((seg) => (
-                        <div
-                          key={seg.uid}
-                          className="flex items-center gap-2 rounded-lg border border-rose-500/25 bg-rose-500/10 px-2 py-1"
-                        >
-                          {seg.imageUrl ? (
-                            seg.isVideo ? (
-                              <span className="relative flex h-6 w-6 shrink-0 items-center justify-center rounded border border-cs2-border bg-black/60 text-white">
-                                <Play className="h-3 w-3 fill-current" />
-                              </span>
-                            ) : (
-                              <img
-                                src={seg.imageUrl}
-                                alt=""
-                                className="h-6 w-6 rounded border border-cs2-border object-cover"
-                              />
-                            )
-                          ) : null}
-                          <span className="text-[11px] font-bold uppercase tracking-wide text-rose-300">
-                            {t("radar.timelineChipLabel")}
-                          </span>
-                          <span className="max-w-[140px] truncate text-[11px] font-semibold text-cs2-text-primary">
-                            {seg.playerName}
-                          </span>
-                          <span className="font-mono text-[10px] text-cs2-text-muted">
-                            {Number(seg.duration || 4).toFixed(1)}s
-                          </span>
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              onRemoveRadarSegment?.(seg.uid);
-                            }}
-                            className="rounded p-0.5 text-cs2-text-muted transition-colors hover:text-rose-400"
-                            aria-label={t("radar.segmentRemove")}
-                          >
-                            <X className="h-3 w-3" />
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                  ) : null}
+                <li key={String(id)} className="flex flex-col">
                   <div
                     role="button"
                     tabIndex={0}
                     draggable
-                    onDragStart={(e) => onDragStart(e, clip.id)}
+                    onDragStart={(e) => onDragStart(e, id)}
                     onDragEnd={onDragEnd}
                     onDragOver={onDragOver}
-                    onDrop={(e) => onDropOnItem(e, clip.id, onDropOnRow)}
-                    onClick={(e) => onRowPointerDown(e, clip.id)}
+                    onDrop={(e) => onDropOnItem(e, id, onDropOnRow)}
+                    onClick={(e) => onRowPointerDown(e, id)}
                     onKeyDown={(e) => {
                       if (e.key === "Enter" || e.key === " ") {
                         e.preventDefault();
-                        onRowPointerDown(e, clip.id);
+                        onRowPointerDown(e, id);
                       }
                     }}
                     className={`relative flex cursor-grab gap-2.5 rounded-xl border p-3.5 text-left transition-all active:cursor-grabbing ${
@@ -842,7 +926,7 @@ export function MontageOrchestrationTimeline({
                       type="button"
                       onClick={(ev) => {
                         ev.stopPropagation();
-                        onRemoveOne(clip.id);
+                        onRemoveOne(id);
                       }}
                       className="shrink-0 self-start rounded-lg p-2 text-cs2-text-muted hover:bg-rose-500/15 hover:text-rose-400 transition-colors"
                       aria-label={t("montage.orchRemoveAriaLabel")}
@@ -860,10 +944,10 @@ export function MontageOrchestrationTimeline({
                           type="button"
                           onClick={(e) => {
                             e.stopPropagation();
-                            onTransitionEdgeFocusChange?.(transitionEdgeSourceId === clip.id ? null : clip.id);
+                            onTransitionEdgeFocusChange?.(String(transitionEdgeSourceId) === String(id) ? null : id);
                           }}
                           className={`relative z-[1] flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-bold transition-all shadow-sm ${
-                            transitionEdgeSourceId === clip.id
+                            String(transitionEdgeSourceId) === String(id)
                               ? "border-cs2-accent bg-cs2-accent text-cs2-text-on-accent shadow-glow-accent scale-105"
                               : "border-cs2-border-subtle bg-cs2-surface-1 text-cs2-text-secondary hover:border-cs2-accent hover:text-cs2-text-primary"
                           }`}
@@ -872,10 +956,10 @@ export function MontageOrchestrationTimeline({
                           <span>{trLine || t("montage.orchTransDefaultCut")}</span>
                         </button>
                       </div>
-                      {transitionEdgeSourceId === clip.id ? (
+                      {String(transitionEdgeSourceId) === String(id) ? (
                         <MontageTransitionEdgeEditor
-                          sourceClipId={clip.id}
-                          nextClip={next}
+                          sourceClipId={id}
+                          nextClip={nextClip}
                           transitionByClipId={transitionByClipId}
                           getEffectiveTransition={getEffectiveTransition}
                           patchTransition={patchTransition}
@@ -899,8 +983,8 @@ function onDropOnItem(e, targetId, onDropOnBlock) {
   e.preventDefault();
   e.stopPropagation();
   const raw = e.dataTransfer.getData("text/plain");
-  const draggedId = Number(raw);
-  if (!Number.isFinite(draggedId)) return;
+  const draggedId = parseTimelineDragId(raw);
+  if (draggedId == null) return;
   onDropOnBlock?.(draggedId, targetId);
 }
 

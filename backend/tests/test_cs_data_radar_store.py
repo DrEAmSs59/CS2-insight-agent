@@ -64,10 +64,10 @@ def test_create_cards_for_all_players(tmp_path, monkeypatch):
         assert path is not None and path.is_file()
         # 对外暴露绝对路径，供合辑导出（montage radar_segments）直接使用
         assert card["image_path"] and Path(card["image_path"]).is_file()
-    # 全场均值基准线：两名玩家各维度的平均值（红色基准六边形），允许派生/舍入误差
-    avg = cards[0]["match_avg"]
+    # 本局中位数底板：两名玩家时中位数等于均值（ADR 按一位小数舍入）
+    avg = cards[0]["match_median"]
     assert abs(avg["kpr"] - (0.99 + 0.71) / 2) < 0.01
-    assert abs(avg["adr"] - (101.4 + 88.1) / 2) < 0.01
+    assert abs(avg["adr"] - round((101.4 + 88.1) / 2, 1)) < 0.01
     assert abs(avg["kast"] - (0.782 + 0.715) / 2) < 0.01
     # JSON 索引落盘
     index_file = get_data_dir() / "cards.json"

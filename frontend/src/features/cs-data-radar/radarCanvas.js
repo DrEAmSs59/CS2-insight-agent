@@ -327,7 +327,7 @@ function drawInitial(ctx, playerName, color) {
   ctx.lineWidth = 4;
   ctx.stroke();
   ctx.fillStyle = "rgba(255,255,255,0.92)";
-  ctx.font = 'bold 120px "Rajdhani", sans-serif';
+  ctx.font = 'bold 120px "Noto Sans SC", "Microsoft YaHei", "Rajdhani", sans-serif';
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
   ctx.fillText(initial, panelX + size / 2, panelY + size / 2);
@@ -344,7 +344,7 @@ function drawRightPanel(ctx, color, playerName, radar, teamLabel) {
   ctx.fillStyle = "rgba(255,255,255,0.82)";
   ctx.fillText("CS数据图", panelX, 150);
 
-  ctx.font = 'bold 58px "Rajdhani", sans-serif';
+  ctx.font = 'bold 58px "Noto Sans SC", "Microsoft YaHei", "Rajdhani", sans-serif';
   ctx.shadowColor = color;
   ctx.shadowBlur = 12;
   ctx.fillStyle = color;

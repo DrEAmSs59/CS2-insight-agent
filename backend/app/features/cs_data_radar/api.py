@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import logging
 import re
+import uuid
 from pathlib import Path
 from typing import Annotated, Any, Optional
 
@@ -364,6 +365,56 @@ def _resolve_ffmpeg_or_none(cfg: Any):
         return resolve_ffmpeg_binary(getattr(cfg, "ffmpeg_path", None))
     except Exception:
         return None
+
+
+class RadarCandidatesBody(BaseModel):
+    recorded_clip_ids: list[int] = Field(default_factory=list, max_length=500)
+
+
+@router.post("/api/cs-data-radar/candidates")
+async def radar_candidates(body: RadarCandidatesBody):
+    """从当前时间线成片推导雷达候选项，并附带对局解析数据。"""
+    from ...databases import demo_db, montage_db
+    from .candidates import build_candidates_for_clips
+
+    ids: list[int] = []
+    for raw in body.recorded_clip_ids:
+        try:
+            n = int(raw)
+        except (TypeError, ValueError):
+            continue
+        if n > 0:
+            ids.append(n)
+    rows = await montage_db.get_recorded_clips_by_ids(ids)
+    clips = [rows[cid] for cid in ids if cid in rows]
+    candidates = await build_candidates_for_clips(clips, demo_db=demo_db)
+    return {"candidates": candidates, "count": len(candidates)}
+
+
+@router.post("/api/cs-data-radar/portraits")
+async def upload_radar_candidate_portrait(file: UploadFile = File(...)):
+    """候选项自己的肖像（不与名牌头像共用）。"""
+    content_type = file.content_type or ""
+    if content_type and content_type not in _ALLOWED_IMAGE_TYPES:
+        raise HTTPException(400, "仅支持 JPEG / PNG / WebP / GIF 格式图片")
+    data = await file.read()
+    if len(data) > _MAX_IMAGE_BYTES:
+        raise HTTPException(400, "图片文件大小不能超过 8MB")
+    import asyncio
+
+    portraits_dir = get_data_dir() / "portraits"
+    portraits_dir.mkdir(parents=True, exist_ok=True)
+    suffix = _suffix_for(content_type, file.filename or "")
+    dest = portraits_dir / f"cand_{uuid.uuid4().hex}{suffix}"
+
+    def _write(path: Path, payload: bytes) -> None:
+        path.write_bytes(payload)
+
+    await asyncio.to_thread(_write, dest, data)
+    return {
+        "path": str(dest),
+        "url": f"/api/cs-data-radar/images/{dest.name}",
+    }
 
 
 _FILENAME_RE = re.compile(r"^[a-zA-Z0-9_\-\.]+$")

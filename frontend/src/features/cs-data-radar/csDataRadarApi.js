@@ -106,7 +106,25 @@ export async function deleteRadarCard(cardId) {
   await API.delete(`/cs-data-radar/cards/${encodeURIComponent(String(cardId))}`);
 }
 
-/** 上传人物图片（前端接口），后端自动重渲染该玩家雷达图。 */
+/** 上传候选项肖像（不与名牌头像共用）。 */
+export async function uploadRadarCandidatePortrait(file) {
+  const form = new FormData();
+  form.append("file", file);
+  const { data } = await API.post("/cs-data-radar/portraits", form, {
+    headers: { "Content-Type": "multipart/form-data" },
+  });
+  return data;
+}
+
+/** 按当前时间线成片推导雷达候选项。 */
+export async function fetchRadarCandidates(recordedClipIds) {
+  const { data } = await API.post("/cs-data-radar/candidates", {
+    recorded_clip_ids: (Array.isArray(recordedClipIds) ? recordedClipIds : [])
+      .map((id) => Number(id))
+      .filter((id) => Number.isInteger(id) && id > 0),
+  });
+  return Array.isArray(data?.candidates) ? data.candidates : [];
+}
 export async function uploadRadarPortrait(cardId, file) {
   const form = new FormData();
   form.append("file", file);

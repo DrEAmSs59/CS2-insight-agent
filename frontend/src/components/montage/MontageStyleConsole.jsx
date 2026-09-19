@@ -205,17 +205,24 @@ export function MontageStyleConsole({
   framemeldRuntimeAvailable = false,
   framemeldSourceSummary: providedFrameMeldSourceSummary,
   onFrameMeldEnabledChange,
-  // cs数据图（雷达图专栏）
-  radarCards = [],
-  radarCardsLoading = false,
-  radarCardsError = "",
-  onRefreshRadarCards,
-  radarSegments = [],
+  // 数据雷达图专栏
+  radarCandidates = [],
+  radarCandidatesLoading = false,
+  radarCandidatesError = "",
+  onRefreshRadarCandidates,
+  radarEnabled = true,
+  onRadarEnabledChange,
+  radarItems = [],
+  candidateState = {},
+  onCandidateRatingChange,
+  onCandidateMedianRatingChange,
+  onCandidatePortraitChange,
   timelineClips = [],
-  onInsertRadarSegment,
-  onRemoveRadarSegment,
-  onRadarSegmentDurationChange,
-  onRadarSegmentTargetChange,
+  selectedTimelineId = null,
+  onInsertRadarBefore,
+  onInsertRadarAfter,
+  onRemoveRadarItem,
+  onRadarDurationChange,
 }) {
   const t = useT();
   const framemeldSourceSummary = providedFrameMeldSourceSummary || summarizeFrameMeldSources(clips || []);
@@ -247,7 +254,7 @@ export function MontageStyleConsole({
     { id: "intro", active: introFilled, label: t("montage.exportChecklistIntro") },
     { id: "outro", active: outroFilled, label: t("montage.exportChecklistOutro") },
     { id: "cards", active: nameCardsFilled, label: t("montage.consoleExportOptionalNameCards") },
-    { id: "radar", active: radarSegments.length > 0, label: t("radar.consoleTabTitle") },
+    { id: "radar", active: radarItems.length > 0, label: t("radar.consoleTabTitle") },
   ];
   const optionalActiveCount = optionalItems.filter((item) => item.active).length;
 
@@ -484,16 +491,23 @@ export function MontageStyleConsole({
 
           {activeTab === "radar" && (
             <CsDataRadarPanel
-              cards={radarCards}
-              loading={radarCardsLoading}
-              error={radarCardsError}
-              onRefresh={onRefreshRadarCards}
+              candidates={radarCandidates}
+              loading={radarCandidatesLoading}
+              error={radarCandidatesError}
+              onRefresh={onRefreshRadarCandidates}
+              radarEnabled={radarEnabled}
+              onRadarEnabledChange={onRadarEnabledChange}
+              radarItems={radarItems}
+              candidateState={candidateState}
+              onCandidateRatingChange={onCandidateRatingChange}
+              onCandidateMedianRatingChange={onCandidateMedianRatingChange}
+              onCandidatePortraitChange={onCandidatePortraitChange}
               timelineClips={timelineClips}
-              radarSegments={radarSegments}
-              onInsertRadarSegment={onInsertRadarSegment}
-              onRemoveRadarSegment={onRemoveRadarSegment}
-              onRadarSegmentDurationChange={onRadarSegmentDurationChange}
-              onRadarSegmentTargetChange={onRadarSegmentTargetChange}
+              selectedTimelineId={selectedTimelineId}
+              onInsertBefore={onInsertRadarBefore}
+              onInsertAfter={onInsertRadarAfter}
+              onRemoveRadarItem={onRemoveRadarItem}
+              onRadarDurationChange={onRadarDurationChange}
             />
           )}
 

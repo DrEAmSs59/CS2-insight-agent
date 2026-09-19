@@ -60,7 +60,7 @@ def test_create_and_list_cards(monkeypatch, tmp_path):
     for card in cards:
         assert card["image_path"]
         assert card["image_url"].startswith("/api/cs-data-radar/images/")
-        assert set(card["radar"].keys()) == {"kpr", "survival_rate", "adr", "kast", "multi_kill", "rating"}
+        assert set(card["radar"].keys()) == {"kpr", "survival_rate", "adr", "kast", "multi_kill"}
 
     listed = client.get("/api/cs-data-radar/cards").json()
     assert listed["count"] == 2
@@ -141,8 +141,9 @@ def test_multi_kill_rounds_flow_through(monkeypatch, tmp_path):
     resp = client.post("/api/cs-data-radar/cards", json={"players": players})
     assert resp.status_code == 200
     card = resp.json()["cards"][0]
-    assert abs(card["radar"]["multi_kill"] - round((7 + 2) / 29, 2)) < 1e-9
+    assert abs(card["radar"]["multi_kill"] - 9) < 1e-9
     assert card["match_avg"]["multi_kill"] >= 0
+    assert card["match_median"]["multi_kill"] >= 0
 
 
 def test_animation_endpoint_falls_back_without_ffmpeg(monkeypatch, tmp_path):
@@ -314,3 +315,67 @@ def test_team_logo_reupload_regenerates_video(monkeypatch, tmp_path):
     )
     assert resp.status_code == 200
     assert calls == [card_id]  # 队标变化 → 自动重新生成动画
+
+
+def test_candidate_portrait_upload(monkeypatch, tmp_path):
+    client = _make_client(monkeypatch, tmp_path)
+    resp = client.post(
+        "/api/cs-data-radar/portraits",
+        files={"file": ("p.png", _PNG, "image/png")},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["path"]
+    assert body["url"].startswith("/api/cs-data-radar/images/")
+    filename = body["url"].rsplit("/", 1)[-1]
+    assert client.get(f"/api/cs-data-radar/images/{filename}").status_code == 200
+
+
+def test_candidates_from_recorded_clips(monkeypatch, tmp_path):
+    import app.databases as databases
+
+    class _MontageDb:
+        async def get_recorded_clips_by_ids(self, ids):
+            return {
+                1: {
+                    "id": 1,
+                    "demo_path": r"C:\demos\mirage.dem",
+                    "demo_filename": "mirage.dem",
+                    "player_name": "s1mple",
+                    "target_steamid64": "111",
+                }
+            }
+
+    class _DemoDb:
+        async def get_demo_by_path(self, path):
+            return {"path": path}
+
+        async def get_result(self, path):
+            return {
+                "analysis_workspace": {
+                    "players": [
+                        {
+                            "name": "s1mple",
+                            "steam_id64": "111",
+                            "kpr": 0.9,
+                            "adr": 101.0,
+                            "kast": 70,
+                            "survival_rate": 40,
+                        }
+                    ]
+                }
+            }
+
+    monkeypatch.setattr(databases, "montage_db", _MontageDb())
+    monkeypatch.setattr(databases, "demo_db", _DemoDb())
+    client = _make_client(monkeypatch, tmp_path)
+    resp = client.post("/api/cs-data-radar/candidates", json={"recorded_clip_ids": [1]})
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["count"] == 1
+    cand = body["candidates"][0]
+    assert cand["has_parse_data"] is True
+    assert cand["player_name"] == "s1mple"
+    assert "rating" not in cand["radar"]
+    assert "kpr" in cand["match_median"]
+    assert cand["demo_source"]
