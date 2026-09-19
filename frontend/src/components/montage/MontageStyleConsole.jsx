@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import { CollapsibleSection } from "./MontageWorkbenchPanels";
 import { MontagePlayerAssetsPanel } from "./MontagePlayerAssetsPanel";
+import CsDataRadarPanel from "../../features/cs-data-radar/CsDataRadarPanel";
 import { useT } from "../../i18n/useT.js";
 import { humanizeMontageError } from "../../utils/formatMontageApiError.js";
 import { summarizeFrameMeldSources } from "../../utils/framemeld.js";
@@ -204,6 +205,17 @@ export function MontageStyleConsole({
   framemeldRuntimeAvailable = false,
   framemeldSourceSummary: providedFrameMeldSourceSummary,
   onFrameMeldEnabledChange,
+  // cs数据图（雷达图专栏）
+  radarCards = [],
+  radarCardsLoading = false,
+  radarCardsError = "",
+  onRefreshRadarCards,
+  radarSegments = [],
+  timelineClips = [],
+  onInsertRadarSegment,
+  onRemoveRadarSegment,
+  onRadarSegmentDurationChange,
+  onRadarSegmentTargetChange,
 }) {
   const t = useT();
   const framemeldSourceSummary = providedFrameMeldSourceSummary || summarizeFrameMeldSources(clips || []);
@@ -235,6 +247,7 @@ export function MontageStyleConsole({
     { id: "intro", active: introFilled, label: t("montage.exportChecklistIntro") },
     { id: "outro", active: outroFilled, label: t("montage.exportChecklistOutro") },
     { id: "cards", active: nameCardsFilled, label: t("montage.consoleExportOptionalNameCards") },
+    { id: "radar", active: radarSegments.length > 0, label: t("radar.consoleTabTitle") },
   ];
   const optionalActiveCount = optionalItems.filter((item) => item.active).length;
 
@@ -255,6 +268,7 @@ export function MontageStyleConsole({
   const tabItems = [
     { id: "media", label: t("montage.consoleTabMedia") },
     { id: "players", label: t("montage.consoleTabPlayers") },
+    { id: "radar", label: t("radar.consoleTabTitle") },
     { id: "export", label: t("montage.consoleTabExport") },
   ];
 
@@ -465,6 +479,21 @@ export function MontageStyleConsole({
               nameCardsEnabled={nameCardsEnabled || false}
               onPlayerAvatarChange={onPlayerAvatarChange}
               onNameCardsEnabledChange={onNameCardsEnabledChange}
+            />
+          )}
+
+          {activeTab === "radar" && (
+            <CsDataRadarPanel
+              cards={radarCards}
+              loading={radarCardsLoading}
+              error={radarCardsError}
+              onRefresh={onRefreshRadarCards}
+              timelineClips={timelineClips}
+              radarSegments={radarSegments}
+              onInsertRadarSegment={onInsertRadarSegment}
+              onRemoveRadarSegment={onRemoveRadarSegment}
+              onRadarSegmentDurationChange={onRadarSegmentDurationChange}
+              onRadarSegmentTargetChange={onRadarSegmentTargetChange}
             />
           )}
 
