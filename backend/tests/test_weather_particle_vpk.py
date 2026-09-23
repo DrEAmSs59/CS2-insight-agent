@@ -176,7 +176,8 @@ def test_bundled_rain_runtime_contains_only_final_declared_payloads() -> None:
     declared = {
         Path(item["payload_relative_path"]).as_posix()
         for profile in manifest["maps"].values()
-        for item in profile["loose_outer_replacements"]
+        for source_profile in [profile, *profile.get("source_variants", [])]
+        for item in source_profile["loose_outer_replacements"]
     }
     packaged = {
         path.relative_to(rain_root).as_posix()

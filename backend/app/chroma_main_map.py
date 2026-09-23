@@ -363,6 +363,36 @@ def _resolve_root(value: Path, *, label: str) -> Path:
     return root
 
 
+def _parse_source_profiles(
+    manifest: Mapping[str, Any],
+    map_name: object,
+    *,
+    require_in_game_confirmed: bool,
+) -> tuple[_Profile, ...]:
+    """Keep the original profile and explicitly pinned alternative map builds."""
+    primary = _parse_profile(
+        manifest, map_name, require_in_game_confirmed=require_in_game_confirmed
+    )
+    raw_variants = manifest["maps"][primary.map_name].get("source_variants", [])
+    if not isinstance(raw_variants, list):
+        raise ChromaMainMapError("main-map source_variants must be a list")
+    profiles = [primary]
+    identities = {primary.source_sha256}
+    for variant in raw_variants:
+        if not isinstance(variant, Mapping) or "source_variants" in variant:
+            raise ChromaMainMapError("invalid main-map source variant")
+        profile = _parse_profile(
+            {"schema_version": manifest["schema_version"], "maps": {primary.map_name: variant}},
+            primary.map_name,
+            require_in_game_confirmed=require_in_game_confirmed,
+        )
+        if profile.source_sha256 in identities:
+            raise ChromaMainMapError("duplicate main-map source variant SHA-256")
+        identities.add(profile.source_sha256)
+        profiles.append(profile)
+    return tuple(profiles)
+
+
 def _resolve_file(root: Path, relative_path: str, *, field: str) -> Path:
     candidate = root.joinpath(*PurePosixPath(relative_path).parts)
     try:
@@ -605,11 +635,12 @@ def _build_chroma_main_map_vpk(
     map_name: object,
     require_in_game_confirmed: bool,
 ) -> ChromaMainMapVpkBuild:
-    profile = _parse_profile(
+    profiles = _parse_source_profiles(
         manifest,
         map_name,
         require_in_game_confirmed=require_in_game_confirmed,
     )
+    profile = profiles[0]
     csgo_root = _resolve_root(csgo_dir, label="CS2 csgo directory")
     payloads_root = _resolve_root(
         payload_root, label="chroma main-map payload directory"
@@ -622,17 +653,20 @@ def _build_chroma_main_map_vpk(
     output = _resolve_output_path(output_path, csgo_root=csgo_root, source=source)
 
     source_stat = source.stat()
-    if source_stat.st_size != profile.source_size:
+    matching_sizes = [item for item in profiles if item.source_size == source_stat.st_size]
+    if not matching_sizes:
         raise ChromaMainMapError(
             f"official main-map VPK size changed for {profile.map_name}: "
             f"{source_stat.st_size} != {profile.source_size}"
         )
     source_sha256 = _sha256_file(source)
-    if source_sha256 != profile.source_sha256:
+    matching_profiles = [item for item in matching_sizes if item.source_sha256 == source_sha256]
+    if not matching_profiles:
         raise ChromaMainMapError(
             f"official main-map VPK SHA-256 changed for {profile.map_name}: "
             f"{source_sha256} != {profile.source_sha256}"
         )
+    profile = matching_profiles[0]
 
     try:
         source_header, source_tree_mutable, source_entries = _vpk._open_package(source)

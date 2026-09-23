@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 import hashlib
+import json
 import struct
 import zlib
 from pathlib import Path, PurePosixPath
@@ -646,3 +647,133 @@ def test_schema_and_map_are_validated_before_source_access(tmp_path: Path):
             manifest=manifest,
             map_name="de_missing",
         )
+
+
+def _versioned_fixture(tmp_path: Path, *, same_size: bool = True):
+    csgo, payload_root, staging, source, preserved, world, _entity, manifest = _fixture_data(tmp_path)
+    original = source.read_bytes()
+    new_entity = b"updated!-main-entity-lump"
+    new_preserved = b"updated!-non-target-data" + (b"" if same_size else b"-new-geometry")
+    updated = _make_inline_vpk({
+        _WORLD_ENTRY: (b"", b"official-main-world-node"),
+        _ENTITY_ENTRY: (b"", new_entity),
+        _PRESERVED_ENTRY: (b"", new_preserved),
+    })
+    assert (len(updated) == len(original)) == same_size
+    source.write_bytes(updated)
+    new_payload = b"rain-merged-with-updated-official-entities"
+    _write_relative(payload_root, "versions/new/entities.vents_c", new_payload)
+    expected = _reference_patch_inline_vpk(source, {_WORLD_ENTRY: world, _ENTITY_ENTRY: new_payload})
+    variant = copy.deepcopy(manifest["maps"][_MAP])
+    digest = hashlib.sha256(updated).hexdigest()
+    variant["main_source"].update(
+        source_package_size=len(updated), source_package_sha256=digest,
+        expected_output_size=len(expected), expected_output_sha256=hashlib.sha256(expected).hexdigest(),
+    )
+    for replacement in variant["loose_outer_replacements"]:
+        replacement.update(source_package_size=len(updated), source_package_sha256=digest)
+        if replacement["entry_path"] == _ENTITY_ENTRY:
+            replacement.update(
+                original_size=len(new_entity), original_sha256=hashlib.sha256(new_entity).hexdigest(),
+                original_crc32=f"{zlib.crc32(new_entity) & 0xFFFFFFFF:08x}",
+                payload_relative_path="versions/new/entities.vents_c", payload_size=len(new_payload),
+                payload_sha256=hashlib.sha256(new_payload).hexdigest(),
+                payload_crc32=f"{zlib.crc32(new_payload) & 0xFFFFFFFF:08x}",
+            )
+    manifest["maps"][_MAP]["source_variants"] = [variant]
+    return csgo, payload_root, staging, source, manifest, original, updated, expected, new_preserved
+
+
+@pytest.mark.parametrize("same_size", [True, False])
+def test_map_updates_and_rollbacks_select_their_own_verified_payloads(tmp_path: Path, same_size: bool):
+    csgo, payloads, staging, source, manifest, old, new, expected_new, preserved = _versioned_fixture(
+        tmp_path, same_size=same_size
+    )
+    snapshot = copy.deepcopy(manifest)
+    for raw in (new, old, new):
+        source.write_bytes(raw)
+        built = main_map.build_chroma_main_map_vpk(
+            csgo_dir=csgo, payload_root=payloads, output_path=staging / "rain.vpk",
+            manifest=manifest, map_name=_MAP,
+        )
+        assert built.metadata["source"]["sha256"] == hashlib.sha256(raw).hexdigest()
+        assert source.read_bytes() == raw
+        _assert_other_md5(built.output_path)
+        if raw == new:
+            assert built.output_path.read_bytes() == expected_new
+            assert _read_entry(built.output_path, _PRESERVED_ENTRY) == preserved
+        else:
+            assert hashlib.sha256(built.output_path.read_bytes()).hexdigest() == (
+                manifest["maps"][_MAP]["main_source"]["expected_output_sha256"]
+            )
+            assert _read_entry(built.output_path, _ENTITY_ENTRY) == b"patched-main-entity-lump-with-fog-disabled"
+    assert manifest == snapshot
+
+
+def test_unknown_same_size_map_does_not_fall_back_to_a_known_variant(tmp_path: Path):
+    csgo, payloads, staging, source, manifest, _old, new, *_ = _versioned_fixture(tmp_path)
+    source.write_bytes(new[:-1] + bytes([new[-1] ^ 1]))
+    output = staging / "existing.vpk"
+    output.write_bytes(b"previous output")
+    with pytest.raises(main_map.ChromaMainMapError, match="SHA-256 changed"):
+        main_map.build_chroma_main_map_vpk(
+            csgo_dir=csgo, payload_root=payloads, output_path=output, manifest=manifest, map_name=_MAP,
+        )
+    assert output.read_bytes() == b"previous output"
+
+
+def test_selected_variant_payload_still_requires_its_own_hash(tmp_path: Path):
+    csgo, payloads, staging, _source, manifest, *_ = _versioned_fixture(tmp_path)
+    payload = payloads / "versions/new/entities.vents_c"
+    payload.write_bytes(b"x" * payload.stat().st_size)
+    with pytest.raises(main_map.ChromaMainMapError, match="payload SHA-256 mismatch"):
+        main_map.build_chroma_main_map_vpk(
+            csgo_dir=csgo, payload_root=payloads, output_path=staging / "rain.vpk",
+            manifest=manifest, map_name=_MAP,
+        )
+    assert not (staging / "rain.vpk").exists()
+
+
+@pytest.mark.parametrize("fault", ["duplicate", "candidate", "wrong_source", "nested", "not_list"])
+def test_invalid_variant_catalog_is_rejected(tmp_path: Path, fault: str):
+    csgo, payloads, staging, _source, manifest, *_ = _versioned_fixture(tmp_path)
+    profile = manifest["maps"][_MAP]
+    variant = profile["source_variants"][0]
+    if fault == "duplicate":
+        profile["source_variants"].append(copy.deepcopy(variant))
+    elif fault == "candidate":
+        variant["status"] = "candidate_requires_in_game_gate"
+    elif fault == "wrong_source":
+        variant["main_source"]["source_package_relative_path"] = "maps/de_other.vpk"
+    elif fault == "nested":
+        variant["source_variants"] = []
+    else:
+        profile["source_variants"] = {}
+    with pytest.raises(main_map.ChromaMainMapError):
+        main_map.build_chroma_main_map_vpk(
+            csgo_dir=csgo, payload_root=payloads, output_path=staging / "rain.vpk",
+            manifest=manifest, map_name=_MAP,
+        )
+    assert not (staging / "rain.vpk").exists()
+
+
+def test_bundled_rain_retains_old_map_fingerprints_and_all_variant_payloads():
+    root = Path(__file__).resolve().parents[2] / "pov/weather_effects/rain"
+    manifest = json.loads((root / "manifest.json").read_text(encoding="utf-8"))
+    original_sources = {
+        "de_ancient": "db67fb7c45e4a92a87473dc8d9dae0b5ead6887e282ecd7d98076f5c01af0d26",
+        "de_cache": "958bfb79888c33704ba3582253bb1244d13ab5a89aa29d1b7842fa0ac0855305",
+        "de_mirage": "dc8f0d125014b00218582d0ab9a2f684638fa17054924fba34d07c2ef479e268",
+        "de_nuke": "616286bdfba283f8026cb719321e4c2d0986f04ce925cb13b0ff7ff913c33007",
+    }
+    for name, original_sha in original_sources.items():
+        profiles = main_map._parse_source_profiles(manifest, name, require_in_game_confirmed=True)
+        assert profiles[0].source_sha256 == original_sha
+        assert len(profiles) >= 2
+        assert any("versions/25472966/" in r.payload_relative_path for p in profiles for r in p.replacements)
+        for profile in profiles:
+            for replacement in profile.replacements:
+                body = (root / replacement.payload_relative_path).read_bytes()
+                assert len(body) == replacement.payload_size
+                assert hashlib.sha256(body).hexdigest() == replacement.payload_sha256
+                assert zlib.crc32(body) & 0xFFFFFFFF == replacement.payload_crc32
