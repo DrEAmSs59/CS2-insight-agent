@@ -16,7 +16,7 @@ from app.demo_voice_hud import (
     write_inline_vpk,
 )
 from app.pov_hud_manager import PovHudError, PovHudManager
-from app.skybox_vpk import CHROMA_ACTIVE_SKY_MATERIAL_PATH, SKYBOX_ASSETS
+from app.skybox_vpk import CHROMA_ACTIVE_SKY_MATERIAL_PATH, MAP_SKY_MATERIAL_PATHS, SKYBOX_ASSETS
 
 
 def _manager_fixture(
@@ -138,6 +138,104 @@ def _fake_voice_build(map_name: str) -> DemoVoiceHudBuild:
         radar_map=map_name,
         advanced_playback_enabled=1,
     )
+
+
+@pytest.mark.parametrize("hud_mode,skybox_id,appearance", [
+    (hud, sky, appearance)
+    for hud in ("none", "pov", "auxiliary", "advanced")
+    for sky in ("default", "cartoon3", "chroma_blue", "chroma_green")
+    for appearance in ("default", "waxed_reflection", "rain")
+    if (hud, sky, appearance) != ("none", "default", "default")
+])
+def test_visual_option_matrix_and_next_session_are_isolated(
+    monkeypatch, tmp_path, hud_mode, skybox_id, appearance,
+):
+    # All-off routing is tested in test_recording_vpk_switch: it must not install.
+    manager, pov_dir, csgo, gameinfo = _manager_fixture(monkeypatch, tmp_path)
+    original_info = gameinfo.read_bytes()
+    assets = Path(__file__).resolve().parents[2] / "pov"
+    monkeypatch.setattr(manager, "get_skybox_assets_dir", lambda: assets / "skyboxes")
+    monkeypatch.setattr(manager, "get_map_material_assets_dir", lambda: assets / "map_materials")
+    monkeypatch.setattr(manager, "get_weather_effect_assets_dir", lambda effect: assets / "weather_effects" / effect)
+    _write_chroma_assets(pov_dir, skybox_id if skybox_id.startswith("chroma_") else "chroma_blue")
+    _write_main_catalog(pov_dir, no_main=("de_ancient",))
+    child_path, child_bytes, original_child = _install_fake_child(monkeypatch, "de_ancient", csgo)
+    main_path = csgo / "maps/de_ancient.vpk"
+    original_main = b"original-main-map"
+    main_path.write_bytes(original_main)
+    weather_main = b"main-map-with-rain"
+
+    def build_weather(**kwargs):
+        kwargs["output_path"].write_bytes(weather_main)
+        return SimpleNamespace(
+            logical_path="maps/de_ancient.vpk", output_path=kwargs["output_path"],
+            metadata={
+                "source": {"size": len(original_main), "sha256": hashlib.sha256(original_main).hexdigest()},
+                "output": {"size": len(weather_main), "sha256": hashlib.sha256(weather_main).hexdigest()},
+            },
+        )
+
+    monkeypatch.setattr(pov_hud_manager, "build_chroma_main_map_vpk", build_weather)
+    monkeypatch.setattr(pov_hud_manager, "compose_map_sun_suppression_vpk", lambda **kw: SimpleNamespace(vpk_bytes=kw["base_vpk_bytes"], metadata={}))
+    monkeypatch.setattr(pov_hud_manager, "compose_train_environment_postprocess_vpk", lambda **kw: SimpleNamespace(vpk_bytes=kw["base_vpk_bytes"], metadata={}))
+    monkeypatch.setattr(pov_hud_manager, "load_input_report", lambda _: {})
+    for name in ("pov_default.vpk", "pov_voice_template.vpk", "pov_advanced_playback_template.vpk"):
+        (pov_dir / name).write_bytes(write_inline_vpk({"panorama/static.txt": b"static"}))
+    builds = []
+
+    def build_hud(_demo, template, **kwargs):
+        builds.append((template.name, kwargs))
+        return _fake_voice_build("de_ancient")
+
+    monkeypatch.setattr(pov_hud_manager, "build_demo_voice_hud_vpk", build_hud)
+    kwargs = {} if hud_mode == "none" else {
+        "demo_path": tmp_path / "de_ancient.dem",
+        "require_demo_hud": True,
+        "pov_visuals_enabled": hud_mode != "auxiliary",
+        "advanced_playback_enabled": hud_mode == "advanced",
+    }
+    manager.install(
+        map_name="de_ancient", skybox_id=skybox_id,
+        map_material_id="waxed_reflection" if appearance == "waxed_reflection" else "default",
+        weather_effect_id="rain" if appearance == "rain" else "default", **kwargs,
+    )
+    packed = (csgo / "pov.vpk").read_bytes()
+    entries = read_inline_vpk(packed)
+    assert any(path.startswith("panorama/") for path in entries) is (hud_mode != "none")
+    assert "panorama/static.txt" not in entries
+    if builds:
+        template, options = builds[0]
+        assert template == ("pov_voice_template.vpk" if hud_mode == "pov" else "pov_advanced_playback_template.vpk")
+        assert options["pov_visuals_enabled"] is (hud_mode != "auxiliary")
+        assert options["advanced_playback_enabled"] is (hud_mode == "advanced")
+    particle = "particles/rain_fx/rain_single_128.vpcf_c"
+    assert (particle in entries) is (appearance == "rain")
+    if appearance == "rain":
+        assert entries[particle] == (assets / "weather_effects/rain_particles/rain_single_128.vpcf_c").read_bytes()
+    if skybox_id != "default":
+        assert SKYBOX_ASSETS[skybox_id][1] in entries
+    if appearance != "default":
+        material = "rain_puddles" if appearance == "rain" else appearance
+        profile = json.loads((assets / "map_materials" / material / "manifest.json").read_text(encoding="utf-8"))
+        material_paths = {item["target"] for item in profile["maps"]["de_ancient"]}
+        assert material_paths <= entries.keys()
+    chroma = skybox_id.startswith("chroma_")
+    assert (csgo / child_path).read_bytes() == (child_bytes if chroma else original_child)
+    assert main_path.read_bytes() == (weather_main if appearance == "rain" else original_main)
+    manifest = manager._read_manifest()
+    if chroma:
+        assert manifest["chroma_outer_vpk"]["output"]["sha256"] == hashlib.sha256(packed).hexdigest()
+
+    # A subsequent plain sky session must discard this demo's HUD, material,
+    # rain particle, and both official VPK swaps without relying on app restart.
+    manager.install(map_name="de_ancient", skybox_id="cartoon4")
+    next_entries = read_inline_vpk((csgo / "pov.vpk").read_bytes())
+    assert set(next_entries) == set(SKYBOX_ASSETS["cartoon4"]) | set(MAP_SKY_MATERIAL_PATHS["de_ancient"])
+    assert (csgo / child_path).read_bytes() == original_child
+    assert main_path.read_bytes() == original_main
+    assert manager.restore()["verified"]
+    assert gameinfo.read_bytes() == original_info
+    assert not (csgo / "pov.vpk").exists()
 
 
 def test_bundled_main_catalog_marks_all_validated_maps_child_only() -> None:

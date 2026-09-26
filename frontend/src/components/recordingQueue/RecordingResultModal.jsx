@@ -26,7 +26,7 @@ import { weaponUsedTokens } from "../../i18n/weaponNames.js";
 import { useT } from "../../i18n/useT.js";
 import { useLocaleStore } from "../../i18n/localeStore";
 import { recordingErrorMessage } from "../../utils/recordingErrorMessages.js";
-import { recordingRecoverySummary } from "../../utils/recordingRecovery.js";
+import { recordingRecoverySummary, recordingVpkRecoverySummary } from "../../utils/recordingRecovery.js";
 
 const TYPE_ACCENT_CLASSES = {
   "高光": "bg-cs2-highlight",
@@ -324,6 +324,7 @@ export default function RecordingResultModal({
   const abortedCount = results.filter((result) => isAborted(result)).length;
   const failCount = results.filter((result) => !result.success && !isAborted(result)).length;
   const recovery = recordingRecoverySummary(results);
+  const vpkRecovery = recordingVpkRecoverySummary(results);
   const pendingMediaDuration = results.some((result, index) => {
     if (!result.success) return false;
     const clip = resultClip(result);
@@ -413,6 +414,11 @@ export default function RecordingResultModal({
       contentClassName="min-h-0 overflow-y-auto bg-cs2-bg-page"
       footer={footer}
     >
+      {vpkRecovery.enabled && vpkRecovery.state !== "restored" ? (
+        <div role="alert" className="mx-4 mt-4 rounded-lg border border-cs2-border bg-cs2-rose-surface px-3 py-2.5 text-[11px] text-cs2-rose-on-surface sm:mx-5">
+          {t("queue.vpkRecoveryPending")}
+        </div>
+      ) : null}
       <div
         className={`mx-4 mt-4 flex items-start gap-2.5 rounded-lg border px-3 py-2.5 text-[11px] sm:mx-5 ${
           recovery.state === "restored"

@@ -210,6 +210,7 @@ export default {
   "queue.errorDemoSeek": "The Demo could not be positioned at the target clip. Reload the Demo and try again.",
   "queue.errorDemoControl": "The Demo could not be resumed, so this clip was not recorded.",
   "queue.errorUnknown": "An error occurred while recording. Check CS2 and OBS, then try again.",
+  "queue.vpkRecoveryPending": "Restoration of recording HUD or map effects is not yet verified. Close CS2 and restore temporary game resources in Parameters before starting another playback or recording.",
   "queue.configRecovery.restored.title": "Player configuration restored and verified",
   "queue.configRecovery.restored.desc": "{checked} configuration entries were checked file by file; {restored} files were written back. Their current contents match the pre-recording backup.",
   "queue.configRecovery.failed.title": "Player configuration recovery failed",

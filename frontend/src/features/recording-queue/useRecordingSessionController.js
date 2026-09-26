@@ -15,6 +15,7 @@ import {
   buildRecordingQueueRequestsFromQueue,
 } from "../../utils/recordingBatch";
 import { splitRecordWarmupConfirmPayload } from "../../utils/warmupDefaults";
+import { recordingVpkRecoverySummary } from "../../utils/recordingRecovery.js";
 import { normalizePovVoiceMode } from "../../utils/povVoiceMode.js";
 import { normalizeInputHudPosition } from "../../utils/inputHudPlacement.js";
 import { applyRecordingPlayerAliases, recordingAliasDemoTargets } from "../../utils/playerAliases.js";
@@ -200,9 +201,15 @@ export function useRecordingSessionController({
             || String(item?.error || "").toLowerCase() === "cs2_exited_unexpectedly",
         );
         const reportedRecovery = unexpectedExitResult?.recovery;
+        const vpkRecovery = recordingVpkRecoverySummary(results);
+        const vpkEnabled = vpkRecovery.enabled || session.experimental_pov_enabled
+          || session.recording_skybox !== "default"
+          || session.recording_map_material !== "default"
+          || session.recording_weather_effect !== "default"
+          || povHud.voice_mode !== "mute" || povHud.input_hud_enabled;
         const backupStatus = await refreshConfigBackupStatus();
         let povStatus = null;
-        if (session.experimental_pov_enabled) {
+        if (vpkEnabled) {
           try {
             const { data: nextPovStatus } = await API.get("experimental/pov/status");
             povStatus = nextPovStatus && typeof nextPovStatus === "object"
@@ -215,17 +222,17 @@ export function useRecordingSessionController({
         const configRecoveryNeeded = reportedRecovery?.player_config_restore_verified
           ? reportedRecovery.player_config_restored !== true
           : Boolean(backupStatus?.restore_required || backupStatus?.fetch_failed);
-        const povRecoveryNeeded = !session.experimental_pov_enabled
+        const povRecoveryNeeded = !vpkEnabled
           ? false
-          : reportedRecovery?.pov_restore_verified
-            ? reportedRecovery.pov_restored !== true
+          : vpkRecovery.enabled && vpkRecovery.state !== "unverified"
+            ? vpkRecovery.state !== "restored"
             : Boolean(povStatus?.needs_restore || povStatus?.fetch_failed);
         setRecordingRecoveryPrompt({ configRecoveryNeeded, povRecoveryNeeded });
         setRecordingBlockedMessage(t(unexpectedCs2ExitRecoveryMessageKey({
           configRecoveryNeeded,
-          povEnabled: session.experimental_pov_enabled,
+          povEnabled: vpkEnabled,
           povRecoveryNeeded,
-          povRecoveryMode: reportedRecovery?.pov_restore?.verification_mode,
+          povRecoveryMode: vpkRecovery.detail?.verification_mode,
         })));
         setRecordingBlockedCode("RECORDING_CS2_EXITED");
         setProgressText(t("app.unexpectedCs2ExitToast"), { isError: true });

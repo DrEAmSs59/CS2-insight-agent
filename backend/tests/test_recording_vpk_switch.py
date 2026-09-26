@@ -13,6 +13,61 @@ from app.recording import plan_builder
 from app.recording.executor import obs_recording_controller
 
 
+@pytest.mark.parametrize("stale", [False, True])
+@pytest.mark.parametrize("verified", [False, True])
+def test_all_effects_off_removes_stale_vpk_before_launch(monkeypatch, tmp_path, stale, verified):
+    events = []
+
+    class Manager:
+        def __init__(self, _config):
+            pass
+
+        def status(self):
+            return {"needs_restore": stale, "original_gameinfo_sha256": "a" * 64 if stale else None}
+
+        def install(self, **_kwargs):
+            pytest.fail("All effects off must never install a HUD or visual package")
+
+    def restore(*_args, **_kwargs):
+        events.append("restore")
+        return {"verified": verified, "error": "locked" if not verified else ""}
+
+    class Controller:
+        def __init__(self, *_args):
+            pass
+
+        async def force_stop_recording(self):
+            return True
+
+    monkeypatch.setattr(pov_hud_manager, "PovHudManager", Manager)
+    monkeypatch.setattr(pov_hud_manager, "restore_pov_after_cs2_exit", restore)
+    monkeypatch.setattr(obs_recording_controller, "OBSRecordingController", Controller)
+    monkeypatch.setattr(plan_builder, "build_plan", lambda _: None)
+    director = OBSDirector(OBSConfig(), str(tmp_path / "never-launch.exe"))
+
+    def launch(*_args):
+        events.append("launch")
+        raise RuntimeError("simulated launch failure")
+
+    monkeypatch.setattr(director, "_launch_cs2", launch)
+    monkeypatch.setattr(director, "_kill_cs2", lambda: None)
+    monkeypatch.setattr(director, "_cleanup_cs2_artifacts", lambda: None)
+    dto = SimpleNamespace(request_id="all-off", demo=SimpleNamespace(
+        demo_path=str(tmp_path / "test.dem"), demo_filename="test.dem",
+    ))
+    operation = director.execute_plan_queue([dto], warmup=RecordingWarmupExtras(
+        pov_hud_enabled=False, recording_hud_enabled=False,
+        input_hud_enabled=False, pov_voice_mode="mute",
+    ))
+    if stale and not verified:
+        with pytest.raises(PovHudError):
+            asyncio.run(operation)
+        assert "launch" not in events
+    else:
+        asyncio.run(operation)
+        assert events[0] == ("restore" if stale else "launch")
+
+
 @pytest.mark.parametrize("pov_enabled", [True, False])
 @pytest.mark.parametrize("failure", [None, "restore", "install"])
 def test_queue_restores_before_next_demo_and_never_launches_failed_package(

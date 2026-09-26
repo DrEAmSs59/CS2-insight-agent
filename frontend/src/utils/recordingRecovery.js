@@ -1,3 +1,23 @@
+export function recordingVpkRecoverySummary(results) {
+  const reports = (Array.isArray(results) ? results : [])
+    .map((item) => item?.recovery)
+    .filter((report) => report?.recording_vpk_enabled || report?.pov_enabled);
+  if (!reports.length) return { enabled: false, state: "not_needed", detail: null };
+  const summaries = reports.map((report) => {
+    const generic = report.recording_vpk_enabled === true;
+    const verified = generic ? report.recording_vpk_restore_verified : report.pov_restore_verified;
+    const restored = generic ? report.recording_vpk_restored : report.pov_restored;
+    return {
+      enabled: true,
+      state: verified === true ? (restored === true ? "restored" : "failed") : "unverified",
+      detail: report.recording_vpk_restore || report.pov_restore || null,
+    };
+  });
+  return summaries.find((item) => item.state === "failed")
+    || summaries.find((item) => item.state === "unverified")
+    || summaries[0];
+}
+
 export function recordingRecoverySummary(results) {
   const items = Array.isArray(results) ? results : [];
   const recovery = items

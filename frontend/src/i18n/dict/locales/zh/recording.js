@@ -210,6 +210,7 @@ export default {
   "queue.errorDemoSeek": "无法将 Demo 定位到目标片段，请重新载入 Demo 后重试。",
   "queue.errorDemoControl": "无法控制 Demo 继续播放，当前片段未能完成录制。",
   "queue.errorUnknown": "录制过程中发生错误，请检查 CS2 与 OBS 状态后重试。",
+  "queue.vpkRecoveryPending": "录制 HUD 或地图效果资源尚未确认恢复。请先关闭 CS2，到常用参数中恢复临时游戏资源，再开始下一次播放或录制。",
   "queue.configRecovery.restored.title": "玩家配置已恢复并验证",
   "queue.configRecovery.restored.desc": "已逐文件核对 {checked} 个配置项，其中 {restored} 个文件执行了写回；当前内容与录制前备份一致。",
   "queue.configRecovery.failed.title": "玩家配置恢复失败",

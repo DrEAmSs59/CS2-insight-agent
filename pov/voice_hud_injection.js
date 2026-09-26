@@ -1066,7 +1066,7 @@
     }
 
     function advancedPovVisualsActive() {
-        return !advancedPlayback || advancedPovVisualsEnabled;
+        return advancedPlayback ? advancedPovVisualsEnabled : recordingPovVisualsEnabled;
     }
 
     function runtimeSlotForXuid(xuid) {

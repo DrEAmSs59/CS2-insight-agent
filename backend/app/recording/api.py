@@ -745,7 +745,8 @@ async def execute_recording_queue(
         recording_skybox_id = normalize_skybox_id(raw_skybox_id)
     except SkyboxVpkError as exc:
         raise HTTPException(422, str(exc)) from exc
-    if recording_skybox_id != DEFAULT_SKYBOX_ID:
+    # Explicit default choices must clear values from an older warmup payload.
+    if warmup_extras is not None or recording_skybox_id != DEFAULT_SKYBOX_ID:
         if warmup_extras is None:
             warmup_extras = RecordingWarmupExtras()
         warmup_extras = dataclasses.replace(
@@ -800,7 +801,8 @@ async def execute_recording_queue(
         raise HTTPException(422, "打蜡与天气效果不能同时启用。")
 
     if (
-        recording_map_material_id != DEFAULT_MAP_MATERIAL_ID
+        warmup_extras is not None
+        or recording_map_material_id != DEFAULT_MAP_MATERIAL_ID
         or recording_weather_effect_id != DEFAULT_WEATHER_EFFECT_ID
     ):
         if warmup_extras is None:

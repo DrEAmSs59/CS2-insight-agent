@@ -3755,12 +3755,32 @@ class OBSDirector:
             # Do not continue into POV installation or launch CS2 after that.
             self._check_abort()
 
-            # ── Recording VPK manager (normal sky-only or POV + sky) ─────────
-            if recording_vpk_on_v3:
+            # Even an all-off session must remove a previous interrupted
+            # session's package before CS2 reads gameinfo.gi again.
+            if recording_vpk_on_v3 or self.cs2_path:
                 try:
                     from .env_utils import load_config as _load_cfg
                     _app_cfg = _load_cfg()
                     pov_mgr_v3 = PovHudManager(_app_cfg)
+                    if not recording_vpk_on_v3:
+                        stale_status = pov_mgr_v3.status()
+                        if stale_status.get("needs_restore"):
+                            pov_install_attempted = True
+                            pov_expected_gameinfo_sha256 = str(
+                                stale_status.get("original_gameinfo_sha256") or ""
+                            ).strip().lower() or None
+                            pov_restoration = await asyncio.to_thread(
+                                restore_pov_after_cs2_exit,
+                                pov_mgr_v3,
+                                pov_expected_gameinfo_sha256,
+                                is_running=is_cs2_running,
+                                logger=logger,
+                            )
+                            if not pov_restoration.get("verified"):
+                                raise PovHudError(
+                                    "上次录制 VPK 恢复校验失败："
+                                    f"{pov_restoration.get('error') or '未通过校验'}"
+                                )
                 except PovHudError as _pov_e:
                     raise PovHudError(f"录制 VPK 初始化失败：{_pov_e}") from _pov_e
 
@@ -4320,6 +4340,16 @@ class OBSDirector:
                 "pov_restore_verified": pov_restore_checked if pov_on_v3 else True,
                 "pov_restored": pov_restore_ok if pov_on_v3 else True,
             }
+            if recording_vpk_on_v3 or pov_install_attempted:
+                recovery.update(
+                    {
+                        "recording_vpk_enabled": True,
+                        "recording_hud_enabled": recording_hud_on_v3,
+                        "recording_vpk_restore_verified": pov_restore_checked,
+                        "recording_vpk_restored": pov_restore_ok,
+                        "recording_vpk_restore": pov_restoration,
+                    }
+                )
             if skybox_on_v3:
                 recovery.update(
                     {
