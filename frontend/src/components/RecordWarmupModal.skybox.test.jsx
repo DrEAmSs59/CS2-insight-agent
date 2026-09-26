@@ -19,6 +19,26 @@ describe("RecordWarmupModal skybox override", () => {
     useLocaleStore.getState().hydrate("zh");
   });
 
+  it.each([false, true].flatMap((pov) => ["default", "waxed_reflection", "rain"].flatMap((appearance) =>
+    ["default", "cartoon3", "chroma_blue", "chroma_green"].map((skybox) => ({ pov, appearance, skybox })),
+  )))("submits independent final choices after toggling controls: %j", ({ pov, appearance, skybox }) => {
+    const onConfirm = vi.fn();
+    render(<RecordWarmupModal open onClose={() => {}} onConfirm={onConfirm} experimentalPovEnabled={!pov} />);
+    fireEvent.change(screen.getByRole("combobox", { name: "录制地图材质" }), { target: { value: appearance } });
+    fireEvent.change(screen.getByRole("combobox", { name: "录制天空盒" }), { target: { value: skybox } });
+    fireEvent.change(screen.getByRole("combobox", { name: "语音控制" }), { target: { value: "mute" } });
+    fireEvent.change(screen.getByRole("combobox", { name: "按键显示方式" }), { target: { value: "hidden" } });
+    fireEvent.click(screen.getByTestId("experimental-pov-card").querySelector("input[type=checkbox]"));
+    fireEvent.click(screen.getByRole("button", { name: "开始录制" }));
+    expect(onConfirm).toHaveBeenCalledWith(expect.objectContaining({
+      experimental_pov_enabled: pov,
+      recording_skybox: skybox,
+      recording_map_material: appearance === "waxed_reflection" ? appearance : "default",
+      recording_weather_effect: appearance === "rain" ? "rain" : "default",
+      pov_voice_mode: "mute", input_hud_enabled: false,
+    }));
+  });
+
   it("starts from the saved preset and submits the dialog selection", () => {
     const onConfirm = vi.fn();
     render(

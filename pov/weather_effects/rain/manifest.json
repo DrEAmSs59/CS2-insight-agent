@@ -1774,7 +1774,310 @@
         "annotation": "pov/weather_effects/regions/de_mirage_rain_annotation.png",
         "correction_annotation": "pov/weather_effects/regions/de_mirage_rain_correction_v2.png",
         "visual_resources": "accepted rain particle in rain_particles; native streak texture and ground-impact child from installed CS2"
-      }
+      },
+      "source_variants": [
+        {
+          "status": "validated",
+          "main_source": {
+            "source_package_relative_path": "maps/de_mirage.vpk",
+            "source_package_size": 176187297,
+            "source_package_sha256": "e66cdf1ae6a976f6f6ba510a2addd04b25a4c1cfd811f51f1ef13f0954e6e350",
+            "expected_output_size": 176453225,
+            "expected_output_sha256": "7e291e5f4b360ec8c53f7bd1ea37b0439118d60019126c133c19c07d8a543d10",
+            "expected_output_entry_count": 699,
+            "output_logical_path": "maps/de_mirage.vpk"
+          },
+          "loose_outer_replacements": [
+            {
+              "kind": "main_entity_lump",
+              "status": "validated",
+              "source_package_relative_path": "maps/de_mirage.vpk",
+              "source_package_size": 176187297,
+              "source_package_sha256": "e66cdf1ae6a976f6f6ba510a2addd04b25a4c1cfd811f51f1ef13f0954e6e350",
+              "entry_path": "maps/de_mirage/entities/default_ents.vents_c",
+              "original_size": 70915,
+              "original_sha256": "81e72e970cc0a7b0cd819fa7d76c4562eebe38ad5a216753dd5c5f5fed4fc2c9",
+              "original_crc32": "65e81999",
+              "payload_relative_path": "versions/25472966/de_mirage/default_ents.vents_c",
+              "payload_size": 113486,
+              "payload_sha256": "94686b882e6eade18e3540daed3abb17e8543a3230a03dc9ec869d3d68aa5790",
+              "payload_crc32": "3b07a4aa"
+            },
+            {
+              "kind": "main_worldnode_static_model",
+              "status": "validated",
+              "source_package_relative_path": "maps/de_mirage.vpk",
+              "source_package_size": 176187297,
+              "source_package_sha256": "e66cdf1ae6a976f6f6ba510a2addd04b25a4c1cfd811f51f1ef13f0954e6e350",
+              "entry_path": "maps/de_mirage/worldnodes/n0_lr0_c104_s_mesh_overlay104.vmdl_c",
+              "original_size": 8681,
+              "original_sha256": "636bc4db647af275b3477e892a7227ca87e86ad4aaad6f7a0f2aacd31da0e87f",
+              "original_crc32": "b3eda13b",
+              "payload_relative_path": "de_mirage/worldnodes/n0_lr0_c104_s_mesh_overlay104.vmdl_c",
+              "payload_size": 9660,
+              "payload_sha256": "092a975008d40bdfec63b9d9067ea9904523c523cafdfbfa8dd7e88118143649",
+              "payload_crc32": "fea1526c"
+            },
+            {
+              "kind": "main_worldnode_static_model",
+              "status": "validated",
+              "source_package_relative_path": "maps/de_mirage.vpk",
+              "source_package_size": 176187297,
+              "source_package_sha256": "e66cdf1ae6a976f6f6ba510a2addd04b25a4c1cfd811f51f1ef13f0954e6e350",
+              "entry_path": "maps/de_mirage/worldnodes/n0_lr0_c111_s_mesh_overlay111.vmdl_c",
+              "original_size": 5977,
+              "original_sha256": "0978616b5121e54777a4d675e640c8d39fed67c43ed31e35998494b0c2b0be73",
+              "original_crc32": "4d0d23fb",
+              "payload_relative_path": "de_mirage/worldnodes/n0_lr0_c111_s_mesh_overlay111.vmdl_c",
+              "payload_size": 12299,
+              "payload_sha256": "f0d8c997b990bc21bb27e5b8b7f9eccab847eb04204c60a8fae59396cc58650f",
+              "payload_crc32": "c4e0bc9b"
+            },
+            {
+              "kind": "main_worldnode_static_model",
+              "status": "validated",
+              "source_package_relative_path": "maps/de_mirage.vpk",
+              "source_package_size": 176187297,
+              "source_package_sha256": "e66cdf1ae6a976f6f6ba510a2addd04b25a4c1cfd811f51f1ef13f0954e6e350",
+              "entry_path": "maps/de_mirage/worldnodes/n0_lr0_c11_s_mesh_overlay11.vmdl_c",
+              "original_size": 5573,
+              "original_sha256": "30ce356ef850cab874bf06870f0eb454b05536c0e2b2257377fe30cb0ce848f6",
+              "original_crc32": "090837cc",
+              "payload_relative_path": "de_mirage/worldnodes/n0_lr0_c11_s_mesh_overlay11.vmdl_c",
+              "payload_size": 8346,
+              "payload_sha256": "815a5ef1f05f70c11f63b2860ce1575f4364a1e02e2b03f442ccc2928baa756e",
+              "payload_crc32": "d5590566"
+            },
+            {
+              "kind": "main_worldnode_static_model",
+              "status": "validated",
+              "source_package_relative_path": "maps/de_mirage.vpk",
+              "source_package_size": 176187297,
+              "source_package_sha256": "e66cdf1ae6a976f6f6ba510a2addd04b25a4c1cfd811f51f1ef13f0954e6e350",
+              "entry_path": "maps/de_mirage/worldnodes/n0_lr0_c125_s_mesh_overlay125.vmdl_c",
+              "original_size": 5513,
+              "original_sha256": "5dbed67fde5885660b479588d4d2e03a5cf8cf51069dacf1986cf4a8d2d7665b",
+              "original_crc32": "4c788904",
+              "payload_relative_path": "de_mirage/worldnodes/n0_lr0_c125_s_mesh_overlay125.vmdl_c",
+              "payload_size": 7516,
+              "payload_sha256": "b89ae67fb1f27d68460cb537244ca7f608bfc0b8bdeb31055fce0cccfa4f5b05",
+              "payload_crc32": "ff6b3938"
+            },
+            {
+              "kind": "main_worldnode_static_model",
+              "status": "validated",
+              "source_package_relative_path": "maps/de_mirage.vpk",
+              "source_package_size": 176187297,
+              "source_package_sha256": "e66cdf1ae6a976f6f6ba510a2addd04b25a4c1cfd811f51f1ef13f0954e6e350",
+              "entry_path": "maps/de_mirage/worldnodes/n0_lr0_c147_s_mesh_overlay147.vmdl_c",
+              "original_size": 5337,
+              "original_sha256": "c4f5fb350a48769f9d2c8198cc2920459bc84cff3e43ee03a8bf79ca0b7a0cea",
+              "original_crc32": "8a580b73",
+              "payload_relative_path": "de_mirage/worldnodes/n0_lr0_c147_s_mesh_overlay147.vmdl_c",
+              "payload_size": 9804,
+              "payload_sha256": "da54fec5b9ac1fb3044b0a2253ace5c3505559d1699b51b71edebad3f0b28b91",
+              "payload_crc32": "80f435c2"
+            },
+            {
+              "kind": "main_worldnode_static_model",
+              "status": "validated",
+              "source_package_relative_path": "maps/de_mirage.vpk",
+              "source_package_size": 176187297,
+              "source_package_sha256": "e66cdf1ae6a976f6f6ba510a2addd04b25a4c1cfd811f51f1ef13f0954e6e350",
+              "entry_path": "maps/de_mirage/worldnodes/n0_lr0_c14_s_mesh_overlay14.vmdl_c",
+              "original_size": 5509,
+              "original_sha256": "22115e96e30b21134ba5c84a69e6dec33388827929a93f542c0e1e858d7a52e0",
+              "original_crc32": "328d788f",
+              "payload_relative_path": "de_mirage/worldnodes/n0_lr0_c14_s_mesh_overlay14.vmdl_c",
+              "payload_size": 9530,
+              "payload_sha256": "a610a144acbaf490001b5b845403e930d5955da9b87822c5a8108c0450334f5e",
+              "payload_crc32": "99a92313"
+            },
+            {
+              "kind": "main_worldnode_static_model",
+              "status": "validated",
+              "source_package_relative_path": "maps/de_mirage.vpk",
+              "source_package_size": 176187297,
+              "source_package_sha256": "e66cdf1ae6a976f6f6ba510a2addd04b25a4c1cfd811f51f1ef13f0954e6e350",
+              "entry_path": "maps/de_mirage/worldnodes/n0_lr0_c191_s_mesh_overlay191.vmdl_c",
+              "original_size": 5369,
+              "original_sha256": "6b0d686498c4caf3276d876091cb1de47c91abe6a7e2bca73dc5789f50bbcead",
+              "original_crc32": "210a8402",
+              "payload_relative_path": "de_mirage/worldnodes/n0_lr0_c191_s_mesh_overlay191.vmdl_c",
+              "payload_size": 7404,
+              "payload_sha256": "d202dfe0141057ea6290d09d5a3ecc4f96a9706fd223998b737f90b9aecdfe2c",
+              "payload_crc32": "bbfcd44b"
+            },
+            {
+              "kind": "main_worldnode_static_model",
+              "status": "validated",
+              "source_package_relative_path": "maps/de_mirage.vpk",
+              "source_package_size": 176187297,
+              "source_package_sha256": "e66cdf1ae6a976f6f6ba510a2addd04b25a4c1cfd811f51f1ef13f0954e6e350",
+              "entry_path": "maps/de_mirage/worldnodes/n0_lr0_c192_s_mesh_overlay192.vmdl_c",
+              "original_size": 5017,
+              "original_sha256": "fb5ebad24de1dd3926170061c26c6879227ca873773a52a4cc00b49bd97a2ad4",
+              "original_crc32": "46e8b3a6",
+              "payload_relative_path": "de_mirage/worldnodes/n0_lr0_c192_s_mesh_overlay192.vmdl_c",
+              "payload_size": 7483,
+              "payload_sha256": "2957abaf2ad3b9942295a2fcf1e0c295f99a241779fe51335a92c84e3c8411a0",
+              "payload_crc32": "09ea29e9"
+            },
+            {
+              "kind": "main_worldnode_static_model",
+              "status": "validated",
+              "source_package_relative_path": "maps/de_mirage.vpk",
+              "source_package_size": 176187297,
+              "source_package_sha256": "e66cdf1ae6a976f6f6ba510a2addd04b25a4c1cfd811f51f1ef13f0954e6e350",
+              "entry_path": "maps/de_mirage/worldnodes/n0_lr0_c22_s_mesh_overlay22.vmdl_c",
+              "original_size": 6005,
+              "original_sha256": "739e78ac1d3e4e64366ff7d44489ca1e958ba86c491c31e067f3b95d3714688a",
+              "original_crc32": "a269ab2a",
+              "payload_relative_path": "de_mirage/worldnodes/n0_lr0_c22_s_mesh_overlay22.vmdl_c",
+              "payload_size": 8490,
+              "payload_sha256": "0536f1d6b2d4ed54e12546ef4dd41445f70e33c85fe75b50172deac50b4ef005",
+              "payload_crc32": "f2a578a1"
+            },
+            {
+              "kind": "main_worldnode_static_model",
+              "status": "validated",
+              "source_package_relative_path": "maps/de_mirage.vpk",
+              "source_package_size": 176187297,
+              "source_package_sha256": "e66cdf1ae6a976f6f6ba510a2addd04b25a4c1cfd811f51f1ef13f0954e6e350",
+              "entry_path": "maps/de_mirage/worldnodes/n0_lr0_c253_s_mesh_overlay253.vmdl_c",
+              "original_size": 5177,
+              "original_sha256": "3dd79728d308274be2aa122891caa915c1c74408c7eed06dff3f2020036d4544",
+              "original_crc32": "859be1f7",
+              "payload_relative_path": "de_mirage/worldnodes/n0_lr0_c253_s_mesh_overlay253.vmdl_c",
+              "payload_size": 9628,
+              "payload_sha256": "1211911df2b8ce1a6f8394c59bb340dbd58ad07b890f4781e18cb6141399513a",
+              "payload_crc32": "107b6fba"
+            },
+            {
+              "kind": "main_worldnode_static_model",
+              "status": "validated",
+              "source_package_relative_path": "maps/de_mirage.vpk",
+              "source_package_size": 176187297,
+              "source_package_sha256": "e66cdf1ae6a976f6f6ba510a2addd04b25a4c1cfd811f51f1ef13f0954e6e350",
+              "entry_path": "maps/de_mirage/worldnodes/n0_lr0_c280_s_mesh_overlay280.vmdl_c",
+              "original_size": 5657,
+              "original_sha256": "df1160c2800e69f1dea1b7d0cce41b4c6086951cca9c367f32b1ca73f7d92281",
+              "original_crc32": "bedd173f",
+              "payload_relative_path": "de_mirage/worldnodes/n0_lr0_c280_s_mesh_overlay280.vmdl_c",
+              "payload_size": 10508,
+              "payload_sha256": "b0797d2fcf4598f89b05eee34728c6c1d36550fb7aee54336fedc5546cbd34f0",
+              "payload_crc32": "62659239"
+            },
+            {
+              "kind": "main_worldnode_static_model",
+              "status": "validated",
+              "source_package_relative_path": "maps/de_mirage.vpk",
+              "source_package_size": 176187297,
+              "source_package_sha256": "e66cdf1ae6a976f6f6ba510a2addd04b25a4c1cfd811f51f1ef13f0954e6e350",
+              "entry_path": "maps/de_mirage/worldnodes/n0_lr0_c45_s_mesh_overlay45.vmdl_c",
+              "original_size": 4693,
+              "original_sha256": "6139678c400fe43205dce1609d7432495deaf3df908d588b6b912a06ea6fc63c",
+              "original_crc32": "5b517577",
+              "payload_relative_path": "de_mirage/worldnodes/n0_lr0_c45_s_mesh_overlay45.vmdl_c",
+              "payload_size": 13482,
+              "payload_sha256": "d7414860eea73814b7a49ab81adae42f38cda4869dd0913a47a73240f428abb2",
+              "payload_crc32": "9f233e58"
+            },
+            {
+              "kind": "main_worldnode_static_model",
+              "status": "validated",
+              "source_package_relative_path": "maps/de_mirage.vpk",
+              "source_package_size": 176187297,
+              "source_package_sha256": "e66cdf1ae6a976f6f6ba510a2addd04b25a4c1cfd811f51f1ef13f0954e6e350",
+              "entry_path": "maps/de_mirage/worldnodes/n0_lr0_c48_s_mesh_overlay48.vmdl_c",
+              "original_size": 5349,
+              "original_sha256": "dfdc15477fb811725d874bf7004de0be3a342b84c0bfdf76a925e48ca973e12a",
+              "original_crc32": "d48d512a",
+              "payload_relative_path": "de_mirage/worldnodes/n0_lr0_c48_s_mesh_overlay48.vmdl_c",
+              "payload_size": 9322,
+              "payload_sha256": "2a763c22a033312424db68b64b91f572c183b4a547086868c82d4454b2310414",
+              "payload_crc32": "be66f257"
+            },
+            {
+              "kind": "main_worldnode_static_model",
+              "status": "validated",
+              "source_package_relative_path": "maps/de_mirage.vpk",
+              "source_package_size": 176187297,
+              "source_package_sha256": "e66cdf1ae6a976f6f6ba510a2addd04b25a4c1cfd811f51f1ef13f0954e6e350",
+              "entry_path": "maps/de_mirage/worldnodes/n0_lr0_c4_s_mesh_overlay4.vmdl_c",
+              "original_size": 5525,
+              "original_sha256": "b059b606862db241b01f28b9731346baa3f0f09878a9947bf0e418c40a2295e6",
+              "original_crc32": "630b7553",
+              "payload_relative_path": "de_mirage/worldnodes/n0_lr0_c4_s_mesh_overlay4.vmdl_c",
+              "payload_size": 6952,
+              "payload_sha256": "ed66782508cad7693d9831b9ea1538a13e192b3337a0d03f183e8f03ad651dc3",
+              "payload_crc32": "53b00ca6"
+            },
+            {
+              "kind": "main_worldnode_static_model",
+              "status": "validated",
+              "source_package_relative_path": "maps/de_mirage.vpk",
+              "source_package_size": 176187297,
+              "source_package_sha256": "e66cdf1ae6a976f6f6ba510a2addd04b25a4c1cfd811f51f1ef13f0954e6e350",
+              "entry_path": "maps/de_mirage/worldnodes/n0_lr0_c60_s_mesh_overlay60.vmdl_c",
+              "original_size": 5669,
+              "original_sha256": "5d8fd1579ca3c575ee7a8349e4d53e187ed2c2650a8827b475568d2ae522054d",
+              "original_crc32": "d8fbe049",
+              "payload_relative_path": "de_mirage/worldnodes/n0_lr0_c60_s_mesh_overlay60.vmdl_c",
+              "payload_size": 9402,
+              "payload_sha256": "4f860890d0f0c7d14d58f67d890577a46ea955047c5262d5cb985ee840d63831",
+              "payload_crc32": "bd2e8449"
+            },
+            {
+              "kind": "main_worldnode_static_model",
+              "status": "validated",
+              "source_package_relative_path": "maps/de_mirage.vpk",
+              "source_package_size": 176187297,
+              "source_package_sha256": "e66cdf1ae6a976f6f6ba510a2addd04b25a4c1cfd811f51f1ef13f0954e6e350",
+              "entry_path": "maps/de_mirage/worldnodes/n0_lr0_c6_s_mesh_overlay6.vmdl_c",
+              "original_size": 5445,
+              "original_sha256": "bfc80cd4b42caaca9d950b7c7022bd64fcb678bd897f5f8e0a3c5cf4bb246082",
+              "original_crc32": "f14766ef",
+              "payload_relative_path": "de_mirage/worldnodes/n0_lr0_c6_s_mesh_overlay6.vmdl_c",
+              "payload_size": 7080,
+              "payload_sha256": "bbb2898970e5828aad549465538753705f485ec4c3f00fd703aea1f810af65c5",
+              "payload_crc32": "f1379ff8"
+            },
+            {
+              "kind": "main_worldnode_static_model",
+              "status": "validated",
+              "source_package_relative_path": "maps/de_mirage.vpk",
+              "source_package_size": 176187297,
+              "source_package_sha256": "e66cdf1ae6a976f6f6ba510a2addd04b25a4c1cfd811f51f1ef13f0954e6e350",
+              "entry_path": "maps/de_mirage/worldnodes/n0_lr0_c86_s_mesh_overlay86.vmdl_c",
+              "original_size": 5445,
+              "original_sha256": "dc167c596dccaabb023292bdce76902a1d3c4ff46efc24e921b106ab25a1cdb1",
+              "original_crc32": "a34ddcb6",
+              "payload_relative_path": "de_mirage/worldnodes/n0_lr0_c86_s_mesh_overlay86.vmdl_c",
+              "payload_size": 11322,
+              "payload_sha256": "42aeb11e8a36dbc760cc2cb181ea117c8f7f4c693aaed36a1585ebbd09da5275",
+              "payload_crc32": "4b9757b2"
+            }
+          ],
+          "compatibility_evidence": {
+            "steam_build_id": "25472966",
+            "patch_version": "1.41.8.2",
+            "base_source_sha256": "dc8f0d125014b00218582d0ab9a2f684638fa17054924fba34d07c2ef479e268",
+            "validation": "existing accepted rain delta rebased onto the updated official entity lump",
+            "rain_layout_and_parameters_unchanged": true,
+            "all_rain_additions_identical": true,
+            "rain_additions_preserved": 832,
+            "new_official_entity_count": 561,
+            "other_new_entity_data_preserved": true,
+            "new_entity_dependency_blocks_preserved": true,
+            "rain_dependency_additions_preserved": [],
+            "serialization_verified": true,
+            "new_in_game_validation_performed": false,
+            "reused_overlay_models": 17,
+            "maximum_overlay_position_or_uv_delta": 0.0001983642578125
+          }
+        }
+      ]
     },
     "de_cache": {
       "status": "validated",
@@ -2883,7 +3186,55 @@
         "normal_before_sha256": "f297f0e8fd4b817a13553a73aa03486b367d5bb79d6a75ccf06c955e3d9bc5e0",
         "source": "weather-effects current seven-map preview",
         "normal_in_game_validation": "pending"
-      }
+      },
+      "source_variants": [
+        {
+          "status": "validated",
+          "main_source": {
+            "source_package_relative_path": "maps/de_cache.vpk",
+            "source_package_size": 308788626,
+            "source_package_sha256": "a53d4294883fb2c51025cfa3d4208fa396494f9492ebd51ea7138e8a231aefcd",
+            "expected_output_size": 308902257,
+            "expected_output_sha256": "5e7553fab074f3e43aae1a84c7733f35d0af642dde7bc94f852e1a202a5e15f4",
+            "expected_output_entry_count": 807,
+            "output_logical_path": "maps/de_cache.vpk"
+          },
+          "loose_outer_replacements": [
+            {
+              "kind": "main_entity_lump",
+              "status": "validated",
+              "source_package_relative_path": "maps/de_cache.vpk",
+              "source_package_size": 308788626,
+              "source_package_sha256": "a53d4294883fb2c51025cfa3d4208fa396494f9492ebd51ea7138e8a231aefcd",
+              "entry_path": "maps/de_cache/entities/default_ents.vents_c",
+              "original_size": 76641,
+              "original_sha256": "8897fd26831d4c1e0b7eff7f9916a165d524d073fad1a2e7d214984bbbc3dae8",
+              "original_crc32": "564c5e69",
+              "payload_relative_path": "versions/25472966/de_cache/default_ents.vents_c",
+              "payload_size": 122973,
+              "payload_sha256": "77809063c23786e9ff272d5de6332e6c2b33c64fd4e13459fd13cd7ab37209e3",
+              "payload_crc32": "7f844734"
+            }
+          ],
+          "compatibility_evidence": {
+            "steam_build_id": "25472966",
+            "patch_version": "1.41.8.2",
+            "base_source_sha256": "958bfb79888c33704ba3582253bb1244d13ab5a89aa29d1b7842fa0ac0855305",
+            "validation": "existing accepted rain delta rebased onto the updated official entity lump",
+            "rain_layout_and_parameters_unchanged": true,
+            "all_rain_additions_identical": true,
+            "rain_additions_preserved": 969,
+            "new_official_entity_count": 424,
+            "other_new_entity_data_preserved": true,
+            "new_entity_dependency_blocks_preserved": true,
+            "rain_dependency_additions_preserved": [
+              "particles/rain_fx/rain_single_128.vpcf"
+            ],
+            "serialization_verified": true,
+            "new_in_game_validation_performed": false
+          }
+        }
+      ]
     },
     "de_inferno": {
       "status": "validated",
@@ -5635,7 +5986,53 @@
         "annotation_status": "automatic_geometry_candidate",
         "selected_preview": "pov/weather_effects/regions/de_ancient_rain_selected_preview.png",
         "visual_resources": "accepted rain particle in rain_particles; native streak texture and ground-impact child from installed CS2"
-      }
+      },
+      "source_variants": [
+        {
+          "status": "validated",
+          "main_source": {
+            "source_package_relative_path": "maps/de_ancient.vpk",
+            "source_package_size": 405482447,
+            "source_package_sha256": "6e54d22ff86709d71843b52febbfe6fcd48633a20b6a2b25c6ffbdf0b796d712",
+            "expected_output_size": 405551081,
+            "expected_output_sha256": "95bfc9eb2c2ee3ea4112e589c6390fc8f6d7d8f7ba086d5f96b82040731128a2",
+            "expected_output_entry_count": 497,
+            "output_logical_path": "maps/de_ancient.vpk"
+          },
+          "loose_outer_replacements": [
+            {
+              "kind": "main_entity_lump",
+              "status": "validated",
+              "source_package_relative_path": "maps/de_ancient.vpk",
+              "source_package_size": 405482447,
+              "source_package_sha256": "6e54d22ff86709d71843b52febbfe6fcd48633a20b6a2b25c6ffbdf0b796d712",
+              "entry_path": "maps/de_ancient/entities/default_ents.vents_c",
+              "original_size": 64268,
+              "original_sha256": "f378fc57121553d710d14600b5c07fbd89c32e3e3db80a8660a0c5ef607ad822",
+              "original_crc32": "d744f7b5",
+              "payload_relative_path": "versions/25472966/de_ancient/default_ents.vents_c",
+              "payload_size": 80552,
+              "payload_sha256": "4ac8a07459936f5503f22462e67fb70b76f17ba2734882a4af27bf434bd8b3d4",
+              "payload_crc32": "486c5354"
+            }
+          ],
+          "compatibility_evidence": {
+            "steam_build_id": "25472966",
+            "patch_version": "1.41.8.2",
+            "base_source_sha256": "db67fb7c45e4a92a87473dc8d9dae0b5ead6887e282ecd7d98076f5c01af0d26",
+            "validation": "existing accepted rain delta rebased onto the updated official entity lump",
+            "rain_layout_and_parameters_unchanged": true,
+            "all_rain_additions_identical": true,
+            "rain_additions_preserved": 166,
+            "new_official_entity_count": 348,
+            "other_new_entity_data_preserved": true,
+            "new_entity_dependency_blocks_preserved": true,
+            "rain_dependency_additions_preserved": [],
+            "serialization_verified": true,
+            "new_in_game_validation_performed": false
+          }
+        }
+      ]
     },
     "de_nuke": {
       "status": "validated",
@@ -5963,7 +6360,53 @@
         "visual_resources": "accepted rain particle in rain_particles; native streak texture and ground-impact child from installed CS2",
         "static_wet_overlay_count": 0,
         "localized_puddle_count": 0
-      }
+      },
+      "source_variants": [
+        {
+          "status": "validated",
+          "main_source": {
+            "source_package_relative_path": "maps/de_nuke.vpk",
+            "source_package_size": 246935525,
+            "source_package_sha256": "ab56860b13c86ead3f0f17f1488e4cec44ac0208dbfdda9f1fecb5d5e769d4a7",
+            "expected_output_size": 247033670,
+            "expected_output_sha256": "8ff3e506d32822ef4c9763b9cd6df9b82a3ece98b2cc4cfea3f4029fe876c760",
+            "expected_output_entry_count": 827,
+            "output_logical_path": "maps/de_nuke.vpk"
+          },
+          "loose_outer_replacements": [
+            {
+              "kind": "main_entity_lump",
+              "status": "validated",
+              "source_package_relative_path": "maps/de_nuke.vpk",
+              "source_package_size": 246935525,
+              "source_package_sha256": "ab56860b13c86ead3f0f17f1488e4cec44ac0208dbfdda9f1fecb5d5e769d4a7",
+              "entry_path": "maps/de_nuke/entities/default_ents.vents_c",
+              "original_size": 80445,
+              "original_sha256": "a2e3c74d1fdd9f2429b70904ec308d3537ee538128f6b285085099d2b1f9937d",
+              "original_crc32": "285bc1d5",
+              "payload_relative_path": "versions/25472966/de_nuke/default_ents.vents_c",
+              "payload_size": 105835,
+              "payload_sha256": "81ee8d63bc6b32d9189602268e38857db25b08b14066f82ccb46c616cbc42520",
+              "payload_crc32": "49bd4c15"
+            }
+          ],
+          "compatibility_evidence": {
+            "steam_build_id": "25472966",
+            "patch_version": "1.41.8.2",
+            "base_source_sha256": "616286bdfba283f8026cb719321e4c2d0986f04ce925cb13b0ff7ff913c33007",
+            "validation": "existing accepted rain delta rebased onto the updated official entity lump",
+            "rain_layout_and_parameters_unchanged": true,
+            "all_rain_additions_identical": true,
+            "rain_additions_preserved": 221,
+            "new_official_entity_count": 702,
+            "other_new_entity_data_preserved": true,
+            "new_entity_dependency_blocks_preserved": true,
+            "rain_dependency_additions_preserved": [],
+            "serialization_verified": true,
+            "new_in_game_validation_performed": false
+          }
+        }
+      ]
     }
   }
 }

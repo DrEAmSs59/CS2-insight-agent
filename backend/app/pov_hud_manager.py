@@ -1350,18 +1350,7 @@ class PovHudManager:
                     raise ChromaSkyboxChildError(
                         "outer POV package unexpectedly contains a nested child skybox"
                     )
-                outer_build = write_inline_vpk_file(
-                    output_path=staging_dir / "pov.vpk",
-                    byte_entries=outer_entries,
-                )
-                staged_package_path = outer_build.output_path
-                package_bytes = None
                 chroma_child_metadata = child_build.metadata
-                chroma_outer_metadata = {
-                    **outer_build.metadata,
-                    "logical_path": "csgo/pov.vpk",
-                    "skybox_id": selected_skybox,
-                }
                 chroma_official_swap_metadata = {
                     "schema_version": 1,
                     "route": _CHROMA_OFFICIAL_SWAP_ROUTE,
@@ -1497,6 +1486,25 @@ class PovHudManager:
                     }
                 except (OSError, ValueError, TypeError, WeatherParticleVpkError) as exc:
                     raise PovHudError(f"雨滴粒子 VPK 生成失败：{exc}") from exc
+
+        # Weather may append particle overrides to the same outer package.
+        # Finalize it only after every selected layer has been composed, so the
+        # staged file and its verified hash describe the bytes we will install.
+        if chroma_child_metadata is not None:
+            try:
+                outer_build = write_inline_vpk_file(
+                    output_path=staging_dir / "pov.vpk",
+                    byte_entries=read_inline_vpk(package_bytes),
+                )
+                staged_package_path = outer_build.output_path
+                package_bytes = None
+                chroma_outer_metadata = {
+                    **outer_build.metadata,
+                    "logical_path": "csgo/pov.vpk",
+                    "skybox_id": selected_skybox,
+                }
+            except (OSError, DemoVoiceHudError, InlineVpkStreamError) as exc:
+                raise PovHudError(f"蓝/绿幕运行 VPK 生成失败：{exc}") from exc
 
         if staged_chroma_swap_files:
             chroma_official_swap_metadata = {

@@ -27,6 +27,43 @@ describe("recording queue player aliases", () => {
     }));
   });
 
+  it.each([
+    { recording_skybox: "cartoon3" },
+    { recording_map_material: "waxed_reflection" },
+    { recording_weather_effect: "rain" },
+    { pov_voice_mode: "team" },
+    { input_hud_enabled: true },
+  ])("reports VPK recovery failure with POV off: %j", async (selection) => {
+    const options = {
+      t: (key) => key, setProgressText: vi.fn(), setQueueDrawerOpen: vi.fn(),
+      queue: [{ id: "demo-a" }], clearQueue: vi.fn(), obsConfig: {},
+      uploadedDemos: [], parsedMatches: {}, demoLibraryItems: [],
+    };
+    API.post.mockImplementation(async (url) => ({ data: url === "/obs/config-check"
+      ? { connected: true }
+      : [{ error_code: "RECORDING_CS2_EXITED", recovery: {
+        player_config_restore_verified: true, player_config_restored: true,
+        pov_enabled: false, pov_restored: true,
+        recording_vpk_enabled: true, recording_vpk_restore_verified: true,
+        recording_vpk_restored: false,
+      } }],
+    }));
+    const { result } = renderHook(() => useRecordingSessionController(options));
+    await act(async () => { await result.current.openBatchWarmup(); });
+    await act(async () => {
+      await result.current.handleWarmupConfirm({
+        experimental_pov_enabled: false, recording_skybox: "default",
+        recording_map_material: "default", recording_weather_effect: "default",
+        pov_voice_mode: "mute", input_hud_enabled: false, ...selection,
+      });
+    });
+    expect(result.current.recordingRecoveryPrompt).toEqual({ configRecoveryNeeded: false, povRecoveryNeeded: true });
+    expect(result.current.recordingBlockedMessage).toBe("app.unexpectedCs2ExitPovPending");
+    expect(API.get).toHaveBeenCalledWith("experimental/pov/status");
+    const body = API.post.mock.calls.find(([url]) => url === "recording/queue")[1];
+    expect(body.pov_hud.enabled).toBe(false);
+  });
+
   it("keeps per-demo aliases separate from console warmup and POV options", async () => {
     const options = {
       t: (key) => key,

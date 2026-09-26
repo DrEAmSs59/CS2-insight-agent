@@ -417,6 +417,10 @@ def test_recording_hud_uses_shared_exit_restore_and_reports_evidence(
 
     recovery = results[0]["recovery"]
     assert recovery["pov_enabled"] is pov_enabled
+    assert recovery["recording_vpk_enabled"] is True
+    assert recovery["recording_vpk_restore_verified"] is True
+    assert recovery["recording_vpk_restored"] is restore_verified
+    assert recovery["recording_vpk_restore"] == restoration
     assert recovery["pov_restore_verified"] is True
     if pov_enabled:
         assert recovery["pov_restored"] is restore_verified

@@ -1,3 +1,5 @@
+import { recordingVpkRecoverySummary } from "./recordingRecovery.js";
+
 export function isRecordingAbortResult(result) {
   if (!result || typeof result !== "object") return false;
   if (String(result.error || "").trim().toLowerCase() === "aborted") return true;
@@ -11,12 +13,15 @@ export function recordingQueueWasAborted(results, abortRequested = false) {
 }
 
 export function recordingAbortToastKind(configBackupStatus, results = []) {
+  const vpkRecovery = recordingVpkRecoverySummary(results);
+  if (vpkRecovery.state === "failed") return "restore_pending";
+  if (vpkRecovery.state === "unverified") return "unverified";
   const recovery = (Array.isArray(results) ? results : [])
     .map((item) => item?.recovery)
     .find((value) => value && typeof value === "object");
   const state = String(recovery?.player_config_restore_state || "").toLowerCase();
   if (state === "restored") return "completed";
-  if (state === "not_needed") return "not_needed";
+  if (state === "not_needed") return vpkRecovery.enabled ? "completed" : "not_needed";
   if (state === "failed") return "restore_pending";
   if (state === "unverified") return "unverified";
   if (configBackupStatus?.restore_required === true) return "restore_pending";

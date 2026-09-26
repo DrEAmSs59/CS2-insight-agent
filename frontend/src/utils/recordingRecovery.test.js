@@ -1,5 +1,23 @@
 import { describe, expect, it } from "vitest";
-import { recordingRecoverySummary } from "./recordingRecovery";
+import { recordingRecoverySummary, recordingVpkRecoverySummary } from "./recordingRecovery";
+
+describe("VPK recovery independent of POV", () => {
+  it("reports failed auxiliary or visual VPK recovery with POV disabled", () => {
+    expect(recordingVpkRecoverySummary([{ recovery: {
+      pov_enabled: false, pov_restored: true,
+      recording_vpk_enabled: true, recording_vpk_restore_verified: true,
+      recording_vpk_restored: false, recording_vpk_restore: { error: "locked" },
+    } }])).toEqual({ enabled: true, state: "failed", detail: { error: "locked" } });
+  });
+
+  it("does not hide a failed or unverified report behind a successful one", () => {
+    const restored = { recovery: { recording_vpk_enabled: true, recording_vpk_restore_verified: true, recording_vpk_restored: true } };
+    expect(recordingVpkRecoverySummary([restored, { recovery: { recording_vpk_enabled: true } }]).state).toBe("unverified");
+    expect(recordingVpkRecoverySummary([restored, { recovery: { pov_enabled: true, pov_restore_verified: true, pov_restored: false } }]).state).toBe("failed");
+    expect(recordingVpkRecoverySummary([restored]).state).toBe("restored");
+    expect(recordingVpkRecoverySummary([]).enabled).toBe(false);
+  });
+});
 
 describe("recordingRecoverySummary", () => {
   it("reports a byte-verified restore", () => {

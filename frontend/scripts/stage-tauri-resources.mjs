@@ -3,6 +3,7 @@ import { gzipSync } from "node:zlib";
 import { spawnSync } from "node:child_process";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { collectRainRuntimePaths } from "./rain-runtime-paths.mjs";
 
 const frontendRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 const repoRoot = join(frontendRoot, "..");
@@ -69,25 +70,10 @@ function readFinalRainRuntime() {
     throw new Error("Final Nuke profile must remain rain-only with no wet ground or puddles");
   }
 
-  const keep = new Set(["manifest.json"]);
-  for (const [mapName, profile] of Object.entries(weatherManifest.maps)) {
-    const replacements = profile?.loose_outer_replacements;
-    if (!Array.isArray(replacements) || replacements.length === 0) {
-      throw new Error(`Final rain profile has no runtime payloads: ${mapName}`);
-    }
-    for (const replacement of replacements) {
-      const relativePath = String(replacement?.payload_relative_path || "")
-        .replaceAll("\\", "/")
-        .replace(/^\/+|\/+$/g, "");
-      if (!relativePath || relativePath.includes("..")) {
-        throw new Error(`Invalid final rain payload path for ${mapName}`);
-      }
-      const source = join(repoRoot, "pov", "weather_effects", "rain", ...relativePath.split("/"));
-      if (!existsSync(source)) throw new Error(`Missing final rain payload: ${source}`);
-      keep.add(relativePath.toLowerCase());
-    }
-  }
-  return keep;
+  return collectRainRuntimePaths(
+    weatherManifest.maps,
+    join(repoRoot, "pov", "weather_effects", "rain"),
+  );
 }
 
 const finalRainRuntimePaths = readFinalRainRuntime();

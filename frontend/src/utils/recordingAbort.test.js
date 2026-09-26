@@ -10,6 +10,15 @@ import {
 } from "./recordingAbort";
 
 describe("recording abort outcome", () => {
+  it("keeps VPK failures visible even when player configuration was restored", () => {
+    const recovery = {
+      player_config_restore_state: "restored", pov_enabled: false,
+      recording_vpk_enabled: true, recording_vpk_restore_verified: true,
+      recording_vpk_restored: false,
+    };
+    expect(recordingAbortToastKind({}, [{ recovery }])).toBe("restore_pending");
+    expect(recordingAbortToastKind({}, [{ recovery: { ...recovery, recording_vpk_restore_verified: false } }])).toBe("unverified");
+  });
   it("recognizes request- and segment-level abort results", () => {
     expect(isRecordingAbortResult({ success: false, error: "aborted" })).toBe(true);
     expect(isRecordingAbortResult({

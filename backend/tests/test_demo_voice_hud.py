@@ -828,6 +828,7 @@ def test_checked_in_voice_template_contains_only_an_empty_payload():
     alert_script = entries["panorama/scripts/hud/hudalerts_insight.vjs_c"]
     alert_style = entries["panorama/styles/hud/hudalerts_insight.vcss_c"]
     script = entries[VOICE_SCRIPT_PATH]
+    assert injection_source.replace(b"\r\n", b"\n") in script
     start = script.index(VOICE_DATA_BEGIN) + len(VOICE_DATA_BEGIN)
     end = script.index(VOICE_DATA_END)
 
@@ -1495,6 +1496,8 @@ def test_advanced_playback_template_uses_native_hot_switchable_hud_styles():
     )
     entries = read_inline_vpk(template_path.read_bytes())
     script = entries[VOICE_SCRIPT_PATH]
+    injection = template_path.with_name("voice_hud_injection.js").read_bytes().replace(b"\r\n", b"\n")
+    assert injection in script
     assert struct.unpack_from("<I", script, 0)[0] == len(script)
     block_count = struct.unpack_from("<I", script, 12)[0]
     for index in range(block_count):

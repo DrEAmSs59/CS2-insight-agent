@@ -1066,7 +1066,7 @@
     }
 
     function advancedPovVisualsActive() {
-        return !advancedPlayback || advancedPovVisualsEnabled;
+        return advancedPlayback ? advancedPovVisualsEnabled : recordingPovVisualsEnabled;
     }
 
     function runtimeSlotForXuid(xuid) {
@@ -1795,8 +1795,36 @@
         }
     }
 
+    function plainPlayerName(value) {
+        // Current CS2 names can include engine-owned controller/clan spans.
+        // Unwrap only those spans; old plain names (including literal markup
+        // and entity text) must remain unchanged. Decode once before callers
+        // escape the result for HTML labels or assign it to plain labels.
+        return String(value || "").replace(
+            /<span\b[^>]*\bclass\s*=\s*(["'])decorated-player-name__(?:controller-name|clan-tag)\1[^>]*>([\s\S]*?)<\/span\s*>/gi,
+            function (_span, _quote, name) {
+                const entities = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", nbsp: "\u00a0" };
+                return name.replace(/&(#x[0-9a-f]+|#[0-9]+|amp|lt|gt|quot|apos|nbsp);/gi, function (entity, key) {
+                    if (key.charAt(0) !== "#") {
+                        return entities[key.toLowerCase()];
+                    }
+                    const hex = key.charAt(1).toLowerCase() === "x";
+                    const code = parseInt(key.slice(hex ? 2 : 1), hex ? 16 : 10);
+                    if (code <= 0 || code > 0x10ffff || (code >= 0xd800 && code <= 0xdfff)) {
+                        return entity;
+                    }
+                    if (code <= 0xffff) {
+                        return String.fromCharCode(code);
+                    }
+                    const pair = code - 0x10000;
+                    return String.fromCharCode(0xd800 + (pair >> 10), 0xdc00 + (pair & 0x3ff));
+                });
+            },
+        );
+    }
+
     function normalizedOverheadName(value) {
-        return String(value || "").replace(/\s+/g, " ").trim().toLowerCase();
+        return plainPlayerName(value).replace(/\s+/g, " ").trim().toLowerCase();
     }
 
     function buildOverheadXuidByName() {
@@ -5187,7 +5215,7 @@
     function lowerLeftPlayerName(event) {
         let name = "";
         if (event && event.xuid) {
-            try { name = String(GameStateAPI.GetPlayerName(event.xuid) || ""); } catch (errName) {}
+            try { name = plainPlayerName(GameStateAPI.GetPlayerName(event.xuid)); } catch (errName) {}
         }
         return name || String(event && event.name || "") || "Player";
     }
@@ -5797,7 +5825,7 @@
             if (active) {
                 pinVoiceNotices(voicePanel, activeRowCount, notice, row);
                 const xuid = speaker.xuid || GameStateAPI.GetPlayerXuidStringFromPlayerSlot(speaker.slot);
-                const name = xuid ? GameStateAPI.GetPlayerName(xuid) : "";
+                const name = xuid ? plainPlayerName(GameStateAPI.GetPlayerName(xuid)) : "";
                 const locationToken = locationAt(speaker.locations, state.nTick);
                 const localizedLocation = locationToken ? $.Localize("#" + locationToken) : "";
                 const speakerTeam = resolvePovTeam(speaker.xuid, state.nTick)
@@ -6086,7 +6114,7 @@
         const normalized = normalizeXuid(xuid);
         const packedPlayer = advancedPlayback && advancedPlayback.byXuid[normalized];
         let liveName = "";
-        try { liveName = String(GameStateAPI.GetPlayerName(normalized) || "").trim(); } catch (errName) {}
+        try { liveName = plainPlayerName(GameStateAPI.GetPlayerName(normalized)).trim(); } catch (errName) {}
         return liveName || (packedPlayer ? packedPlayer.name : "") || "Player";
     }
 
