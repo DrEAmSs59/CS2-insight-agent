@@ -12,6 +12,9 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
+mod edition;
+mod runtime_lock;
+
 use tauri::{AppHandle, Manager, RunEvent, WindowEvent};
 use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
 
@@ -766,6 +769,21 @@ fn stop_backend(app: &AppHandle) {
 }
 
 pub fn run() {
+    // Held for the whole process lifetime; the OS releases it on exit.
+    let _runtime_lock = match runtime_lock::acquire(edition::CURRENT) {
+        Ok(runtime_lock::Acquire::Acquired(lock)) => Some(lock),
+        // The single-instance plugin focuses the existing window and exits.
+        Ok(runtime_lock::Acquire::SameEditionRunning) => None,
+        Ok(runtime_lock::Acquire::OtherEditionRunning(running)) => {
+            runtime_lock::show_conflict(edition::CURRENT, running);
+            return;
+        }
+        Err(error) => {
+            runtime_lock::show_error(&error);
+            return;
+        }
+    };
+
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             if let Some(window) = app.get_webview_window("main") {
