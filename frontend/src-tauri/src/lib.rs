@@ -154,6 +154,30 @@ fn request_desktop_exit(handle: &AppHandle, code: i32) {
 }
 
 #[cfg(test)]
+mod migration_failure_tests {
+    use super::{migration_failure_message, startup_failure_dialog_text};
+
+    #[test]
+    fn newer_data_schema_asks_for_an_upgrade_instead_of_a_reinstall() {
+        let message = migration_failure_message(
+            Some(3),
+            "desktop data migration refused: 共用数据的结构版本为 2，本程序最高支持 1。",
+        );
+        assert!(message.contains("请将本程序升级到最新版本"));
+        assert!(message.contains("结构版本为 2"));
+        let dialog = startup_failure_dialog_text(&message);
+        assert!(!dialog.contains("重新安装"));
+    }
+
+    #[test]
+    fn other_migration_failures_keep_the_reinstall_hint() {
+        let message = migration_failure_message(Some(2), "desktop data migration failed: disk full");
+        assert_eq!(message, "桌面数据迁移失败：desktop data migration failed: disk full");
+        assert!(startup_failure_dialog_text(&message).contains("重新安装"));
+    }
+}
+
+#[cfg(test)]
 mod exit_permission_tests {
     use super::parse_exit_permission;
 
@@ -497,6 +521,28 @@ mod dropped_file_path_tests {
     }
 }
 
+// Must match EXIT_DATA_SCHEMA_TOO_NEW in backend/app/desktop_data_migration.py.
+const EXIT_DATA_SCHEMA_TOO_NEW: i32 = 3;
+const DATA_SCHEMA_UPGRADE_HINT: &str = "请将本程序升级到最新版本";
+
+fn migration_failure_message(code: Option<i32>, stderr: &str) -> String {
+    if code == Some(EXIT_DATA_SCHEMA_TOO_NEW) {
+        let detail = stderr
+            .trim()
+            .trim_start_matches("desktop data migration refused:")
+            .trim();
+        return format!("数据已被更新版本的 CS2 洞察使用，{DATA_SCHEMA_UPGRADE_HINT}。\n\n{detail}");
+    }
+    format!("桌面数据迁移失败：{}", stderr.trim())
+}
+
+fn startup_failure_dialog_text(error: &str) -> String {
+    if error.contains(DATA_SCHEMA_UPGRADE_HINT) {
+        return error.to_string();
+    }
+    format!("{error}\n\n请重新安装完整安装包，或查看应用数据目录中的日志。")
+}
+
 fn writable_data_root(_app: &AppHandle, root: &Path, python: &Path) -> Result<PathBuf, String> {
     #[cfg(windows)]
     {
@@ -528,11 +574,13 @@ fn writable_data_root(_app: &AppHandle, root: &Path, python: &Path) -> Result<Pa
             .map_err(|error| format!("无法执行桌面数据迁移：{error}"))?;
         if !output.status.success() {
             let detail = String::from_utf8_lossy(&output.stderr).trim().to_string();
-            return Err(if detail.is_empty() {
-                format!("桌面数据迁移失败，退出码：{}", output.status)
-            } else {
-                format!("桌面数据迁移失败：{detail}")
-            });
+            return Err(
+                if detail.is_empty() && output.status.code() != Some(EXIT_DATA_SCHEMA_TOO_NEW) {
+                    format!("桌面数据迁移失败，退出码：{}", output.status)
+                } else {
+                    migration_failure_message(output.status.code(), &detail)
+                },
+            );
         }
 
         let data_root = app_data.join("CS2 Insight Agent").join("data");
@@ -812,9 +860,7 @@ pub fn run() {
                 if let Err(error) = start_backend(&handle) {
                     handle
                         .dialog()
-                        .message(format!(
-                            "{error}\n\n请重新安装完整安装包，或查看应用数据目录中的日志。"
-                        ))
+                        .message(startup_failure_dialog_text(&error))
                         .title("CS2 Insight Agent — 后端启动失败")
                         .kind(MessageDialogKind::Error)
                         .blocking_show();

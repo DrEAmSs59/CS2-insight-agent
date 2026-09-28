@@ -45,6 +45,11 @@ CANONICAL_DATA_DIR_NAME = "data"
 MIGRATION_MARKER_NAME = ".desktop-data-migration-v1.json"
 MIGRATION_ERROR_LOG_NAME = "desktop-data-migration-error.log"
 
+# Free and Pro share one data directory while shipping different app versions.
+# Bump only together with an additive schema change released to both editions.
+DATA_SCHEMA_VERSION = 1
+EXIT_DATA_SCHEMA_TOO_NEW = 3
+
 # Ordered deliberately: an existing Tauri installation is newer than the
 # Electron package-name layout and must win when both survived on disk.
 LEGACY_CONTAINERS: tuple[tuple[str, str], ...] = (
@@ -76,6 +81,10 @@ CANONICAL_PAYLOAD_DIRECTORIES = (
 
 class DesktopDataMigrationError(RuntimeError):
     """Raised when migration cannot prove that the destination is usable."""
+
+
+class DataSchemaTooNewError(DesktopDataMigrationError):
+    """Raised when shared data was upgraded by a newer Free or Pro release."""
 
 
 def ensure_backend_stopped(host: str = "127.0.0.1", port: int = 19871) -> None:
@@ -240,6 +249,35 @@ def _snapshot_sqlite(source_db: Path, destination_db: Path) -> None:
     os.replace(snapshot, destination_db)
     destination_db.with_name(destination_db.name + "-wal").unlink(missing_ok=True)
     destination_db.with_name(destination_db.name + "-shm").unlink(missing_ok=True)
+
+
+def ensure_supported_data_schema(database: Path) -> None:
+    if not database.is_file():
+        return
+    try:
+        connection = sqlite3.connect(_sqlite_uri(database), uri=True, timeout=10)
+        try:
+            version = int(connection.execute("PRAGMA user_version").fetchone()[0])
+        finally:
+            connection.close()
+    except sqlite3.Error as exc:
+        raise DesktopDataMigrationError(f"无法读取数据结构版本 {database}: {exc}") from exc
+    if version > DATA_SCHEMA_VERSION:
+        raise DataSchemaTooNewError(
+            f"共用数据的结构版本为 {version}，本程序最高支持 {DATA_SCHEMA_VERSION}。"
+        )
+
+
+def _stamp_data_schema(database: Path) -> None:
+    if not database.is_file():
+        return
+    connection = sqlite3.connect(database, timeout=10)
+    try:
+        if int(connection.execute("PRAGMA user_version").fetchone()[0]) < DATA_SCHEMA_VERSION:
+            connection.execute(f"PRAGMA user_version = {DATA_SCHEMA_VERSION}")
+            connection.commit()
+    finally:
+        connection.close()
 
 
 def validate_data_root(data_root: Path) -> None:
@@ -443,6 +481,9 @@ def main(argv: Optional[list[str]] = None) -> int:
     try:
         if args.require_desktop_stopped:
             ensure_backend_stopped()
+        ensure_supported_data_schema(
+            canonical_data_root(args.appdata.expanduser().resolve()) / "cs2-insight.db"
+        )
 
         # Export browser-owned state before snapshotting the SQLite/config
         # tree. Starting the legacy renderer also starts its bundled backend;
@@ -466,6 +507,10 @@ def main(argv: Optional[list[str]] = None) -> int:
             # bootstrap both refer to canonical data, without relaunching the
             # legacy renderer.
             ui_result = migrate_electron_ui_state(args.appdata, final_data_root)
+        _stamp_data_schema(final_data_root / "cs2-insight.db")
+    except DataSchemaTooNewError as exc:
+        print(f"desktop data migration refused: {exc}", file=sys.stderr)
+        return EXIT_DATA_SCHEMA_TOO_NEW
     except Exception as exc:
         _append_error_log(args.appdata, exc)
         print(f"desktop data migration failed: {exc}", file=sys.stderr)
