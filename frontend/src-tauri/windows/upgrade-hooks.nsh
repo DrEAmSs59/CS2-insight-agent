@@ -24,6 +24,8 @@ Var CS2ElectronScope     ; "samedir" (preinstall) or "all" (postinstall)
 Var CS2ElectronDir       ; lowercased install dir of the legacy entry, no trailing backslash
 Var CS2ElectronUninsExe  ; parsed legacy uninstaller executable path
 Var CS2ElectronMode      ; "/currentuser" for HKCU or "/allusers" for HKLM
+Var CS2MainExe           ; this edition's shell image; set in PREINSTALL because
+                         ; MAINBINARYNAME is defined after this file is included
 
 Function CS2_AbortMigrationInstall
   IfSilent cs2_abort_silent cs2_abort_interactive
@@ -74,7 +76,7 @@ Function CS2_PrepareRunningApps
   ; running for several seconds while the Python backend shuts down. Wait for
   ; that instead of aborting; force-kill the whole child tree only if it never
   ; exits (e.g. a hung backend).
-  StrCpy $R9 "cs2-insight-agent-desktop.exe"
+  StrCpy $R9 "$CS2MainExe"
   Call CS2_IsProcessRunning
   ${If} $R0 = 1
     DetailPrint "等待正在退出的 CS2 Insight Agent 进程结束…"
@@ -82,11 +84,11 @@ Function CS2_PrepareRunningApps
     Call CS2_WaitProcessGone
     ${If} $R0 = 1
       DetailPrint "强制结束仍在运行的 CS2 Insight Agent…"
-      nsExec::ExecToStack '"$SYSDIR\taskkill.exe" /IM "cs2-insight-agent-desktop.exe" /F /T'
+      nsExec::ExecToStack '"$SYSDIR\taskkill.exe" /IM "$CS2MainExe" /F /T'
       Pop $R0
       Pop $R1
       Sleep 1500
-      StrCpy $R9 "cs2-insight-agent-desktop.exe"
+      StrCpy $R9 "$CS2MainExe"
       Call CS2_IsProcessRunning
       ${If} $R0 = 1
         StrCpy $R7 "无法结束仍在运行的 CS2 Insight Agent。$\r$\n$\r$\n请手动关闭应用（必要时在任务管理器结束进程），再重新运行安装程序。"
@@ -97,8 +99,9 @@ Function CS2_PrepareRunningApps
 
   ; A backend orphaned by an earlier force-kill keeps port 19871 busy and
   ; would make the freshly installed app fail its startup identity check.
-  ; Only python.exe listeners on that port are terminated.
-  nsExec::ExecToStack `"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -Command "Get-NetTCPConnection -LocalPort 19871 -State Listen -ErrorAction SilentlyContinue | ForEach-Object { $$proc = Get-Process -Id $$_.OwningProcess -ErrorAction SilentlyContinue; if ($$proc -and $$proc.ProcessName -eq 'python') { Stop-Process -Id $$proc.Id -Force } }"`
+  ; Free and Pro share that port, so only this installation's python.exe is
+  ; terminated; the other edition's running backend is left alone.
+  nsExec::ExecToStack `"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -Command "Get-NetTCPConnection -LocalPort 19871 -State Listen -ErrorAction SilentlyContinue | ForEach-Object { $$proc = Get-Process -Id $$_.OwningProcess -ErrorAction SilentlyContinue; if ($$proc -and $$proc.ProcessName -eq 'python' -and $$proc.Path -and $$proc.Path.StartsWith('$INSTDIR\', [StringComparison]::OrdinalIgnoreCase)) { Stop-Process -Id $$proc.Id -Force } }"`
   Pop $R0
   Pop $R1
 
@@ -402,6 +405,7 @@ Function CS2_RemoveLegacyElectron
 FunctionEnd
 
 !macro NSIS_HOOK_PREINSTALL
+  StrCpy $CS2MainExe "${MAINBINARYNAME}.exe"
   Call CS2_PrepareRunningApps
 
   ; Same-directory Electron installs must be retired before any file copy —
