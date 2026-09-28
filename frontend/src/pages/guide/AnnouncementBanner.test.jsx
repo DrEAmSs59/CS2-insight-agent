@@ -2,7 +2,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import API from "../../api/api";
 import { useLocaleStore } from "../../i18n/localeStore.js";
-import AnnouncementBanner, { DISMISSED_ANNOUNCEMENTS_KEY } from "./AnnouncementBanner.jsx";
+import AnnouncementBanner from "./AnnouncementBanner.jsx";
 
 const desktopBridgeMock = vi.hoisted(() => ({ openExternal: vi.fn(async () => {}) }));
 
@@ -45,7 +45,10 @@ describe("AnnouncementBanner", () => {
 
     render(<AnnouncementBanner />);
 
-    expect(await screen.findByText("服务器将于今晚维护")).toBeTruthy();
+    const body = await screen.findByText("服务器将于今晚维护");
+    expect(screen.getByText("公告")).toBeTruthy();
+    expect(body.closest("[data-announcement-body]")).toBeTruthy();
+    expect(screen.getByText("公告").closest("[data-announcement-body]")).toBeNull();
     expect(API.get).toHaveBeenCalledWith("/app/announcements");
   });
 
@@ -56,6 +59,9 @@ describe("AnnouncementBanner", () => {
     render(<AnnouncementBanner />);
 
     expect(await screen.findByText("Server maintenance tonight")).toBeTruthy();
+    expect(screen.getByText("Announcement")).toBeTruthy();
+    expect(screen.queryByText("仅中文公告")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Next announcement" }));
     expect(screen.getByText("仅中文公告")).toBeTruthy();
     expect(screen.queryByText("服务器将于今晚维护")).toBeNull();
   });
@@ -70,19 +76,24 @@ describe("AnnouncementBanner", () => {
     expect(container.querySelector("img")).toBeNull();
   });
 
-  test("hides a dismissed announcement on later visits but shows new ones", async () => {
-    serve([announcement()]);
-    const first = render(<AnnouncementBanner />);
-    fireEvent.click(await screen.findByRole("button", { name: "关闭公告" }));
-    expect(screen.queryByText("服务器将于今晚维护")).toBeNull();
-    expect(JSON.parse(window.localStorage.getItem(DISMISSED_ANNOUNCEMENTS_KEY))).toEqual(["a1"]);
-    first.unmount();
+  test("switches between announcements and has no close button", async () => {
+    serve([
+      announcement({ id: "a1", body_zh: "第一条" }),
+      announcement({ id: "a2", body_zh: "第二条" }),
+    ]);
 
-    serve([announcement(), announcement({ id: "a2", body_zh: "新的公告" })]);
     render(<AnnouncementBanner />);
 
-    expect(await screen.findByText("新的公告")).toBeTruthy();
-    expect(screen.queryByText("服务器将于今晚维护")).toBeNull();
+    expect(await screen.findByText("第一条")).toBeTruthy();
+    expect(screen.queryByText("第二条")).toBeNull();
+    expect(screen.queryByRole("button", { name: "关闭公告" })).toBeNull();
+    expect(screen.getByRole("button", { name: "上一条" }).disabled).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "下一条" }));
+    expect(screen.getByText("第二条")).toBeTruthy();
+    expect(screen.queryByText("第一条")).toBeNull();
+    expect(screen.getByText("2 / 2")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "上一条" }));
+    expect(screen.getByText("第一条")).toBeTruthy();
   });
 
   test("opens the detail link in the system browser", async () => {
@@ -102,6 +113,7 @@ describe("AnnouncementBanner", () => {
     const item = (await screen.findByText("服务器将于今晚维护")).closest("[data-announcement-level]");
     expect(item.getAttribute("data-announcement-level")).toBe("warning");
     expect(item.className).toContain("amber");
+    expect(screen.getByText("重要")).toBeTruthy();
   });
 
   test("renders nothing when there are no announcements or the request fails", async () => {

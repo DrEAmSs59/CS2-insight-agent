@@ -1,7 +1,11 @@
 // en / guide — keep keys scoped to this feature catalog.
 export default {
+  "guide.announcementLabel": "Announcement",
+  "guide.announcementImportant": "Important",
   "guide.announcementDetails": "View details",
-  "guide.announcementDismiss": "Dismiss announcement",
+  "guide.announcementPrevious": "Previous announcement",
+  "guide.announcementNext": "Next announcement",
+  "guide.announcementPosition": "{current} / {total}",
   "dashboard.pageTitle": "Dashboard",
   "dashboard.pageSubtitle": "Select an entry below to open the corresponding feature. Highlight analysis, recording queue management, and montage export are each on their own page — use the left navigation to switch between them.",
   "dashboard.analysisMode": "Analysis mode",
