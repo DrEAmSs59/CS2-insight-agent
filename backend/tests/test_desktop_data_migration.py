@@ -335,13 +335,14 @@ def test_backend_refuses_to_open_databases_written_by_a_newer_schema(tmp_path: P
 
     _write_database(tmp_path, "newer")
     _set_user_version(tmp_path, DATA_SCHEMA_VERSION + 1)
-    env = {**os.environ, "CS2_INSIGHT_CONFIG": str(tmp_path / "cs2-insight.config.json")}
+    env = {**os.environ, "CS2_INSIGHT_CONFIG": str(tmp_path / "cs2-insight.config.json"), "PYTHONIOENCODING": "utf-8"}
     completed = subprocess.run(
         [sys.executable, "-c", "import app.databases"],
         cwd=Path(__file__).resolve().parents[1],
         env=env,
         capture_output=True,
-        text=True,
+        encoding="utf-8",
+        errors="replace",
         timeout=60,
     )
 
