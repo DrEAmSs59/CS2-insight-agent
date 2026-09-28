@@ -1,5 +1,7 @@
 // zh / guide — keep keys scoped to this feature catalog.
 export default {
+  "guide.announcementDetails": "查看详情",
+  "guide.announcementDismiss": "关闭公告",
   "dashboard.pageTitle": "仪表盘",
   "dashboard.pageSubtitle": "选择下方入口进入对应功能。解析高光、管理录制队列与合辑导出已分为独立页面，左侧导航可随时切换。",
   "dashboard.analysisMode": "分析模式",

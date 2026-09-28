@@ -18,6 +18,14 @@ def test_tauri_identifier_and_installer_hook_are_stable():
     assert (TAURI_ROOT / hook).is_file()
 
 
+def test_backend_learns_its_edition_from_the_desktop_shell():
+    source = TAURI_RUNTIME.read_text(encoding="utf-8")
+    start = source.index("fn start_backend(")
+    spawn = source.index(".spawn()", start)
+
+    assert '.env("CS2_INSIGHT_EDITION", edition::CURRENT.id())' in source[start:spawn]
+
+
 def test_installer_hook_covers_electron_upgrade_surfaces():
     hook = (TAURI_ROOT / "windows" / "upgrade-hooks.nsh").read_text(encoding="utf-8")
 

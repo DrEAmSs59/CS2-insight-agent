@@ -689,6 +689,7 @@ fn start_backend(app: &AppHandle) -> Result<(), String> {
         .current_dir(&backend_dir)
         .env("CS2_INSIGHT_PORT", "19871")
         .env("CS2_INSIGHT_INSTANCE_ID", &instance_id)
+        .env("CS2_INSIGHT_EDITION", edition::CURRENT.id())
         .env("PYTHONNOUSERSITE", "1")
         .env("PYTHONDONTWRITEBYTECODE", "1")
         .env("PYTHONUNBUFFERED", "1")
