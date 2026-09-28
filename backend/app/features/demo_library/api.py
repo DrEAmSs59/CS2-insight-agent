@@ -29,7 +29,7 @@ from ..demo_analysis.player_matching import (
     normalized_expected_parse_players,
 )
 from ..demo_analysis.workflows import run_library_demo_analyze
-from .ingestion import infer_demo_source
+from .ingestion import infer_demo_source, remember_missing_player_keyboard_input
 from .roster import get_or_index_demo_roster, index_demo_player_stats, persist_ingested_demo
 
 logger = logging.getLogger(__name__)
@@ -744,13 +744,20 @@ async def batch_ingest_demos(body: BatchIngestBody):
             refined_source = str(row.get("source") or "") or None
             if isinstance(meta, dict):
                 refined_source = infer_demo_source(Path(dem_path).name, server_name=meta.get("server_name"))
+            meta_dict = meta if isinstance(meta, dict) else {}
             await persist_ingested_demo(
                 demo_id,
                 dem_path,
                 players=players or [],
-                meta=meta if isinstance(meta, dict) else {},
+                meta=meta_dict,
                 source=refined_source,
                 parsed_at=utc_now_iso(),
+            )
+            server_name = meta_dict.get("server_name")
+            await remember_missing_player_keyboard_input(
+                dem_path,
+                Path(dem_path).name,
+                server_name if isinstance(server_name, str) else None,
             )
             ingested += 1
         except Exception as exc:  # noqa: BLE001

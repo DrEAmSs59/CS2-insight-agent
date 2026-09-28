@@ -66,6 +66,50 @@ def infer_demo_source(filename: str, server_name: str | None = None) -> str:
     return "Local/Other"
 
 
+def demo_lacks_player_keyboard_input(filename: str, server_name: str | None = None) -> bool:
+    """Perfect World demos do not contain a per-tick keyboard stream.
+
+    Their files may still carry ``svc_UserCmds`` inside full snapshots. That is
+    not enough for the in-game keyboard HUD, so the queue warning can be shown
+    as soon as the platform is known.
+    """
+    return infer_demo_source(filename, server_name) == "Perfect World"
+
+
+def resolve_player_keyboard_input_flag(
+    filename: str,
+    server_name: str | None,
+    probed: bool | None,
+) -> bool | None:
+    if demo_lacks_player_keyboard_input(filename, server_name):
+        return False
+    return probed
+
+
+def server_name_from_match_meta(payload: object) -> str | None:
+    if not isinstance(payload, dict):
+        return None
+    meta = payload.get("match_meta")
+    if not isinstance(meta, dict):
+        return None
+    server_name = meta.get("server_name")
+    if isinstance(server_name, str) and server_name.strip():
+        return server_name.strip()
+    return None
+
+
+async def remember_missing_player_keyboard_input(
+    demo_path: str,
+    filename: str,
+    server_name: str | None = None,
+) -> bool | None:
+    """Persist the queue warning for a Perfect World demo. Other platforms stay unknown."""
+    if not demo_lacks_player_keyboard_input(filename, server_name):
+        return None
+    await demo_db.mark_player_keyboard_input_missing(demo_path)
+    return False
+
+
 async def enqueue_demo_path(path: Path, origin_zip: str | None = None) -> None:
     """Register one demo as pending, with optional content-hash deduplication."""
     global _enqueue_striped_locks
@@ -115,6 +159,7 @@ async def enqueue_demo_path(path: Path, origin_zip: str | None = None) -> None:
             origin_zip=origin_zip if use_md5 else None,
             watch_root=watch_root,
         )
+        await remember_missing_player_keyboard_input(demo_path, path.name)
         if not inserted:
             if use_md5 and md5_hex:
                 await demo_db.update_demo_content_md5_if_absent(demo_path, md5_hex, origin_zip)
