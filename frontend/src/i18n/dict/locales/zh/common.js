@@ -47,6 +47,7 @@ export default {
   "test.greet": "你好 {name}",
   "test.items": "{n} 项",
   "nav.brand": "CS2 洞察",
+  "nav.getPro": "获取 Pro 版本",
   "nav.mainNav": "主导航",
   "nav.sectionWorkflow": "工作流",
   "nav.guide": "上手指南",

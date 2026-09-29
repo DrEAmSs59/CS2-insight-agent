@@ -59,6 +59,7 @@ const MatchHistoryPage = lazy(() => import("./pages/MatchHistoryPage"));
 const ObsAiTuningPreviewPage = lazy(() => import("./pages/ObsAiTuningPreviewPage"));
 const ObsAiEntryPreviewPage = lazy(() => import("./pages/ObsAiEntryPreviewPage"));
 const CosmeticsWorkshopPage = lazy(() => import("./features/cosmetics-workshop/CosmeticsWorkshopPage"));
+const GetProPage = lazy(() => import("./pages/GetProPage"));
 
 const DEFAULT_CS2_EXTRA_LAUNCH_ARGS = "-fullscreen";
 
@@ -1500,6 +1501,7 @@ export default function App() {
                 <Route path="/lite-cut/color" element={<Navigate to="/lite-cut" replace />} />
                 <Route path="/lite-cut/export" element={<LiteCutExportPage />} />
                 <Route path="/params" element={<RecordingParamsPage />} />
+                <Route path="/pro" element={<GetProPage />} />
                 <Route path="/settings" element={<SettingsPage />} />
                 <Route path="/player-game-config" element={<PlayerGameConfigPage />} />
                 <Route path="/match-history" element={<MatchHistoryPage />} />

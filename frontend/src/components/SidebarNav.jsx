@@ -11,6 +11,7 @@ import {
   Package,
   PanelLeft,
   Settings,
+  Sparkles,
   Sun,
 } from "lucide-react";
 import API from "../api/api";
@@ -217,6 +218,15 @@ export default function SidebarNav({ queueLength = 0, disabled = false }) {
         >
           v{APP_VERSION}
         </div>
+        <NavLink
+          to="/pro"
+          aria-label={t("nav.getPro")}
+          title={collapsed ? t("nav.getPro") : undefined}
+          className={({ isActive }) => `flex h-9 items-center rounded-md text-[11px] font-semibold text-cs2-accent transition-colors hover:bg-cs2-accent-soft ${isActive ? "bg-cs2-accent-soft" : ""} ${collapsed ? "justify-center" : "gap-3 px-2.5"}`}
+        >
+          <Sparkles className="h-4 w-4 shrink-0" />
+          {!collapsed ? <span>{t("nav.getPro")}</span> : null}
+        </NavLink>
         <NavLink
           to="/settings"
           aria-label={collapsed ? t("nav.settings") : undefined}

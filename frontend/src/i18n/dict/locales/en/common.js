@@ -46,6 +46,7 @@ export default {
   "test.greet": "Hello {name}",
   "test.items": "{n} {n, plural, one=item, other=items}",
   "nav.brand": "CS2 Insight",
+  "nav.getPro": "Get Pro",
   "nav.mainNav": "Main navigation",
   "nav.sectionWorkflow": "Workflow",
   "nav.guide": "Getting Started",
