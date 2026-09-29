@@ -14,6 +14,10 @@ from ...api_errors import error_detail
 from ...databases import demo_db
 from ...demo_db import utc_now_iso
 from ...demo_library_hub import demo_library_hub
+from ..demo_library.ingestion import (
+    resolve_player_keyboard_input_flag,
+    server_name_from_match_meta,
+)
 from ..demo_library.roster import get_or_index_demo_roster
 from .inspection import demo_failure_code
 
@@ -68,6 +72,19 @@ async def run_library_demo_analyze(
             None,
         )
         players_out = {p: v for p, v in batch_result.items() if isinstance(v, dict)}
+        server_name = next(
+            (
+                found
+                for player_result in players_out.values()
+                if (found := server_name_from_match_meta(player_result))
+            ),
+            None,
+        )
+        has_player_keyboard_input = resolve_player_keyboard_input_flag(
+            Path(library_path).name,
+            server_name,
+            has_player_keyboard_input,
+        )
         missing = [p for p in target_players if p not in players_out]
         if missing:
             logger.warning(

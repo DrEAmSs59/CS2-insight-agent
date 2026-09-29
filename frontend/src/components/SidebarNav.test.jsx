@@ -61,7 +61,11 @@ describe("SidebarNav", () => {
   test("keeps utility actions in the sidebar", async () => {
     renderSidebar();
     const version = screen.getByTestId("sidebar-version");
+    const getPro = screen.getByRole("link", { name: /获取 Pro 版本|Get Pro/ });
     const settings = screen.getByRole("link", { name: /设置|Settings/ });
+    expect(getPro.getAttribute("href")).toBe("/pro");
+    expect(version.compareDocumentPosition(getPro) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(getPro.compareDocumentPosition(settings) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(version.textContent).toBe(`v${APP_VERSION}`);
     expect(version.className).toContain("justify-start");
     expect(version.compareDocumentPosition(settings) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();

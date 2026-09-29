@@ -29,6 +29,13 @@ def prepare_desktop_exit(instance_id: str = Query(...)):
     return {"instance_id": expected, **prepare_app_exit()}
 
 
+@router.get("/api/app/announcements")
+async def app_announcements():
+    from ..announcements import get_announcements
+
+    return await asyncio.to_thread(get_announcements)
+
+
 class FilePickerBody(BaseModel):
     file_type: str = Field(default="any", pattern=r"^(audio|video_or_image|lite_cut_asset|exe|any)$")
     multiple: bool = False

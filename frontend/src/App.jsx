@@ -1,6 +1,7 @@
 import { lazy, Suspense, useState, useCallback, useMemo, useEffect, useRef } from "react";
 import { Routes, Route, Navigate, useNavigate, useLocation } from "react-router-dom";
 import { AppShellProvider } from "./context/AppShellContext";
+import { useAppAnnouncements } from "./hooks/useAppAnnouncements.js";
 import UpdateCheckModal from "./components/UpdateCheckModal";
 import RecordingBlockedDialog from "./components/RecordingBlockedDialog";
 import RecordingResultModal from "./components/recordingQueue/RecordingResultModal";
@@ -59,6 +60,7 @@ const MatchHistoryPage = lazy(() => import("./pages/MatchHistoryPage"));
 const ObsAiTuningPreviewPage = lazy(() => import("./pages/ObsAiTuningPreviewPage"));
 const ObsAiEntryPreviewPage = lazy(() => import("./pages/ObsAiEntryPreviewPage"));
 const CosmeticsWorkshopPage = lazy(() => import("./features/cosmetics-workshop/CosmeticsWorkshopPage"));
+const GetProPage = lazy(() => import("./pages/GetProPage"));
 
 const DEFAULT_CS2_EXTRA_LAUNCH_ARGS = "-fullscreen";
 
@@ -75,6 +77,7 @@ export default function App() {
   const t = useT();
   const locale = useLocaleStore((s) => s.locale);
   const [backendReady, setBackendReady] = useState(false);
+  const announcements = useAppAnnouncements(backendReady);
   /** 后端就绪后的启动流程：先检查更新，再拉取首页配置检查 */
   const [startupInitDone, setStartupInitDone] = useState(false);
   const [startupInitPhase, setStartupInitPhase] = useState(/** @type {"update" | "config" | null} */ (null));
@@ -1261,6 +1264,7 @@ export default function App() {
     setSelectedClientClipUids(new Set());
   }, [currentMatchIndex]);
   const shell = {
+    announcements,
     aiMode,
     queue,
     uploadedDemos,
@@ -1500,6 +1504,7 @@ export default function App() {
                 <Route path="/lite-cut/color" element={<Navigate to="/lite-cut" replace />} />
                 <Route path="/lite-cut/export" element={<LiteCutExportPage />} />
                 <Route path="/params" element={<RecordingParamsPage />} />
+                <Route path="/pro" element={<GetProPage />} />
                 <Route path="/settings" element={<SettingsPage />} />
                 <Route path="/player-game-config" element={<PlayerGameConfigPage />} />
                 <Route path="/match-history" element={<MatchHistoryPage />} />

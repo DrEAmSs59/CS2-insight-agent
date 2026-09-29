@@ -1813,6 +1813,32 @@ def test_session_console_commands_are_embedded_in_the_payload():
     assert payload[20] == 0
 
 
+@pytest.mark.parametrize("input_enabled", [False, True])
+@pytest.mark.parametrize("template_name", ["pov_voice_template.vpk", "pov_advanced_playback_template.vpk"])
+def test_perfect_world_discards_supplied_input_and_forces_hud_off(monkeypatch, input_enabled, template_name):
+    from app import demo_voice_hud
+
+    class PerfectWorldParser(_FakeParser):
+        def parse_header(self):
+            return {"server_name": "完美世界竞技平台"}
+
+    monkeypatch.setattr(demo_voice_hud, "add_input_tracks_to_payload",
+                        lambda *args, **kwargs: pytest.fail("must not generate input tracks"))
+    template = Path(__file__).resolve().parents[2] / "pov" / template_name
+    build = build_demo_voice_hud_vpk(
+        "renamed.dem", template, parser_factory=PerfectWorldParser,
+        input_track_report={"tracks": ["stale"]}, input_hud_enabled=input_enabled,
+        input_audio_enabled=True,
+    )
+    script = read_inline_vpk(build.vpk_bytes)[VOICE_SCRIPT_PATH]
+    payload = json.loads(script.split(VOICE_DATA_BEGIN)[1].split(VOICE_DATA_END)[0])
+    assert payload[2] == []
+    assert payload[18][0] == 0
+    assert payload[18][3] == 0
+    assert payload[18][7] == "perfect_world"
+    assert build.input_tracks == 0
+
+
 def test_session_console_commands_reject_command_separators():
     template_path = Path(__file__).resolve().parents[2] / "pov" / "pov_advanced_playback_template.vpk"
 

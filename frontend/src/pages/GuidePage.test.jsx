@@ -44,6 +44,35 @@ function obsSetupCard() {
   return screen.getByText("OBS 配置已验证").closest(".rounded-xl");
 }
 
+function quickCheckCalls() {
+  return API.get.mock.calls.filter(([url]) => url === "/config/quick-check").length;
+}
+
+describe("GuidePage announcements", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    window.localStorage.clear();
+    useLocaleStore.setState({ locale: "zh", effectiveLocale: "zh", hydrated: true, persistenceError: null });
+    useAppShellMock.mockReturnValue({ initialQuickCheckStatus: staleStatus });
+    getObsConfigStatus.mockResolvedValue({ obs_connected: false });
+  });
+
+  test("shows server announcements above the page title", async () => {
+    useAppShellMock.mockReturnValue({
+      initialQuickCheckStatus: staleStatus,
+      announcements: [{ id: "n1", level: "info", body_zh: "新版本已发布", body_en: null, link_url: null }],
+    });
+    API.get.mockResolvedValue({ data: freshStatus });
+
+    renderGuide();
+
+    const notice = await screen.findByText("新版本已发布");
+    const title = screen.getByRole("heading", { name: "上手指南" });
+    expect(notice.compareDocumentPosition(title) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(API.get.mock.calls.some(([url]) => url === "/app/announcements")).toBe(false);
+  });
+});
+
 describe("GuidePage setup checklist refresh", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -82,18 +111,18 @@ describe("GuidePage setup checklist refresh", () => {
     API.get.mockResolvedValue({ data: freshStatus });
 
     const firstVisit = renderGuide();
-    await waitFor(() => expect(API.get).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(quickCheckCalls()).toBe(1));
     firstVisit.unmount();
 
     renderGuide();
-    await waitFor(() => expect(API.get).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(quickCheckCalls()).toBe(2));
   });
 
   test("keeps both optional tags solid and theme-independent", async () => {
     API.get.mockResolvedValue({ data: freshStatus });
 
     renderGuide();
-    await waitFor(() => expect(API.get).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(quickCheckCalls()).toBe(1));
 
     const optionalTags = screen.getAllByText("可选");
     expect(optionalTags).toHaveLength(2);
@@ -107,7 +136,7 @@ describe("GuidePage setup checklist refresh", () => {
     API.get.mockResolvedValue({ data: freshStatus });
 
     renderGuide();
-    await waitFor(() => expect(API.get).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(quickCheckCalls()).toBe(1));
 
     const requiredTags = screen.getAllByText("必需");
     expect(requiredTags).toHaveLength(2);

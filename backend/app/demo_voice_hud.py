@@ -3883,6 +3883,7 @@ def add_input_presentation_to_payload(
     audio_volume_percent: int,
     combat_stats_enabled: bool = True,
     position: str = DEFAULT_INPUT_HUD_POSITION,
+    input_unavailable: bool = False,
 ) -> bytes:
     """Append validated per-session keyboard/mouse presentation settings."""
     try:
@@ -3905,14 +3906,16 @@ def add_input_presentation_to_payload(
         raise DemoVoiceHudError(f"unsupported input HUD position: {position}")
 
     packed[INPUT_PRESENTATION_PAYLOAD_INDEX] = [
-        int(bool(enabled)),
+        int(bool(enabled) and not input_unavailable),
         mode,
         scale,
-        int(bool(audio_enabled)),
+        int(bool(audio_enabled) and not input_unavailable),
         volume,
         int(bool(combat_stats_enabled)),
         hud_position,
     ]
+    if input_unavailable:
+        packed[INPUT_PRESENTATION_PAYLOAD_INDEX].append("perfect_world")
     return json.dumps(packed, ensure_ascii=True, separators=(",", ":")).encode("ascii")
 
 
@@ -4736,6 +4739,9 @@ def build_demo_voice_hud_vpk(
     combat_stats_enabled: bool = True,
     session_console_commands: Iterable[object] | None = None,
 ) -> DemoVoiceHudBuild:
+    from .demo_input_policy import demo_disables_player_input
+
+    input_unavailable = demo_disables_player_input(demo_path, parser_factory=parser_factory)
     payload, stats = build_voice_payload(demo_path, parser_factory=parser_factory)
     input_stats = {
         "input_tracks": 0,
@@ -4758,7 +4764,7 @@ def build_demo_voice_hud_vpk(
         "input_audio_edges": 0,
         "input_audio_subtick_edges": 0,
     }
-    if input_track_report is not None:
+    if input_track_report is not None and not input_unavailable:
         payload, input_stats = add_input_tracks_to_payload(
             payload,
             demo_path,
@@ -4776,6 +4782,7 @@ def build_demo_voice_hud_vpk(
         audio_volume_percent=input_audio_volume_percent,
         combat_stats_enabled=combat_stats_enabled,
         position=normalize_input_hud_position(input_hud_position),
+        input_unavailable=input_unavailable,
     )
     stats["payload_bytes"] = len(payload)
 

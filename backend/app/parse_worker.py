@@ -77,7 +77,16 @@ def _run(payload: dict) -> object:
             return analyzer.analyze(target, freeze_to_death_rounds=ftd_list).to_dict()
 
         result, has_keyboard_input = _analyze_with_keyboard_probe(dem_path, run_analyze)
-        result["has_player_keyboard_input"] = has_keyboard_input
+        from app.features.demo_library.ingestion import (
+            resolve_player_keyboard_input_flag,
+            server_name_from_match_meta,
+        )
+
+        result["has_player_keyboard_input"] = resolve_player_keyboard_input_flag(
+            Path(dem_path).name,
+            server_name_from_match_meta(result),
+            has_keyboard_input,
+        )
         return result
     if action == "analyze_batch":
         raw_players = payload.get("target_players") or []
@@ -104,6 +113,17 @@ def _run(payload: dict) -> object:
         results, has_keyboard_input = _analyze_with_keyboard_probe(
             dem_path,
             run_analyze_batch,
+        )
+        from app.features.demo_library.ingestion import (
+            resolve_player_keyboard_input_flag,
+            server_name_from_match_meta,
+        )
+
+        first_result = next(iter(results.values()), None)
+        has_keyboard_input = resolve_player_keyboard_input_flag(
+            Path(dem_path).name,
+            server_name_from_match_meta(first_result.to_dict() if first_result is not None else None),
+            has_keyboard_input,
         )
         analyzer = analyzer_holder["analyzer"]
         analysis_workspace = analyzer.analysis_workspace

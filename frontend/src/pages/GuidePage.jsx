@@ -1,5 +1,7 @@
 import { useT } from "../i18n/useT.js";
 import { BookOpen } from "lucide-react";
+import AnnouncementBanner from "./guide/AnnouncementBanner.jsx";
+import { useAppShell } from "../context/AppShellContext";
 import { FaqAccordion, FeatureCards, QuickStart, SetupChecklist } from "./guide/GuideSections.jsx";
 
 // ─── Setup checklist ────────────────────────────────────────────
@@ -8,8 +10,10 @@ import { FaqAccordion, FeatureCards, QuickStart, SetupChecklist } from "./guide/
 
 export default function GuidePage() {
   const t = useT();
+  const { announcements } = useAppShell();
   return (
     <div className="flex h-full min-h-0 w-full flex-col overflow-y-auto px-4 py-4 sm:px-5">
+      <AnnouncementBanner items={announcements} />
       {/* header */}
       <div className="mb-5 shrink-0 border-b border-white/10 pb-4">
         <div className="flex items-center gap-2">

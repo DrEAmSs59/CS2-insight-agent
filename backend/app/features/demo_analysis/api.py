@@ -22,7 +22,7 @@ from ...env_utils import (
     llm_base_url_is_local_host,
     load_config,
 )
-from ..demo_library.ingestion import infer_demo_source
+from ..demo_library.ingestion import infer_demo_source, remember_missing_player_keyboard_input
 from .inspection import (
     analyze_demo_sync,
     demo_failure_code,
@@ -72,6 +72,15 @@ async def _ensure_analysis_demo_row(path: Path) -> int:
     return int(demo_id)
 
 
+async def _player_keyboard_input_for_open(path: Path, match_meta: object) -> bool | None:
+    server_name = None
+    if isinstance(match_meta, dict):
+        raw_server_name = match_meta.get("server_name")
+        if isinstance(raw_server_name, str):
+            server_name = raw_server_name
+    return await remember_missing_player_keyboard_input(str(path), path.name, server_name)
+
+
 @router.post("/api/demo/upload")
 async def upload_demo(
     file: UploadFile = File(...),
@@ -97,6 +106,7 @@ async def upload_demo(
 
     players, match_meta, inspection_error = await safe_upload_demo_meta(persistent_path)
     demo_id = await _ensure_analysis_demo_row(persistent_path)
+    keyboard_input = await _player_keyboard_input_for_open(persistent_path, match_meta)
     return {
         "id": demo_id,
         "filename": filename,
@@ -106,6 +116,7 @@ async def upload_demo(
         "compatibility": {**compat.report.to_dict(), "cached": compat.cached},
         "players": players,
         "match_meta": match_meta,
+        "has_player_keyboard_input": keyboard_input,
         "inspection_error": {"code": inspection_error} if inspection_error else None,
     }
 
@@ -159,6 +170,7 @@ async def upload_demos(
             failed.append({"filename": filename, "code": inspection_error})
             continue
         demo_id = await _ensure_analysis_demo_row(persistent_path)
+        keyboard_input = await _player_keyboard_input_for_open(persistent_path, match_meta)
         out.append(
             {
                 "id": demo_id,
@@ -169,6 +181,7 @@ async def upload_demos(
                 "compatibility": {**compat.report.to_dict(), "cached": compat.cached},
                 "players": players,
                 "match_meta": match_meta,
+                "has_player_keyboard_input": keyboard_input,
             },
         )
     return {"uploads": out, "failed": failed}
@@ -209,6 +222,7 @@ async def open_local_demos(body: OpenLocalDemosBody):
             failed.append({"filename": path.name, "code": inspection_error})
             continue
         demo_id = await _ensure_analysis_demo_row(path)
+        keyboard_input = await _player_keyboard_input_for_open(path, match_meta)
         uploads.append(
             {
                 "id": demo_id,
@@ -219,6 +233,7 @@ async def open_local_demos(body: OpenLocalDemosBody):
                 "compatibility": {**compat.report.to_dict(), "cached": compat.cached},
                 "players": players,
                 "match_meta": match_meta,
+                "has_player_keyboard_input": keyboard_input,
             }
         )
     return {"uploads": uploads, "failed": failed}

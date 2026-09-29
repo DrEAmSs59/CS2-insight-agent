@@ -7,9 +7,13 @@ import pytest
 
 from app.desktop_data_migration import (
     CANONICAL_CONTAINER_NAME,
+    DATA_SCHEMA_VERSION,
+    EXIT_DATA_SCHEMA_TOO_NEW,
+    DataSchemaTooNewError,
     DesktopDataMigrationError,
     MIGRATION_MARKER_NAME,
     ensure_backend_stopped,
+    ensure_supported_data_schema,
     main,
     migrate_desktop_data,
 )
@@ -274,3 +278,84 @@ def test_new_install_creates_canonical_data_root(tmp_path: Path):
     assert result.mode == "new-install"
     assert (_canonical(tmp_path) / "logs").is_dir()
     assert (tmp_path / CANONICAL_CONTAINER_NAME / MIGRATION_MARKER_NAME).is_file()
+
+
+def _user_version(data_root: Path) -> int:
+    connection = sqlite3.connect(data_root / "cs2-insight.db")
+    try:
+        return connection.execute("PRAGMA user_version").fetchone()[0]
+    finally:
+        connection.close()
+
+
+def _set_user_version(data_root: Path, version: int) -> None:
+    connection = sqlite3.connect(data_root / "cs2-insight.db")
+    try:
+        connection.execute(f"PRAGMA user_version = {version}")
+        connection.commit()
+    finally:
+        connection.close()
+
+
+def test_cli_stamps_unversioned_shared_database(tmp_path: Path):
+    _write_database(_canonical(tmp_path), "shared")
+
+    assert main(["--appdata", str(tmp_path)]) == 0
+
+    assert _user_version(_canonical(tmp_path)) == DATA_SCHEMA_VERSION
+    assert _read_database(_canonical(tmp_path)) == "shared"
+
+
+def test_cli_refuses_data_written_by_a_newer_schema_without_touching_it(tmp_path: Path, capsys):
+    data_root = _canonical(tmp_path)
+    _write_database(data_root, "from-newer-edition")
+    _set_user_version(data_root, DATA_SCHEMA_VERSION + 1)
+    before = (data_root / "cs2-insight.db").read_bytes()
+
+    assert main(["--appdata", str(tmp_path)]) == EXIT_DATA_SCHEMA_TOO_NEW
+
+    assert (data_root / "cs2-insight.db").read_bytes() == before
+    assert not (tmp_path / CANONICAL_CONTAINER_NAME / MIGRATION_MARKER_NAME).exists()
+    assert str(DATA_SCHEMA_VERSION + 1) in capsys.readouterr().err
+
+
+def test_cli_accepts_current_schema(tmp_path: Path):
+    data_root = _canonical(tmp_path)
+    _write_database(data_root, "current")
+    _set_user_version(data_root, DATA_SCHEMA_VERSION)
+
+    assert main(["--appdata", str(tmp_path)]) == 0
+    assert _user_version(data_root) == DATA_SCHEMA_VERSION
+
+
+def test_backend_refuses_to_open_databases_written_by_a_newer_schema(tmp_path: Path):
+    import os
+    import subprocess
+    import sys
+
+    _write_database(tmp_path, "newer")
+    _set_user_version(tmp_path, DATA_SCHEMA_VERSION + 1)
+    env = {**os.environ, "CS2_INSIGHT_CONFIG": str(tmp_path / "cs2-insight.config.json"), "PYTHONIOENCODING": "utf-8"}
+    completed = subprocess.run(
+        [sys.executable, "-c", "import app.databases"],
+        cwd=Path(__file__).resolve().parents[1],
+        env=env,
+        capture_output=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=60,
+    )
+
+    assert completed.returncode != 0
+    assert "DataSchemaTooNewError" in completed.stderr
+
+
+def test_backend_guard_rejects_newer_schema_and_allows_missing_database(tmp_path: Path):
+    ensure_supported_data_schema(tmp_path / "cs2-insight.db")
+
+    _write_database(tmp_path, "guard")
+    ensure_supported_data_schema(tmp_path / "cs2-insight.db")
+
+    _set_user_version(tmp_path, DATA_SCHEMA_VERSION + 1)
+    with pytest.raises(DataSchemaTooNewError):
+        ensure_supported_data_schema(tmp_path / "cs2-insight.db")

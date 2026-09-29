@@ -47,9 +47,10 @@
     const recordingVoiceMode = ["all", "team", "enemy", "mute"].indexOf(encodedRecordingVoiceMode) >= 0
         ? encodedRecordingVoiceMode
         : "team";
-    const inputHudEnabled = encodedInputPresentation.length > 0
+    const inputHudUnavailable = encodedInputPresentation[7] === "perfect_world";
+    const inputHudEnabled = !inputHudUnavailable && (encodedInputPresentation.length > 0
         ? Boolean(encodedInputPresentation[0])
-        : true;
+        : true);
     const requestedInputHudDisplayMode = String(encodedInputPresentation[1] || "hybrid");
     // encodedAdvancedPlayback is available at this point; the decoded
     // advancedPlayback object is initialized later in the script.
@@ -64,9 +65,9 @@
     const inputHudPosition = ["bottom_center", "minimap_below", "weapon_right"].indexOf(requestedInputHudPosition) >= 0
         ? requestedInputHudPosition
         : "bottom_center";
-    const inputAudioEnabled = encodedInputPresentation.length > 3
+    const inputAudioEnabled = !inputHudUnavailable && (encodedInputPresentation.length > 3
         ? Boolean(encodedInputPresentation[3])
-        : true;
+        : true);
     const requestedInputAudioVolumePercent = Number(encodedInputPresentation[4] || 100);
     // Temporarily disable the custom K/D/A, R DMG, and DMG block in every
     // generated POV VPK. Keep the session setting and implementation in place
@@ -882,7 +883,7 @@
     const advancedOptionButtons = {};
     const advancedOptionLabels = {};
     const advancedInputHudButtons = {};
-    let advancedInputHudPosition = "bottom_center";
+    let advancedInputHudPosition = inputHudUnavailable ? "hidden" : "bottom_center";
     const ADVANCED_EVENT_ICON_HEIGHT = 16;
     const ADVANCED_EVENT_ICON_TRACK_HEIGHT = 20;
     const ADVANCED_FILTER_ICON_SIZE = 14;
@@ -2783,6 +2784,7 @@
     }
 
     function runtimeInputHudVisible() {
+        if (inputHudUnavailable) return false;
         if (advancedPlayback) {
             return !advancedHudHidden && advancedInputHudPosition !== "hidden";
         }
@@ -6072,6 +6074,7 @@
     }
 
     function advancedSetInputHudPosition(position) {
+        if (inputHudUnavailable) return;
         if (["hidden", "bottom_center", "minimap_below", "weapon_right"].indexOf(position) < 0) {
             return;
         }
@@ -7882,34 +7885,47 @@
         inputHudRow.style.height = "30px";
         inputHudRow.style.flowChildren = "right";
         advancedCreateSectionLabel(inputHudRow, advancedCopy("键鼠", "INPUT"));
-        [
-            ["hidden", advancedCopy("不显示", "Hide")],
-            ["bottom_center", advancedCopy("底部中央", "Bottom")],
-            ["minimap_below", advancedCopy("小地图下", "Minimap")],
-            ["weapon_right", advancedCopy("武器HUD上", "Weapon")],
-        ].forEach(function (entry, index, choices) {
-            const button = advancedCreateButton(
-                inputHudRow,
-                entry[1],
-                function () { advancedSetInputHudPosition(entry[0]); },
-                "96px",
-            );
-            button.style.height = "25px";
-            button.style.paddingLeft = "4px";
-            button.style.paddingRight = "4px";
-            if (index === choices.length - 1) {
-                button.style.marginRight = "0px";
-            }
-            const label = button.GetChild ? button.GetChild(0) : null;
-            if (label && label.IsValid()) {
-                label.style.width = "100%";
-                label.style.textAlign = "center";
-                label.style.textOverflow = "shrink";
-                label.style.fontSize = advancedChinese() ? "11px" : "10px";
-            }
-            advancedInputHudButtons[entry[0]] = button;
-        });
-        advancedRefreshInputHudButtons();
+        if (inputHudUnavailable) {
+            const notice = advancedCreateLabel(inputHudRow, advancedCopy(
+                "该 Demo 缺少玩家键鼠数据，无法显示键鼠可视化，可能与游戏平台有关",
+                "Input data unavailable; visualization disabled (platform limitation).",
+            ), 11, "#e8b35b");
+            notice.style.width = "fill-parent-flow(1)";
+            notice.style.verticalAlign = "center";
+            notice.style.fontSize = "11px";
+            notice.style.color = "#e8b35b";
+            notice.style.whiteSpace = "nowrap";
+            notice.style.textOverflow = "shrink";
+        } else {
+            [
+                ["hidden", advancedCopy("不显示", "Hide")],
+                ["bottom_center", advancedCopy("底部中央", "Bottom")],
+                ["minimap_below", advancedCopy("小地图下", "Minimap")],
+                ["weapon_right", advancedCopy("武器HUD上", "Weapon")],
+            ].forEach(function (entry, index, choices) {
+                const button = advancedCreateButton(
+                    inputHudRow,
+                    entry[1],
+                    function () { advancedSetInputHudPosition(entry[0]); },
+                    "96px",
+                );
+                button.style.height = "25px";
+                button.style.paddingLeft = "4px";
+                button.style.paddingRight = "4px";
+                if (index === choices.length - 1) {
+                    button.style.marginRight = "0px";
+                }
+                const label = button.GetChild ? button.GetChild(0) : null;
+                if (label && label.IsValid()) {
+                    label.style.width = "100%";
+                    label.style.textAlign = "center";
+                    label.style.textOverflow = "shrink";
+                    label.style.fontSize = advancedChinese() ? "11px" : "10px";
+                }
+                advancedInputHudButtons[entry[0]] = button;
+            });
+            advancedRefreshInputHudButtons();
+        }
 
         const voiceRow = advancedCreatePanel("Panel", advancedMenuBody, "");
         voiceRow.style.width = "100%";

@@ -1002,6 +1002,15 @@ class DemoDB:
             )
             await conn.commit()
 
+    async def mark_player_keyboard_input_missing(self, demo_path: str) -> None:
+        """Record that this demo cannot drive the in-game keyboard HUD."""
+        async with aiosqlite.connect(self.db_path) as conn:
+            await conn.execute(
+                "UPDATE demo_files SET has_player_keyboard_input = 0 WHERE path = ?",
+                (demo_path,),
+            )
+            await conn.commit()
+
     async def find_by_filename(self, filename: str):
         """Return the demo_files row for the given filename, or None."""
         async with aiosqlite.connect(self.db_path) as db:

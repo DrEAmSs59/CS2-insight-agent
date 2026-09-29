@@ -18,15 +18,31 @@ def test_tauri_identifier_and_installer_hook_are_stable():
     assert (TAURI_ROOT / hook).is_file()
 
 
+def test_installer_only_stops_its_own_edition():
+    hook = (TAURI_ROOT / "windows" / "upgrade-hooks.nsh").read_text(encoding="utf-8")
+    preinstall = hook[hook.index("!macro NSIS_HOOK_PREINSTALL"):]
+
+    assert "cs2-insight-agent-desktop.exe" not in hook
+    assert preinstall.index('StrCpy $CS2MainExe "${MAINBINARYNAME}.exe"') < preinstall.index("Call CS2_PrepareRunningApps")
+    assert 'taskkill.exe" /IM "$CS2MainExe" /F /T' in hook
+    # The other edition shares port 19871; only this installation's Python may be stopped.
+    assert "$$proc.Path.StartsWith('$INSTDIR\\'" in hook
+
+
+def test_backend_learns_its_edition_from_the_desktop_shell():
+    source = TAURI_RUNTIME.read_text(encoding="utf-8")
+    start = source.index("fn start_backend(")
+    spawn = source.index(".spawn()", start)
+
+    assert '.env("CS2_INSIGHT_EDITION", edition::CURRENT.id())' in source[start:spawn]
+
+
 def test_installer_hook_covers_electron_upgrade_surfaces():
     hook = (TAURI_ROOT / "windows" / "upgrade-hooks.nsh").read_text(encoding="utf-8")
 
     assert 'tasklist.exe" /FI "IMAGENAME eq $R9"' in hook
     assert 'StrCpy $R9 "CS2 Insight Agent.exe"' in hook
-    assert 'StrCpy $R9 "cs2-insight-agent-desktop.exe"' in hook
-    # A running Tauri shell is waited for and force-killed with its backend
-    # child tree instead of aborting the install.
-    assert 'taskkill.exe" /IM "cs2-insight-agent-desktop.exe" /F /T' in hook
+    assert 'StrCpy $R9 "$CS2MainExe"' in hook
     # An orphaned backend must not keep port 19871 busy after an upgrade.
     assert "LocalPort 19871" in hook
     # In-place upgrades must remove the obsolete native HTTP parser; the lean
