@@ -1,6 +1,5 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { AlertTriangle, ChevronLeft, ChevronRight, ExternalLink, Megaphone } from "lucide-react";
-import API from "../../api/api";
 import { desktopBridge } from "../../desktop/desktopBridge.js";
 import { useLocaleStore } from "../../i18n/localeStore.js";
 import { useT } from "../../i18n/useT.js";
@@ -13,25 +12,10 @@ function openLink(url) {
   window.open(url, "_blank", "noopener,noreferrer");
 }
 
-export default function AnnouncementBanner() {
+export default function AnnouncementBanner({ items = [] }) {
   const t = useT();
   const effectiveLocale = useLocaleStore((s) => s.effectiveLocale);
-  const [items, setItems] = useState([]);
   const [index, setIndex] = useState(0);
-
-  useEffect(() => {
-    let cancelled = false;
-    API.get("/app/announcements")
-      .then(({ data }) => {
-        if (!cancelled) setItems(Array.isArray(data?.announcements) ? data.announcements : []);
-      })
-      .catch(() => {
-        if (!cancelled) setItems([]);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
 
   if (items.length === 0) return null;
   const currentIndex = Math.min(index, items.length - 1);

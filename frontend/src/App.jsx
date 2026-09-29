@@ -1,6 +1,7 @@
 import { lazy, Suspense, useState, useCallback, useMemo, useEffect, useRef } from "react";
 import { Routes, Route, Navigate, useNavigate, useLocation } from "react-router-dom";
 import { AppShellProvider } from "./context/AppShellContext";
+import { useAppAnnouncements } from "./hooks/useAppAnnouncements.js";
 import UpdateCheckModal from "./components/UpdateCheckModal";
 import RecordingBlockedDialog from "./components/RecordingBlockedDialog";
 import RecordingResultModal from "./components/recordingQueue/RecordingResultModal";
@@ -76,6 +77,7 @@ export default function App() {
   const t = useT();
   const locale = useLocaleStore((s) => s.locale);
   const [backendReady, setBackendReady] = useState(false);
+  const announcements = useAppAnnouncements(backendReady);
   /** 后端就绪后的启动流程：先检查更新，再拉取首页配置检查 */
   const [startupInitDone, setStartupInitDone] = useState(false);
   const [startupInitPhase, setStartupInitPhase] = useState(/** @type {"update" | "config" | null} */ (null));
@@ -1262,6 +1264,7 @@ export default function App() {
     setSelectedClientClipUids(new Set());
   }, [currentMatchIndex]);
   const shell = {
+    announcements,
     aiMode,
     queue,
     uploadedDemos,

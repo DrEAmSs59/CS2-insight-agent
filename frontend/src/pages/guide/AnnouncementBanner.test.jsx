@@ -1,14 +1,9 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, test, vi } from "vitest";
-import API from "../../api/api";
 import { useLocaleStore } from "../../i18n/localeStore.js";
 import AnnouncementBanner from "./AnnouncementBanner.jsx";
 
 const desktopBridgeMock = vi.hoisted(() => ({ openExternal: vi.fn(async () => {}) }));
-
-vi.mock("../../api/api", () => ({
-  default: { get: vi.fn() },
-}));
 
 vi.mock("../../desktop/desktopBridge.js", () => ({
   desktopBridge: desktopBridgeMock,
@@ -25,8 +20,9 @@ function announcement(overrides = {}) {
   };
 }
 
-function serve(items) {
-  API.get.mockResolvedValue({ data: { edition: "free", announcements: items } });
+let items;
+function serve(value) {
+  items = value;
 }
 
 function setLocale(locale) {
@@ -43,20 +39,19 @@ describe("AnnouncementBanner", () => {
   test("shows server announcements in Chinese", async () => {
     serve([announcement()]);
 
-    render(<AnnouncementBanner />);
+    render(<AnnouncementBanner items={items} />);
 
     const body = await screen.findByText("服务器将于今晚维护");
     expect(screen.getByText("公告")).toBeTruthy();
     expect(body.closest("[data-announcement-body]")).toBeTruthy();
     expect(screen.getByText("公告").closest("[data-announcement-body]")).toBeNull();
-    expect(API.get).toHaveBeenCalledWith("/app/announcements");
   });
 
   test("uses the English body when the interface is English and falls back to Chinese", async () => {
     setLocale("en");
     serve([announcement(), announcement({ id: "a2", body_zh: "仅中文公告", body_en: null })]);
 
-    render(<AnnouncementBanner />);
+    render(<AnnouncementBanner items={items} />);
 
     expect(await screen.findByText("Server maintenance tonight")).toBeTruthy();
     expect(screen.getByText("Announcement")).toBeTruthy();
@@ -69,7 +64,7 @@ describe("AnnouncementBanner", () => {
   test("renders markup from the server as plain text", async () => {
     serve([announcement({ body_zh: "<b>粗体</b><img src=x onerror=alert(1)>" })]);
 
-    const { container } = render(<AnnouncementBanner />);
+    const { container } = render(<AnnouncementBanner items={items} />);
 
     expect(await screen.findByText("<b>粗体</b><img src=x onerror=alert(1)>")).toBeTruthy();
     expect(container.querySelector("b")).toBeNull();
@@ -82,7 +77,7 @@ describe("AnnouncementBanner", () => {
       announcement({ id: "a2", body_zh: "第二条" }),
     ]);
 
-    render(<AnnouncementBanner />);
+    render(<AnnouncementBanner items={items} />);
 
     expect(await screen.findByText("第一条")).toBeTruthy();
     expect(screen.queryByText("第二条")).toBeNull();
@@ -99,7 +94,7 @@ describe("AnnouncementBanner", () => {
   test("opens the detail link in the system browser", async () => {
     serve([announcement({ link_url: "https://ciacut.cc/notice" })]);
 
-    render(<AnnouncementBanner />);
+    render(<AnnouncementBanner items={items} />);
     fireEvent.click(await screen.findByRole("button", { name: "查看详情" }));
 
     expect(desktopBridgeMock.openExternal).toHaveBeenCalledWith("https://ciacut.cc/notice");
@@ -108,7 +103,7 @@ describe("AnnouncementBanner", () => {
   test("marks warnings with the warning style", async () => {
     serve([announcement({ level: "warning" })]);
 
-    render(<AnnouncementBanner />);
+    render(<AnnouncementBanner items={items} />);
 
     const item = (await screen.findByText("服务器将于今晚维护")).closest("[data-announcement-level]");
     expect(item.getAttribute("data-announcement-level")).toBe("warning");
@@ -116,16 +111,8 @@ describe("AnnouncementBanner", () => {
     expect(screen.getByText("重要")).toBeTruthy();
   });
 
-  test("renders nothing when there are no announcements or the request fails", async () => {
-    serve([]);
+  test("renders nothing when there are no announcements", () => {
     const empty = render(<AnnouncementBanner />);
-    await waitFor(() => expect(API.get).toHaveBeenCalledTimes(1));
     expect(empty.container.innerHTML).toBe("");
-    empty.unmount();
-
-    API.get.mockRejectedValue(new Error("offline"));
-    const failed = render(<AnnouncementBanner />);
-    await waitFor(() => expect(API.get).toHaveBeenCalledTimes(2));
-    expect(failed.container.innerHTML).toBe("");
   });
 });

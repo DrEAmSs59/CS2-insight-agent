@@ -58,17 +58,18 @@ describe("GuidePage announcements", () => {
   });
 
   test("shows server announcements above the page title", async () => {
-    API.get.mockImplementation(async (url) => (
-      url === "/app/announcements"
-        ? { data: { announcements: [{ id: "n1", level: "info", body_zh: "新版本已发布", body_en: null, link_url: null }] } }
-        : { data: freshStatus }
-    ));
+    useAppShellMock.mockReturnValue({
+      initialQuickCheckStatus: staleStatus,
+      announcements: [{ id: "n1", level: "info", body_zh: "新版本已发布", body_en: null, link_url: null }],
+    });
+    API.get.mockResolvedValue({ data: freshStatus });
 
     renderGuide();
 
     const notice = await screen.findByText("新版本已发布");
     const title = screen.getByRole("heading", { name: "上手指南" });
     expect(notice.compareDocumentPosition(title) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(API.get.mock.calls.some(([url]) => url === "/app/announcements")).toBe(false);
   });
 });
 
