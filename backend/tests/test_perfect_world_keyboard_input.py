@@ -4,9 +4,48 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app.features.demo_library import ingestion
+
+
+@pytest.mark.parametrize("filename,server_name", [
+    ("pvp_match.dem", ""),
+    ("source.dem", "完美世界竞技平台"),
+    ("renamed.dem", "Perfect World"),
+    ("renamed.dem", "PerfectWorld"),
+    ("renamed.dem", "wanmei"),
+])
+def test_perfect_world_never_extracts_or_reuses_input(tmp_path, monkeypatch, filename, server_name):
+    import demoparser2
+    from app import input_command
+
+    demo = tmp_path / filename
+    demo.write_bytes(b"demo")
+    monkeypatch.setattr(demoparser2, "DemoParser", lambda _: SimpleNamespace(
+        parse_header=lambda: {"server_name": server_name},
+    ))
+    monkeypatch.setattr(input_command, "_report_cache", {
+        input_command._demo_key(demo): {"format_version": 10, "tracks": ["stale"]},
+    })
+    monkeypatch.setattr(input_command, "resolve_input_extractor", lambda: pytest.fail("must not run extractor"))
+    assert input_command.load_input_report(demo)["tracks"] == []
+
+
+def test_other_platform_still_uses_input_cache(tmp_path, monkeypatch):
+    import demoparser2
+    from app import input_command
+
+    demo = tmp_path / "match.dem"
+    demo.write_bytes(b"demo")
+    monkeypatch.setattr(demoparser2, "DemoParser", lambda _: SimpleNamespace(
+        parse_header=lambda: {"server_name": "FACEIT"},
+    ))
+    report = {"format_version": 10, "tracks": ["existing"]}
+    monkeypatch.setattr(input_command, "_report_cache", {input_command._demo_key(demo): report})
+    assert input_command.load_input_report(demo) is report
 
 
 def test_perfect_world_overrides_a_positive_keyboard_probe():

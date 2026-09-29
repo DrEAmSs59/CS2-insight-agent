@@ -23,6 +23,8 @@ import tempfile
 import threading
 from typing import Any, Mapping
 
+from .demo_input_policy import demo_disables_player_input
+
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _EXTRACTOR_NAME = "demo-input-hud-track.exe" if sys.platform == "win32" else "demo-input-hud-track"
@@ -86,6 +88,10 @@ def resolve_input_extractor() -> Path:
 
 
 def load_input_report(demo_path: str | Path) -> dict[str, Any]:
+    # Apply platform policy before consulting old reports or resolving/spawning
+    # the extractor, regardless of the user's HUD visibility setting.
+    if demo_disables_player_input(demo_path):
+        return {"format_version": _INPUT_REPORT_MIN_FORMAT_VERSION, "tracks": []}
     key = _demo_key(demo_path)
     with _CACHE_LOCK:
         cached = _report_cache.get(key)

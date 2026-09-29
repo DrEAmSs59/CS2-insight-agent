@@ -28,7 +28,7 @@ def infer_demo_source(filename: str, server_name: str | None = None) -> str:
         return "Faceit"
     if "5eplay" in sn or "5e" in sn:
         return "5E"
-    if "完美世界" in sn or "wanmei" in sn:
+    if "完美世界" in sn or "wanmei" in sn or "perfectworld" in sn.replace(" ", ""):
         return "Perfect World"
     if "valve" in sn:
         return "Matchmaking"
