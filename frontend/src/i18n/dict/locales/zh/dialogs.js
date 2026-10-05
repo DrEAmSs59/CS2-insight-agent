@@ -174,4 +174,5 @@ export default {
   "dialog.ffmpegRequiredTitle": "无法使用合辑工作台",
   "dialog.ffmpegRequiredSubtitleDefault": "FFmpeg 未就绪",
   "dialog.ffmpegRequiredGoSettings": "前往设置",
+  "dialog.ffmpegDownloadPage": "下载地址",
 };

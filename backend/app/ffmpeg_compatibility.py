@@ -18,8 +18,8 @@ logger = logging.getLogger(__name__)
 _BASELINE_PATH = Path(__file__).with_name("ffmpeg_baseline.json")
 _FALLBACK_BASELINE: dict[str, Any] = {
     "schema_version": 1,
-    "recommended_name": "ffmpeg-2026-05-06-git-f2e5eff3ff-full_build",
-    "reference_version": "2026-05-06-git-f2e5eff3ff-full_build-www.gyan.dev",
+    "recommended_name": "ffmpeg-9.0.2-full_build",
+    "reference_version": "9.0.2-full_build-www.gyan.dev",
     "required_build_flags": [
         "--enable-libx264",
         "--enable-libdav1d",

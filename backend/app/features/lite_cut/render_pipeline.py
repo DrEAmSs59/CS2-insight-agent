@@ -1333,7 +1333,7 @@ def compose_lite_cut_montage(
         probe_ffmpeg_encoder,
         run_encoder_attempts,
     )
-    from .export_preflight import validate_export_output
+    from .export_preflight import expected_export_duration, validate_export_output
 
     _raise_if_cancelled(cancel_event)
     export_plan = build_lite_cut_export_plan(project_body)
@@ -1485,7 +1485,14 @@ def compose_lite_cut_montage(
                 encoder_adapter=candidate.adapter,
                 rife_device_plan=rife_device_plan,
             )
-            validate_export_output(ffmpeg_bin, attempt_output)
+            validate_export_output(
+                ffmpeg_bin,
+                attempt_output,
+                expected_duration_sec=expected_export_duration(export_plan),
+                # Each normalized segment may round by one working-rate frame.
+                # FrameMeld additionally rounds its final output to 60 FPS.
+                duration_tolerance_sec=max(0.1, (len(clips) + 2) / min(fps, 60.0)),
+            )
         except MontageComposerError as exc:
             _convert_generated_failure(candidate, exc)
             raise

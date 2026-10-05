@@ -1,5 +1,16 @@
-import { Clapperboard } from "lucide-react";
+import { Clapperboard, ExternalLink } from "lucide-react";
+import { desktopBridge } from "../desktop/desktopBridge.js";
 import { useT } from "../i18n/useT.js";
+
+const DOWNLOAD_URL = "https://ciacut.cc";
+
+function openDownloadPage(url) {
+  if (desktopBridge?.openExternal) {
+    void desktopBridge.openExternal(url);
+    return;
+  }
+  window.open(url, "_blank", "noopener,noreferrer");
+}
 
 /**
  * FFmpeg 门控：未配置或不可用时展示，不可通过遮罩/关闭按钮 dismiss。
@@ -32,6 +43,14 @@ export default function FfmpegRequiredDialog({ title, subtitle, message, onGoSet
           <p className="text-sm leading-6 text-cs2-text-secondary whitespace-pre-wrap break-words">
             {message}
           </p>
+          <button
+            type="button"
+            onClick={() => openDownloadPage(DOWNLOAD_URL)}
+            className="mt-3 inline-flex items-center gap-1 text-sm font-semibold text-cs2-accent hover:underline"
+          >
+            {t("dialog.ffmpegDownloadPage")}
+            <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
+          </button>
         </div>
 
         <div className="flex justify-end border-t border-cs2-border bg-cs2-bg-input/30 px-5 py-3">

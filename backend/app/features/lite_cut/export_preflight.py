@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+import math
 import os
 import shutil
 import subprocess
@@ -13,6 +15,9 @@ from ...video_composer import MontageComposerError, ffprobe_streams, resolve_ffp
 from .export_plan import LiteCutExportPlan
 from .graph_builders import build_audio_mix_graph
 from .timeline import _resolve_audio_clip_paths
+from .timeline_math import clip_timeline_duration_sec
+
+logger = logging.getLogger(__name__)
 
 
 def ensure_ffmpeg_runnable(ffmpeg_bin: Path) -> None:
@@ -190,7 +195,28 @@ def ensure_lite_cut_audio_command_length(
     return ensure_windows_command_length(command)
 
 
-def validate_export_output(ffmpeg_bin: Path, output_path: Path) -> None:
+def expected_export_duration(export_plan: LiteCutExportPlan) -> float:
+    """Use the rendered base timeline, including gaps, speed and freeze frames.
+
+    Audio/overlay tails do not extend the base video. A custom export range
+    cannot extend it either. Never infer this value from the generated file.
+    """
+    end = max((
+        max(0.0, float(clip.get("timeline_start") or 0.0)) + clip_timeline_duration_sec(clip)
+        for clip in export_plan.base_clips
+    ), default=0.0)
+    if export_plan.range_end_sec is not None:
+        end = min(end, export_plan.range_end_sec)
+    return max(0.0, end - export_plan.range_start_sec)
+
+
+def validate_export_output(
+    ffmpeg_bin: Path,
+    output_path: Path,
+    *,
+    expected_duration_sec: float | None = None,
+    duration_tolerance_sec: float = 0.1,
+) -> None:
     try:
         if not output_path.is_file() or output_path.stat().st_size <= 0:
             raise OSError("empty output")
@@ -201,9 +227,33 @@ def validate_export_output(ffmpeg_bin: Path, output_path: Path) -> None:
             file_role="final",
         )
         streams = data.get("streams") or []
-        has_video = any(str(stream.get("codec_type") or "") == "video" for stream in streams if isinstance(stream, dict))
-        if not has_video:
+        video = next((stream for stream in streams if isinstance(stream, dict) and stream.get("codec_type") == "video"), None)
+        if video is None:
             raise OSError("no video stream")
+        if expected_duration_sec is not None:
+            # Container duration can remain correct when only audio survives.
+            # Final exports are MP4: require the video stream's own duration.
+            try:
+                actual_duration = float(video.get("duration", "nan"))
+            except (TypeError, ValueError):
+                actual_duration = math.nan
+            tolerance = max(0.05, float(duration_tolerance_sec))
+            if (
+                not math.isfinite(actual_duration)
+                or actual_duration <= 0.0
+                or abs(actual_duration - expected_duration_sec) > tolerance
+            ):
+                logger.error(
+                    "LiteCut output duration mismatch expected=%.3fs video=%s tolerance=%.3fs file=%s",
+                    expected_duration_sec, actual_duration, tolerance, output_path.name,
+                )
+                raise MontageComposerError(
+                    "MONTAGE_OUTPUT_INCOMPLETE",
+                    expected_seconds=f"{expected_duration_sec:.3f}",
+                    actual_seconds=f"{actual_duration:.3f}" if math.isfinite(actual_duration) else "unknown",
+                    stage="lite_cut_output_validation",
+                    name=output_path.name,
+                )
         decode_command = [
             str(ffmpeg_bin),
             "-hide_banner",
@@ -222,6 +272,8 @@ def validate_export_output(ffmpeg_bin: Path, output_path: Path) -> None:
         decoded = run_process_capture(decode_command, timeout=120)
         if decoded.returncode != 0:
             raise OSError(process_error_tail(decoded) or "video decode failed")
+    except MontageComposerError:
+        raise
     except Exception as exc:
         raise MontageComposerError("MONTAGE_OUTPUT_NOT_PLAYABLE") from exc
 

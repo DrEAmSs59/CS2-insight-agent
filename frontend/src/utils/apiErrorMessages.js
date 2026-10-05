@@ -62,6 +62,7 @@ export const API_ERROR_I18N_KEYS = {
   MONTAGE_OUTPUT_SPACE_CHECK_FAILED: "montage.err.outputSpaceCheckFailed",
   MONTAGE_OUTPUT_DISK_FULL: "montage.err.outputDiskFull",
   MONTAGE_OUTPUT_NOT_PLAYABLE: "montage.err.outputNotPlayable",
+  MONTAGE_OUTPUT_INCOMPLETE: "montage.err.outputIncomplete",
   MONTAGE_CLIPS_EMPTY: "montage.exportErrorNoClips",
   MONTAGE_CLIP_FILE_MISSING: "montage.err.clipFileMissing",
   MONTAGE_SOURCE_NOT_READABLE: "montage.err.sourceNotReadable",

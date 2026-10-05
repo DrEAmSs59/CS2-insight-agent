@@ -174,4 +174,5 @@ export default {
   "dialog.ffmpegRequiredTitle": "Montage studio unavailable",
   "dialog.ffmpegRequiredSubtitleDefault": "FFmpeg not ready",
   "dialog.ffmpegRequiredGoSettings": "Go to Settings",
+  "dialog.ffmpegDownloadPage": "Download page",
 };

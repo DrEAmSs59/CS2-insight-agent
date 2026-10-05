@@ -59,7 +59,7 @@ export default {
   "liteCut.project.creating": "创建中…",
   "liteCut.project.startTitle": "选择或新建工程",
   "liteCut.ffmpegRequiredTitle": "无法使用 LiteCut",
-  "liteCut.ffmpegGateDefaultMessage": "FFmpeg未配置或不可用，请前往设置页配置后再使用LiteCut。\n若已填写ffmpeg路径，则是ffmpeg版本不受支持。\n请下载 FrameMeld_FFmpeg V0.1.1以上或ffmpeg-9.0-full_build(不支持帧混合)",
+  "liteCut.ffmpegGateDefaultMessage": "FFmpeg未配置或不可用，请前往设置页配置后再使用LiteCut。\n若已填写ffmpeg路径，则是ffmpeg版本不受支持。\n请下载 FrameMeld_FFmpeg V0.1.5 或更高版本或ffmpeg-9.0.2-full_build(不支持帧混合)",
   "liteCut.project.startHint": "打开一个已有工程继续剪辑，或者主动创建新工程。LiteCut 不会再自动生成未命名工程。",
   "liteCut.project.startNew": "新建工程",
   "liteCut.project.startNewHint": "设置名称、画布尺寸和视频帧率",
