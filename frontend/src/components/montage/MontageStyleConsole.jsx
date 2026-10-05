@@ -1,3 +1,4 @@
+import SharpenControl from "../SharpenControl.jsx";
 import { useState } from "react";
 import {
   Copy,
@@ -201,6 +202,11 @@ export function MontageStyleConsole({
   nameCardsEnabled,
   onPlayerAvatarChange,
   onNameCardsEnabledChange,
+  sharpenEnabled = false,
+  sharpenAmount = 0.15,
+  sharpenAvailable = false,
+  legacySharpen = false,
+  onSharpenChange,
   framemeldEnabled,
   framemeldRuntimeAvailable = false,
   framemeldSourceSummary: providedFrameMeldSourceSummary,
@@ -655,6 +661,8 @@ export function MontageStyleConsole({
                   {t("montage.consoleFrameMeldLockedPlan")}
                 </p>
               ) : null}
+              <SharpenControl t={t} available={sharpenAvailable} legacy={legacySharpen}
+                enabled={sharpenEnabled} amount={sharpenAmount} onChange={onSharpenChange} />
               </div>
             </details>
 

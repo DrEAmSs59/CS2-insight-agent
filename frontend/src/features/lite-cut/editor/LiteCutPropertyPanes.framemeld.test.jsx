@@ -52,3 +52,12 @@ describe("LiteCut ExportPane FrameMeld confirmation", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 });
+
+ it("can sharpen independently without the temporal FPS constraint", () => {
+   const props = renderExportPane({sharpenAvailable:true, sharpenEnabled:true, sharpenAmount:0.15, framemeldSourceItems:[{fps:60},{fps:120}]});
+   expect(screen.getByRole("button", {name:"liteCut.frameMeldTitle"}).disabled).toBe(true);
+   fireEvent.change(screen.getByRole("slider", {name:"montage.sharpenStrength"}), {target:{value:"0.27"}});
+   expect(props.onOutputSettingsChange).toHaveBeenCalledWith({sharpen_amount:0.27});
+   fireEvent.click(screen.getByRole("button", {name:"montage.sharpenTitle"}));
+   expect(props.onOutputSettingsChange).toHaveBeenLastCalledWith({sharpen_enabled:false});
+ });

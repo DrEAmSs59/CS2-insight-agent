@@ -1,5 +1,11 @@
 // en / montage — keep keys scoped to this feature catalog.
 export default {
+  "montage.sharpenTitle": "Sharpening",
+  "montage.sharpenHint": "Enhance image detail independently or together with frame blending.",
+  "montage.sharpenStrength": "Sharpening strength",
+  "montage.sharpenUnavailable": "Independent sharpening requires FrameMeld 0.1.5 or later. Download the complete runtime and update the FFmpeg path.",
+  "montage.sharpenLegacy": "This older FrameMeld runtime applies fixed 0.15 sharpening with frame blending. Independent control requires FrameMeld 0.1.5 or later.",
+
   "montage.bundleLabel": "Bundle Record",
   "montage.bundleTitle": "👨‍🔬 Lab Special: Full Death Reel",
   "montage.bundleDeathCount": "({n} deaths this match)",

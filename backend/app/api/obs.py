@@ -89,7 +89,7 @@ def _setup_status_obs_handshake_timeout_sec() -> float:
 
 def _configured_ffmpeg_toolkit_report(raw_path: str) -> dict[str, object]:
     from ..ffmpeg_compatibility import inspect_ffmpeg_toolkit
-    from ..framemeld import probe_framemeld
+    from ..framemeld import probe_framemeld, supports_independent_sharpen
     from ..video_composer import MontageComposerError, resolve_ffmpeg_binary
 
     raw = str(raw_path or "").strip()
@@ -121,6 +121,9 @@ def _configured_ffmpeg_toolkit_report(raw_path: str) -> dict[str, object]:
     return {
         **report,
         "framemeld_available": capability is not None,
+        "framemeld_sharpen_available": supports_independent_sharpen(capability),
+        "framemeld_legacy_sharpen": bool(capability and "final-luma-sharpen-v1" in capability.features and not supports_independent_sharpen(capability)),
+        "framemeld_version": capability.version if capability else None,
         "framemeld_route": capability.route if capability is not None else None,
         "framemeld_api_version": capability.api_version if capability is not None else None,
     }

@@ -54,6 +54,8 @@ class LiteCutExportPlan:
     range_start_sec: float
     range_end_sec: float | None
     framemeld_enabled: bool
+    sharpen_enabled: bool = False
+    sharpen_amount: float = 0.15
 
 
 def _asset_references(owner: str, clips: tuple[dict[str, Any], ...]) -> list[ExportAssetReference]:
@@ -186,4 +188,6 @@ def build_lite_cut_export_plan(body: dict[str, Any], reference_media: dict[str, 
         range_start_sec=range_start_sec,
         range_end_sec=range_end_sec,
         framemeld_enabled=bool(output.get("framemeld_enabled")),
+        sharpen_enabled=output.get("sharpen_enabled") is True,
+        sharpen_amount=float(output.get("sharpen_amount", 0.15)),
     )

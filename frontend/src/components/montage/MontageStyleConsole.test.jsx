@@ -155,3 +155,13 @@ describe("MontageStyleConsole export layout", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 });
+
+ it("offers independent sharpening while mixed-FPS frame blending is locked", () => {
+   const onSharpenChange = vi.fn();
+   const props = renderConsole({sharpenAvailable: true, onSharpenChange, framemeldRuntimeAvailable: true, clips: [{fps:60},{fps:120}]});
+   fireEvent.click(screen.getByText("montage.consoleExportAdvancedTitle"));
+   expect(screen.getByRole("button", {name:"montage.consoleFrameMeldTitle"}).disabled).toBe(true);
+   fireEvent.click(screen.getByRole("button", {name:"montage.sharpenTitle"}));
+   expect(onSharpenChange).toHaveBeenCalledWith({sharpen_enabled:true});
+   expect(props.onFrameMeldEnabledChange).not.toHaveBeenCalled();
+ });

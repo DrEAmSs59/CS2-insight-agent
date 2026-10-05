@@ -1,5 +1,11 @@
 // zh / montage — keep keys scoped to this feature catalog.
 export default {
+  "montage.sharpenTitle": "锐化",
+  "montage.sharpenHint": "增强画面细节，可独立开启，也可与帧混合同时使用。",
+  "montage.sharpenStrength": "锐化强度",
+  "montage.sharpenUnavailable": "需要 FrameMeld 0.1.5 或更高版本才能独立启用和调整锐化。请下载完整运行时，并重新配置 FFmpeg 路径。",
+  "montage.sharpenLegacy": "当前旧版 FrameMeld 启用帧混合时会固定附带 0.15 锐化，不能独立开关或调整。请升级至 FrameMeld 0.1.5 或更高版本。",
+
   "montage.bundleLabel": "打包录制",
   "montage.bundleTitle": "👨‍🔬 节目效果专属：研发全过程",
   "montage.bundleDeathCount": "（本局共 {n} 次死亡）",

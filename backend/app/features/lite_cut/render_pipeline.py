@@ -79,6 +79,7 @@ from ...video_export_log import export_event, export_gpu_inventory
 from ...framemeld import (
     FrameMeldRifeDevicePlan,
     build_framemeld_command,
+    require_sharpen_capability,
     framemeld_execution_policy,
     framemeld_failure_from_result,
     log_framemeld_diagnostic_events,
@@ -904,7 +905,7 @@ def _compose_lite_cut_montage_once(
         detail: dict[str, Any] | None = None,
     ) -> None:
         mapped = float(progress)
-        if framemeld_requested and stage not in {"framemeld", "done"}:
+        if (framemeld_requested or export_plan.sharpen_enabled) and stage not in {"framemeld", "done"}:
             # Reserve 40% of the visible range for the usually dominant FrameMeld
             # pass instead of reporting 99% before interpolation has started.
             mapped = min(0.60, mapped * (0.60 / 0.98))
@@ -1172,7 +1173,7 @@ def _compose_lite_cut_montage_once(
                 video_encode_quality=video_encode_quality,
                 cancel_event=cancel_event,
             )
-        if framemeld_requested:
+        if framemeld_requested or export_plan.sharpen_enabled:
             _raise_if_cancelled(cancel_event)
             capability = probe_framemeld(ffmpeg_bin)
             if capability is None:
@@ -1185,6 +1186,9 @@ def _compose_lite_cut_montage_once(
             cmd_framemeld = build_framemeld_command(
                 ffmpeg_bin=ffmpeg_bin,
                 source_path=framemeld_base,
+                frame_blending=framemeld_requested,
+                sharpen_enabled=export_plan.sharpen_enabled,
+                sharpen_amount=export_plan.sharpen_amount,
                 output_path=output_path,
                 video_encode_args=video_encode_quality,
                 encoder_adapter=encoder_adapter,
@@ -1382,6 +1386,8 @@ def compose_lite_cut_montage(
         adapters = map_nvenc_device_indices(ffmpeg_bin, adapters)
     export_gpu_inventory(adapters)
     framemeld_enabled = export_plan.framemeld_enabled
+    if export_plan.sharpen_enabled:
+        require_sharpen_capability(ffmpeg_bin)
     rife_device_plan = (
         plan_framemeld_rife_device(ffmpeg_bin, adapters)
         if framemeld_enabled

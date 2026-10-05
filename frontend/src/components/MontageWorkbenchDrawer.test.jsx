@@ -330,6 +330,65 @@ describe("MontageWorkbenchDrawer", () => {
     expect(exportCall).toBeTruthy();
     expect(exportCall[1].framemeld_enabled).toBe(false);
   });
+  it("restores and exports independent sharpening while mixed-FPS blending stays disabled", async () => {
+    mocks.get.mockImplementation((url) => {
+      if (url === "config/ffmpeg-check") {
+        return Promise.resolve({ data: { ok: true, framemeld_available: true, framemeld_sharpen_available: true } });
+      }
+      if (url === "/config") return Promise.resolve({ data: { montage_export_dir: "D:\\Exports" } });
+      if (url === "/recorded-clips") {
+        return Promise.resolve({
+          data: {
+            items: [
+              { id: 5, output_path: "D:\\clips\\60fps.mp4", duration_sec: 4, fps: 60 },
+              { id: 9, output_path: "D:\\clips\\120fps.mp4", duration_sec: 6, fps: 120 },
+            ],
+          },
+        });
+      }
+      return Promise.resolve({ data: {} });
+    });
+    mocks.post.mockImplementation((url) => {
+      if (url === "/montage/export") return Promise.resolve({ data: {} });
+      return Promise.resolve({ data: {} });
+    });
+
+    render(
+      <MemoryRouter initialEntries={["/montage"]}>
+        <MontageWorkbenchDrawer open layout="page" onClose={() => {}} />
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => expect(mocks.draftPanelProps).toBeTruthy());
+    await waitFor(() => expect(mocks.materialProps?.clip?.id).toBe(9));
+    await act(async () => {
+      await mocks.draftPanelProps.onOpenDraft({
+        id: 21,
+        name: "Mixed FPS",
+        body: {
+          recorded_clip_ids: [5, 9],
+          output_filename: "mixed.mp4",
+          framemeld_enabled: true,
+          sharpen_enabled: true,
+          sharpen_amount: 0.27,
+        },
+      });
+    });
+
+    await waitFor(() => {
+      expect(mocks.consoleProps.framemeldSourceSummary.hasMixedFrameRates).toBe(true);
+      expect(mocks.consoleProps.framemeldEnabled).toBe(false);
+    });
+    await act(async () => {
+      await mocks.consoleProps.onExport();
+    });
+
+    const exportCall = mocks.post.mock.calls.find(([url]) => url === "/montage/export");
+    expect(exportCall).toBeTruthy();
+    expect(exportCall[1].framemeld_enabled).toBe(false);
+    expect(exportCall[1].sharpen_enabled).toBe(true);
+    expect(exportCall[1].sharpen_amount).toBe(0.27);
+  });
 
   it("includes an intro video in the project FrameMeld boundary", async () => {
     const introPath = "D:\\clips\\intro-60fps.mp4";

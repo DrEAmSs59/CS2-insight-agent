@@ -35,6 +35,8 @@
       "encoder": "auto",
       "encoder_tier": "quality",
       "framemeld_enabled": false,
+      "sharpen_enabled": false,
+      "sharpen_amount": 0.15,
       "canvas_fit": "contain",
       "background_color": "#000000",
       "blur_amount": 24,
