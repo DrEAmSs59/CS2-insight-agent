@@ -227,6 +227,14 @@ DEFAULT_STEAM_PATHS = [
 CS2_RELATIVE = Path("steamapps") / "common" / "Counter-Strike Global Offensive" / "game" / "bin" / "win64" / "cs2.exe"
 
 
+def _is_dir_safe(p: Path) -> bool:
+    """``Path.is_dir`` 但对 BitLocker 锁定 / 掉线的盘符返回 False，而不是抛 OSError。"""
+    try:
+        return p.is_dir()
+    except OSError:
+        return False
+
+
 def _steam_install_from_registry() -> Optional[Path]:
     if winreg is None:
         return None
@@ -240,7 +248,7 @@ def _steam_install_from_registry() -> Optional[Path]:
             steam_dir, _ = winreg.QueryValueEx(key, "InstallPath")
             winreg.CloseKey(key)
             p = Path(str(steam_dir).strip())
-            if p.exists():
+            if _is_dir_safe(p):
                 return p
         except OSError:
             continue
@@ -265,7 +273,7 @@ def _library_roots_from_vdf(steam_install: Path) -> list[Path]:
             p = Path(raw)
         except ValueError:
             continue
-        if p.is_dir():
+        if _is_dir_safe(p):
             roots.append(p)
     return roots
 
@@ -281,7 +289,7 @@ def _candidate_steam_roots() -> list[Path]:
             rp = str(p.resolve())
         except OSError:
             rp = str(p)
-        if rp not in seen and p.is_dir():
+        if rp not in seen and _is_dir_safe(p):
             seen.add(rp)
             out.append(p)
 
