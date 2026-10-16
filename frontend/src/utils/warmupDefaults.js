@@ -106,6 +106,7 @@ export function warmupUiOptsToPersisted(opts) {
   return {
     cl_draw_only_deathnotices: !!opts.cl_draw_only_deathnotices,
     hud_showtargetid_hide: !!opts.hud_showtargetid_hide,
+    hide_clan_tags: opts.hide_clan_tags !== false,
     tv_nochat: !!opts.tv_nochat,
     spec_show_xray:
       opts.spec_show_xray === true ||
@@ -150,6 +151,7 @@ export function warmupApiPayloadToPersisted(warmup) {
   return {
     cl_draw_only_deathnotices: !!warmup.cl_draw_only_deathnotices,
     hud_showtargetid_hide: !!warmup.hud_showtargetid_hide,
+    hide_clan_tags: warmup.hide_clan_tags !== false,
     tv_nochat: !!warmup.tv_nochat,
     spec_show_xray:
       warmup.spec_show_xray === 1 ||

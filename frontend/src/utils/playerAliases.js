@@ -3,10 +3,8 @@
  *  Licensed under the PolyForm Noncommercial License 1.0.0. See LICENSE in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-// Temporarily hide the playback/recording entry points until the packaged
-// demo-player-aliases sidecar is shipped again. Keep the editor and payload
-// helpers intact so restoring the feature is a single flag change.
-export const PLAYER_ALIAS_ENTRY_VISIBLE = false;
+// Playback and OBS recording rename only their temporary demo copies.
+export const PLAYER_ALIAS_ENTRY_VISIBLE = true;
 
 export function playerAliasError(name) {
   if (!name.trim()) return "";

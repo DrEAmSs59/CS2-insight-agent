@@ -48,6 +48,7 @@ export function buildWarmupConsoleCommands(o) {
   // radar; 0 lets CCSGO_HudRadar follow the observed player's relationship.
   lines.push("mp_forcecamera 0");
   lines.push(o.hud_showtargetid_hide ? "hud_showtargetid 0" : "hud_showtargetid 1");
+  lines.push(o.hide_clan_tags !== false ? "cl_show_clan_in_death_notice 0" : "cl_show_clan_in_death_notice 1");
   lines.push(o.tv_nochat ? "tv_nochat 1" : "tv_nochat 0");
   if (o.hide_demo_playback_ui) {
     lines.push("sv_cheats 1");
@@ -92,6 +93,7 @@ export function buildWarmupConsoleCommands(o) {
 export const RECORD_WARMUP_DEFAULT_OPTIONS = {
   cl_draw_only_deathnotices: true,
   hud_showtargetid_hide: true,
+  hide_clan_tags: true,
   tv_nochat: true,
   spec_show_xray: false,
   apply_fov: false,
@@ -302,6 +304,7 @@ export default function RecordWarmupModal({
     const apiShape = {
       cl_draw_only_deathnotices: opts.cl_draw_only_deathnotices,
       hud_showtargetid_hide: opts.hud_showtargetid_hide,
+      hide_clan_tags: opts.hide_clan_tags,
       tv_nochat: opts.tv_nochat,
       spec_show_xray: opts.spec_show_xray ? 1 : 0,
       fov_cs_debug: opts.apply_fov ? Number(opts.fov_cs_debug) || 90 : null,
@@ -468,6 +471,14 @@ export default function RecordWarmupModal({
                 checked={opts.hud_showtargetid_hide}
                 onChange={(v) => set({ hud_showtargetid_hide: v })}
                 outcomeOn={t("record.hudHideTargetOutcome")}
+              />
+              <RecordingHudCard
+                title={t("record.hudHideClanTagsTitle")}
+                code="cl_show_clan_in_death_notice 0"
+                description={t("record.hudHideClanTagsDesc")}
+                checked={opts.hide_clan_tags}
+                onChange={(v) => set({ hide_clan_tags: v })}
+                outcomeOn={t("record.hudHideClanTagsOutcome")}
               />
               <RecordingHudCard
                 title={t("record.hudNoChatTitle")}

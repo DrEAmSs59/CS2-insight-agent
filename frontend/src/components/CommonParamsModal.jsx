@@ -1038,6 +1038,14 @@ export default function CommonParamsModal({
                     outcomeOn={t("record.hudHideTargetOutcome")}
                   />
                   <RecordingHudCard
+                    title={t("record.hudHideClanTagsTitle")}
+                    code="cl_show_clan_in_death_notice 0"
+                    description={t("record.hudHideClanTagsDesc")}
+                    checked={warmupOpts.hide_clan_tags}
+                    onChange={(v) => patchWarmup({ hide_clan_tags: v })}
+                    outcomeOn={t("record.hudHideClanTagsOutcome")}
+                  />
+                  <RecordingHudCard
                     title={t("record.hudNoChatTitle")}
                     code="tv_nochat 1"
                     description={t("record.hudNoChatDesc")}

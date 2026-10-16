@@ -19,12 +19,12 @@ describe("recording aliases entry", () => {
     API.get.mockReturnValue(new Promise(() => {}));
     API.post.mockReset();
   });
-  it("stays hidden and submits no aliases", () => {
+  it("shows the opt-in editor and submits no aliases by default", () => {
     const onConfirm = vi.fn();
     const props = { onConfirm, onClose: vi.fn(), aliasDemos: [{ key: "a.dem", path: "a.dem", label: "a.dem" }] };
     render(<RecordWarmupModal open {...props} />);
-    expect(screen.queryByText("自定义玩家昵称")).toBeNull();
-    expect(screen.queryByRole("checkbox", { name: "启用改名" })).toBeNull();
+    expect(screen.getByText("自定义玩家昵称")).toBeTruthy();
+    expect(screen.getByRole("checkbox", { name: "启用改名" }).checked).toBe(false);
     fireEvent.click(screen.getByRole("button", { name: "开始录制" }));
     expect(onConfirm).toHaveBeenCalledWith(expect.objectContaining({
       experimental_pov_enabled: false,
