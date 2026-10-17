@@ -42,14 +42,14 @@ describe("useDemoPlaybackDialog restoration monitor", () => {
     API.post.mockReset();
   });
 
-  it("keeps the player-alias entry hidden and launches without an alias payload", async () => {
+  it("shows the player-alias entry and launches without aliases unless enabled", async () => {
     getDemoPlaybackPreflight.mockResolvedValue({ cs2_path_configured: true });
     playDemoInCs2.mockResolvedValue({ ok: true });
     render(<Harness />);
     fireEvent.click(screen.getByRole("button", { name: "open" }));
     const launchButton = await screen.findByRole("button", { name: /启动高级播放 Demo/ });
-    expect(screen.queryByText("自定义玩家昵称")).toBeNull();
-    expect(screen.queryByRole("checkbox", { name: "启用改名" })).toBeNull();
+    expect(screen.getByText("自定义玩家昵称")).toBeTruthy();
+    expect(screen.getByRole("checkbox", { name: "启用改名" }).checked).toBe(false);
     fireEvent.click(launchButton);
     await waitFor(() => expect(playDemoInCs2).toHaveBeenCalledTimes(1));
     expect(playDemoInCs2.mock.calls[0][0].advancedPlayback).not.toHaveProperty("player_aliases");

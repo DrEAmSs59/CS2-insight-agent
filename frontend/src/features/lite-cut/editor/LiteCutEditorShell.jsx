@@ -328,6 +328,8 @@ export default function LiteCutEditorShell({
   const outputHeight = Math.max(LITE_CUT_OUTPUT_LIMITS.height.min, Math.min(LITE_CUT_OUTPUT_LIMITS.height.max, Number(body?.output?.height) || LITE_CUT_OUTPUT_DEFAULTS.height));
   const outputFps = Math.max(LITE_CUT_OUTPUT_LIMITS.fps.min, Math.min(LITE_CUT_OUTPUT_LIMITS.fps.max, Number(body?.output?.fps) || LITE_CUT_OUTPUT_DEFAULTS.fps));
   const outputFrameMeldEnabled = body?.output?.framemeld_enabled === true;
+  const outputSharpenEnabled = body?.output?.sharpen_enabled === true;
+  const outputSharpenAmount = body?.output?.sharpen_amount ?? 0.15;
   const outputEncoder = ["auto", "h264_nvenc", "h264_qsv", "h264_amf", "libx264"].includes(body?.output?.encoder)
     ? body.output.encoder
     : "auto";
@@ -354,6 +356,7 @@ export default function LiteCutEditorShell({
   const { ffmpegGate } = useLiteCutFfmpegGateController({
     pathname: location.pathname,
     outputFrameMeldEnabled,
+    outputSharpenEnabled,
     patchOutput,
     t,
   });
@@ -1714,6 +1717,10 @@ export default function LiteCutEditorShell({
             outputWidth={outputWidth}
             outputHeight={outputHeight}
             outputFps={outputFps}
+            outputSharpenEnabled={outputSharpenEnabled}
+            outputSharpenAmount={outputSharpenAmount}
+            outputSharpenAvailable={!ffmpegGate.loading && ffmpegGate.sharpenAvailable === true}
+            outputLegacySharpen={ffmpegGate.legacySharpen}
             outputFrameMeldEnabled={outputFrameMeldEnabled}
             outputFrameMeldAvailable={ffmpegGate.framemeldAvailable}
             framemeldSourceItems={framemeldSourceItems}
@@ -1840,6 +1847,10 @@ export default function LiteCutEditorShell({
           width={outputWidth}
           height={outputHeight}
           fps={outputFps}
+          sharpenEnabled={outputSharpenEnabled}
+          sharpenAmount={outputSharpenAmount}
+          sharpenAvailable={!ffmpegGate.loading && ffmpegGate.sharpenAvailable === true}
+          legacySharpen={ffmpegGate.legacySharpen}
           framemeldEnabled={outputFrameMeldEnabled}
           framemeldRuntimeAvailable={ffmpegGate.framemeldAvailable}
           framemeldSourceItems={framemeldSourceItems}

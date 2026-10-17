@@ -93,6 +93,10 @@ export default function LiteCutPropertyPanel({
   outputWidth = LITE_CUT_OUTPUT_DEFAULTS.width,
   outputHeight = LITE_CUT_OUTPUT_DEFAULTS.height,
   outputFps = LITE_CUT_OUTPUT_DEFAULTS.fps,
+  outputSharpenEnabled = false,
+  outputSharpenAmount = 0.15,
+  outputSharpenAvailable = false,
+  outputLegacySharpen = false,
   outputFrameMeldEnabled = false,
   outputFrameMeldAvailable = false,
   framemeldSourceItems = [],
@@ -415,6 +419,10 @@ export default function LiteCutPropertyPanel({
               width={outputWidth}
               height={outputHeight}
               fps={outputFps}
+              sharpenEnabled={outputSharpenEnabled}
+              sharpenAmount={outputSharpenAmount}
+              sharpenAvailable={outputSharpenAvailable}
+              legacySharpen={outputLegacySharpen}
               framemeldEnabled={outputFrameMeldEnabled}
               framemeldRuntimeAvailable={outputFrameMeldAvailable}
               framemeldSourceItems={framemeldSourceItems}

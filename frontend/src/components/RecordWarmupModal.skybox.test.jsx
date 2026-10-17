@@ -82,7 +82,7 @@ describe("RecordWarmupModal skybox override", () => {
     expect(screen.queryByRole("combobox", { name: "录制天气效果" })).toBeNull();
     expect(screen.getByTestId("experimental-feature-card").contains(selector)).toBe(true);
     expect(screen.getByTestId("experimental-feature-card").contains(inputModeSelector)).toBe(true);
-    expect(screen.queryByTestId("player-aliases-section")).toBeNull();
+    expect(screen.getByTestId("player-aliases-section")).toBeTruthy();
     expect(
       screen.getByTestId("experimental-voice-card").compareDocumentPosition(
         screen.getByTestId("experimental-input-hud-card"),

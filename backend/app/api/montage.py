@@ -7,11 +7,11 @@ import logging
 import time
 import uuid
 from pathlib import Path
-from typing import Any, Optional
+from typing import Annotated, Any, Optional
 
 from fastapi import APIRouter, File, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, TypeAdapter, ValidationError
 
 from ..databases import montage_db
 from ..env_utils import get_data_dir, load_config
@@ -72,6 +72,8 @@ class MontageProjectBody(BaseModel):
     player_avatars: list[PlayerAvatar] = Field(default_factory=list)
     name_cards_enabled: bool = False
     framemeld_enabled: bool = False
+    sharpen_enabled: bool = False
+    sharpen_amount: float = Field(default=0.15, ge=0.1, le=0.3)
     radar_segments: list[RadarSegment] = Field(default_factory=list)
     timeline_ids: list[str] = Field(default_factory=list)
     radar_enabled: bool = True
@@ -139,6 +141,8 @@ async def save_montage_project(body: MontageProjectBody):
     proj_body["player_avatars"] = [pa.model_dump() for pa in body.player_avatars]
     proj_body["name_cards_enabled"] = body.name_cards_enabled
     proj_body["framemeld_enabled"] = body.framemeld_enabled
+    proj_body["sharpen_enabled"] = body.sharpen_enabled
+    proj_body["sharpen_amount"] = body.sharpen_amount
     if body.radar_segments:
         proj_body["radar_segments"] = [rs.model_dump() for rs in body.radar_segments]
     proj_body["timeline_ids"] = [str(x) for x in (body.timeline_ids or [])]
@@ -231,6 +235,8 @@ class MontageExportBody(BaseModel):
     player_avatars: list[PlayerAvatar] = Field(default_factory=list)
     name_cards_enabled: Optional[bool] = None  # None = inherit from project extras
     framemeld_enabled: Optional[bool] = None
+    sharpen_enabled: Optional[bool] = None
+    sharpen_amount: Optional[float] = Field(default=None, ge=0.1, le=0.3)
     radar_segments: list[RadarSegment] = Field(default_factory=list)
     radar_enabled: Optional[bool] = None
     radar_items: Optional[dict[str, Any]] = None
@@ -585,6 +591,14 @@ async def montage_export(body: MontageExportBody):
     else:
         name_cards_enabled_eff = bool(extras.get("name_cards_enabled")) if isinstance(extras, dict) else False
 
+    sharpen_extras = extras if isinstance(extras, dict) else {}
+    sharpen_enabled_eff = body.sharpen_enabled if body.sharpen_enabled is not None else sharpen_extras.get("sharpen_enabled") is True
+    sharpen_amount_eff = body.sharpen_amount if body.sharpen_amount is not None else sharpen_extras.get("sharpen_amount", 0.15)
+    # Saved project extras also pass the request model's finite range check.
+    try:
+        sharpen_amount_eff = TypeAdapter(Annotated[float, Field(ge=0.1, le=0.3)]).validate_python(sharpen_amount_eff)
+    except ValidationError as exc:
+        raise HTTPException(422, "sharpen_amount must be between 0.1 and 0.3") from exc
     framemeld_enabled_eff = (
         bool(body.framemeld_enabled)
         if body.framemeld_enabled is not None
@@ -755,6 +769,8 @@ async def montage_export(body: MontageExportBody):
     snap["player_avatars"] = [pa.model_dump() for pa in player_avatars_eff]
     snap["name_cards_enabled"] = name_cards_enabled_eff
     snap["framemeld_enabled"] = framemeld_enabled_eff
+    snap["sharpen_enabled"] = sharpen_enabled_eff
+    snap["sharpen_amount"] = sharpen_amount_eff
     snap["radar_segments"] = radar_segments_prepared
     snap["timeline_ids"] = [str(x) for x in radar_plan["ordered_ids"]]
     snap["radar_enabled"] = radar_enabled_eff
@@ -800,6 +816,8 @@ async def montage_export(body: MontageExportBody):
         "montage_encoder": cfg.montage_encoder or "auto",
         "name_cards": name_cards_arg,
         "framemeld_enabled": framemeld_enabled_eff,
+        "sharpen_enabled": sharpen_enabled_eff,
+        "sharpen_amount": sharpen_amount_eff,
         "radar_segments": radar_segments_prepared,
         "radar_spec": {
             **radar_plan,

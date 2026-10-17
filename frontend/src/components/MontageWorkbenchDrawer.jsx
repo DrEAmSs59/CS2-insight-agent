@@ -1,3 +1,4 @@
+import { normalizeSharpenAmount } from "../utils/framemeldSharpen.js";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import API, { API_BASE_URL } from "../api/api";
@@ -56,6 +57,8 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
   const [outroPath, setOutroPath] = useState("");
   const [outroDuration, setOutroDuration] = useState(3);
   const [framemeldEnabled, setFrameMeldEnabled] = useState(false);
+  const [sharpenEnabled, setSharpenEnabled] = useState(false);
+  const [sharpenAmount, setSharpenAmount] = useState(0.15);
   const [outputFilename, setOutputFilename] = useState(() => buildTimestampMontageFilename());
   const [outputDir, setOutputDir] = useState("");
   const outputDirTouchedRef = useRef(false);
@@ -116,6 +119,8 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
           subtitle: "",
           message: "",
           framemeldAvailable: data?.framemeld_available === true,
+          sharpenAvailable: data?.framemeld_sharpen_available === true,
+          legacySharpen: data?.framemeld_legacy_sharpen === true,
         });
         return;
       }
@@ -327,6 +332,8 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
     playerAvatars,
     nameCardsEnabled,
     framemeldEnabled,
+    sharpenEnabled,
+    sharpenAmount,
     radarEnabled,
     radarItems,
     radarCandidateState,
@@ -526,6 +533,16 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
     && ffmpegGate.framemeldAvailable
     && framemeldSourceSummary.compatible;
   const effectiveFrameMeldEnabled = framemeldCanEnable && framemeldEnabled;
+  const sharpenCanEnable = !ffmpegGate.loading && !ffmpegGate.blocked && ffmpegGate.sharpenAvailable === true;
+  const effectiveSharpenEnabled = sharpenCanEnable && sharpenEnabled;
+  const handleSharpenChange = (patch) => {
+    if (!sharpenCanEnable) return;
+    if (typeof patch.sharpen_enabled === "boolean") setSharpenEnabled(patch.sharpen_enabled);
+    if (patch.sharpen_amount != null) setSharpenAmount(normalizeSharpenAmount(patch.sharpen_amount));
+  };
+  useEffect(() => {
+    if (!ffmpegGate.loading && !sharpenCanEnable && sharpenEnabled) setSharpenEnabled(false);
+  }, [ffmpegGate.loading, sharpenCanEnable, sharpenEnabled]);
 
   useEffect(() => {
     if (framemeldEnabled && !framemeldCanEnable) {
@@ -881,6 +898,8 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
         player_avatars: playerAvatarsPayload,
         name_cards_enabled: nameCardsEnabled,
         framemeld_enabled: effectiveFrameMeldEnabled,
+        sharpen_enabled: effectiveSharpenEnabled,
+        sharpen_amount: sharpenAmount,
         radar_enabled: radarEnabled,
         radar_items: radarItemsPayload,
         radar_candidate_state: radarCandidateState,
@@ -919,6 +938,10 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
       }
       if (typeof data?.body?.framemeld_enabled === "boolean") {
         setFrameMeldEnabled(Boolean(data.body.framemeld_enabled) && framemeldCanEnable);
+      }
+      if (data?.body) {
+        setSharpenEnabled(data.body.sharpen_enabled === true && sharpenCanEnable);
+        setSharpenAmount(normalizeSharpenAmount(data.body.sharpen_amount));
       }
       if (requestedName) setDraftName(requestedName);
       setDraftDirty(false);
@@ -1033,6 +1056,8 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
     setPlayerAvatars(nextAvatars);
     setNameCardsEnabled(Boolean(body.name_cards_enabled));
     setFrameMeldEnabled(Boolean(body.framemeld_enabled));
+    setSharpenEnabled(body.sharpen_enabled === true);
+    setSharpenAmount(normalizeSharpenAmount(body.sharpen_amount));
     setSelectedTimelineClipId(null);
     setTimelineMultiSelectedIds(new Set());
     setTransitionEdgeSourceId(null);
@@ -1095,6 +1120,8 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
         player_avatars: playerAvatarsPayload,
         name_cards_enabled: nameCardsEnabled,
         framemeld_enabled: effectiveFrameMeldEnabled,
+        sharpen_enabled: effectiveSharpenEnabled,
+        sharpen_amount: sharpenAmount,
         radar_enabled: radarEnabled,
         radar_items: radarItemsPayload,
         radar_candidate_state: radarCandidateState,
@@ -1725,6 +1752,11 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
                 nameCardsEnabled={nameCardsEnabled}
                 onPlayerAvatarChange={handlePlayerAvatarChange}
                 onNameCardsEnabledChange={setNameCardsEnabled}
+                sharpenEnabled={effectiveSharpenEnabled}
+                sharpenAmount={sharpenAmount}
+                sharpenAvailable={sharpenCanEnable}
+                legacySharpen={ffmpegGate.legacySharpen}
+                onSharpenChange={handleSharpenChange}
                 framemeldEnabled={effectiveFrameMeldEnabled}
                 framemeldRuntimeAvailable={ffmpegGate.framemeldAvailable}
                 framemeldSourceSummary={framemeldSourceSummary}

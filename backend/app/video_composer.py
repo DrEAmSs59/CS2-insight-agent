@@ -34,6 +34,7 @@ from .ffmpeg_compatibility import add_ffmpeg_compatibility_hint, ffmpeg_tool_ver
 from .framemeld import (
     FrameMeldRifeDevicePlan,
     build_framemeld_command,
+    require_sharpen_capability,
     framemeld_execution_policy,
     framemeld_failure_from_result,
     log_framemeld_diagnostic_events,
@@ -1592,6 +1593,8 @@ def _compose_montage_once(
     montage_encoder: str = "auto",
     name_cards: Optional[list[dict | None]] = None,
     framemeld_enabled: bool = False,
+    sharpen_enabled: bool = False,
+    sharpen_amount: float = 0.15,
     radar_segments: Optional[list[dict[str, Any]]] = None,
     encoder_device_args: Sequence[str] | None = None,
     encoder_adapter: object | None = None,
@@ -2087,7 +2090,7 @@ def _compose_montage_once(
                 raise MontageComposerError("MONTAGE_BGM_MIX_FAILED")
             _progress(0.93, "audio", {"stage_progress": 1.0})
 
-        if framemeld_enabled:
+        if framemeld_enabled or sharpen_enabled:
             _progress(0.94, "framemeld", {"stage_progress": 0.0})
             capability = probe_framemeld(ffmpeg_bin)
             if capability is None:
@@ -2097,6 +2100,9 @@ def _compose_montage_once(
             cmd_framemeld = build_framemeld_command(
                 ffmpeg_bin=ffmpeg_bin,
                 source_path=framemeld_base,
+                frame_blending=framemeld_enabled,
+                sharpen_enabled=sharpen_enabled,
+                sharpen_amount=sharpen_amount,
                 output_path=output_path,
                 video_encode_args=video_encode_quality,
                 encoder_adapter=encoder_adapter,
@@ -2214,6 +2220,8 @@ def _compose_montage_impl(
     montage_encoder: str = "auto",
     name_cards: Optional[list[dict | None]] = None,
     framemeld_enabled: bool = False,
+    sharpen_enabled: bool = False,
+    sharpen_amount: float = 0.15,
     radar_segments: Optional[list[dict[str, Any]]] = None,
     progress_callback: Optional[Callable[[float, str, Optional[dict[str, Any]]], None]] = None,
 ) -> Any:
@@ -2291,6 +2299,8 @@ def _compose_montage_impl(
     if "h264_nvenc" in available:
         adapters = map_nvenc_device_indices(ffmpeg_bin, adapters)
     export_gpu_inventory(adapters)
+    if sharpen_enabled:
+        require_sharpen_capability(ffmpeg_bin)
     rife_device_plan = (
         plan_framemeld_rife_device(ffmpeg_bin, adapters)
         if framemeld_enabled
@@ -2397,6 +2407,8 @@ def _compose_montage_impl(
                 montage_encoder=candidate.codec,
                 name_cards=name_cards,
                 framemeld_enabled=framemeld_enabled,
+                sharpen_enabled=sharpen_enabled,
+                sharpen_amount=sharpen_amount,
                 radar_segments=radar_segments,
                 encoder_device_args=candidate.ffmpeg_device_args,
                 encoder_adapter=candidate.adapter,
@@ -2568,6 +2580,8 @@ def compose_montage(
     montage_encoder: str = "auto",
     name_cards: Optional[list[dict | None]] = None,
     framemeld_enabled: bool = False,
+    sharpen_enabled: bool = False,
+    sharpen_amount: float = 0.15,
     radar_segments: Optional[list[dict[str, Any]]] = None,
     progress_callback: Optional[Callable[[float, str, Optional[dict[str, Any]]], None]] = None,
     cancel_event: Any | None = None,
@@ -2593,6 +2607,8 @@ def compose_montage(
             montage_encoder=montage_encoder,
             name_cards=name_cards,
             framemeld_enabled=framemeld_enabled,
+            sharpen_enabled=sharpen_enabled,
+            sharpen_amount=sharpen_amount,
             radar_segments=radar_segments,
             progress_callback=progress_callback,
         )

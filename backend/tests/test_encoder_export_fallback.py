@@ -294,7 +294,7 @@ def test_lite_cut_hardware_failure_falls_back_to_x264_and_atomically_replaces(
     monkeypatch.setattr(
         export_preflight,
         "validate_export_output",
-        lambda _ffmpeg, path: Path(path).read_bytes(),
+        lambda _ffmpeg, path, **_kwargs: Path(path).read_bytes(),
     )
 
     def fake_compose_once(**kwargs) -> None:
@@ -328,6 +328,43 @@ def test_lite_cut_hardware_failure_falls_back_to_x264_and_atomically_replaces(
     assert not list(tmp_path.glob(".export.encoder-attempt-*.mp4"))
 
 
+def test_lite_cut_truncated_output_preserves_target_without_encoder_retry(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "source.mp4"
+    source.write_bytes(b"source")
+    target = tmp_path / "export.mp4"
+    target.write_bytes(b"previous-complete-export")
+    calls: list[str] = []
+    _patch_shared_plan(monkeypatch, f"lite-cut-truncated-{tmp_path}")
+    monkeypatch.setattr(render_pipeline, "resolve_ffprobe_binary", lambda _: tmp_path / "ffprobe.exe")
+    monkeypatch.setattr(render_pipeline, "probe_video_audio_summary", lambda *a, **kw: _media_info())
+    monkeypatch.setattr(render_pipeline, "available_h264_encoders", lambda _: {"h264_amf", "libx264"})
+    monkeypatch.setattr(export_preflight, "resolve_ffprobe_binary", lambda _: tmp_path / "ffprobe.exe")
+    monkeypatch.setattr(export_preflight, "ffprobe_streams", lambda *a, **kw: {
+        "streams": [{"codec_type": "video", "duration": "0.3"}, {"codec_type": "audio", "duration": "1.0"}],
+        "format": {"duration": "1.0"},
+    })
+
+    def fake_compose_once(**kwargs) -> None:
+        calls.append(str(kwargs["montage_encoder"]))
+        Path(kwargs["output_path"]).write_bytes(b"truncated-video")
+
+    monkeypatch.setattr(render_pipeline, "_compose_lite_cut_montage_once", fake_compose_once)
+    with pytest.raises(MontageComposerError) as caught:
+        render_pipeline.compose_lite_cut_montage(
+            ffmpeg_bin=tmp_path / "ffmpeg.exe", project_body=_lite_cut_body(source),
+            clip_path_by_id={}, output_path=target, montage_encoder="auto",
+        )
+    assert caught.value.code == "MONTAGE_OUTPUT_INCOMPLETE"
+    assert caught.value.params["expected_seconds"] == "1.000"
+    assert caught.value.params["actual_seconds"] == "0.300"
+    assert calls == ["h264_amf"]
+    assert target.read_bytes() == b"previous-complete-export"
+    assert not list(tmp_path.glob(".export.encoder-attempt-*.mp4"))
+
+
 def test_lite_cut_undecodable_hardware_output_falls_back_to_x264(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -347,7 +384,7 @@ def test_lite_cut_undecodable_hardware_output_falls_back_to_x264(
         calls.append(codec)
         Path(kwargs["output_path"]).write_text(codec, encoding="utf-8")
 
-    def validate(_ffmpeg: Path, path: Path) -> None:
+    def validate(_ffmpeg: Path, path: Path, **_kwargs) -> None:
         if path.read_text(encoding="utf-8") == "h264_amf":
             raise MontageComposerError("MONTAGE_OUTPUT_NOT_PLAYABLE")
 

@@ -25,8 +25,8 @@ def test_installer_only_stops_its_own_edition():
     assert "cs2-insight-agent-desktop.exe" not in hook
     assert preinstall.index('StrCpy $CS2MainExe "${MAINBINARYNAME}.exe"') < preinstall.index("Call CS2_PrepareRunningApps")
     assert 'taskkill.exe" /IM "$CS2MainExe" /F /T' in hook
-    # The other edition shares port 19871; only this installation's Python may be stopped.
-    assert "$$proc.Path.StartsWith('$INSTDIR\\'" in hook
+    assert "prepare-python-upgrade.ps1" in hook
+    assert "$WINDIR\\Sysnative\\WindowsPowerShell" in hook
 
 
 def test_backend_learns_its_edition_from_the_desktop_shell():
@@ -43,8 +43,10 @@ def test_installer_hook_covers_electron_upgrade_surfaces():
     assert 'tasklist.exe" /FI "IMAGENAME eq $R9"' in hook
     assert 'StrCpy $R9 "CS2 Insight Agent.exe"' in hook
     assert 'StrCpy $R9 "$CS2MainExe"' in hook
-    # An orphaned backend must not keep port 19871 busy after an upgrade.
-    assert "LocalPort 19871" in hook
+    # Workers without a listening port must be checked before destructive staging.
+    preinstall = hook[hook.index("!macro NSIS_HOOK_PREINSTALL"):]
+    assert preinstall.index("Call CS2_PreparePythonRuntime") < preinstall.index("Call CS2_RemoveBundledDemoparser")
+    assert "Get-NetTCPConnection" not in hook
     # In-place upgrades must remove the obsolete native HTTP parser; the lean
     # runtime pins Uvicorn to h11 and no longer ships httptools.
     assert 'RMDir /r "$INSTDIR\\python\\Lib\\site-packages\\httptools"' in hook
@@ -110,10 +112,11 @@ def test_versioned_build_rejects_missing_webview2_loader_bundle():
 def test_close_destroys_webview_before_waiting_for_backend():
     source = TAURI_RUNTIME.read_text(encoding="utf-8")
 
-    destroy = source.index("window.destroy()")
+    exit_worker = source.index("fn request_desktop_exit(")
+    destroy = source.index("window.destroy()", exit_worker)
     stop = source.index("stop_backend(&handle);", destroy)
     assert destroy < stop
     # The graceful backend stop must run off the event loop thread so the
     # window disappears immediately instead of freezing on screen.
-    spawn = source.index("thread::spawn", destroy)
-    assert spawn < stop
+    spawn = source.index("thread::spawn", exit_worker)
+    assert spawn < destroy < stop

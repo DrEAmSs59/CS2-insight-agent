@@ -1,3 +1,4 @@
+import { normalizeSharpenAmount } from "../../../utils/framemeldSharpen.js";
 import {
   LITE_CUT_ENCODERS,
   LITE_CUT_ENCODER_TIERS,
@@ -95,6 +96,8 @@ export function normalizeLiteCutBody(rawBody) {
       encoder: LITE_CUT_OUTPUT_DEFAULTS.encoder,
       encoder_tier: LITE_CUT_OUTPUT_DEFAULTS.encoder_tier,
       framemeld_enabled: LITE_CUT_OUTPUT_DEFAULTS.framemeld_enabled,
+      sharpen_enabled: false,
+      sharpen_amount: 0.15,
       canvas_fit: LITE_CUT_OUTPUT_DEFAULTS.canvas_fit,
       background_color: LITE_CUT_OUTPUT_DEFAULTS.background_color,
       blur_amount: LITE_CUT_OUTPUT_DEFAULTS.blur_amount,
@@ -141,6 +144,15 @@ export function normalizeLiteCutBody(rawBody) {
     }
     if (typeof body.output.framemeld_enabled !== "boolean") {
       body.output.framemeld_enabled = LITE_CUT_OUTPUT_DEFAULTS.framemeld_enabled;
+      changed = true;
+    }
+    if (typeof body.output.sharpen_enabled !== "boolean") {
+      body.output.sharpen_enabled = false;
+      changed = true;
+    }
+    const sharpenAmount = normalizeSharpenAmount(body.output.sharpen_amount);
+    if (body.output.sharpen_amount !== sharpenAmount) {
+      body.output.sharpen_amount = sharpenAmount;
       changed = true;
     }
     if (!LITE_CUT_RANGE_MODES.includes(body.output.range_mode)) {

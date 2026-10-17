@@ -48,8 +48,8 @@ describe("DemoPlayOptionsModal", () => {
     expect(screen.getByText("跟随回合开")).toBeTruthy();
     expect(screen.getByText("原生 DemoUI · 进度与播放控制")).toBeTruthy();
     expect(screen.getAllByTestId("advanced-preview-player-row")).toHaveLength(10);
-    expect(screen.queryByText("自定义玩家昵称")).toBeNull();
-    expect(screen.queryByRole("checkbox", { name: "启用改名" })).toBeNull();
+    expect(screen.getByText("自定义玩家昵称")).toBeTruthy();
+    expect(screen.getByRole("checkbox", { name: "启用改名" }).checked).toBe(false);
     expect(screen.getByText("键鼠")).toBeTruthy();
     expect(screen.getByText("底部中央")).toBeTruthy();
     expect(screen.getByText("小地图下")).toBeTruthy();

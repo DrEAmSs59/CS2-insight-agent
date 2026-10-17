@@ -6,6 +6,13 @@ import { messageFromApiCode } from "./apiErrorMessages.js";
 const zh = (key, params) => translate("zh", key, params);
 
 describe("messageFromApiCode", () => {
+  it("shows a truncation update reminder for background jobs without error parameters", () => {
+    const message = messageFromApiCode("MONTAGE_OUTPUT_INCOMPLETE", zh);
+    expect(message).toContain("截断");
+    expect(message).toContain("9.0.2");
+    expect(message).toContain("FrameMeld");
+    expect(message).not.toContain("{expected_seconds}");
+  });
   it("uses the selected-clip fallback instead of leaking a missing name placeholder", () => {
     const message = messageFromApiCode("MONTAGE_FFPROBE_FAILED", zh, {});
 

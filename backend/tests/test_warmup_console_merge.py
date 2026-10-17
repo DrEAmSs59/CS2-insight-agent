@@ -41,6 +41,30 @@ def test_no_fixed_cvars_when_inject_lines_empty():
         assert cvar not in lines
 
 
+@pytest.mark.parametrize("hide, value", [(True, 0), (False, 1)])
+@pytest.mark.parametrize("console_cmds", [(), ("hud_showtargetid 0",)])
+def test_clan_tags_setting_with_generated_or_legacy_console_commands(hide, value, console_cmds):
+    lines = _director("")._recording_warmup_console_lines(
+        RecordingWarmupExtras(hide_clan_tags=hide, console_cmds=console_cmds)
+    )
+    assert f"cl_show_clan_in_death_notice {value}" in lines
+    assert f"cl_show_clan_in_death_notice {1 - value}" not in lines
+
+
+def test_clan_tags_hidden_by_default():
+    lines = _director("")._recording_warmup_console_lines(RecordingWarmupExtras())
+    assert "cl_show_clan_in_death_notice 0" in lines
+
+
+def test_clan_tags_frontend_command_is_not_duplicated():
+    command = "cl_show_clan_in_death_notice 1"
+    lines = _director("")._recording_warmup_console_lines(
+        RecordingWarmupExtras(hide_clan_tags=False, console_cmds=(command,))
+    )
+    assert lines.count(command) == 1
+    assert "cl_show_clan_in_death_notice 0" not in lines
+
+
 def test_fixed_cvars_injected_from_config():
     director = _director("\n".join(FIXED_CVARS))
     lines = director._recording_warmup_console_lines(RecordingWarmupExtras())

@@ -1832,6 +1832,7 @@ class RecordingWarmupExtras:
     resolution_width: Optional[int] = None
     resolution_height: Optional[int] = None
     hud_showtargetid_hide: bool = True
+    hide_clan_tags: bool = True
     tv_nochat: bool = True
     viewmodel_fov_68: bool = False
     # 第三人称肩部镜头；启用后在预热阶段注入固定 cam_* / c_thirdperson* 参数。
@@ -3558,6 +3559,12 @@ class OBSDirector:
         """
         if w.console_cmds:
             cmds = _without_voice_console_lines(w.console_cmds)
+            # Older clients/saved jobs may provide console_cmds without this option.
+            if not any(
+                line.split(maxsplit=1)[0].rstrip(";").lower() == "cl_show_clan_in_death_notice"
+                for line in cmds
+            ):
+                cmds.append(f"cl_show_clan_in_death_notice {0 if w.hide_clan_tags else 1}")
             lines = self._append_config_warmup_console_lines(
                 [*_RECORDING_KEYBIND_RESET_LINES, *cmds]
             )
@@ -3579,6 +3586,7 @@ class OBSDirector:
             lines.append("hud_showtargetid 0")
         else:
             lines.append("hud_showtargetid 1")
+        lines.append(f"cl_show_clan_in_death_notice {0 if w.hide_clan_tags else 1}")
         if w.tv_nochat:
             lines.append("tv_nochat 1")
         else:

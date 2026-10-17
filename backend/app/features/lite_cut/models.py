@@ -101,6 +101,8 @@ class OutputConfig(BaseModel):
     encoder: Literal["auto", "h264_nvenc", "h264_qsv", "h264_amf", "libx264"] = "auto"
     encoder_tier: Literal["quality", "fast"] = "quality"
     framemeld_enabled: bool = False
+    sharpen_enabled: bool = False
+    sharpen_amount: float = Field(default=0.15, ge=0.1, le=0.3)
     canvas_fit: Literal["contain", "cover", "blur"] = "contain"
     background_color: str = Field(default="#000000", pattern=r"^#[0-9a-fA-F]{6}$")
     blur_amount: int = Field(default=CANVAS_BLUR_DEFAULT, ge=CANVAS_BLUR_MIN, le=CANVAS_BLUR_MAX)

@@ -15,6 +15,7 @@ from app.features.lite_cut.export_preflight import (
     project_file_paths,
     unique_output_path,
     validate_export_output,
+    expected_export_duration,
 )
 from app.features.lite_cut.export_plan import build_lite_cut_export_plan
 from app.video_composer import MontageComposerError
@@ -168,3 +169,47 @@ def test_validate_export_output_rejects_an_undecodable_video(tmp_path: Path):
         validate_export_output(tmp_path / "ffmpeg.exe", output)
 
     assert caught.value.code == "MONTAGE_OUTPUT_NOT_PLAYABLE"
+
+
+@pytest.mark.parametrize("video_duration", ["173.422", "NaN", "N/A", None, "999.0"])
+def test_full_audio_duration_cannot_hide_incomplete_video(tmp_path, video_duration):
+    output = tmp_path / "truncated.mp4"
+    output.write_bytes(b"has-video-and-audio")
+    with (
+        patch("app.features.lite_cut.export_preflight.resolve_ffprobe_binary", return_value=tmp_path / "ffprobe.exe"),
+        patch("app.features.lite_cut.export_preflight.ffprobe_streams", return_value={
+            "streams": [{"codec_type": "video", "duration": video_duration}, {"codec_type": "audio", "duration": "471.874"}],
+            "format": {"duration": "471.874"},
+        }),
+        patch("app.features.lite_cut.export_preflight.run_process_capture") as decode,
+        pytest.raises(MontageComposerError) as caught,
+    ):
+        validate_export_output(tmp_path / "ffmpeg.exe", output, expected_duration_sec=471.874)
+    assert caught.value.code == "MONTAGE_OUTPUT_INCOMPLETE"
+    decode.assert_not_called()
+
+
+def test_complete_video_allows_frame_rounding_and_audio_encoder_padding(tmp_path):
+    output = tmp_path / "complete.mp4"
+    output.write_bytes(b"media")
+    with (
+        patch("app.features.lite_cut.export_preflight.resolve_ffprobe_binary", return_value=tmp_path / "ffprobe.exe"),
+        patch("app.features.lite_cut.export_preflight.ffprobe_streams", return_value={
+            "streams": [{"codec_type": "video", "duration": "471.866667"}],
+            "format": {"duration": "471.895333"},
+        }),
+        patch("app.features.lite_cut.export_preflight.run_process_capture", return_value=subprocess.CompletedProcess([], 0, "", "")),
+    ):
+        validate_export_output(tmp_path / "ffmpeg.exe", output, expected_duration_sec=471.874)
+
+
+@pytest.mark.parametrize("start,end,expected", [(0, None, 9), (2, 7, 5), (2, 20, 7), (2, None, 7)])
+def test_expected_duration_uses_base_speed_freeze_gaps_and_clamped_range(start, end, expected):
+    body = {
+        "output": {"range_mode": "custom", "range_start_sec": start, "range_end_sec": end},
+        "tracks": [
+            {"id": "a1", "type": "audio", "clips": [{"source_type": "file", "file_path": "voice.wav", "trim_out": 30}]},
+            {"id": "v1", "type": "video", "clips": [{"source_type": "file", "file_path": "clip.mp4", "timeline_start": 3, "trim_in": 0, "trim_out": 10, "speed": 2, "freeze_frame_sec": 1}]},
+        ],
+    }
+    assert expected_export_duration(build_lite_cut_export_plan(body)) == expected

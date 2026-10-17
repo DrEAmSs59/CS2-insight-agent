@@ -1,7 +1,7 @@
 {
-  "label": "GyanD/codexffmpeg 8.1.2 ffmpeg-8.1.2-essentials_build.zip",
-  "zip_url": "https://github.com/GyanD/codexffmpeg/releases/download/8.1.2/ffmpeg-8.1.2-essentials_build.zip",
-  "sha256": "db580001caa24ac104c8cb856cd113a87b0a443f7bdf47d8c12b1d740584a2ec",
-  "zip_relative_ffmpeg": "ffmpeg-8.1.2-essentials_build/bin/ffmpeg.exe",
-  "zip_relative_ffprobe": "ffmpeg-8.1.2-essentials_build/bin/ffprobe.exe"
+  "label": "GyanD/codexffmpeg 9.0.2 ffmpeg-9.0.2-full_build.zip",
+  "zip_url": "https://github.com/GyanD/codexffmpeg/releases/download/9.0.2/ffmpeg-9.0.2-full_build.zip",
+  "sha256": "759d0a9831c436a0eb331ad36f236c06cb04aaa0005da46571f0e9d3d9206f6b",
+  "zip_relative_ffmpeg": "ffmpeg-9.0.2-full_build/bin/ffmpeg.exe",
+  "zip_relative_ffprobe": "ffmpeg-9.0.2-full_build/bin/ffprobe.exe"
 }

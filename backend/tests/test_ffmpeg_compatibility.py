@@ -3,6 +3,8 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+import pytest
+
 _BACKEND_ROOT = Path(__file__).resolve().parents[1]
 if str(_BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(_BACKEND_ROOT))
@@ -41,6 +43,21 @@ def test_reference_build_passes_baseline(monkeypatch, tmp_path: Path) -> None:
 
     assert report["compatible"] is True
     assert report["issues"] == []
+
+
+@pytest.mark.parametrize("version", ["9.0", "9.0.1"])
+def test_older_compatible_release_is_not_blocked_before_export(monkeypatch, tmp_path: Path, version: str) -> None:
+    ffmpeg = tmp_path / "ffmpeg.exe"
+    ffmpeg.write_bytes(b"test")
+    (tmp_path / "ffprobe.exe").write_bytes(b"test")
+    ffmpeg_compatibility._audit_cached.cache_clear()
+    ffmpeg_compatibility._tool_version_identity_cached.cache_clear()
+    monkeypatch.setattr(ffmpeg_compatibility, "_run", lambda command: _reference_outputs(command).replace(
+        "2026-05-06-git-f2e5eff3ff", version,
+    ))
+    report = ffmpeg_compatibility.inspect_ffmpeg_toolkit(ffmpeg)
+    assert report["ok"] is True
+    assert report["reason"] == "ok"
 
 
 def test_older_essentials_build_is_incompatible(monkeypatch, tmp_path: Path) -> None:

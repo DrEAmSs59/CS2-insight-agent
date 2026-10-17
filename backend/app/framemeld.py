@@ -20,6 +20,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Sequence
 
+from .montage_exceptions import MontageComposerError
 from .env_utils import get_data_dir
 from .video_export_log import export_event
 
@@ -38,6 +39,7 @@ FRAMEMELD_RIFE_GPU_SELECTION_FEATURE = "rife-gpu-selection-v1"
 FRAMEMELD_RIFE_BINDING_FEATURE = "rife-binding-json-v1"
 FRAMEMELD_FINAL_SHARPEN_FEATURE = "final-luma-sharpen-v1"
 FRAMEMELD_FINAL_SHARPEN_AMOUNT = 0.15
+FRAMEMELD_INDEPENDENT_SHARPEN_FEATURE = "independent-sharpen-v1"
 FRAMEMELD_DEVICE_PROTOCOL = "org.framemeld.devices"
 # FrameMeld is a frame-processing workload regardless of which encoder writes
 # the final stream.  Keep one policy so a healthy long render is not treated
@@ -66,6 +68,7 @@ class FrameMeldCapability:
     api_version: int | None
     legacy: bool = False
     features: frozenset[str] = frozenset()
+    version: str = ""
 
 
 @dataclass(frozen=True)
@@ -306,7 +309,24 @@ def _capability_from_json(result: subprocess.CompletedProcess[str] | None) -> Fr
         route=FRAMEMELD_ROUTE,
         api_version=api_version,
         features=features,
+        version=str(payload.get("version") or ""),
     )
+
+
+def supports_independent_sharpen(capability: FrameMeldCapability | None) -> bool:
+    if capability is None or capability.legacy:
+        return False
+    version = re.fullmatch(r"(\d+)\.(\d+)\.(\d+)", capability.version)
+    return bool(
+        version and tuple(map(int, version.groups())) >= (0, 1, 5)
+        and FRAMEMELD_INDEPENDENT_SHARPEN_FEATURE in capability.features
+        and FRAMEMELD_FINAL_SHARPEN_FEATURE in capability.features
+    )
+
+
+def require_sharpen_capability(ffmpeg_bin: Path) -> None:
+    if not supports_independent_sharpen(probe_framemeld(ffmpeg_bin)):
+        raise MontageComposerError("MONTAGE_SHARPEN_REQUIRES_FRAMEMELD_015")
 
 
 def _help_identifies_framemeld(result: subprocess.CompletedProcess[str] | None) -> bool:
@@ -748,8 +768,11 @@ def build_framemeld_command(
     encoder_adapter: object | None = None,
     rife_device_plan: FrameMeldRifeDevicePlan | None = None,
     capability: FrameMeldCapability | None = None,
+    frame_blending: bool = True,
+    sharpen_enabled: bool = False,
+    sharpen_amount: float = FRAMEMELD_FINAL_SHARPEN_AMOUNT,
 ) -> list[str]:
-    """Build a 60 FPS automatic FrameMeld render command.
+    """Build a FrameMeld render command with independent optional sharpening.
 
     Interpolation targets, duplicate repair, sample counts, weights, and blur
     strength are deliberately omitted.  They are FrameMeld-owned policy.
@@ -758,6 +781,12 @@ def build_framemeld_command(
     resolved_capability = capability or probe_framemeld(ffmpeg_bin)
     if resolved_capability is None:
         raise ValueError("The configured executable does not expose FrameMeld")
+
+    independent = supports_independent_sharpen(resolved_capability)
+    if (sharpen_enabled or not frame_blending) and not independent:
+        raise MontageComposerError("MONTAGE_SHARPEN_REQUIRES_FRAMEMELD_015")
+    if not 0.1 <= sharpen_amount <= 0.3:
+        raise ValueError("sharpen_amount must be between 0.1 and 0.3")
 
     options = [str(item) for item in video_encode_args]
 
@@ -794,7 +823,13 @@ def build_framemeld_command(
     # Fast runtimes expose final sharpening as a host-controlled opt-in. Keep
     # the argument capability-gated so older FrameMeld versions continue to
     # receive only CLI options they understand.
-    if FRAMEMELD_FINAL_SHARPEN_FEATURE in resolved_capability.features:
+    if independent:
+        command.extend(["--final-sharpen", f"{sharpen_amount if sharpen_enabled else 0:g}"])
+        if not frame_blending:
+            command.append("--sharpen-only")
+    elif FRAMEMELD_FINAL_SHARPEN_FEATURE in resolved_capability.features:
+        # Preserve the pre-0.1.5 host preset. The UI explicitly describes this
+        # legacy bundled sharpening and never advertises independent control.
         command.extend(["--final-sharpen", f"{FRAMEMELD_FINAL_SHARPEN_AMOUNT:g}"])
     command.extend([
         "-c:v",

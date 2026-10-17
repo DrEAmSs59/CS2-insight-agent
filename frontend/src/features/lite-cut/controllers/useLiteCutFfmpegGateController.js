@@ -13,6 +13,7 @@ const FFMPEG_GATE_IDLE = {
 export function useLiteCutFfmpegGateController({
   pathname,
   outputFrameMeldEnabled,
+  outputSharpenEnabled,
   patchOutput,
   t,
 }) {
@@ -29,6 +30,8 @@ export function useLiteCutFfmpegGateController({
           subtitle: "",
           message: "",
           framemeldAvailable: data?.framemeld_available === true,
+          sharpenAvailable: data?.framemeld_sharpen_available === true,
+          legacySharpen: data?.framemeld_legacy_sharpen === true,
         });
         return;
       }
@@ -59,6 +62,12 @@ export function useLiteCutFfmpegGateController({
       patchOutput({ framemeld_enabled: false });
     }
   }, [ffmpegGate.framemeldAvailable, ffmpegGate.loading, outputFrameMeldEnabled, patchOutput]);
+
+  useEffect(() => {
+    if (!ffmpegGate.loading && !ffmpegGate.sharpenAvailable && outputSharpenEnabled === true) {
+      patchOutput({ sharpen_enabled: false });
+    }
+  }, [ffmpegGate.loading, ffmpegGate.sharpenAvailable, outputSharpenEnabled, patchOutput]);
 
   useEffect(() => {
     // Native file pickers temporarily blur the window. Recheck after focus

@@ -1,3 +1,4 @@
+import SharpenControl from "../../../components/SharpenControl.jsx";
 import {
   Volume2,
   FolderOpen,
@@ -1305,6 +1306,10 @@ export function ExportPane({
   width = LITE_CUT_OUTPUT_DEFAULTS.width,
   height = LITE_CUT_OUTPUT_DEFAULTS.height,
   fps = LITE_CUT_OUTPUT_DEFAULTS.fps,
+  sharpenEnabled = false,
+  sharpenAmount = 0.15,
+  sharpenAvailable = false,
+  legacySharpen = false,
   framemeldEnabled = false,
   framemeldRuntimeAvailable = false,
   framemeldSourceItems = [],
@@ -1499,6 +1504,8 @@ export function ExportPane({
             <p className="mt-2 text-[10px] leading-relaxed text-cs2-text-muted">{t("liteCut.frameMeldLockedPlan")}</p>
           ) : null}
         </div>
+        <SharpenControl t={t} available={sharpenAvailable} legacy={legacySharpen}
+          enabled={sharpenEnabled} amount={sharpenAmount} onChange={commitSize} />
         <div className="grid grid-cols-2 gap-1.5">
           {[
             ["quality", "高质量"],

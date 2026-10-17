@@ -1,5 +1,11 @@
 // en / montage — keep keys scoped to this feature catalog.
 export default {
+  "montage.sharpenTitle": "Sharpening",
+  "montage.sharpenHint": "Enhance image detail independently or together with frame blending.",
+  "montage.sharpenStrength": "Sharpening strength",
+  "montage.sharpenUnavailable": "Independent sharpening requires FrameMeld 0.1.5 or later. Download the complete runtime and update the FFmpeg path.",
+  "montage.sharpenLegacy": "This older FrameMeld runtime applies fixed 0.15 sharpening with frame blending. Independent control requires FrameMeld 0.1.5 or later.",
+
   "montage.bundleLabel": "Bundle Record",
   "montage.bundleTitle": "👨‍🔬 Lab Special: Full Death Reel",
   "montage.bundleDeathCount": "({n} deaths this match)",
@@ -336,6 +342,7 @@ export default {
   "montage.err.outputSpaceCheckFailed": "Could not read free space on the target disk. Check that the disk is online and writable.",
   "montage.err.outputDiskFull": "Not enough free space: about {required_gb} GB is required and {free_gb} GB is available.",
   "montage.err.outputNotPlayable": "The exported file failed playback validation. The partial file was removed; please try again.",
+  "montage.err.outputIncomplete": "The exported video duration does not match the project; the video may have been truncated. The partial file was removed and export was not marked successful. If using FFmpeg 9.0/9.0.1, update to 9.0.2 or a build containing the fix and retry. FrameMeld users should download and use version 0.1.5 or later.",
   "montage.err.clipFileMissing": "Recording file missing: {name}. It may have been moved or deleted.",
   "montage.err.sourceNotReadable": "Media file \"{name}\" cannot be read. Another app may have locked it, or access is denied.",
   "montage.err.exportInterrupted": "The previous export was not finalized before the app closed. Temporary files were cleaned up; any already-published output was kept.",

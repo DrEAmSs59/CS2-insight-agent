@@ -18,6 +18,7 @@
 ; but tauri-bundler 2.6 does not add that sibling DLL to NSIS automatically.
 ; Capture this directory while the hook is included so macro expansion later
 ; does not change __FILEDIR__ to the generated NSIS directory.
+!define CS2_UPGRADE_HELPER "${__FILEDIR__}\prepare-python-upgrade.ps1"
 !define CS2_TAURI_RELEASE_DIR "${__FILEDIR__}\..\target\release"
 
 Var CS2ElectronScope     ; "samedir" (preinstall) or "all" (postinstall)
@@ -97,14 +98,6 @@ Function CS2_PrepareRunningApps
     ${EndIf}
   ${EndIf}
 
-  ; A backend orphaned by an earlier force-kill keeps port 19871 busy and
-  ; would make the freshly installed app fail its startup identity check.
-  ; Free and Pro share that port, so only this installation's python.exe is
-  ; terminated; the other edition's running backend is left alone.
-  nsExec::ExecToStack `"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -Command "Get-NetTCPConnection -LocalPort 19871 -State Listen -ErrorAction SilentlyContinue | ForEach-Object { $$proc = Get-Process -Id $$_.OwningProcess -ErrorAction SilentlyContinue; if ($$proc -and $$proc.ProcessName -eq 'python' -and $$proc.Path -and $$proc.Path.StartsWith('$INSTDIR\', [StringComparison]::OrdinalIgnoreCase)) { Stop-Process -Id $$proc.Id -Force } }"`
-  Pop $R0
-  Pop $R1
-
   ; Legacy Electron build: give it time to finish exiting (electron-updater
   ; launches this installer right after quitting the app), but never
   ; force-kill it — it may still be flushing config or the SQLite database.
@@ -118,6 +111,25 @@ Function CS2_PrepareRunningApps
       StrCpy $R7 "检测到旧版 CS2 Insight Agent (Electron) 正在运行。$\r$\n$\r$\n为避免配置或数据库损坏，请先正常关闭旧版应用，再重新运行安装程序。"
       Call CS2_AbortMigrationInstall
     ${EndIf}
+  ${EndIf}
+FunctionEnd
+
+Function CS2_PreparePythonRuntime
+  InitPluginsDir
+  SetOutPath $PLUGINSDIR
+  File /oname=prepare-python-upgrade.ps1 "${CS2_UPGRADE_HELPER}"
+  ; Sysnative bypasses WOW64 redirection from the 32-bit NSIS process.
+  StrCpy $R6 "$SYSDIR\WindowsPowerShell\v1.0\powershell.exe"
+  ${If} ${RunningX64}
+    StrCpy $R6 "$WINDIR\Sysnative\WindowsPowerShell\v1.0\powershell.exe"
+  ${EndIf}
+  nsExec::ExecToStack '"$R6" -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$PLUGINSDIR\prepare-python-upgrade.ps1" -InstallDir "$INSTDIR"'
+  Pop $R0
+  Pop $R1
+  DetailPrint "$R1"
+  ${If} $R0 != 0
+    StrCpy $R7 "安装目录中的 Python 文件仍被占用，或无法完成占用检查。安装已在覆盖文件前停止。$\r$\n请关闭 Insight 后重试；仍失败时请重启电脑后安装。$\r$\n$\r$\n$R1"
+    Call CS2_AbortMigrationInstall
   ${EndIf}
 FunctionEnd
 
@@ -407,6 +419,7 @@ FunctionEnd
 !macro NSIS_HOOK_PREINSTALL
   StrCpy $CS2MainExe "${MAINBINARYNAME}.exe"
   Call CS2_PrepareRunningApps
+  Call CS2_PreparePythonRuntime
 
   ; Same-directory Electron installs must be retired before any file copy —
   ; their uninstaller would delete $INSTDIR together with the new files.
