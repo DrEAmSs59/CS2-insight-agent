@@ -1046,6 +1046,12 @@ export default function CommonParamsModal({
                     outcomeOn={t("record.hudHideClanTagsOutcome")}
                   />
                   <RecordingHudCard
+                    title={t("record.hudPersistentKillfeedTitle")}
+                    description={t("record.hudPersistentKillfeedDesc")}
+                    checked={warmupOpts.persistent_killfeed}
+                    onChange={(v) => patchWarmup({ persistent_killfeed: v })}
+                  />
+                  <RecordingHudCard
                     title={t("record.hudNoChatTitle")}
                     code="tv_nochat 1"
                     description={t("record.hudNoChatDesc")}

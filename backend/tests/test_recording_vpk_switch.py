@@ -13,6 +13,47 @@ from app.recording import plan_builder
 from app.recording.executor import obs_recording_controller
 
 
+@pytest.mark.parametrize("hud", [False, True])
+def test_persistent_killfeed_groups_protagonists_and_preserves_requested_cuts(monkeypatch, tmp_path, hud):
+    installed = []
+    class Manager:
+        def __init__(self, _config): pass
+        def install(self, **kwargs): installed.append(kwargs)
+        def status(self): return {"original_gameinfo_sha256": "a" * 64}
+    class Controller:
+        def __init__(self, *_args): pass
+        async def force_stop_recording(self): return True
+    monkeypatch.setattr(pov_hud_manager, "PovHudManager", Manager)
+    monkeypatch.setattr(pov_hud_manager, "restore_pov_after_cs2_exit", lambda *a, **k: {"verified": True})
+    monkeypatch.setattr(obs_recording_controller, "OBSRecordingController", Controller)
+    monkeypatch.setattr(plan_builder, "build_plan", lambda dto: SimpleNamespace(segments=[
+        SimpleNamespace(start_tick=int(dto.request_id)*100, end_tick=int(dto.request_id)*100+50, disabled=False),
+        SimpleNamespace(start_tick=900, end_tick=999, disabled=True),
+    ]))
+    director = OBSDirector(OBSConfig(), "")
+    def launch(*args): raise RuntimeError("simulated launch failure")
+    monkeypatch.setattr(director, "_launch_cs2", launch)
+    monkeypatch.setattr(director, "_kill_cs2", lambda: None)
+    monkeypatch.setattr(director, "_cleanup_cs2_artifacts", lambda: None)
+    requests = [SimpleNamespace(request_id=str(i),
+        demo=SimpleNamespace(demo_path=str(tmp_path/'test.dem'), demo_filename='test.dem', map_name='de_dust2'),
+        target_player=SimpleNamespace(steamid64=target))
+        for i, target in enumerate(['76561198386265483', '76561198386265484', '76561198386265483'])]
+    asyncio.run(director.execute_plan_queue(requests, warmup=RecordingWarmupExtras(
+        persistent_killfeed=True, recording_hud_enabled=hud, pov_hud_enabled=hud,
+        input_hud_enabled=False, hide_clan_tags=False)))
+    assert len(installed) == 2
+    assert [p['persistent_killfeed_target_xuid'] for p in installed] == ['76561198386265483', '76561198386265484']
+    assert installed[0]['persistent_killfeed_segments'] == [
+        {'start_tick':0, 'end_tick':50}, {'start_tick':200, 'end_tick':250}]
+    assert installed[1]['persistent_killfeed_segments'] == [{'start_tick':100, 'end_tick':150}]
+    for package in installed:
+        assert package['persistent_killfeed'] is True
+        assert package['killfeed_only'] is not hud
+        assert package['pov_visuals_enabled'] is hud
+        assert package['hide_killfeed_clan_tags'] is False
+
+
 @pytest.mark.parametrize("stale", [False, True])
 @pytest.mark.parametrize("verified", [False, True])
 def test_all_effects_off_removes_stale_vpk_before_launch(monkeypatch, tmp_path, stale, verified):

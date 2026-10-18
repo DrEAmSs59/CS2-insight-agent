@@ -94,6 +94,7 @@ export const RECORD_WARMUP_DEFAULT_OPTIONS = {
   cl_draw_only_deathnotices: true,
   hud_showtargetid_hide: true,
   hide_clan_tags: true,
+  persistent_killfeed: false,
   tv_nochat: true,
   spec_show_xray: false,
   apply_fov: false,
@@ -305,6 +306,7 @@ export default function RecordWarmupModal({
       cl_draw_only_deathnotices: opts.cl_draw_only_deathnotices,
       hud_showtargetid_hide: opts.hud_showtargetid_hide,
       hide_clan_tags: opts.hide_clan_tags,
+      persistent_killfeed: !!opts.persistent_killfeed,
       tv_nochat: opts.tv_nochat,
       spec_show_xray: opts.spec_show_xray ? 1 : 0,
       fov_cs_debug: opts.apply_fov ? Number(opts.fov_cs_debug) || 90 : null,
@@ -479,6 +481,12 @@ export default function RecordWarmupModal({
                 checked={opts.hide_clan_tags}
                 onChange={(v) => set({ hide_clan_tags: v })}
                 outcomeOn={t("record.hudHideClanTagsOutcome")}
+              />
+              <RecordingHudCard
+                title={t("record.hudPersistentKillfeedTitle")}
+                description={t("record.hudPersistentKillfeedDesc")}
+                checked={opts.persistent_killfeed}
+                onChange={(v) => set({ persistent_killfeed: v })}
               />
               <RecordingHudCard
                 title={t("record.hudNoChatTitle")}

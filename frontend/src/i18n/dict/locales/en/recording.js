@@ -231,6 +231,8 @@ export default {
   "record.hudHideTargetTitle": "Hide crosshair target info",
   "record.hudHideTargetDesc": "Suppresses the name and health popup when the crosshair is on a player.",
   "record.hudHideTargetOutcome": "No ID / health bar appears under the crosshair in the final footage.",
+  "record.hudPersistentKillfeedTitle": "Persistent kill feed",
+  "record.hudPersistentKillfeedDesc": "Keep up to 15 kills by the recorded player. Hidden in victim views; rewinding hides future kills and replaying never duplicates entries.",
   "record.hudHideClanTagsTitle": "Hide clan tags",
   "record.hudHideClanTagsDesc": "Hide clan tags before player names in the kill feed. Enabled by default.",
   "record.hudHideClanTagsOutcome": "The kill feed shows player names without clan tags.",

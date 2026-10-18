@@ -214,6 +214,12 @@ function maybeStageSkinCore() {
   console.log(`[desktop] staged explicitly configured skin-core.exe from ${source}`);
 }
 
+for (const name of ["persistent_killfeed.js", "persistent_killfeed_runtime.js"]) {
+  if (!existsSync(join(destination, "pov", name))) {
+    throw new Error(`Missing persistent killfeed resource: ${name}`);
+  }
+}
+
 maybeStageSkinCore();
 
 // Run the exact parser command used by the NSIS postinstall hook against the

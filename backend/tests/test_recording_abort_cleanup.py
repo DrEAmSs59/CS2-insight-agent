@@ -311,7 +311,15 @@ def test_recording_hud_uses_shared_exit_restore_and_reports_evidence(
             input_audio_enabled=True,
             input_audio_volume_percent=100,
             combat_stats_enabled=True,
+            **killfeed_options,
         ):
+            assert killfeed_options == {
+                "persistent_killfeed": False,
+                "killfeed_only": False,
+                "persistent_killfeed_target_xuid": "",
+                "persistent_killfeed_segments": [],
+                "hide_killfeed_clan_tags": True,
+            }
             calls.append((
                 "install",
                 demo_path,

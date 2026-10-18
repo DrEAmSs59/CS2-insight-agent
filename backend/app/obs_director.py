@@ -1833,6 +1833,7 @@ class RecordingWarmupExtras:
     resolution_height: Optional[int] = None
     hud_showtargetid_hide: bool = True
     hide_clan_tags: bool = True
+    persistent_killfeed: bool = False  # Panorama journal of protagonist kills
     tv_nochat: bool = True
     viewmodel_fov_68: bool = False
     # 第三人称肩部镜头；启用后在预热阶段注入固定 cam_* / c_thirdperson* 参数。
@@ -3688,6 +3689,8 @@ class OBSDirector:
         demo_abs_map: dict[str, Path] = {}
         for dto in requests:
             key = dto.demo.demo_path or dto.demo.demo_filename
+            if warmup and warmup.persistent_killfeed:
+                key += "\0" + dto.target_player.steamid64
             demo_groups.setdefault(key, []).append(dto)
             if key not in demo_abs_map:
                 demo_abs_map[key] = Path(dto.demo.demo_path or dto.demo.demo_filename)
@@ -3742,7 +3745,8 @@ class OBSDirector:
         )
         weather_on_v3 = weather_effect_id_v3 != DEFAULT_WEATHER_EFFECT_ID
         visual_layer_on_v3 = skybox_on_v3 or map_material_on_v3 or weather_on_v3
-        recording_vpk_on_v3 = recording_hud_on_v3 or visual_layer_on_v3
+        persistent_killfeed_v3 = bool(warmup and warmup.persistent_killfeed)
+        recording_vpk_on_v3 = recording_hud_on_v3 or visual_layer_on_v3 or persistent_killfeed_v3
         pov_install_attempted = False
         pov_expected_gameinfo_sha256: Optional[str] = None
         pov_restoration: Optional[dict[str, Any]] = None
@@ -3843,13 +3847,26 @@ class OBSDirector:
                             demo_map_name,
                         )
                         pov_install_attempted = True
-                        if recording_hud_on_v3:
+                        if recording_hud_on_v3 or persistent_killfeed_v3:
+                            killfeed_ranges = [
+                                {"start_tick": segment.start_tick, "end_tick": segment.end_tick}
+                                for dto in demo_requests
+                                for plan in [_plan_cache.get(dto.request_id)] if plan is not None
+                                for segment in plan.segments if not segment.disabled
+                            ] if persistent_killfeed_v3 else []
                             pov_mgr_v3.install(
                                 map_name=demo_map_name,
                                 demo_path=demo_abs,
                                 require_demo_hud=True,
                                 voice_mode=pov_voice_mode_v3,
                                 pov_visuals_enabled=pov_on_v3,
+                                persistent_killfeed=persistent_killfeed_v3,
+                                killfeed_only=not recording_hud_on_v3,
+                                persistent_killfeed_target_xuid=(
+                                    demo_requests[0].target_player.steamid64 if persistent_killfeed_v3 else ""
+                                ),
+                                persistent_killfeed_segments=killfeed_ranges,
+                                hide_killfeed_clan_tags=bool(warmup is None or warmup.hide_clan_tags),
                                 skybox_id=skybox_id_v3,
                                 map_material_id=map_material_id_v3,
                                 weather_effect_id=weather_effect_id_v3,
