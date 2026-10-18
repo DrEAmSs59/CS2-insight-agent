@@ -21,6 +21,7 @@ import {
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useLiteCutTimelineStore } from "../state/timelineStore.js";
+import { getLiteCutResolutionError, isEvenExportDimension } from "../state/exportResolution.js";
 import { useT } from "../../../i18n/useT.js";
 import { messageFromApiCode } from "../../../utils/apiErrorMessages.js";
 import { liteCutClient } from "../api/liteCutClient.js";
@@ -1145,6 +1146,7 @@ export function CanvasPane({
   onOutputSettingsChange,
 }) {
   const commitCanvas = (patch) => onOutputSettingsChange?.(patch);
+  const t = useT();
   const sizePresets = CANVAS_PRESETS;
   const currentRatio = canvasRatioLabel(width, height);
   const hasPresetRatio = sizePresets.some((preset) => preset.id === currentRatio);
@@ -1158,6 +1160,7 @@ export function CanvasPane({
   const normalizedBlur = Math.max(OUTPUT_BLUR.min, Math.min(OUTPUT_BLUR.max, Number(blurAmount) || OUTPUT_BLUR.default));
   const [widthDraft, setWidthDraft] = useState(String(width));
   const [heightDraft, setHeightDraft] = useState(String(height));
+  const resolutionError = getLiteCutResolutionError({ width: widthDraft, height: heightDraft });
   useEffect(() => setWidthDraft(String(width)), [width]);
   useEffect(() => setHeightDraft(String(height)), [height]);
   const commitWidth = () => {
@@ -1214,6 +1217,9 @@ export function CanvasPane({
           <input
             type="number"
             aria-label="画布宽度"
+            aria-invalid={!isEvenExportDimension(widthDraft)}
+            aria-describedby={resolutionError ? "litecut-canvas-resolution-error" : undefined}
+            step={2}
             min={OUTPUT_WIDTH.min}
             max={OUTPUT_WIDTH.max}
             value={widthDraft}
@@ -1228,6 +1234,9 @@ export function CanvasPane({
           <input
             type="number"
             aria-label="画布高度"
+            aria-invalid={!isEvenExportDimension(heightDraft)}
+            aria-describedby={resolutionError ? "litecut-canvas-resolution-error" : undefined}
+            step={2}
             min={OUTPUT_HEIGHT.min}
             max={OUTPUT_HEIGHT.max}
             value={heightDraft}
@@ -1241,6 +1250,11 @@ export function CanvasPane({
         </div>
       </PaneSection>
 
+      {resolutionError ? (
+        <p id="litecut-canvas-resolution-error" role="alert" className="text-[11px] text-rose-300">
+          {messageFromApiCode(resolutionError.code, t, resolutionError.params)}
+        </p>
+      ) : null}
       <PaneSection title="画布适配">
         <div className="grid grid-cols-3 gap-1.5">
           {fitOptions.map((option) => (
@@ -1333,7 +1347,8 @@ export function ExportPane({
   clipCount,
 }) {
   const t = useT();
-  const canExport = clipCount > 0 && (outputDir.trim() || outputDirHint) && filename.trim() && rangeValid;
+  const resolutionError = getLiteCutResolutionError({ width, height });
+  const canExport = clipCount > 0 && (outputDir.trim() || outputDirHint) && filename.trim() && rangeValid && !resolutionError;
   const [encoderDetecting, setEncoderDetecting] = useState(false);
   const [encoderDetection, setEncoderDetection] = useState(null);
   const [frameMeldConfirmationOpen, setFrameMeldConfirmationOpen] = useState(false);
@@ -1446,6 +1461,9 @@ export function ExportPane({
               min={OUTPUT_WIDTH.min}
               max={OUTPUT_WIDTH.max}
               value={width}
+              step={2}
+              aria-invalid={!isEvenExportDimension(width)}
+              aria-describedby={resolutionError ? "litecut-export-resolution-error" : undefined}
               onChange={(e) => commitSize({ width: Math.max(OUTPUT_WIDTH.min, Math.min(OUTPUT_WIDTH.max, Number(e.target.value) || LITE_CUT_OUTPUT_DEFAULTS.width)) })}
               className="litecut-property-number w-full"
             />
@@ -1457,6 +1475,9 @@ export function ExportPane({
               min={OUTPUT_HEIGHT.min}
               max={OUTPUT_HEIGHT.max}
               value={height}
+              step={2}
+              aria-invalid={!isEvenExportDimension(height)}
+              aria-describedby={resolutionError ? "litecut-export-resolution-error" : undefined}
               onChange={(e) => commitSize({ height: Math.max(OUTPUT_HEIGHT.min, Math.min(OUTPUT_HEIGHT.max, Number(e.target.value) || LITE_CUT_OUTPUT_DEFAULTS.height)) })}
               className="litecut-property-number w-full"
             />
@@ -1475,6 +1496,11 @@ export function ExportPane({
             />
           </label>
         </div>
+        {resolutionError ? (
+          <p id="litecut-export-resolution-error" role="alert" className="text-[11px] text-rose-300">
+            {messageFromApiCode(resolutionError.code, t, resolutionError.params)}
+          </p>
+        ) : null}
         <div className="rounded-lg border border-cs2-border/70 bg-cs2-surface-1/60 p-2.5">
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">

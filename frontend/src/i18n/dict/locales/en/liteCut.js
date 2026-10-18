@@ -1,5 +1,6 @@
 // en / liteCut — keep keys scoped to this feature catalog.
 export default {
+  "liteCut.exportResolutionInvalid": "Export width and height must both be positive even integers (currently {width} × {height}). Change the resolution before exporting.",
   "liteCut.project.name": "Project name",
   "liteCut.project.headerMeta": "LiteCut · Project #{id} · {state}",
   "liteCut.project.headerMetaDetailed": "LiteCut · Project #{id} · {width}×{height} · {fps} FPS · {state}",

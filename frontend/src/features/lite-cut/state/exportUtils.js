@@ -1,6 +1,7 @@
 import { liteCutClient } from "../api/liteCutClient.js";
 import { ensureMp4Filename } from "../../../utils/montageUtils.js";
 import { mainVideoClips } from "./timelineUtils.js";
+import { getLiteCutResolutionError } from "./exportResolution.js";
 
 function dirnamePath(p) {
   const s = String(p || "").replace(/\\/g, "/");
@@ -105,6 +106,10 @@ export function liteCutRangePatchFromDraggedEdge(output = {}, totalSec = 0, edge
 }
 
 export async function startLiteCutExport({ projectId, body, outputDir, filename }) {
+  const resolutionError = getLiteCutResolutionError(body?.output);
+  if (resolutionError) {
+    throw Object.assign(new Error(resolutionError.code), resolutionError);
+  }
   const output_path = buildLiteCutOutputPath(outputDir, filename);
   if (!output_path) {
     const err = new Error("output_path_invalid");

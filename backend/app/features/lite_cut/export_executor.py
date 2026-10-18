@@ -35,12 +35,6 @@ async def prepare_export(
     active_jobs,
     resolve_encoder,
 ) -> dict[str, Any]:
-    cfg = load_config()
-    try:
-        ffmpeg_bin = resolve_ffmpeg_binary(cfg.ffmpeg_path)
-    except MontageComposerError as exc:
-        raise HTTPException(400, montage_detail_from_exception(exc)) from exc
-
     project_body: dict[str, Any] | None = None
     if body.project_id is not None:
         project = await projects.get(int(body.project_id))
@@ -53,7 +47,16 @@ async def prepare_export(
         raise HTTPException(400, error_detail("LITECUT_EXPORT_NO_BODY"))
     project_body = normalize_project_body(project_body)
 
-    export_plan = build_lite_cut_export_plan(project_body)
+    try:
+        export_plan = build_lite_cut_export_plan(project_body)
+    except MontageComposerError as exc:
+        raise HTTPException(422, montage_detail_from_exception(exc)) from exc
+
+    cfg = load_config()
+    try:
+        ffmpeg_bin = resolve_ffmpeg_binary(cfg.ffmpeg_path)
+    except MontageComposerError as exc:
+        raise HTTPException(400, montage_detail_from_exception(exc)) from exc
     clips = list(export_plan.base_clips)
     if not clips:
         raise HTTPException(400, error_detail("MONTAGE_NO_CLIPS"))

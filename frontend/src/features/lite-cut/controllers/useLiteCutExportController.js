@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { useLiteCutEditorStore } from "../state/editorStore.js";
+import { getLiteCutResolutionError } from "../state/exportResolution.js";
 import {
   cancelLiteCutExport,
   defaultLiteCutFilename,
@@ -67,6 +68,12 @@ export function useLiteCutExportController({
 
   const handleExport = useCallback(async () => {
     if (!body || exportableClipCount === 0) return;
+    const currentBody = useLiteCutEditorStore.getState().body || body;
+    const resolutionError = getLiteCutResolutionError(currentBody.output);
+    if (resolutionError) {
+      setExportError(messageFromApiCode(resolutionError.code, t, resolutionError.params));
+      return;
+    }
     const dir = outputDir.trim() || outputDirHint;
     const filename = defaultLiteCutFilename({ output: { filename: outputFilename } }, projectName);
     if (!dir) {
@@ -93,7 +100,8 @@ export function useLiteCutExportController({
       patchOutput({ dir: outputDir.trim() || dir, filename });
       publishExportPhase("running", result);
     } catch (error) {
-      const message = formatMontageApiError(error, t, error?.message || "导出失败");
+      const message = messageFromApiCode(error?.code, t, error?.params)
+        || formatMontageApiError(error, t, error?.message || "导出失败");
       setExportError(message);
       publishExportPhase("error", { error: message });
       setExporting(false);
