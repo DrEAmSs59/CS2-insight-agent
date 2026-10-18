@@ -267,6 +267,17 @@ def _run_ffmpeg_capture(
     return result
 
 
+def _probe_timeout_seconds(path: Path | None) -> float:
+    # Probing a large recording on a slow disk can outlive 120 seconds.
+    # Budget for a conservative 5 MiB/s scan plus startup headroom; keep a cap
+    # for hung probes and let the existing process runner handle cancellation.
+    try:
+        size = path.stat().st_size if path is not None else 0
+    except OSError:
+        size = 0
+    return min(6 * 60 * 60, (120 + size / (5 * 1024 * 1024)) * 1.3)
+
+
 def _run_json(
     cmd: list[str],
     *,
@@ -278,7 +289,7 @@ def _run_json(
     try:
         proc = run_process_capture(
             cmd,
-            timeout=120,
+            timeout=_probe_timeout_seconds(media_path),
             cancel_event=_MONTAGE_CANCEL_EVENT.get(),
         )
     except InterruptedError as exc:
