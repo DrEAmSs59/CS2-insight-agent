@@ -924,9 +924,18 @@
     function currentPovXuid(state) {
         let xuid = String(GameStateAPI.GetHudPlayerXuid() || "");
         if ((!xuid || xuid === "0") && state && state.nSpectatingPlayerId >= 0) {
-            xuid = String(
-                GameStateAPI.GetPlayerXuidStringFromPlayerSlot(state.nSpectatingPlayerId) || "",
-            );
+            // DemoUI reports a pawn entity index, not a player slot. Resolve
+            // the current roster on each fallback: pawn indices change after
+            // respawns and seeks, and can overlap another player's slot.
+            try {
+                const players = controller.GetDemoPlayers();
+                const player = players.find(function (entry) {
+                    return entry.nPawnEntIndex === state.nSpectatingPlayerId;
+                });
+                if (player && Number.isInteger(player.nPlayerSlot) && player.nPlayerSlot >= 0) {
+                    xuid = String(GameStateAPI.GetPlayerXuidStringFromPlayerSlot(player.nPlayerSlot) || "");
+                }
+            } catch (errDemoPlayers) {}
         }
         return normalizeXuid(xuid);
     }
