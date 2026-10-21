@@ -74,8 +74,8 @@ POV_CORE_FORCED_COMMANDS: list[str] = [
     # Keep CS2's own footstep/sound visualization authoritative. Panorama must
     # never synthesize replacement circles when the demo has no native event.
     "snd_disable_radar_visualize 0",
-    # 0=team color, 12=teammate/player color (HP/ammo accents follow slot colors).
-    "cl_hud_color 12",
+    # Preserve the player's CS2 HUD preference instead of forcing slot colors.
+    "cl_force_spec_hud_color_to_team false",
     # Native CCSGO_HudReticle owns the world-to-screen placement and pooled
     # `.playerid` panels. Mode 3 keeps its name and equipment children alive;
     # the injected demo controller fills the native centered economy line.
