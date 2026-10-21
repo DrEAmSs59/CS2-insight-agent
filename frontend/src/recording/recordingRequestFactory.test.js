@@ -55,6 +55,7 @@ describe("recording demo EOF metadata", () => {
           round_start_tick: 170_000,
           freeze_end_tick: 170_500,
           round_end_tick: 180_000,
+          death_tick: null,
           end_tick: 181_000,
         }],
       },

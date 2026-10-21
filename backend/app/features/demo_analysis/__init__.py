@@ -11,7 +11,6 @@ from .tag_constants import (
     RAPID_KILL_WINDOW_SECONDS, ECO_MAX_VALUE, FULL_BUY_MIN_VALUE,
     _TAG_COVERAGE_RULES, _dedup_context_tags,
     _EXTRA_EVENT_FIELDS, _PLAYER_DEATH_GAME_KEYS,
-    _FREEZE_TO_DEATH_PRE_FREEZE_SEC, _FREEZE_TO_DEATH_POST_DEATH_SEC,
 )
 from .parse_utils import (
     _to_pandas_df, _bool, _int, _round_end_winner_team_num, _norm_steam_id,

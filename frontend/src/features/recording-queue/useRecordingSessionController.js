@@ -106,10 +106,15 @@ export function useRecordingSessionController({
       }), { isError: true });
       return;
     }
+    try {
+      setRecordingAliasDemos(recordingAliasDemoTargets(buildRecordingQueueRequestsFromQueue(
+        queue, useRecordingQueue.getState().globalPacing, uploadedDemos, parsedMatches, demoLibraryItems,
+      )));
+    } catch (error) {
+      setProgressText(formatRecordingApiError(error, t, t("app.recordStartFailed")), { isError: true });
+      return;
+    }
     setQueueDrawerOpen(false);
-    setRecordingAliasDemos(recordingAliasDemoTargets(buildRecordingQueueRequestsFromQueue(
-      queue, useRecordingQueue.getState().globalPacing, uploadedDemos, parsedMatches, demoLibraryItems,
-    )));
     setWarmupIntent("batch");
     setRecordWarmupOpen(true);
     setProgressText("");

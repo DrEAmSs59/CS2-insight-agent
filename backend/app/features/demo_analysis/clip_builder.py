@@ -16,8 +16,6 @@ from .tag_constants import (
     _DEATH_CLIP_LEAD_SECONDS,
     _DEFUSE_EXTREME_MIN_SEC,
     _NINJA_ENEMY_MAX_DIST_3D,
-    _FREEZE_TO_DEATH_PRE_FREEZE_SEC,
-    _FREEZE_TO_DEATH_POST_DEATH_SEC,
     _RIVAL_KILL_THRESHOLD,
     _NEMESIS_DEATH_THRESHOLD,
     _SHOULDER_DIST,
@@ -806,170 +804,33 @@ def build_rival_compilations(
             if prev is None or dt < prev:
                 death_tick_by_round[rn] = dt
 
-        pre_ticks = max(1, int(abs(_FREEZE_TO_DEATH_PRE_FREEZE_SEC) * TICK_RATE))
-        post_ticks = max(1, int(abs(_FREEZE_TO_DEATH_POST_DEATH_SEC) * TICK_RATE))
-
-        def _ftd_cap_at_death_round(rnd: int, death_tick: int) -> int:
-            fe = int(round_freeze_end_ticks.get(rnd) or 0)
-            raw_end = int(death_tick) + post_ticks
-            next_fe = round_freeze_end_ticks.get(rnd + 1)
-            if next_fe and next_fe > fe:
-                return min(raw_end, int(next_fe) - int(5 * TICK_RATE))
-            return raw_end
-
-        def _ftd_safe_end_alive_round(rnd: int) -> int:
-            next_fe = round_freeze_end_ticks.get(rnd + 1)
-            if next_fe:
-                return max(int(next_fe) - int(5 * TICK_RATE), 0)
-            fe = int(round_freeze_end_ticks.get(rnd) or 0)
-            return fe + int(150 * TICK_RATE) if fe > 0 else int(150 * TICK_RATE)
-
-        eligible: list[int] = []
-        for rnd in sorted(round_freeze_end_ticks.keys()):
-            if ftd_filter is not None and rnd not in ftd_filter:
-                continue
+        # Preserve every eligible round, including unselected neighbours. Only
+        # the recording planner computes pre-roll, death tails and end caps.
+        facts = []
+        for rnd in sorted(round_freeze_end_ticks):
             so, se = round_start_scores_for_target(rnd, round_team_score_map)
             if is_post_match_round(rnd, so, se, completed_rounds=_done_rounds, final_scoreline=_final_line):
                 continue
             fe = int(round_freeze_end_ticks.get(rnd) or 0)
             if fe <= 0:
                 continue
-            eligible.append(rnd)
-
-        ftd_round_windows: list[dict[str, Any]] = []
-        for rnd in eligible:
-            fe = int(round_freeze_end_ticks.get(rnd) or 0)
-            if fe <= 0:
-                continue
-            dt = death_tick_by_round.get(rnd)
-            s = max(0, fe - pre_ticks)
-            if dt is not None and int(dt) > 0:
-                _dtk = int(dt)
-                raw_end = _dtk + post_ticks
-                cap_e = _ftd_cap_at_death_round(rnd, _dtk)
-                e = max(s + 1, min(raw_end, cap_e))
-            else:
-                e = max(s + 1, _ftd_safe_end_alive_round(rnd))
-            if _ftd_demo_mx > 0:
-                e = max(s + 1, min(e, _ftd_demo_mx))
-            # round_end_tick: the *real* round_end event tick (when the round was
-            # decided). It is intentionally independent of `end_tick` (which is the
-            # freeze→death+2s recording window). Downstream the planner uses it
-            # to distinguish a mid-round death from the natural round boundary.
-            _re_tick = (round_end_tick_map or {}).get(rnd)
-            ftd_round_windows.append({
-                "round": int(rnd),
-                "freeze_end_tick": int(fe),
-                "start_tick": int(s),
-                "end_tick": int(e),
-                "death_tick": int(dt) if dt is not None and int(dt) > 0 else None,
+            facts.append({
+                "round": int(rnd), "freeze_end_tick": fe,
                 "round_start_tick": (round_freeze_start_ticks or {}).get(rnd),
-                "round_end_tick": int(_re_tick) if _re_tick and int(_re_tick) > 0 else None,
+                "round_end_tick": (round_end_tick_map or {}).get(rnd) or None,
+                "death_tick": death_tick_by_round.get(rnd),
             })
-
-        ftd_segments: list[tuple[int, int, int, int, Optional[int]]] = []
-        run_start_r: Optional[int] = None
-        run_start_tick: int = 0
-        last_r: Optional[int] = None
-
-        def _emit_death_segment(sr: int, s_tick: int, er: int, d_tick: int) -> None:
-            raw_end = int(d_tick) + post_ticks
-            cap_e = _ftd_cap_at_death_round(er, d_tick)
-            seg_end = max(s_tick + 1, min(raw_end, cap_e))
-            if _ftd_demo_mx > 0:
-                seg_end = max(s_tick + 1, min(seg_end, _ftd_demo_mx))
-            if seg_end <= s_tick:
-                return
-            ftd_segments.append((s_tick, seg_end, sr, er, d_tick))
-
-        def _emit_alive_segment(sr: int, s_tick: int, er: int) -> None:
-            cap_e = _ftd_safe_end_alive_round(er)
-            if _ftd_demo_mx > 0:
-                cap_e = min(cap_e, _ftd_demo_mx)
-            if cap_e <= s_tick:
-                return
-            ftd_segments.append((s_tick, cap_e, sr, er, None))
-
-        def _flush_open_run() -> None:
-            nonlocal run_start_r, run_start_tick, last_r
-            if run_start_r is None or last_r is None:
-                return
-            _emit_alive_segment(run_start_r, run_start_tick, last_r)
-            run_start_r = None
-            last_r = None
-
-        for rnd in eligible:
-            fe = int(round_freeze_end_ticks.get(rnd) or 0)
-            if fe <= 0:
-                continue
-            dt = death_tick_by_round.get(rnd)
-
-            if run_start_r is None:
-                run_start_r = rnd
-                run_start_tick = max(0, fe - pre_ticks)
-                last_r = rnd
-                if dt is not None and dt > 0:
-                    _emit_death_segment(run_start_r, run_start_tick, rnd, dt)
-                    run_start_r = None
-                    last_r = None
-                continue
-
-            if rnd != last_r + 1:
-                _flush_open_run()
-                run_start_r = rnd
-                run_start_tick = max(0, fe - pre_ticks)
-                last_r = rnd
-                if dt is not None and dt > 0:
-                    _emit_death_segment(run_start_r, run_start_tick, rnd, dt)
-                    run_start_r = None
-                    last_r = None
-                continue
-
-            last_r = rnd
-            if dt is not None and dt > 0:
-                _emit_death_segment(run_start_r, run_start_tick, rnd, dt)
-                run_start_r = None
-                last_r = None
-
-        _flush_open_run()
-
-        if ftd_segments:
-            source_ticks = [[s, e] for (s, e, _sr, _er, _d) in ftd_segments]
-            first_rnd = ftd_segments[0][2]
-            kill_anchors: list[int] = []
-            for (_s, e, _sr, _er, dtk) in ftd_segments:
-                if dtk is not None and dtk > 0:
-                    kill_anchors.append(int(dtk))
-                else:
-                    kill_anchors.append(max(_s, e - 1))
-            last_death = next((d for (_s, _e, _sr, _er, d) in reversed(ftd_segments) if d is not None), None)
-            ftd_round_filter_out: Optional[list[int]] = None
-            if ftd_filter is not None:
-                ftd_round_filter_out = sorted(ftd_filter)
+        selected = [row for row in facts if ftd_filter is None or row["round"] in ftd_filter]
+        if selected:
             compilations.append(Clip(
-                clip_id=f"c_{uuid.uuid4().hex[:8]}",
-                map_name=map_name,
-                round=first_rnd,
-                category="compilation",
-                weapon_used="",
-                kill_count=0,
-                start_tick=source_ticks[0][0],
-                end_tick=source_ticks[-1][1],
-                context_tags=["🎬 回合合集"],
-                killer_name=None,
-                killers=[],
-                victims=[],
-                kill_ticks=kill_anchors,
-                round_won=round_result_map.get(first_rnd),
-                clip_min_tick=round_freeze_end_ticks.get(first_rnd),
-                death_tick=last_death,
-                source_ticks=source_ticks,
-                source_rounds=[sr for (_s, _e, sr, _er, _d) in ftd_segments],
-                source_round_ends=[_er for (_s, _e, sr, _er, _d) in ftd_segments],
-                compilation_kind="freeze_to_death",
-                fixed_segment_pacing=True,
-                freeze_to_death_round_filter=ftd_round_filter_out,
-                freeze_to_death_round_windows=ftd_round_windows,
+                clip_id=f"c_{uuid.uuid4().hex[:8]}", map_name=map_name,
+                round=selected[0]["round"], category="compilation", weapon_used="", kill_count=0,
+                # Generic Clip envelope is descriptive, never a capture window.
+                start_tick=selected[0]["freeze_end_tick"], end_tick=_ftd_demo_mx,
+                context_tags=["🎬 回合合集"], compilation_kind="freeze_to_death",
+                round_won=round_result_map.get(selected[0]["round"]),
+                round_facts=facts,
+                freeze_to_death_round_filter=sorted(ftd_filter) if ftd_filter is not None else None,
             ))
 
     return compilations

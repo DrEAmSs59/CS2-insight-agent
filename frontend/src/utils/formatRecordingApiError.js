@@ -7,6 +7,7 @@ import { messageFromApiCode, parseApiDetail } from "./apiErrorMessages.js";
  * @param {string} [fallback] - when no detail is available
  */
 export function formatRecordingApiError(e, t, fallback) {
+  if (e?.translationKey) return t(e.translationKey);
   const data = e?.response?.data;
   const d = data?.detail;
   const { code, params } = parseApiDetail(d);

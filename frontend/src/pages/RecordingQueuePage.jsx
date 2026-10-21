@@ -16,6 +16,7 @@ import RecordingControlDock from "../components/recordingQueue/RecordingControlD
 import RecordingQueueEmptyState from "../components/recordingQueue/RecordingQueueEmptyState";
 import PageContainer from "../components/PageContainer";
 import { Search } from "lucide-react";
+import { RoundCompilationPlansContext, useRoundCompilationPlans } from "../recording/useRoundCompilationPlans";
 
 export default function RecordingQueuePage() {
   const t = useT();
@@ -23,6 +24,7 @@ export default function RecordingQueuePage() {
   const globalPacing = useRecordingQueue((st) => st.globalPacing);
   const reorderQueue = useRecordingQueue((st) => st.reorderQueue);
   const queue = s.queue;
+  const roundPlans = useRoundCompilationPlans(queue, globalPacing, s.uploadedDemos, s.parsedMatches, s.demoLibraryItems);
 
   const [selectedId, setSelectedId] = useState(null);
   const [dragSourceIndex, setDragSourceIndex] = useState(null);
@@ -63,8 +65,8 @@ export default function RecordingQueuePage() {
   };
 
   const totalEstimateSec = useMemo(
-    () => estimateQueueTotalSeconds(queue, globalPacing),
-    [queue, globalPacing]
+    () => estimateQueueTotalSeconds(queue, globalPacing, roundPlans),
+    [queue, globalPacing, roundPlans]
   );
   const povN = useMemo(() => countPovSegments(queue), [queue]);
   const demoN = useMemo(() => uniqueDemoCount(queue), [queue]);
@@ -143,6 +145,7 @@ export default function RecordingQueuePage() {
   );
 
   return (
+    <RoundCompilationPlansContext.Provider value={roundPlans}>
     <PageContainer>
     <div className="flex min-h-0 flex-1 w-full flex-col gap-2 overflow-hidden">
       <div
@@ -291,5 +294,6 @@ export default function RecordingQueuePage() {
       />
     </div>
     </PageContainer>
+    </RoundCompilationPlansContext.Provider>
   );
 }

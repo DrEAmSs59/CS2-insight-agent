@@ -22,6 +22,9 @@ import {
   isFreezeToDeathCompilation,
 } from "../../utils/freezeToDeathRoundFilter";
 import { estimateItemRecordSeconds } from "../../utils/recordingQueueDerive";
+import { useRoundCompilationPlan } from "../../recording/useRoundCompilationPlans";
+import RoundCompilationPlan from "./RoundCompilationPlan";
+import RoundCompilationTiming from "./RoundCompilationTiming";
 
 function FieldGroup({ icon: Icon, title, children }) {
   return (
@@ -55,6 +58,7 @@ export default function QueueInspectorPanel({ selectedId: _selectedId, selectedI
   const locale = useLocaleStore((s) => s.locale);
   const globalPacing = useRecordingQueue((s) => s.globalPacing);
   const updateItemPacing = useRecordingQueue((s) => s.updateItemPacing);
+  const roundPlan = useRoundCompilationPlan(selectedItem);
 
   if (!selectedItem) {
     return (
@@ -84,7 +88,7 @@ export default function QueueInspectorPanel({ selectedId: _selectedId, selectedI
   const aiScore = cd.ai_score;
   const weaponPrimary = weaponUsedTokens(cd.weapon_used, locale)[0];
   const tags = Array.isArray(cd.context_tags) ? cd.context_tags.slice(0, 5) : [];
-  const estSec = estimateItemRecordSeconds(selectedItem, globalPacing);
+  const estSec = estimateItemRecordSeconds(selectedItem, globalPacing, roundPlan);
   const victimsCount = Array.isArray(cd.victims) ? cd.victims.length : 0;
 
   return (
@@ -161,7 +165,7 @@ export default function QueueInspectorPanel({ selectedId: _selectedId, selectedI
           <div className="rounded-lg border border-cs2-border bg-cs2-bg-input/40 px-2 py-1.5">
             <p className="text-[11px] text-cs2-text-muted">{t("queue.statEstDuration")}</p>
             <p className="mt-0.5 font-mono text-[16px] font-bold text-cs2-accent">
-              {Number.isFinite(estSec) ? `${Number(estSec).toFixed(0)}s` : "—"}
+              {Number.isFinite(estSec) ? `${Number(estSec).toFixed(isFreezeToDeathCompilation(cd) ? 1 : 0)}s` : "—"}
             </p>
           </div>
           <div className="rounded-lg border border-cs2-border bg-cs2-bg-input/40 px-2 py-1.5">
@@ -173,8 +177,13 @@ export default function QueueInspectorPanel({ selectedId: _selectedId, selectedI
         </div>
 
         {/* 节奏面板 */}
+        {isFreezeToDeathCompilation(cd) && <FieldGroup title={t("queue.planPreviewTitle")}>
+          <RoundCompilationPlan item={selectedItem} />
+        </FieldGroup>}
         <FieldGroup icon={Settings} title={t("queue.fieldPacing")}>
-          {isClipPacingAndPovLocked(cd) ? (
+          {isFreezeToDeathCompilation(cd) ? (
+            <RoundCompilationTiming item={selectedItem} updateItemPacing={updateItemPacing} />
+          ) : isClipPacingAndPovLocked(cd) ? (
             <p className="rounded-lg border border-amber-500/20 bg-cs2-amber-surface px-2 py-1.5 text-[11px] text-cs2-amber-on-surface">
               {isRoundTimelineRoundClip(cd)
                 ? t("queue.pacingLockedTimeline")

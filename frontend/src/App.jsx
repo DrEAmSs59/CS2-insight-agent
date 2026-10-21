@@ -1264,6 +1264,7 @@ export default function App() {
     setSelectedClientClipUids(new Set());
   }, [currentMatchIndex]);
   const shell = {
+    parsedMatches,
     announcements,
     aiMode,
     queue,

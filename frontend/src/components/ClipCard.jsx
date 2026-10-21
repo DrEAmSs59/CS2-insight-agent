@@ -232,7 +232,9 @@ export default function ClipCard({
             )}
             {clip.category === "compilation" && (
               <>
-                {Array.isArray(clip.source_ticks) && clip.source_ticks.length > 0 && (
+                {isRoundMontage ? <span className="text-[10px] text-cs2-text-primary">
+                  {t("ftd.selectedRounds", { n: ftdPicked.length })}
+                </span> : Array.isArray(clip.source_ticks) && clip.source_ticks.length > 0 && (
                   <span
                     className="font-mono text-[10px] font-bold text-cs2-text-primary"
                     title={t("clip.segmentsTitle")}

@@ -141,7 +141,7 @@ export default {
   "queue.povLockedTimelineSuffix": "clip pacing fine-tuning and victim/killer POV are not supported",
   "queue.povLockedDeathStrong": "round death compilation",
   "queue.povLockedDeathMiddle": " (multi-round checked compilation) — ",
-  "queue.povLockedDeathSuffix": "clip pacing fine-tuning and POV are not supported",
+  "queue.povLockedDeathSuffix": "additional POV replays are not supported; recording timings can be adjusted in Clip pacing",
   "queue.noKillerPovReason": "C4 explosion / fall death has no real attacker — killer POV unavailable",
   "queue.appendVictimPov": "Append victim POV",
   "queue.appendKillerPov": "Append killer POV",

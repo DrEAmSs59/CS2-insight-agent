@@ -141,7 +141,7 @@ export default {
   "queue.povLockedTimelineSuffix": "不支持剪辑节奏微调与追加受害者 / 击杀者回看视角",
   "queue.povLockedDeathStrong": "回合死亡合集",
   "queue.povLockedDeathMiddle": "（多回合勾选合辑），",
-  "queue.povLockedDeathSuffix": "不支持剪辑节奏微调与追加回看视角",
+  "queue.povLockedDeathSuffix": "不支持追加回看视角；录制时间可在剪辑节奏中设置",
   "queue.noKillerPovReason": "C4 爆炸 / 摔死无真实攻击者，不支持击杀者视角",
   "queue.appendVictimPov": "追加受害者视角",
   "queue.appendKillerPov": "追加击杀者视角",

@@ -113,6 +113,7 @@ def normalize(dto: RecordingRequestDTO) -> NormalizedRequest:
         "death_compilation_merge_gap_sec",
         "round_freeze_preroll_sec",
         "round_death_post_sec",
+        "round_alive_post_sec",
         "demo_end_guard_sec",
         "victim_pov_post_sec",
         "fail_killer_pre_sec",

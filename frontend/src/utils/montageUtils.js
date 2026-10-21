@@ -338,6 +338,8 @@ export function getClipDurationSeconds(clip) {
     const n = Number(v);
     if (Number.isFinite(n) && n >= 0) return n;
   }
+  // Round-compilation envelopes include unrecorded gaps, not a media duration.
+  if (clip.compilation_kind === "freeze_to_death") return null;
   const st = Number(clip.start_tick);
   const et = Number(clip.end_tick);
   if (Number.isFinite(st) && Number.isFinite(et) && et > st) {

@@ -71,7 +71,8 @@ class EventInfo(BaseModel):
 
 class RoundInfo(BaseModel):
     round: int
-    round_start_tick: int
+    # Some demos begin during the first freeze phase. Its end is still precise.
+    round_start_tick: Optional[int] = None
     round_end_tick: Optional[int] = None
     freeze_start_tick: Optional[int] = None
     freeze_end_tick: Optional[int] = None
@@ -96,8 +97,9 @@ class RecordingOptions(BaseModel):
     death_compilation_pre_sec: float = 2.0
     death_compilation_post_sec: float = 1.5
     death_compilation_merge_gap_sec: float = 2.0
-    round_freeze_preroll_sec: float = 3.0
-    round_death_post_sec: float = 2.0
+    round_freeze_preroll_sec: float = Field(default=3.0, ge=3, le=10, allow_inf_nan=False)
+    round_death_post_sec: float = Field(default=2.0, ge=2, le=5, allow_inf_nan=False)
+    round_alive_post_sec: float = Field(default=3.0, ge=1, le=3, allow_inf_nan=False)
     enable_victim_pov: bool = False
     victim_pov_pre_sec: Optional[float] = None   # None = use highlight_pre_sec
     victim_pov_post_sec: float = 1.5

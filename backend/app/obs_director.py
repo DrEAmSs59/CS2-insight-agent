@@ -1045,7 +1045,7 @@ def _build_all_kills_windows(
 
 
 def _is_freeze_to_death_clip(clip: dict) -> bool:
-    """回合冻结→死亡合集：录制窗已由 ``source_ticks`` 完整表达，导播应原样分段。"""
+    """仅识别历史回合合集，防止其进入旧版窗口算法。"""
     kind = str(
         clip.get("compilation_kind")
         or clip.get("source_kind")
@@ -1069,7 +1069,6 @@ def _is_death_compilation(clip: dict) -> bool:
     if category != "compilation":
         return False
 
-    # freeze_to_death：``build_smart_jump_segments`` 最前即按 ``source_ticks`` 早退，不走死亡点窗重写。
     death_like_kinds = {
         "all_deaths",
         "deaths",
@@ -1204,11 +1203,10 @@ def _build_death_compilation_windows(
 def build_smart_jump_segments(clip: dict) -> list[tuple[int, int]]:
     """智能跳剪 / 单段墙钟所依据的 ``[(seg_start, seg_end), ...]``。
 
-    **入口统一在本函数**，但按 clip 形态分 **三套算法**（先匹配者先返回），与「是否都叫 pacing_override」无关：
+    历史辅助函数；当前录制入口使用 RecordingRequestDTO → build_plan。
+    回合合集不再接受此处的旧窗口，其他历史片段算法保留如下：
 
     1. **合集 + ``source_ticks``**（``category == compilation`` 且 ``source_ticks`` 非空）
-       - **``freeze_to_death``** 且 ``fixed_segment_pacing``：仅信任 ``source_ticks`` 硬窗，
-         不因 ``kill_ticks`` / ``death_tick`` / pacing 重算（见 ``_is_freeze_to_death_clip`` 早退）。
        - **死亡类合集**（``_is_death_compilation``）：``_build_death_compilation_windows``，
          按死亡点 + 回合合并窗；pre/post 读 ``pacing_override`` / ``CS2_INSIGHT_SMART_*``。
        - **``compilation_kind == all_kills``**：``_build_all_kills_windows``，
@@ -1229,6 +1227,8 @@ def build_smart_jump_segments(clip: dict) -> list[tuple[int, int]]:
 
     整回合 ``round_timeline_round`` 主段通常 ``fixed_segment_pacing``，不依赖本函数分段。
     """
+    if _is_freeze_to_death_clip(clip):
+        raise ValueError("Round compilations require RecordingRequestDTO and build_plan")
     start_tick = max(0, int(clip.get("start_tick") or 0))
     end_tick = max(start_tick, int(clip.get("end_tick") or 0))
 
@@ -1264,56 +1264,6 @@ def build_smart_jump_segments(clip: dict) -> list[tuple[int, int]]:
 
     raw_source_ticks = clip.get("source_ticks") or []
     if str(clip.get("category") or "").strip() == "compilation" and raw_source_ticks:
-        if _is_freeze_to_death_clip(clip) and bool(clip.get("fixed_segment_pacing")):
-            ftd_segments: list[tuple[int, int]] = []
-            for item in raw_source_ticks:
-                try:
-                    ss = int(item[0])
-                    ee = int(item[1])
-                except (TypeError, ValueError, IndexError):
-                    continue
-                ss = max(0, ss)
-                if ee <= ss:
-                    continue
-                ftd_segments.append((ss, ee))
-            ftd_segments.sort(key=lambda seg: seg[0])
-            if ftd_segments:
-                fixed_ftd: list[tuple[int, int]] = []
-                for i, (ss, ee) in enumerate(ftd_segments):
-                    s_i = max(0, int(ss))
-                    e_i = int(ee)
-                    if i + 1 < len(ftd_segments):
-                        next_s = int(ftd_segments[i + 1][0])
-                        e_i = min(e_i, max(s_i + 1, next_s - 1))
-                    if e_i > s_i:
-                        fixed_ftd.append((s_i, e_i))
-                ftd_segments = fixed_ftd
-                if ftd_segments:
-                    _cid = clip.get("clip_id") or clip.get("id")
-                    logger.info(
-                        "[freeze-to-death-segments] clip_id=%s source_rounds=%s source_round_ends=%s "
-                        "source_ticks=%s final_segments=%s kill_ticks=%s death_tick=%s",
-                        _cid,
-                        clip.get("source_rounds"),
-                        clip.get("source_round_ends"),
-                        raw_source_ticks,
-                        ftd_segments,
-                        clip.get("kill_ticks"),
-                        clip.get("death_tick"),
-                    )
-                    _log_smart_jump_segment_debug(
-                        clip,
-                        ftd_segments,
-                        override,
-                        pre_sec=float(pre_first_sec_eff),
-                        post_sec=float(post_last_sec_eff),
-                        max_gap_sec=float(max_gap_sec_eff),
-                        tick_rate=DEMO_TICK_RATE,
-                        has_user_pacing=has_user_pacing,
-                        max_gap_ticks=_max_gap_ticks_i,
-                    )
-                    return ftd_segments
-
         source_records: list[tuple[int, int, int, int]] = []
         kill_ticks_for_source = _clip_kill_ticks_in_order(clip)
         source_rounds = clip.get("source_rounds") or []
