@@ -156,6 +156,7 @@ def run_rewrite_owned_batch(
     steam_id64: str,
     items: Sequence[Mapping[str, Any]],
     demoparser2_python: str | Path,
+    player_loadout: Mapping[str, int] | None = None,
     timeout: float | None = _DEFAULT_REWRITE_TIMEOUT_SEC,
 ) -> dict[str, Any]:
     """Spawn skin-core rewrite-owned-batch with pipe auth; return decrypted response JSON.
@@ -169,10 +170,12 @@ def run_rewrite_owned_batch(
     demopy_arg = _cli_path_str(demoparser2_python)
 
     request_obj = {
-        "schema_version": 1,
+        "schema_version": 2 if any("attachments" in item for item in items) else 1,
         "steam_id64": str(steam_id64),
         "items": list(items),
     }
+    if player_loadout:
+        request_obj.update(schema_version=3, player_loadout=dict(player_loadout))
     plaintext = json.dumps(request_obj, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
 
     key = os.urandom(32)

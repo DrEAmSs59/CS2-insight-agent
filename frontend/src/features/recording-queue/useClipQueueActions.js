@@ -121,6 +121,7 @@ export function useClipQueueActions({
       targetPlayer: meta?.target_player || playerName || null,
       targetPlayerUserId: meta?.target_player_user_id ?? null,
       targetSteamId: steamId,
+      matchMeta: meta,
     };
   }, [parsedMatches, uploadedDemos]);
 

@@ -44,7 +44,7 @@ import {
   PackageOpen,
   Download,
   // 新增图标
-  Github,
+  GitFork,
   Bug,
   Lightbulb,
   Mail,
@@ -787,7 +787,7 @@ export default function SettingsPage() {
                     onClick={() => openExternalLink('https://github.com/DrEAmSs59/CS2-insight-agent')}
                     className="inline-flex items-center gap-1.5 rounded-md border border-cs2-border bg-cs2-bg-input px-2.5 py-1.5 text-xs font-semibold text-cs2-text-secondary transition-colors hover:border-cs2-accent/50 hover:text-cs2-accent"
                   >
-                    <Github className="h-3.5 w-3.5" />
+                    <GitFork className="h-3.5 w-3.5" />
                     GitHub
                   </button>
                 </div>

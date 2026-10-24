@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import argparse
 import struct
 import sys
 
@@ -81,6 +82,9 @@ def replace_data_block(resource: bytes, script: bytes) -> bytes:
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser(description="Rebuild HUD templates with the current stock DemoUI controller.")
+    parser.add_argument("--stock-controller", type=Path, help="Unmodified current huddemocontroller.vts_c")
+    args = parser.parse_args()
     entries = read_inline_vpk(POV_TEMPLATE.read_bytes())
     static_entries = read_inline_vpk(STATIC_PACKAGE.read_bytes())
     # Health/ammo must come from the installed CS2 build. Shipping this old
@@ -95,7 +99,7 @@ def main() -> None:
                 f"static POV package is missing required recording style: {resource_path}"
             )
         entries[resource_path] = resource
-    compiled = entries[VOICE_SCRIPT_PATH]
+    compiled = args.stock_controller.read_bytes() if args.stock_controller else entries[VOICE_SCRIPT_PATH]
 
     block_count = struct.unpack_from("<I", compiled, 12)[0]
     data_source = None
@@ -110,23 +114,28 @@ def main() -> None:
     if data_source is None:
         raise RuntimeError("template has no Panorama DATA source")
 
-    marker = data_source.find(VOICE_DATA_BEGIN)
-    if marker < 0:
-        raise RuntimeError("template source contains no payload marker")
-    candidates = [
-        position
-        for position in (
-            data_source.find(b"/*__CS2_INSIGHT_INJECTION_BEGIN__*/", 0, marker),
-            data_source.find(b"// Injected into the stock Panorama", 0, marker),
-            data_source.rfind(b";(function CS2InsightDemoVoiceHud()", 0, marker),
-            data_source.rfind(b",function(){const packed=", 0, marker),
-        )
-        if position >= 0
-    ]
-    injection_start = min(candidates, default=-1)
-    if injection_start < 0:
-        raise RuntimeError("could not separate the stock demo controller from its injection")
-    stock_source = data_source[:injection_start].rstrip()
+    if args.stock_controller:
+        if VOICE_DATA_BEGIN in data_source:
+            raise RuntimeError("stock controller already contains Insight injection")
+        stock_source = data_source.rstrip(b"\x00\r\n ")
+    else:
+        marker = data_source.find(VOICE_DATA_BEGIN)
+        if marker < 0:
+            raise RuntimeError("template source contains no payload marker")
+        candidates = [
+            position
+            for position in (
+                data_source.find(b"/*__CS2_INSIGHT_INJECTION_BEGIN__*/", 0, marker),
+                data_source.find(b"// Injected into the stock Panorama", 0, marker),
+                data_source.rfind(b";(function CS2InsightDemoVoiceHud()", 0, marker),
+                data_source.rfind(b",function(){const packed=", 0, marker),
+            )
+            if position >= 0
+        ]
+        injection_start = min(candidates, default=-1)
+        if injection_start < 0:
+            raise RuntimeError("could not separate the stock demo controller from its injection")
+        stock_source = data_source[:injection_start].rstrip()
 
     # Keep the compiled Panorama DATA source deterministic on Windows even when
     # the working tree uses CRLF or a patch leaves mixed line endings.

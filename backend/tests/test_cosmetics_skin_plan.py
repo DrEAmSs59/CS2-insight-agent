@@ -78,7 +78,7 @@ def test_slot_key_prefers_item_id_then_placeholder_then_def():
     assert slot_key({"item_id": 4, "is_placeholder": True, "def_index": 7}) == "id:4"
 
 
-def test_build_batch_and_plan_maps_weapon_fields_without_custom_name_or_stickers():
+def test_build_batch_and_plan_sends_host_name_without_exposing_sticker_edits():
     inv = [
         inventory_row(
             item_id=10,
@@ -118,6 +118,7 @@ def test_build_batch_and_plan_maps_weapon_fields_without_custom_name_or_stickers
         "paint_kit": 340,
         "pattern_seed": 12.0,
         "wear": 0.01,
+        "attachments": {"custom_name": "CS2 INSIGHT AGENT"},
     }
     assert "custom_name" not in item
     assert "stickers" not in item
@@ -877,3 +878,105 @@ def test_map_item_statuses_includes_original_and_replacement_names():
     assert mapped[0]["replacement_name_zh"] == "AK-47 | 红线"
     assert mapped[0]["replacement_name_en"] == "AK-47 | Redline"
     assert mapped[0]["name_zh"] == "AK-47 | 红线"
+
+
+def test_updated_music_kit_catalog_accepts_104():
+    from app.cosmetics_skin_plan import validate_player_loadout
+    assert validate_player_loadout({"music_kit": 104}) == {"music_kit": 104}
+
+
+@pytest.mark.parametrize("as_text", [False, True])
+def test_uint64_identity_survives_batch_and_plan_replay(as_text):
+    item_id = 14204636884736196609
+    inv = [inventory_row(item_id=str(item_id) if as_text else item_id)]
+    key = f"ct:id:{item_id}"
+    assert slot_key(inv[0]) == f"id:{item_id}"
+    batch, plan = build_batch_and_plan(STEAM_ID, inv, {key: replacement()})
+    assert batch[0]["item_id64"] == str(item_id)
+    assert plan["items"][0]["original"]["item_id"] == str(item_id)
+    assert build_batch_from_plan_json(plan, inv) == batch
+
+
+def test_legacy_browser_rounded_key_resolves_only_unique_server_identity():
+    item_id = 14204636884736196609
+    inv = [inventory_row(item_id=item_id)]
+    key = "ct:id:14204636884736197000"
+    batch, plan = build_batch_and_plan(STEAM_ID, inv, {key: replacement()})
+    assert batch[0]["item_id64"] == str(item_id)
+    assert build_batch_from_plan_json(plan, inv) == batch
+    with pytest.raises(CosmeticsSkinPlanError, match="slot not found"):
+        build_batch_and_plan(STEAM_ID, inv + [inventory_row(item_id=item_id + 1)], {key: replacement()})
+    with pytest.raises(CosmeticsSkinPlanError, match="not observed"):
+        build_batch_and_plan(STEAM_ID, [inventory_row(item_id=item_id, observed_teams=["t"])], {key: replacement()})
+
+
+@pytest.mark.parametrize("request_key", ["ct:id:14204636884736196609", "ct:id:14204636884736197000"])
+def test_editing_materialized_knife_reuses_trusted_original_slot(request_key):
+    original = inventory_row(item_id=None, def_index=42, paint_index=0, observed_teams=["ct"])
+    applied = replacement()
+    materialized = {**applied, "item_id": "14204636884736196609", "observed_teams": ["ct"]}
+    persisted = {"steamid": STEAM_ID, "items": [{"slot_key": "ct:placeholder:42", "original": original, "replacement": applied}]}
+    changed = replacement(paint_seed=99)
+    batch, plan = build_batch_and_plan(STEAM_ID, [materialized],
+        {"ct:placeholder:42": applied, request_key: changed}, trusted_plan=persisted)
+    assert len(batch) == 1
+    assert batch[0]["item_id64"] == "0"
+    assert batch[0]["definition_index"] == 42
+    assert batch[0]["replacement_definition_index"] == 508
+    assert batch[0]["pattern_seed"] == 99
+    assert plan["items"][0]["slot_key"] == "ct:placeholder:42"
+    assert plan["items"][0]["original"]["def_index"] == 42
+    assert build_batch_from_plan_json(plan, [materialized]) == batch
+
+
+def test_materialized_binding_requires_unique_inventory_match_and_trusted_plan():
+    original = inventory_row(item_id=None, def_index=42, paint_index=0, observed_teams=["ct"])
+    applied = replacement()
+    materialized = {**applied, "item_id": "14204636884736196609", "observed_teams": ["ct"]}
+    persisted = {"steamid": STEAM_ID, "items": [{"slot_key": "ct:placeholder:42", "original": original, "replacement": applied}]}
+    key = "ct:id:14204636884736196609"
+    for inventory, trusted in [([materialized], None), ([materialized, {**materialized, "item_id": "14204636884736196610"}], persisted)]:
+        batch, _ = build_batch_and_plan(STEAM_ID, inventory, {key: applied}, originals={key: original}, trusted_plan=trusted)
+        assert batch[0]["item_id64"] == materialized["item_id"]
+
+
+@pytest.mark.parametrize("request_key", ["ct:id:14204634713564106207", "ct:def:3:0:0:0"])
+def test_editing_materialized_zero_id_weapon_restores_persisted_source(request_key):
+    original = inventory_row(item_id=None, type="weapon", def_index=3,
+                             paint_index=0, paint_seed=None, paint_wear=None, observed_teams=["ct"])
+    applied = replacement(type="weapon", def_index=3, paint_index=660, paint_seed=0, paint_wear=0.07)
+    materialized = {**applied, "item_id": "14204634713564106207", "observed_teams": ["ct"]}
+    source_key = "ct:def:3:0:0:0"
+    persisted = {"steamid": STEAM_ID, "items": [
+        {"slot_key": source_key, "original": original, "replacement": applied},
+    ]}
+    changed = {**applied, "paint_seed": 99}
+    batch, plan = build_batch_and_plan(STEAM_ID, [materialized],
+        {source_key: applied, request_key: changed}, trusted_plan=persisted,
+        originals={source_key: {**original, "def_index": 7}})
+    assert len(batch) == 1
+    assert batch[0]["item_id64"] == "0"
+    assert batch[0]["definition_index"] == 3
+    assert batch[0]["team"] == "CT"
+    assert batch[0]["pattern_seed"] == 99
+    assert plan["items"][0]["slot_key"] == source_key
+    assert plan["items"][0]["original"]["def_index"] == 3
+    # Replaying the newly saved plan cannot require the cache's inventory to
+    # have been re-analyzed with its new seed (or to contain the old zero ID).
+    assert build_batch_from_plan_json(plan, [materialized]) == batch
+
+
+@pytest.mark.parametrize("bad_plan", ["absent", "other-team", "wrong-source"])
+def test_missing_zero_id_weapon_cannot_be_restored_from_client_snapshots(bad_plan):
+    original = inventory_row(item_id=None, type="weapon", def_index=3,
+                             paint_index=0, paint_seed=0, paint_wear=0, observed_teams=["ct"])
+    applied = replacement(type="weapon", def_index=3, paint_index=660, paint_seed=0, paint_wear=0.07)
+    source_key = "ct:def:3:0:0:0"
+    persisted = None if bad_plan == "absent" else {"steamid": STEAM_ID, "items": [{
+        "slot_key": "t:def:3:0:0:0" if bad_plan == "other-team" else source_key,
+        "original": {**original, "def_index": 7} if bad_plan == "wrong-source" else original,
+        "replacement": applied,
+    }]}
+    with pytest.raises(CosmeticsSkinPlanError, match="slot not found"):
+        build_batch_and_plan(STEAM_ID, [], {source_key: applied},
+                             originals={source_key: original}, trusted_plan=persisted)

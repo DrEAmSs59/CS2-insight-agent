@@ -2,10 +2,18 @@ import asyncio
 import logging
 from typing import Optional
 
+from ..models import RecordingSegment
+
 logger = logging.getLogger(__name__)
 
+
+def obs_spec_slot(segment: RecordingSegment, demo_path: str) -> Optional[int]:
+    """Use only the controller resolved from this recording's playback Demo."""
+    slot = segment.metadata.get("obs_controller_slot")
+    return slot if type(slot) is int and 1 <= slot <= 64 else None
+
 try:
-    from ...win_cs2_console import inject_console_sequence
+    from ...win_cs2_console import inject_obs_console_sequence as inject_console_sequence
 except ImportError:
     def inject_console_sequence(lines): pass
 

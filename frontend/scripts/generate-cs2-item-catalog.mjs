@@ -7,9 +7,12 @@ import { mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { CS2_ITEMS } from "@ianlucas/cs2-lib";
-import { english } from "@ianlucas/cs2-lib/translations/english";
-import { schinese } from "@ianlucas/cs2-lib/translations/schinese";
+import { requireFrontendDependencies } from "./require-frontend-dependencies.mjs";
+
+requireFrontendDependencies();
+const { CS2_ITEMS } = await import("@ianlucas/cs2-lib");
+const { english } = await import("@ianlucas/cs2-lib/translations/english");
+const { schinese } = await import("@ianlucas/cs2-lib/translations/schinese");
 
 const frontendRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 const repoRoot = join(frontendRoot, "..");
@@ -44,20 +47,22 @@ function translatedField(language, item, field) {
 }
 
 function hudStemFor(item) {
-  if (hudStems.has(item.model)) return item.model;
+  if (hudStems.has(item.modelKey)) return item.modelKey;
   if (item.type === "melee") return hudStems.has("knife") ? "knife" : "";
   return "";
 }
 
 const items = CS2_ITEMS
-  .filter((item) => wantedTypes.has(item.type) && Number.isInteger(item.def))
+  .filter((item) => wantedTypes.has(item.type) && Number.isInteger(item.definitionIndex))
   .sort((left, right) => (
-    left.def - right.def
-    || Number(left.index || 0) - Number(right.index || 0)
+    left.definitionIndex - right.definitionIndex
+    || Number(left.variantIndex || 0) - Number(right.variantIndex || 0)
     || left.id - right.id
   ));
 
-const baseItems = items.filter((item) => item.base === true);
+if (!items.length) throw new Error("CS2 catalog schema mismatch: no equipment entries");
+
+const baseItems = items.filter((item) => item.isBase === true);
 const aliases = {};
 const bases = {};
 const catalogItems = {};
@@ -65,27 +70,27 @@ const stickerKits = {};
 const zhToEn = {};
 
 for (const item of baseItems) {
-  const nameEn = translatedName(english, item) || item.model;
+  const nameEn = translatedName(english, item) || item.modelKey;
   const nameZh = translatedName(schinese, item) || nameEn;
   const hudStem = hudStemFor(item);
   const base = {
     id: item.id,
-    def: item.def,
-    model: item.model,
-    player_model: String(item.playerModel || ""),
+    def: item.definitionIndex,
+    model: item.modelKey,
+    player_model: String(item.modelPath || ""),
     type: item.type,
     name_en: nameEn,
     name_zh: nameZh,
     hud_stem: hudStem,
-    image: item.image || "",
-    rarity: String(item.rarity || ""),
-    teams: Number.isInteger(item.teams) ? item.teams : null,
+    image: item.imagePath || "",
+    rarity: String(item.rarityColor || ""),
+    teams: Number.isInteger(item.team) ? item.team : null,
   };
-  bases[String(item.def)] = base;
+  bases[String(item.definitionIndex)] = base;
   zhToEn[nameZh] = nameEn;
-  for (const rawAlias of [item.model, nameEn, nameZh, `weapon_${item.model}`]) {
+  for (const rawAlias of [item.modelKey, nameEn, nameZh, `weapon_${item.modelKey}`]) {
     const alias = normalizedAlias(rawAlias);
-    if (alias) aliases[alias] = item.model;
+    if (alias) aliases[alias] = item.modelKey;
   }
 }
 
@@ -100,48 +105,48 @@ Object.assign(aliases, {
 });
 
 for (const item of items) {
-  const paintIndex = Number(item.index || 0);
-  const base = bases[String(item.def)];
-  const nameEn = translatedName(english, item) || base?.name_en || item.model;
+  const paintIndex = Number(item.variantIndex || 0);
+  const base = bases[String(item.definitionIndex)];
+  const nameEn = translatedName(english, item) || base?.name_en || item.modelKey;
   const nameZh = translatedName(schinese, item) || base?.name_zh || nameEn;
-  catalogItems[`${item.def}:${paintIndex}`] = {
+  catalogItems[`${item.definitionIndex}:${paintIndex}`] = {
     id: item.id,
-    base_id: Number.isInteger(item.baseId) ? item.baseId : null,
-    def: item.def,
+    base_id: Number.isInteger(item.parentId) ? item.parentId : null,
+    def: item.definitionIndex,
     paint: paintIndex,
-    model: item.model,
-    player_model: String(item.playerModel || ""),
+    model: item.modelKey,
+    player_model: String(item.modelPath || ""),
     type: item.type,
     name_en: nameEn,
     name_zh: nameZh,
-    alt_name: String(item.altName || ""),
-    image: String(item.image || ""),
-    rarity: String(item.rarity || ""),
-    category: String(item.category || ""),
-    collection_image: String(item.collectionImage || ""),
+    alt_name: String(item.alternateName || ""),
+    image: String(item.imagePath || ""),
+    rarity: String(item.rarityColor || ""),
+    category: String(item.loadoutCategory || ""),
+    collection_image: String(item.collectionImagePath || ""),
     collection_name_en: translatedField(english, item, "collectionName"),
     collection_name_zh: translatedField(schinese, item, "collectionName"),
-    desc_en: translatedField(english, item, "desc"),
-    desc_zh: translatedField(schinese, item, "desc"),
-    teams: Number.isInteger(item.teams) ? item.teams : null,
+    desc_en: translatedField(english, item, "description"),
+    desc_zh: translatedField(schinese, item, "description"),
+    teams: Number.isInteger(item.team) ? item.team : null,
     wear_min: Number.isFinite(item.wearMin) ? item.wearMin : null,
     wear_max: Number.isFinite(item.wearMax) ? item.wearMax : null,
   };
 }
 
 for (const item of CS2_ITEMS) {
-  if (item.type !== "sticker" || !Number.isInteger(item.index) || item.index <= 0) continue;
-  const nameEn = translatedName(english, item) || `Sticker ${item.index}`;
+  if (item.type !== "sticker" || !Number.isInteger(item.variantIndex) || item.variantIndex <= 0) continue;
+  const nameEn = translatedName(english, item) || `Sticker ${item.variantIndex}`;
   const nameZh = translatedName(schinese, item) || nameEn;
-  stickerKits[String(item.index)] = {
+  stickerKits[String(item.variantIndex)] = {
     id: item.id,
-    def: item.def,
-    paint: item.index,
+    def: item.definitionIndex,
+    paint: item.variantIndex,
     type: item.type,
     name_en: nameEn,
     name_zh: nameZh,
-    image: String(item.image || ""),
-    rarity: String(item.rarity || ""),
+    image: String(item.imagePath || ""),
+    rarity: String(item.rarityColor || ""),
   };
 }
 
@@ -189,25 +194,25 @@ writeFileSync(
 );
 
 const cosmeticsItems = items
-  .filter((item) => item.type === "weapon" || item.type === "melee" || item.type === "glove")
+  .filter((item) => ["weapon", "melee", "glove", "agent", "musickit"].includes(item.type))
   .map((item) => ({
     id: item.id,
-    baseId: Number.isInteger(item.baseId) ? item.baseId : null,
-    def: item.def,
-    index: Number(item.index || 0),
-    model: item.model,
+    baseId: Number.isInteger(item.parentId) ? item.parentId : null,
+    def: item.definitionIndex,
+    index: Number(item.variantIndex || 0),
+    model: item.modelKey,
     type: item.type,
-    nameEn: translatedName(english, item) || item.model,
-    nameZh: translatedName(schinese, item) || translatedName(english, item) || item.model,
-    altName: String(item.altName || ""),
-    image: String(item.image || ""),
-    rarity: String(item.rarity || ""),
-    category: String(item.category || ""),
-    teams: Number.isInteger(item.teams) ? item.teams : null,
+    nameEn: translatedName(english, item) || item.modelKey,
+    nameZh: translatedName(schinese, item) || translatedName(english, item) || item.modelKey,
+    altName: String(item.alternateName || ""),
+    image: String(item.imagePath || ""),
+    rarity: String(item.rarityColor || ""),
+    category: String(item.loadoutCategory || ""),
+    teams: Number.isInteger(item.team) ? item.team : null,
     wearMin: Number.isFinite(item.wearMin) ? item.wearMin : null,
     wearMax: Number.isFinite(item.wearMax) ? item.wearMax : null,
-    free: item.free === true,
-    base: item.base === true,
+    free: item.isDefault === true,
+    base: item.isBase === true,
   }));
 const cosmeticsPath = join(frontendRoot, "src", "generated", "cs2CosmeticsCatalog.js");
 writeFileSync(
@@ -219,6 +224,4 @@ writeFileSync(
   "utf8",
 );
 
-console.log(
-  `[cs2-catalog] ${baseItems.length} base items, ${items.length} equipment entries, ${Object.keys(stickerKits).length} sticker kits from ${sourceVersion}`,
-);
+console.log(`[cs2-catalog] ${baseItems.length} base items, ${items.length} equipment entries, ${Object.keys(stickerKits).length} sticker kits from ${sourceVersion}`);

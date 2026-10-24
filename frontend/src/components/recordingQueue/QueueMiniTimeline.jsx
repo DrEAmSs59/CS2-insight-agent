@@ -3,6 +3,7 @@ import { DEMO_TICK_RATE, isRoundTimelineRoundClip, isTimelineSourceClip } from "
 import { getRecordingPlanPreview } from "../../utils/recordingPlanPreview";
 import RecordingPlanPreview from "./RecordingPlanPreview";
 import { useT } from "../../i18n/useT.js";
+import { isFreezeToDeathCompilation } from "../../utils/freezeToDeathRoundFilter";
 
 function clipDataUsesDeathTickOverlay(clipData) {
   const cat = clipData?.category;
@@ -158,7 +159,7 @@ function barClass(type) {
 export default function QueueMiniTimeline({ clipData, pacingOverride, globalPacing }) {
   const t = useT();
 
-  if (isRoundTimelineRoundClip(clipData)) {
+  if (isRoundTimelineRoundClip(clipData) || isFreezeToDeathCompilation(clipData)) {
     return null;
   }
 

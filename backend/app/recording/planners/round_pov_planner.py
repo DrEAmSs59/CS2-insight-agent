@@ -7,10 +7,9 @@ from ..platform_utils import platform_slot_offset, compute_voice_listen_mask, co
 logger = logging.getLogger(__name__)
 
 
-# Keep the round-result beat visible in round compilations.  ``round_end_tick`` is
-# the instant CS2 decides the round (often the same tick as the last kill), not the
-# end of the post-round presentation.  This mirrors the 3 s tail used by the round
-# timeline path while still being capped before the next round's freeze phase.
+# Death tails retain their existing post-round safety ceiling, independently of
+# the configurable surviving-round tail. round_end_tick is the decision event,
+# not the end of the result presentation.
 _ROUND_COMPILATION_POST_ROUND_END_SEC = 3.0
 
 
@@ -86,8 +85,8 @@ def plan_round_pov(req: NormalizedRequest) -> tuple[list[RecordingSegment], list
         # --- Compute end_tick ---
         if round_info.target_death_tick is None:
             # Case A: player alive this round.
-            # For round compilations, retain 3 s after a reliable round_end so the
-            # final kill/result presentation can finish.  Regardless of the chosen
+            # For ordinary compilations, retain the configured 1–3 s after a reliable
+            # round_end for the final kill/result presentation. Regardless of the chosen
             # source, cap just before next_round_start_tick so OBS latency cannot
             # capture the following freeze frame.
             # Priority: reliable round_end_tick (+ compilation tail)
@@ -97,7 +96,7 @@ def plan_round_pov(req: NormalizedRequest) -> tuple[list[RecordingSegment], list
                 end_tick = round_info.round_end_tick  # type: ignore[assignment]
                 end_reason = "round_end"
                 if is_round_compilation and not is_final_round:
-                    end_tick += round_end_post_ticks
+                    end_tick += sec_to_ticks(opts.round_alive_post_sec, tick_rate)
                     end_reason = "round_end_post"
             elif round_info.next_round_start_tick is not None:
                 end_tick = round_info.next_round_start_tick - alive_end_guard_ticks

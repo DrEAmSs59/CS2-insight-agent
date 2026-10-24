@@ -1,6 +1,8 @@
 import { Clapperboard } from "lucide-react";
 import { useT } from "../../i18n/useT.js";
 import { getRecordingPlanPreview, planPreviewToTokens } from "../../utils/recordingPlanPreview";
+import { isFreezeToDeathCompilation } from "../../utils/freezeToDeathRoundFilter";
+import RoundCompilationPlan from "./RoundCompilationPlan";
 
 function chipClass(token) {
   if (token === "K") {
@@ -31,6 +33,7 @@ function chipLabel(token, t) {
  */
 export default function RecordingPlanPreview({ item, globalPacing, compact = false, embedded = false }) {
   const t = useT();
+  if (isFreezeToDeathCompilation(item?.clipData)) return <RoundCompilationPlan item={item} />;
   const plan = getRecordingPlanPreview(item, globalPacing);
   if (!plan) return null;
 

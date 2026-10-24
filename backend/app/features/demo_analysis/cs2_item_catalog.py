@@ -19,6 +19,8 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
+from ...econ_item_ids import json_safe_item_id
+
 logger = logging.getLogger(__name__)
 
 _CATALOG_PATH = Path(__file__).with_name("cs2_item_catalog.generated.json")
@@ -364,6 +366,11 @@ def _safe_float(value: object) -> float | None:
 
 
 def _safe_int(value: object) -> int | None:
+    # Economy IDs are uint64; converting through float loses their low bits.
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str) and value.strip().lstrip("+-").isdigit():
+        return int(value)
     try:
         number = float(value)
     except (TypeError, ValueError, OverflowError):
@@ -471,7 +478,7 @@ def _skin_entry(row: Mapping[str, Any]) -> dict[str, Any] | None:
     item_id = _safe_int(row.get("item_id"))
     if item_id is not None and item_id > 0:
         entry["item_id"] = item_id
-    return entry
+    return json_safe_item_id(entry)
 
 
 def _starter_pistol_def_from_inventory(value: object, team: str) -> int | None:
@@ -1412,7 +1419,7 @@ def build_player_cosmetic_inventory(
     priority = {"melee": 0, "glove": 1, "weapon": 2, "utility": 3}
     return {
         steamid: sorted(
-            entries.values(),
+            (json_safe_item_id(entry) for entry in entries.values()),
             key=lambda entry: (
                 priority.get(str(entry.get("type") or ""), 99),
                 str(entry.get("name_en") or "").lower(),

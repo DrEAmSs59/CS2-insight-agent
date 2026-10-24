@@ -6,6 +6,7 @@ from typing import Any, Optional
 
 from ..models import RecordingPlan, RecordingSegment, SourceType, Perspective
 from ..platform_utils import voice_listen_mask_console_commands
+from ..obs_targets import obs_prepare_tick
 from .obs_client import OBSClient
 from .obs_recording_controller import OBSRecordingController, OBSControlError
 from .obs_fade_controller import OBSFadeController
@@ -15,7 +16,7 @@ from .demo_controller import (
     DemoSeekError, inject_console_sequence,
 )
 from .kill_markers import KillMarkerTimeline
-from .spec_controller import spec_by_slot, spec_player
+from .spec_controller import obs_spec_slot, spec_by_slot
 from .gsi_verifier import verify_spec_target
 
 logger = logging.getLogger(__name__)
@@ -35,9 +36,6 @@ async def _inject_voice_listen_mask(mask: int) -> None:
         raise VoiceIsolationError("voice mask injection returned false")
 
 
-# Seconds seeked before each segment's start_tick to absorb spec_player / GSI-verify
-# overhead without consuming the user-configured highlight_pre_sec recording window.
-PREPARE_PREROLL_SEC: float = 5.0
 # If prepare work exceeds the prepare→start wall-clock budget, re-seek instead of drifting past start_tick.
 _SPEC_OVERSHOOT_RESYNC_SEC: float = 0.2
 
@@ -354,84 +352,39 @@ class ExecutionResult:
     kill_markers: list[dict] = field(default_factory=list)
 
 
-# Max additional slot offsets to try after the demo-parsed base slot fails GSI verify.
-# 5E / Perfect World demos are often off by +1; rarely more.
-_SPEC_SLOT_MAX_OFFSET = 3
-
-
 async def _spec_by_slot_with_retry(
     base_slot: Optional[int],
     player_name: str,
     target_steamid64: str,
     result_warnings: list,
     segment_index: int,
-) -> "bool | None":
-    """
-    Switch to base_slot (pre-computed during demo parsing), then verify via GSI.
-    If verification fails, increment the slot by 1 and retry up to
-    _SPEC_SLOT_MAX_OFFSET times (handles 5E/PW demos that shift slots by +1).
+) -> bool:
+    """Select the verified controller; retry that same slot after delayed GSI.
 
-    Returns:
-        True  — verified correct player
-        None  — GSI inconclusive (proceed with warning)
-        False — all offsets exhausted, still wrong player
+    A real controller is never platform-adjusted or incremented. Missing identity
+    and silent GSI are failures, not permission to record an unverified POV.
     """
-    if base_slot is None:
-        if (player_name or "").strip():
-            logger.info(
-                "[RecordingV3] no spec slot for %r; falling back to spec_player by name",
-                player_name,
-            )
-            await spec_player(player_name)
-            if not target_steamid64:
-                return None
-            verified = await verify_spec_target(target_steamid64)
-            if verified is False:
-                result_warnings.append(
-                    f"segment {segment_index}: spec verify failed for "
-                    f"{player_name} (name fallback) — wrong player spectated"
-                )
-            return verified
-        logger.warning(
-            "[RecordingV3] no spec slot or name for spectate target; skipping spec switch",
-            player_name,
-        )
-        return None
+    if base_slot is None or not target_steamid64:
+        result_warnings.append(f"segment {segment_index}: missing verified OBS controller/SteamID")
+        return False
 
-    for offset in range(_SPEC_SLOT_MAX_OFFSET + 1):
-        slot = base_slot + offset
+    for attempt in range(2):
         logger.info(
-            "[RecordingV3] spec_by_slot %d (base=%d offset=%d) for %r steamid=%s",
-            slot, base_slot, offset, player_name, target_steamid64,
+            "[RecordingV3] spec_by_slot %d (Demo controller, attempt=%d) for %r steamid=%s",
+            base_slot, attempt + 1, player_name, target_steamid64,
         )
-        await spec_by_slot(slot)
-
-        if not target_steamid64:
-            return None
-
+        await spec_by_slot(base_slot)
         verified = await verify_spec_target(target_steamid64)
         if verified is True:
-            if offset > 0:
-                logger.info(
-                    "[RecordingV3] slot offset +%d worked for %r (base=%d actual=%d)",
-                    offset, player_name, base_slot, slot,
-                )
             return True
         if verified is None:
             result_warnings.append(
                 f"segment {segment_index}: spec verify inconclusive for "
-                f"{player_name} at slot {slot} — GSI silent"
+                f"{player_name} at slot {base_slot} — GSI silent"
             )
-            return None
-        # verified is False — try next offset
-        logger.warning(
-            "[RecordingV3] slot %d wrong for %r (offset=%d), trying +1",
-            slot, player_name, offset,
-        )
-
     logger.error(
-        "[RecordingV3] all slot offsets 0..%d failed for %r steamid=%s",
-        _SPEC_SLOT_MAX_OFFSET, player_name, target_steamid64,
+        "[RecordingV3] controller %d could not be verified for %r steamid=%s",
+        base_slot, player_name, target_steamid64,
     )
     return False
 
@@ -591,11 +544,7 @@ class RecordingExecutor:
             #
             # If a planner set an earlier safe_seek_tick (for example, round
             # freeze-end), preserve that timing intent.
-            prepare_ticks = int(PREPARE_PREROLL_SEC * plan.tick_rate)
-            if segment.safe_seek_tick < segment.start_tick:
-                seek_tick = segment.safe_seek_tick
-            else:
-                seek_tick = max(0, segment.start_tick - prepare_ticks)
+            seek_tick = segment.metadata.get("obs_prepare_tick", obs_prepare_tick(segment, plan.tick_rate))
 
             logger.info(
                 "[RecordingV3] prepare_seek segment %d  prepare_tick=%d  start_tick=%d  preroll=%.2fs",
@@ -633,7 +582,7 @@ class RecordingExecutor:
                 if segment.target_steamid64 or segment.target_player_name:
                     spec_t0 = time.monotonic()
                     spec_ok = await _spec_by_slot_with_retry(
-                        base_slot=segment.target_spec_slot,
+                        base_slot=obs_spec_slot(segment, plan.demo_path),
                         player_name=segment.target_player_name,
                         target_steamid64=segment.target_steamid64,
                         result_warnings=result.warnings,
@@ -719,7 +668,7 @@ class RecordingExecutor:
                     spec_elapsed = 0.0
                     if segment.target_steamid64 or segment.target_player_name:
                         spec_ok = await _spec_by_slot_with_retry(
-                            base_slot=segment.target_spec_slot,
+                            base_slot=obs_spec_slot(segment, plan.demo_path),
                             player_name=segment.target_player_name,
                             target_steamid64=segment.target_steamid64,
                             result_warnings=result.warnings,

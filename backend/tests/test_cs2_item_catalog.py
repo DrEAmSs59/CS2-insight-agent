@@ -88,13 +88,14 @@ def test_player_loadouts_keep_only_unambiguous_weapon_finishes():
     assert "awp" not in loadouts.get("2", {})
 
 
-def test_cosmetic_inventory_uses_owner_rows_and_decodes_raw_wear_bits():
+@pytest.mark.parametrize("item_id", [53009600926, 14204636884736196609])
+def test_cosmetic_inventory_uses_owner_rows_and_decodes_raw_wear_bits(item_id):
     class FakeParser:
         def parse_skins(self):
             return {
                 "steamid": ["76561198000000001", "76561198000000001"],
                 "def_index": [508, 508],
-                "item_id": [53009600926, 53009600926],
+                "item_id": [item_id, item_id],
                 "paint_index": [415, 415],
                 "paint_seed": [80, 80],
                 "paint_wear": [1015704674, 1015704674],
@@ -103,7 +104,6 @@ def test_cosmetic_inventory_uses_owner_rows_and_decodes_raw_wear_bits():
 
         def parse_ticks(self, _wanted, *, ticks):
             assert ticks == [10, 20]
-            item_id = 53009600926
             return {
                 "steamid": ["76561198000000001", "76561198000000001", "76561198000000002"],
                 "item_id_high": [item_id >> 32, item_id >> 32, 999 >> 32],
@@ -129,6 +129,7 @@ def test_cosmetic_inventory_uses_owner_rows_and_decodes_raw_wear_bits():
     assert list(inventory) == ["76561198000000001"]
     assert len(inventory["76561198000000001"]) == 1
     item = inventory["76561198000000001"][0]
+    assert item["item_id"] == (str(item_id) if item_id > 2**53 - 1 else item_id)
     assert item["custom_name"] == "全角，测试！"
     assert item["paint_wear"] == 0.016897
     assert item["observed_teams"] == ["t", "ct"]
@@ -261,7 +262,7 @@ def test_cosmetic_inventory_attaches_only_catalogued_stickers_to_the_exact_owned
         "type": "sticker",
         "name_en": "Sticker | Crown (Foil)",
         "name_zh": "印花 | 皇冠（闪亮）",
-        "image_url": "https://cdn.cstrike.app/images/crown_foil_a4ad4557.webp",
+        "image_url": "https://cdn.cstrike.app/images/crown_foil_b3128071.webp",
         "rarity": "#d32ce6",
         "wear": 0.01,
         "slot": 0,

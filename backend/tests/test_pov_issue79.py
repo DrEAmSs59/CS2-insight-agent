@@ -37,8 +37,9 @@ def test_pov_forces_rotating_round_scaled_radar():
     assert expected.issubset(POV_CORE_FORCED_COMMANDS)
 
 
-def test_pov_forces_teammate_hud_color():
-    assert "cl_hud_color 12" in POV_CORE_FORCED_COMMANDS
+def test_pov_preserves_user_hud_color():
+    assert not any(command.startswith("cl_hud_color ") for command in POV_CORE_FORCED_COMMANDS)
+    assert "cl_force_spec_hud_color_to_team false" in POV_CORE_FORCED_COMMANDS
 
 
 def test_pov_suppresses_demo_player_card_without_replacing_health_hud():

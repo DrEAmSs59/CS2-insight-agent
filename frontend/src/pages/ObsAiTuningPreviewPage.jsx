@@ -466,6 +466,7 @@ export function GoalScreen({ goal, setGoal, recommendation, onBack, onNext, envi
                 <button
                   type="button"
                   key={fps}
+                  aria-label={`${fps} FPS`}
                   onClick={() => setGoal((prev) => ({ ...prev, fps, fpsDraft: String(fps) }))}
                   className={`rounded-xl border px-2 py-3 text-center transition-colors ${
                     goal.fps === fps

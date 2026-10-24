@@ -115,7 +115,13 @@ export function buildDtoFromQueueItem(item, matchMeta, globalPacing = {}) {
   if (cat === "highlight") return buildHighlightRecordingRequest(...args);
   if (cat === "fail") return buildFailRecordingRequest(...args);
   if (cat === "compilation") {
-    if (kind === "freeze_to_death") return buildRoundCompilationRecordingRequest(...args);
+    if (kind === "freeze_to_death") {
+      // Dedicated round timings must not change timeline rounds or event clips.
+      for (const key of ["round_freeze_preroll_sec", "round_death_post_sec", "round_alive_post_sec"]) {
+        if (mergedPacing[key] != null) options[key] = mergedPacing[key];
+      }
+      return buildRoundCompilationRecordingRequest(...args);
+    }
     if (["rival_kills", "all_kills", "weapon_kills"].includes(kind))
       return buildKillCompilationRecordingRequest(...args);
     if (kind === "nemesis_deaths" || kind === "all_deaths")

@@ -11,8 +11,13 @@ const SHOTGUNS = new Set(["nova", "xm1014", "mag7", "sawedoff"]);
 const MACHINE_GUNS = new Set(["m249", "negev"]);
 
 export function slotKey(item) {
+  const rawId = item?.item_id;
+  if (typeof rawId === "string" && /^\d+$/.test(rawId.trim())) {
+    const exactId = BigInt(rawId.trim());
+    if (exactId > 0n) return `id:${exactId}`;
+  }
   const id = Number(item?.item_id);
-  if (Number.isFinite(id) && id > 0) return `id:${id}`;
+  if (Number.isFinite(id) && Number.isInteger(id) && id > 0) return `id:${BigInt(id)}`;
   if (item?.is_placeholder) return `placeholder:${Number(item?.def_index) || 0}`;
   return `def:${Number(item?.def_index) || 0}:${Number(item?.paint_index) || 0}:${Number(item?.paint_seed) || 0}:${Number(item?.paint_wear) || 0}`;
 }

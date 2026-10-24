@@ -973,6 +973,11 @@ class PovHudManager:
         input_audio_enabled: bool = False,
         input_audio_volume_percent: int = 100,
         combat_stats_enabled: bool = True,
+        persistent_killfeed: bool = False,
+        killfeed_only: bool = False,
+        persistent_killfeed_target_xuid: str = "",
+        persistent_killfeed_segments: Optional[list[dict]] = None,
+        hide_killfeed_clan_tags: bool = True,
         weather_effect_id: str = DEFAULT_WEATHER_EFFECT_ID,
     ) -> Optional[DemoVoiceHudBuild]:
         with ExitStack() as staging_stack:
@@ -994,6 +999,11 @@ class PovHudManager:
                 input_audio_enabled=input_audio_enabled,
                 input_audio_volume_percent=input_audio_volume_percent,
                 combat_stats_enabled=combat_stats_enabled,
+                persistent_killfeed=persistent_killfeed,
+                killfeed_only=killfeed_only,
+                persistent_killfeed_target_xuid=persistent_killfeed_target_xuid,
+                persistent_killfeed_segments=persistent_killfeed_segments,
+                hide_killfeed_clan_tags=hide_killfeed_clan_tags,
                 weather_effect_id=weather_effect_id,
                 staging_stack=staging_stack,
             )
@@ -1018,6 +1028,11 @@ class PovHudManager:
         input_audio_enabled: bool = False,
         input_audio_volume_percent: int = 100,
         combat_stats_enabled: bool = True,
+        persistent_killfeed: bool = False,
+        killfeed_only: bool = False,
+        persistent_killfeed_target_xuid: str = "",
+        persistent_killfeed_segments: Optional[list[dict]] = None,
+        hide_killfeed_clan_tags: bool = True,
         weather_effect_id: str = DEFAULT_WEATHER_EFFECT_ID,
         staging_stack: ExitStack,
     ) -> Optional[DemoVoiceHudBuild]:
@@ -1080,7 +1095,7 @@ class PovHudManager:
             legacy_voice_disabled=not voice_enabled,
         )
         resolved_input_track_report = input_track_report
-        if demo_path is not None and resolved_input_track_report is None:
+        if demo_path is not None and resolved_input_track_report is None and not killfeed_only:
             try:
                 resolved_input_track_report = load_input_report(demo_path)
             except InputCommandError as exc:
@@ -1098,7 +1113,7 @@ class PovHudManager:
         )
         if demo_path is not None and demo_template_required and not voice_template.is_file():
             raise PovHudError(f"未找到 Demo HUD 模板：{voice_template}")
-        if demo_path is not None and voice_template.is_file():
+        if demo_path is not None and voice_template.is_file() and not killfeed_only:
             try:
                 voice_build = build_demo_voice_hud_vpk(
                     demo_path,
@@ -1156,6 +1171,20 @@ class PovHudManager:
                 )
 
         package_bytes: Optional[bytes] = voice_build.vpk_bytes if voice_build is not None else None
+        if persistent_killfeed:
+            from .persistent_killfeed import bind_persistent_killfeed, killfeed_only_template
+            try:
+                if killfeed_only:
+                    package_bytes = killfeed_only_template(voice_template.read_bytes())
+                if package_bytes is None:
+                    raise PovHudError("击杀常驻缺少 Panorama 模板")
+                package_bytes = bind_persistent_killfeed(
+                    package_bytes, enabled=True, demo_path=demo_path,
+                    target_xuid=persistent_killfeed_target_xuid,
+                    segments=persistent_killfeed_segments, hide_clan_tags=hide_killfeed_clan_tags,
+                )
+            except (ValueError, OSError) as exc:
+                raise PovHudError(f"击杀常驻生成失败：{exc}") from exc
         explicit_map_name = normalize_skybox_map_name(map_name)
         detected_map_name = (
             normalize_skybox_map_name(voice_build.radar_map)
@@ -1655,6 +1684,7 @@ class PovHudManager:
             "pov_vpk_path": str(pov_dst),
             "pov_vpk_source_basename": source_basename,
             "demo_voice_hud_generated": voice_build is not None,
+            "persistent_killfeed": bool(persistent_killfeed),
             "demo_voice_hud": (
                 {
                     "voice_packets": voice_build.voice_packets,

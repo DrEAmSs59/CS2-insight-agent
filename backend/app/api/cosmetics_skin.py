@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import shutil
 import sys
 import threading
 import uuid
@@ -26,6 +27,7 @@ from ..cosmetics_skin_plan import (
     build_batch_from_plan_json,
     filter_plan_by_succeeded_item_ids,
     map_item_statuses,
+    validate_player_loadout,
 )
 from ..databases import demo_db
 from ..demo_cache import copy_original_to_temp_input, ensure_row_cached, file_md5
@@ -54,7 +56,8 @@ _MISSING_REWRITE_METADATA_ERRORS = (
 
 class CustomSkinPlanBody(BaseModel):
     steamid: str = Field(..., min_length=1)
-    replacements: dict[str, Any] = Field(..., min_length=1)
+    replacements: dict[str, Any] = Field(default_factory=dict)
+    player_loadout: dict[str, Any] | None = None
     # First-seen demo skins per slot (UI snapshots). Optional; used for plan display.
     originals: dict[str, Any] | None = None
 
@@ -142,15 +145,28 @@ def _run_one_owned_batch(
     output_dem: Path,
     steam_id64: str,
     items: list[dict[str, Any]],
+    player_loadout: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Invoke skin-core once; raise SkinCore* / Exception for the caller to map."""
+    # Experimental consent belongs to the saved plan, not the native protocol.
+    player_loadout = {key: value for key, value in (player_loadout or {}).items()
+                      if key in {"agent_t", "agent_ct", "music_kit"}}
+    if not items and not player_loadout:
+        # Clearing the player's loadout restores the original while retaining
+        # other players' already replayed plans in current_input.
+        shutil.copy2(input_dem, output_dem)
+        return {"ok": True, "succeeded": [], "failed": []}
     skin_result = run_rewrite_owned_batch(
         input_dem=str(input_dem),
         output_dem=str(output_dem),
         steam_id64=steam_id64,
         items=items,
         demoparser2_python=sys.executable,
+        **({"player_loadout": player_loadout} if player_loadout else {}),
     )
+    if (player_loadout and isinstance(skin_result, dict) and skin_result.get("ok") is True
+            and skin_result.get("player_loadout_applied") is not True):
+        raise SkinCoreError("skin-core did not confirm player loadout")
     if not isinstance(skin_result, dict):
         raise SkinCoreError("skin-core rewrite failed")
     return skin_result
@@ -280,13 +296,22 @@ async def post_custom_skin_plan(
             trusted_plan = candidate
         break
     try:
+        loadout = validate_player_loadout(body.player_loadout if body.player_loadout is not None
+            else (trusted_plan or {}).get("player_loadout", {}))
+        if not body.replacements and body.player_loadout is None:
+            raise CosmeticsSkinPlanError("replacements or player_loadout is required")
         batch_items, plan_json = build_batch_and_plan(
             steamid,
             inventory,
             body.replacements,
             originals=body.originals,
             trusted_plan=trusted_plan,
-        )
+        ) if body.replacements else ([], {"steamid": steamid, "items": []})
+        if not body.replacements and (trusted_plan or {}).get("items"):
+            batch_items = build_batch_from_plan_json(trusted_plan, inventory)
+            plan_json["items"] = trusted_plan["items"]
+        if loadout:
+            plan_json["player_loadout"] = loadout
     except CosmeticsSkinPlanError as exc:
         logger.warning(
             "cosmetics plan validation failed: demo_id=%s steamid=%s slots=%s error=%s",
@@ -299,7 +324,7 @@ async def post_custom_skin_plan(
 
     # Other players' persisted plans must be re-applied onto the original before
     # this player's pass; skin-core accepts one steamid per call.
-    prior_passes: list[tuple[str, list[dict[str, Any]]]] = []
+    prior_passes = []
     for stored in stored_plans:
         other_steamid = str(stored.get("steamid") or "").strip()
         if not other_steamid or other_steamid == steamid:
@@ -309,7 +334,8 @@ async def post_custom_skin_plan(
             continue
         other_inventory = _inventory_for_steamid(result, other_steamid)
         try:
-            other_batch = build_batch_from_plan_json(other_plan, other_inventory)
+            other_loadout = validate_player_loadout(other_plan.get("player_loadout", {}))
+            other_batch = build_batch_from_plan_json(other_plan, other_inventory) if other_plan.get("items") else []
         except CosmeticsSkinPlanError as exc:
             logger.error(
                 "stored cosmetics plan could not be rebuilt: demo_id=%s steamid=%s",
@@ -318,8 +344,8 @@ async def post_custom_skin_plan(
                 exc_info=(type(exc), exc, exc.__traceback__),
             )
             raise HTTPException(500, error_detail(_ERR_SKIN_REWRITE_FAILED)) from exc
-        if other_batch:
-            prior_passes.append((other_steamid, other_batch))
+        if other_batch or other_loadout:
+            prior_passes.append((other_steamid, other_batch, other_loadout))
 
     original = Path(original_path)
     temp_in: Path | None = None
@@ -337,7 +363,7 @@ async def post_custom_skin_plan(
             raise HTTPException(404, str(exc)) from exc
 
         current_input = temp_in
-        for other_steamid, other_batch in prior_passes:
+        for other_steamid, other_batch, other_loadout in prior_passes:
             prior_out = _temp_output_path(cached_path)
             intermediate_temps.append(prior_out)
             try:
@@ -347,6 +373,7 @@ async def post_custom_skin_plan(
                     output_dem=prior_out,
                     steam_id64=other_steamid,
                     items=other_batch,
+                    **({"player_loadout": other_loadout} if other_loadout else {}),
                 )
             except Exception as exc:
                 raise _map_skin_core_call_error(
@@ -385,6 +412,7 @@ async def post_custom_skin_plan(
                 output_dem=temp_out,
                 steam_id64=steamid,
                 items=batch_items,
+                **({"player_loadout": loadout} if loadout else {}),
             )
         except Exception as exc:
             raise _map_skin_core_call_error(
@@ -441,6 +469,9 @@ async def post_custom_skin_plan(
             succeeded_ids,
             succeeded_rows=succeeded_raw if isinstance(succeeded_raw, list) else [],
         )
+
+        if loadout:
+            filtered_plan["player_loadout"] = loadout
 
         # Soft all-fail: structured failed[] with ok:false — do not replace cache.
         if skin_result.get("ok") is not True:

@@ -106,16 +106,18 @@ class Clip:
     # 导播剪辑按此列表逐个跳转，中间可插转场。非合集片段保持空列表。
     source_ticks: list[list[int]] = field(default_factory=list)
     source_rounds: list[int] = field(default_factory=list)
-    # 与 source_ticks 等长；freeze_to_death 每段 (start_round, end_round) 含端点，供前端按勾选子集入队切片
+    # Historical segment-range field. New round compilations do not emit it.
     source_round_ends: list[int] = field(default_factory=list)
     compilation_kind: Optional[str] = None
     # 为 True 时：导播与入队合并忽略智能分段 / 击杀前后预留等 pacing（仍保留 POV 开关类字段的显式覆写）
     fixed_segment_pacing: bool = False
     # 回合合集（compilation_kind=freeze_to_death）：本次解析使用的回合范围，写入结果 JSON 供库缓存/前端恢复。
-    # None = 使用全部合规非赛后回合；非空 list = 仅这些回合（与 source_ticks 同源）。
+    # None = all eligible rounds; a list selects rounds without discarding neighbour facts.
     freeze_to_death_round_filter: Optional[list[int]] = None
-    # 每合规回合一条精确 [start_tick,end_tick]（与 source_ticks 合并段不同）；前端按勾选子集合并连续回合入队，无需重新解析。
+    # Legacy saved-analysis field; converted once at the frontend recording boundary.
     freeze_to_death_round_windows: Optional[list[dict[str, Any]]] = None
+    # Raw round events only. No pre-roll, tail, cut windows or merged segments.
+    round_facts: Optional[list[dict[str, Any]]] = None
     # 本片段中因 assistedflash=True 的击杀对应的助攻闪光手玩家名（去重保序），供前端 hover 展示
     flash_assisters: list[str] = field(default_factory=list)
     # 与 kill_ticks 等长；每次击杀的武器 / 爆头 / 标签 / 开火数（AI 导播选受害者 POV）
@@ -125,7 +127,15 @@ class Clip:
     shots_to_kill: list[int] = field(default_factory=list)
 
     def to_dict(self) -> dict:
-        return asdict(self)
+        result = asdict(self)
+        if self.compilation_kind == "freeze_to_death":
+            for key in ("source_ticks", "source_rounds", "source_round_ends", "fixed_segment_pacing",
+                        "kill_ticks", "death_tick", "clip_min_tick", "clip_max_tick",
+                        "freeze_to_death_round_windows"):
+                result.pop(key, None)
+        elif self.round_facts is None:
+            result.pop("round_facts", None)
+        return result
 
 
 @dataclass

@@ -8,7 +8,8 @@ CS2 客户端播 demo 时 RCON 不可靠，故用前台窗口 + 模拟键盘输�
 - ``~``（控制台开关）与 Space（demo UI）使用 ``SendInput``，需要 CS2 在前台。
 - 控制台**文字字符与 Enter**使用 ``PostMessage(WM_CHAR)`` 直接投递到 CS2 消息队列，
   绕过 Windows UIPI 对 ``SendInput`` 的静默拦截（症状：SendInput 返回 0/2，
-  文字输入到一半卡住）。每条命令分别提交，保留 Demo 控制指令之间的处理间隔。
+  文字输入到一半卡住）。OBS 调用将命令用分号合并成有长度上限的批次，
+  避免为每条 cvar 重复 Enter 和等待；其他调用仍按原顺序逐条提交。
 """
 
 from __future__ import annotations
@@ -27,6 +28,26 @@ __all__ = [
     "send_cs2_space_taps",
     "send_cs2_vk_tap",
 ]
+
+
+def _console_batches(commands: list[str], max_chars: int) -> list[str]:
+    """Batch commands without letting a line comment swallow the next command."""
+    batches: list[str] = []
+    current = ""
+    for command in commands:
+        # Preserve parser boundaries for comments and multiline user input.
+        # Treating quoted URLs conservatively also preserves their contents.
+        isolated = any(token in command for token in ("//", "\n", "\r"))
+        if current and (isolated or len(current) + 1 + len(command) > max_chars):
+            batches.append(current)
+            current = ""
+        if isolated:
+            batches.append(command)
+        else:
+            current = f"{current};{command}" if current else command
+    if current:
+        batches.append(current)
+    return batches
 
 
 if sys.platform != "win32":
@@ -48,6 +69,7 @@ if sys.platform != "win32":
         *,
         skip_console_toggle: bool = False,
         close_console: bool = True,
+        batch_commands: bool = False,
     ) -> bool:
         cmds = [str(ln).strip() for ln in lines if ln and str(ln).strip()]
         if cmds:
@@ -382,11 +404,25 @@ else:
         *,
         skip_console_toggle: bool = False,
         close_console: bool = True,
+        batch_commands: bool = False,
     ) -> bool:
         cmds = [str(ln).strip() for ln in lines if ln and str(ln).strip()]
         if not cmds:
             return True
-        logger.info("CS2 控制台逐条注入 %d 条指令: %s", len(cmds), cmds)
+        try:
+            batch_max_chars = int(
+                (os.environ.get("CS2_INSIGHT_CONSOLE_BATCH_MAX_CHARS") or "900").strip()
+            )
+        except ValueError:
+            batch_max_chars = 900
+        batch_max_chars = max(128, min(4096, batch_max_chars))
+        batches = _console_batches(cmds, batch_max_chars) if batch_commands else cmds
+        logger.info(
+            "CS2 控制台批量注入 %d 条指令（%d 批）: %s",
+            len(cmds),
+            len(batches),
+            cmds,
+        )
         hwnd = find_cs2_hwnd()
         if not hwnd:
             logger.error("未找到 Counter-Strike 窗口，无法注入控制台命令")
@@ -404,8 +440,8 @@ else:
             vk_toggle, scan_toggle = _console_toggle_vk_scan()
             _vk_tap_with_fallback(hwnd, vk_toggle, scan_toggle)
             time.sleep(0.18)
-        for cmd in cmds:
-            for ch in cmd:
+        for batch in batches:
+            for ch in batch:
                 _post_char(hwnd, ord(ch))
                 time.sleep(0.002)
             time.sleep(0.02)
@@ -429,3 +465,8 @@ else:
 
     def inject_console_command(cmd: str, *, skip_console_toggle: bool = False) -> bool:
         return inject_console_sequence([cmd], skip_console_toggle=skip_console_toggle)
+
+
+def inject_obs_console_sequence(lines: list[str], **kwargs) -> bool:
+    """OBS-only batched console input; preserve other playback callers."""
+    return inject_console_sequence(lines, batch_commands=True, **kwargs)

@@ -41,6 +41,20 @@ def test_no_fixed_cvars_when_inject_lines_empty():
         assert cvar not in lines
 
 
+@pytest.mark.parametrize("color", [None, 5, 9, 12])
+def test_obs_pov_preserves_game_or_explicit_hud_color(color):
+    command = "" if color is None else f"cl_hud_color {color}"
+    lines = _director(command)._recording_warmup_console_lines(
+        RecordingWarmupExtras(), pov_enabled=True
+    )
+    # OBS applies the shared POV commands separately after warmup.
+    lines += [*POV_CORE_FORCED_COMMANDS,
+              *pov_tail_commands(teamcounter_numeric=False, radar_mode=0)]
+    color_commands = [line for line in lines if line.startswith("cl_hud_color ")]
+    assert color_commands == ([] if color is None else [command])
+    assert "cl_force_spec_hud_color_to_team false" in lines
+
+
 @pytest.mark.parametrize("hide, value", [(True, 0), (False, 1)])
 @pytest.mark.parametrize("console_cmds", [(), ("hud_showtargetid 0",)])
 def test_clan_tags_setting_with_generated_or_legacy_console_commands(hide, value, console_cmds):

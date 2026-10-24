@@ -20,9 +20,10 @@ function publicErrorCodeFromAxios(error) {
 }
 
 /** Persist custom skin plan and rewrite the demo working cache. */
-export async function saveCustomSkinPlan({ demoId, steamid, replacements, originals }) {
+export async function saveCustomSkinPlan({ demoId, steamid, replacements, originals, playerLoadout }) {
   try {
     const payload = { steamid, replacements };
+    if (playerLoadout !== undefined) payload.player_loadout = playerLoadout;
     if (originals && typeof originals === "object") {
       payload.originals = originals;
     }

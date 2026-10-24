@@ -6,6 +6,7 @@ export default defineConfig({
   test: {
     environment: "jsdom",
     globals: true,
-    exclude: [...configDefaults.exclude, "src-tauri/target/**"],
+    // Generated release copies can contain Node-only Panorama tests.
+    exclude: [...configDefaults.exclude, "src-tauri/target/**", "src-tauri/bundle-resources/**", "scripts/*.test.mjs"],
   },
 });

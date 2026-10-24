@@ -1,6 +1,6 @@
-# Copyright (c) CS2 Insight Agent contributors.
+﻿# Copyright (c) CS2 Insight Agent contributors.
 # One-click Windows desktop package that rebuilds skin-core from a sibling
-# CS2-demo-anyskin checkout and embeds it into the Tauri NSIS installer.
+# CS2-demo-anyskin main checkout and embeds it into the Tauri NSIS installer.
 #
 # Usage (from repo root OR this script's directory):
 #   powershell -ExecutionPolicy Bypass -File .\packaging\windows\build_desktop_with_skin_core.ps1 `
@@ -28,7 +28,7 @@ param(
     [ValidatePattern('^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$')]
     [string]$Version,
 
-    # Override sibling anyskin root. Default: <insight-parent>\CS2-demo-anyskin
+    # Override AnySkin root; must be checked out on main. Default: sibling CS2-demo-anyskin-main.
     [string]$AnyskinRoot = "",
 
     # Optional path to upx.exe when not on PATH.
@@ -55,37 +55,24 @@ function Get-InsightRepoRoot {
 }
 
 function Resolve-AnyskinRoot {
-    param(
-        [string]$InsightRoot,
-        [string]$Override
-    )
-    if ($Override) {
-        if (-not (Test-Path -LiteralPath $Override)) {
-            throw "AnyskinRoot not found: $Override"
-        }
-        return (Resolve-Path -LiteralPath $Override).Path
-    }
-
+    param([string]$InsightRoot, [string]$Override)
     $parent = Split-Path -Parent $InsightRoot
-    $candidates = @(
-        (Join-Path $parent "CS2-demo-anyskin"),
-        (Join-Path $InsightRoot "..\CS2-demo-anyskin")
-    )
-    foreach ($c in $candidates) {
-        $releaseScript = Join-Path $c "scripts\release-skin-core.ps1"
-        if ((Test-Path -LiteralPath $c) -and (Test-Path -LiteralPath $releaseScript)) {
-            return (Resolve-Path -LiteralPath $c).Path
-        }
+    $candidates = if ($Override) { @($Override) } else {
+        @((Join-Path $parent "CS2-demo-anyskin-main"), (Join-Path $parent "CS2-demo-anyskin"))
     }
-    throw @"
-CS2-demo-anyskin not found next to Insight.
-
-Expected sibling layout:
-  $(Split-Path -Parent $InsightRoot)\CS2-insight-agent
-  $(Split-Path -Parent $InsightRoot)\CS2-demo-anyskin
-
-Clone the private anyskin repo beside Insight, or pass -AnyskinRoot <path>.
-"@
+    foreach ($candidate in $candidates) {
+        if (-not (Test-Path -LiteralPath (Join-Path $candidate "scripts\release-skin-core.ps1"))) { continue }
+        $resolved = (Resolve-Path -LiteralPath $candidate).Path
+        $branch = & git -C $resolved symbolic-ref --quiet --short HEAD
+        if ($LASTEXITCODE -eq 0 -and "$branch".Trim() -eq "main") {
+            $revision = & git -C $resolved rev-parse HEAD
+            if ($LASTEXITCODE -ne 0) { throw "Cannot resolve AnySkin main revision." }
+            Write-Host "AnySkin source: main @ $revision"
+            return $resolved
+        }
+        if ($Override) { throw "Free releases require AnySkin main; the selected checkout is not on main: $resolved" }
+    }
+    throw "Free releases require an AnySkin main checkout. Use sibling CS2-demo-anyskin-main or -AnyskinRoot <main checkout>."
 }
 
 function Invoke-Native {
@@ -121,7 +108,7 @@ function Invoke-DesktopBuildVer {
     try {
         Write-Host "==> pnpm desktop:build:ver -- $AppVersion"
         Invoke-Native -FailMessage "desktop:build:ver failed" -Block {
-            pnpm.cmd run desktop:build:ver -- $AppVersion
+            & node (Join-Path $FrontendRoot "scripts\tauri-build-version.mjs") $AppVersion
         }
     } finally {
         Pop-Location
@@ -168,6 +155,9 @@ function Invoke-SkinCoreRelease {
     } finally {
         Pop-Location
     }
+    # Check encrypted IPC and the real parent gate before packaging rebuilt bytes.
+    & $PythonExe -I -B (Join-Path $PSScriptRoot "verify_skin_core_protocol.py") (Join-Path $AnyskinRoot "dist\skin-core.exe")
+    if ($LASTEXITCODE -ne 0) { throw "Skin Core protocol verification failed." }
 }
 
 # ---------------------------------------------------------------------------
@@ -175,6 +165,11 @@ $InsightRoot = Get-InsightRepoRoot
 $FrontendRoot = Join-Path $InsightRoot "frontend"
 $ReleaseDir = Join-Path $FrontendRoot "src-tauri\target\release"
 $BundlePython = Join-Path $FrontendRoot "src-tauri\bundle-resources\python\python.exe"
+& node (Join-Path $FrontendRoot "scripts\require-secure-node.mjs")
+if ($LASTEXITCODE -ne 0) { throw "Node.js security version preflight failed." }
+& node (Join-Path $FrontendRoot "scripts\require-frontend-dependencies.mjs")
+if ($LASTEXITCODE -ne 0) { throw "Frontend dependency preflight failed; run corepack pnpm install --frozen-lockfile." }
+
 $Anyskin = Resolve-AnyskinRoot -InsightRoot $InsightRoot -Override $AnyskinRoot
 $ReleaseSkinCore = Join-Path $Anyskin "scripts\release-skin-core.ps1"
 $SkinCoreDist = Join-Path $Anyskin "dist\skin-core.exe"

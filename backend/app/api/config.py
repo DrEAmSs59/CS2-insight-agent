@@ -14,6 +14,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from ..app_state import application_state
+from ..tls import public_ssl_context
 from ..env_utils import (
     LLMConfig,
     OBSConfig,
@@ -257,7 +258,7 @@ async def test_llm_connection():
 
             try:
                 request = urllib.request.Request(url, headers={"Accept": "application/json"})  # noqa: S310
-                with urllib.request.urlopen(request, timeout=4.0) as response:  # noqa: S310
+                with urllib.request.urlopen(request, timeout=4.0, context=public_ssl_context()) as response:  # noqa: S310
                     return True, f"HTTP {response.getcode()} {url}"
             except urllib.error.HTTPError as exc:
                 return False, f"HTTP {exc.code} {url}"
@@ -285,12 +286,12 @@ async def test_llm_connection():
             "detail": "配置文件中的密钥为脱敏占位（****…），请在设置中重新粘贴完整 API 密钥并保存后再测试。",
         }
 
-    from openai import APIConnectionError, APIError, APITimeoutError, AsyncOpenAI, RateLimitError
+    from openai import APIConnectionError, APIError, APITimeoutError, AsyncOpenAI, DefaultAsyncHttpxClient, RateLimitError
 
     base_url = (llm.base_url or "").strip() or None
     model = (llm.model or "").strip() or "gpt-4o-mini"
     try:
-        client = AsyncOpenAI(api_key=api_key, base_url=base_url, timeout=12.0)
+        client = AsyncOpenAI(api_key=api_key, base_url=base_url, timeout=12.0, http_client=DefaultAsyncHttpxClient(verify=public_ssl_context()))
         response = await asyncio.wait_for(
             client.chat.completions.create(
                 model=model,

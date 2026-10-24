@@ -1,5 +1,6 @@
 // zh / liteCut — keep keys scoped to this feature catalog.
 export default {
+  "liteCut.exportResolutionInvalid": "导出宽度和高度必须为正偶数（当前 {width} × {height}）。请修改分辨率后再导出。",
   "liteCut.frameMeldTitle": "帧混合(动态模糊)",
   "liteCut.frameMeldHint": "通过特定版本ffmpeg：FrameMeld_ffmpeg自动处理补帧、去重和运动模糊，固定输出60 FPS。具体渲染策略由FrameMeld_ffmpeg管理。勾选后导出时间会变长。",
   "liteCut.frameMeldUnavailable": "当前配置的是普通 FFmpeg，可使用其他导出功能，但不能启用 FrameMeld。",

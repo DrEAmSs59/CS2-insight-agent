@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, test, vi } from "vitest";
 import CosmeticsView from "./CosmeticsView";
+import { loadoutCandidates } from "./PlayerLoadoutEditor.jsx";
 import { loadCustomSkinPlan, saveCustomSkinPlan } from "./saveCustomSkinPlan.js";
 
 const desktopBridgeMock = vi.hoisted(() => ({
@@ -495,7 +496,7 @@ describe("CosmeticsView", () => {
 
     expect(screen.queryByText("探员")).toBeNull();
     expect(screen.queryByText("血腥达里尔爵士（沉默）")).toBeNull();
-    expect(screen.queryByText("音乐盒")).toBeNull();
+    expect(screen.getByTestId("player-loadout-editor")).toBeTruthy();
     expect(screen.queryByText("Under Bright Lights")).toBeNull();
     expect(screen.queryByText("C4 炸弹")).toBeNull();
     // Each team only shows the natural knife/glove placeholders.
@@ -1763,4 +1764,33 @@ describe("CosmeticsView", () => {
     expect(within(screen.getByTestId("cosmetics-row-ct")).getByText(/★ CT 刀/)).toBeTruthy();
     expect(screen.getByTestId("cosmetics-row-t")).toBeTruthy();
   });
+});
+
+
+test("loadout-only customization saves, reloads and restores without weapon edits", async () => {
+  const chosen = loadoutCandidates("agent_t")[0];
+  const loadout = { agent_t: chosen.def, music_kit: 3 };
+  vi.mocked(loadCustomSkinPlan).mockResolvedValueOnce({ ok: true, plan: { player_loadout: { music_kit: 3 }, items: [] } });
+  vi.mocked(saveCustomSkinPlan).mockResolvedValueOnce({ ok: true, plan: { player_loadout: loadout, items: [] }, succeeded: [], failed: [] });
+  const props = { demoId: 42, selectedPlayer: { name: "JW", steamid: STEAM_ID }, workspace: { cosmetics: { players: {} } } };
+  const view = render(<CosmeticsView {...props} />);
+  const music = loadoutCandidates("music_kit").find(row => row.index === 3);
+  await waitFor(() => expect(screen.getByText(music.nameZh)).toBeTruthy());
+  fireEvent.click(screen.getByTestId("cosmetics-customize"));
+  fireEvent.click(screen.getByRole("button", { name: "T 探员" }));
+  fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: chosen.nameZh }));
+  fireEvent.click(screen.getByTestId("cosmetics-save-plan"));
+  await waitFor(() => expect(saveCustomSkinPlan).toHaveBeenLastCalledWith(expect.objectContaining({ playerLoadout: loadout, replacements: {} })));
+  await waitFor(() => expect(screen.getByRole("button", { name: "T 探员" }).disabled).toBe(true));
+  view.unmount();
+  vi.mocked(loadCustomSkinPlan).mockResolvedValueOnce({ ok: true, plan: { player_loadout: loadout, items: [] } });
+  vi.mocked(saveCustomSkinPlan).mockResolvedValueOnce({ ok: true, plan: { player_loadout: { music_kit: 3 }, items: [] }, succeeded: [], failed: [] });
+  render(<CosmeticsView {...props} />);
+  await waitFor(() => expect(screen.getByText(chosen.nameZh)).toBeTruthy());
+  fireEvent.click(screen.getByTestId("cosmetics-customize"));
+  fireEvent.click(screen.getByRole("button", { name: "T 探员" }));
+  fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "沿用 Demo 原设置" }));
+  fireEvent.click(screen.getByTestId("cosmetics-save-plan"));
+  await waitFor(() => expect(saveCustomSkinPlan).toHaveBeenLastCalledWith(expect.objectContaining({ playerLoadout: { music_kit: 3 }, replacements: {} })));
+  await waitFor(() => expect(screen.getByRole("button", { name: "T 探员" }).disabled).toBe(true));
 });

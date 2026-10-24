@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 param(
   [string]$DemoparserWheel = ""
 )
@@ -23,7 +23,7 @@ $previousNoUserSite = $env:PYTHONNOUSERSITE
 $env:PYTHONNOUSERSITE = "1"
 $uv = Get-Command uv -ErrorAction SilentlyContinue
 if (-not $uv) {
-  throw "uv 0.11.x is required to assemble the bundled Python runtime."
+  throw "uv 0.13.5+ is required to assemble the bundled Python runtime."
 }
 
 function Remove-TreeIfExists([string]$Path) {

@@ -7,7 +7,7 @@ logger = logging.getLogger(__name__)
 
 # Non-Windows: stubs
 try:
-    from ...win_cs2_console import inject_console_sequence, send_cs2_vk_tap
+    from ...win_cs2_console import inject_obs_console_sequence as inject_console_sequence, send_cs2_vk_tap
 except ImportError:
     def inject_console_sequence(lines): pass
     def send_cs2_vk_tap(vk: int) -> bool: return False

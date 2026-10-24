@@ -95,7 +95,12 @@ def test_resolve_raises_when_missing(tmp_path: Path, monkeypatch: pytest.MonkeyP
         resolve_skin_core_exe()
 
 
+@pytest.mark.parametrize("with_name,loadout", [
+    (False, None), (True, None), (False, {"music_kit": 3}),
+    (True, {"agent_t": 5105, "agent_ct": 4619, "music_kit": 3}),
+])
 def test_run_rewrite_pipes_session_key_and_decrypts_response(
+    with_name, loadout,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ):
@@ -136,7 +141,9 @@ def test_run_rewrite_pipes_session_key_and_decrypts_response(
         aad = REQUEST_MAGIC + bytes([VERSION]) + input_arg.encode("utf-8") + output_arg.encode("utf-8")
         plaintext = decrypt_frame(REQUEST_MAGIC, FIXED_KEY, aad, request_path.read_bytes())
         body = json.loads(plaintext.decode("utf-8"))
-        assert body["schema_version"] == 1
+        assert body["schema_version"] == (3 if loadout else 2 if with_name else 1)
+        assert body.get("player_loadout") == loadout
+        assert body["items"][0].get("attachments") == ({"custom_name": "CS2 INSIGHT AGENT"} if with_name else None)
         assert body["steam_id64"] == "76561198000000001"
         assert len(body["items"]) == 1
         assert "custom_name" not in body["items"][0]
@@ -174,11 +181,14 @@ def test_run_rewrite_pipes_session_key_and_decrypts_response(
             "wear": 0.01,
         }
     ]
+    if with_name:
+        items[0]["attachments"] = {"custom_name": "CS2 INSIGHT AGENT"}
     result = run_rewrite_owned_batch(
         input_dem=str(input_dem),
         output_dem=str(output_dem),
         steam_id64="76561198000000001",
         items=items,
+        player_loadout=loadout,
         demoparser2_python=str(demopy),
     )
 

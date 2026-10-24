@@ -14,6 +14,7 @@ import { useT } from "../../i18n/useT.js";
 import { estimateItemRecordSeconds } from "../../utils/recordingQueueDerive";
 import { friendlyClipTitleForQueue, isTimelineSourceClip } from "../../utils/montageUtils";
 import { freezeToDeathQueueRoundBadgeText, isFreezeToDeathCompilation } from "../../utils/freezeToDeathRoundFilter";
+import { useRoundCompilationPlan } from "../../recording/useRoundCompilationPlans";
 
 const CAT_ICON = {
   highlight: Sparkles,
@@ -55,6 +56,7 @@ export default function QueueWorkspaceRow({
   onReorderDragEnd,
 }) {
   const t = useT();
+  const roundPlan = useRoundCompilationPlan(item);
   const clip = item.clipData || {};
   const category = clip.category || "";
   const timeline = isTimelineSourceClip(clip);
@@ -69,7 +71,7 @@ export default function QueueWorkspaceRow({
         ? `R${clip.round} · ${clip.score_own}:${clip.score_opp}`
         : `R${clip.round}`
       : "—";
-  const estimate = estimateItemRecordSeconds(item, globalPacing);
+  const estimate = estimateItemRecordSeconds(item, globalPacing, roundPlan);
   const categoryKey = timeline
     ? "queue.rowCatTimeline"
     : ({
@@ -133,7 +135,11 @@ export default function QueueWorkspaceRow({
           <div className="mt-1 flex flex-wrap gap-x-3 font-mono text-[10px] tabular-nums text-cs2-text-muted">
             <span>{mapName}</span>
             <span>{roundLabel}</span>
-            <span>~{estimate}s</span>
+            <span>{Number.isFinite(estimate) ? `~${isFreezeToDeathCompilation(clip) ? estimate.toFixed(1) : estimate}s` : "—"}</span>
+            {isFreezeToDeathCompilation(clip) && <span className={roundPlan?.status === "error" ? "text-cs2-text-error" : ""}>
+              {roundPlan?.status === "ready" ? t("clip.segments", { n: roundPlan.plan.active_segments.length })
+                : t(roundPlan?.errorKey || "ftd.planLoading")}
+            </span>}
           </div>
         </div>
       </div>

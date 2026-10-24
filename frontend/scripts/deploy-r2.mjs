@@ -1,3 +1,5 @@
+import { requireSecureNode } from "./require-secure-node.mjs";
+requireSecureNode();
 import { S3Client, HeadObjectCommand } from "@aws-sdk/client-s3";
 import { Upload } from "@aws-sdk/lib-storage";
 import crypto from "crypto";

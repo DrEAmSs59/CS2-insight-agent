@@ -19,7 +19,7 @@
   Do not embed Python; output has no python\ (end users must install Python + deps themselves).
 
 .PARAMETER EmbeddedPythonVersion
-  Python embeddable version to download (default 3.12.7). Must match an existing zip on python.org.
+  Pinned standalone Python 3.12.15 archive; verified by SHA256 before extraction.
 
 .PARAMETER ElectronStagePythonOnly
   Only populate repo-root .\python\ using the same rules as the portable pack.
@@ -35,7 +35,7 @@ param(
     [Alias("SkipNpm")][switch]$SkipPnpm,
     [Alias("CleanNpm")][switch]$CleanPnpm,
     [switch]$SkipBundlePython,
-    [string]$EmbeddedPythonVersion = "3.12.7",
+    [string]$EmbeddedPythonVersion = "3.12.15",
     [switch]$ElectronStagePythonOnly,
     [string]$DemoparserWheel = $env:CS2_INSIGHT_DEMOPARSER_WHEEL
 )
@@ -62,7 +62,7 @@ $CacheDir = Join-Path $Root ".packaging-cache"
 $ProjectFile = Join-Path $Root "pyproject.toml"
 $LockFile = Join-Path $Root "uv.lock"
 $Uv = Get-Command uv -ErrorAction SilentlyContinue
-if (-not $Uv) { throw "uv 0.11.x is required to build a portable runtime." }
+if (-not $Uv) { throw "uv 0.13.5+ is required to build a portable runtime." }
 
 function Write-Step($msg) { Write-Host "`n==> $msg" -ForegroundColor Cyan }
 
@@ -80,38 +80,35 @@ function Get-EmbeddedPython {
     )
     [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
-    $ZipName = "python-$Version-embed-amd64.zip"
-    $Url = "https://www.python.org/ftp/python/$Version/$ZipName"
-    $ZipLocal = Join-Path $CacheDir $ZipName
-
-    Ensure-Directory $CacheDir
-    if (-not (Test-Path $ZipLocal)) {
-        Write-Step "Download embeddable Python $Version (may take a while)"
-        Invoke-WebRequest -Uri $Url -OutFile $ZipLocal -UseBasicParsing -TimeoutSec 600
+    $meta = Get-Content -LiteralPath (Join-Path $PSScriptRoot "python-runtime.json") -Raw | ConvertFrom-Json
+    if ($Version -ne $meta.python_version) {
+        throw "EmbeddedPythonVersion must match the verified runtime in python-runtime.json ($($meta.python_version))."
     }
-
-    Write-Step "Extract embeddable Python to python\"
-    if (Test-Path $DestDir) { Remove-Item -Recurse -Force $DestDir }
-    Ensure-Directory (Split-Path $DestDir -Parent)
-    Expand-Archive -Path $ZipLocal -DestinationPath $DestDir -Force
-
-    $pth = Get-ChildItem -Path $DestDir -Filter "*._pth" -File | Select-Object -First 1
-    if (-not $pth) { throw "No *._pth file in embeddable Python zip" }
-
-    $lines = Get-Content -Path $pth.FullName
-    $zipLine = ($lines | Where-Object { $_ -match '\.zip\s*$' } | Select-Object -First 1)
-    if (-not $zipLine) { $zipLine = ($lines | Select-Object -First 1) }
-    $pthBody = @(
-        $zipLine.Trim()
-        '.'
-        'Lib\site-packages'
-        'import site'
-    ) -join [Environment]::NewLine
-    [System.IO.File]::WriteAllText($pth.FullName, $pthBody)
-
-    $sitePkgs = Join-Path $DestDir "Lib\site-packages"
-    Ensure-Directory $sitePkgs
-
+    $archive = Join-Path $CacheDir ("python-" + $meta.sha256 + ".tar.gz")
+    Ensure-Directory $CacheDir
+    if (-not (Test-Path -LiteralPath $archive -PathType Leaf)) {
+        Write-Step "Download $($meta.label)"
+        $partial = "$archive.part"
+        Invoke-WebRequest -Uri $meta.tarball_url -OutFile $partial -UseBasicParsing -TimeoutSec 600
+        if ((Get-FileHash -LiteralPath $partial -Algorithm SHA256).Hash -ine $meta.sha256) {
+            throw "Python archive SHA256 mismatch: $partial"
+        }
+        Move-Item -LiteralPath $partial -Destination $archive -Force
+    }
+    if ((Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash -ine $meta.sha256) {
+        throw "Cached Python archive SHA256 mismatch: $archive"
+    }
+    # The pinned archive contains a single python/ tree. Validate the archive
+    # before replacing staging, and never remove a source interpreter.
+    Write-Step "Extract verified Python $Version to $DestDir"
+    if (Test-Path -LiteralPath $DestDir) { Remove-Item -LiteralPath $DestDir -Recurse -Force }
+    Ensure-Directory $DestDir
+    & tar -xzf $archive --strip-components=1 -C $DestDir
+    if ($LASTEXITCODE -ne 0) { throw "Python archive extraction failed (exit $LASTEXITCODE)" }
+    # Retain the old embeddable runtime's isolated import paths.
+    [IO.File]::WriteAllLines((Join-Path $DestDir "python312._pth"), @(
+        '.', 'Lib', 'DLLs', 'Lib\site-packages', 'import site'
+    ))
 }
 
 function Install-BackendRequirements {
@@ -121,6 +118,8 @@ function Install-BackendRequirements {
     $previousNoUserSite = $env:PYTHONNOUSERSITE
     $env:PYTHONNOUSERSITE = "1"
     try {
+    & $PythonExe -I -B (Join-Path $PSScriptRoot "verify_python_version.py")
+    if ($LASTEXITCODE -ne 0) { throw "Python security version preflight failed." }
     if (-not $DemoparserWheel.Trim()) {
         throw "DemoparserWheel is required; refusing to create a runtime with the stock parser."
     }
@@ -150,6 +149,15 @@ function Install-BackendRequirements {
     if ($LASTEXITCODE -ne 0) { throw "patched demoparser runtime verification failed (exit $LASTEXITCODE)" }
     foreach ($rel in @(
         "Scripts",
+        "Lib\ensurepip",
+        "Lib\site-packages\pip",
+        "Lib\test",
+        "Lib\idlelib",
+        "Lib\tkinter",
+        "Lib\turtledemo",
+        "include",
+        "libs",
+        "tcl",
         "Lib\site-packages\websocket\tests",
         "Lib\site-packages\aiosqlite\tests",
         "Lib\site-packages\colorama\tests",
@@ -160,6 +168,8 @@ function Install-BackendRequirements {
             Remove-Item -LiteralPath $path -Recurse -Force
         }
     }
+    Get-ChildItem -LiteralPath $sitePackages -Directory -Filter "pip-*.dist-info" -ErrorAction SilentlyContinue |
+        ForEach-Object { Remove-Item -LiteralPath $_.FullName -Recurse -Force }
     & $PythonExe -c "import cryptography, demoparser2, fastapi, openai, PIL, uvicorn"
     if ($LASTEXITCODE -ne 0) { throw "trimmed runtime import verification failed (exit $LASTEXITCODE)" }
     Get-ChildItem -LiteralPath $pythonRoot -Recurse -Directory -Filter "__pycache__" -ErrorAction SilentlyContinue |
@@ -180,8 +190,10 @@ function Install-BackendRequirements {
         ForEach-Object { Remove-Item -LiteralPath $_.FullName -Recurse -Force -ErrorAction SilentlyContinue }
     Get-ChildItem -LiteralPath (Join-Path $sitePackages "PIL") -File -Filter "_avif*.pyd" -ErrorAction SilentlyContinue |
         ForEach-Object { Remove-Item -LiteralPath $_.FullName -Force -ErrorAction SilentlyContinue }
-    & $PythonExe -c "from PIL import Image; import cryptography, demoparser2, fastapi, openai, uvicorn; import importlib.util as u; assert u.find_spec('numpy') is None; assert u.find_spec('pandas') is None"
+    & $PythonExe -c "from PIL import Image; import cryptography, demoparser2, fastapi, lzma, openai, tarfile, uvicorn; import importlib.util as u; assert u.find_spec('numpy') is None; assert u.find_spec('pandas') is None"
     if ($LASTEXITCODE -ne 0) { throw "final trimmed runtime import verification failed (exit $LASTEXITCODE)" }
+    & $PythonExe -I -B (Join-Path $PSScriptRoot "prepare_python_stdlib.py") $pythonRoot
+    if ($LASTEXITCODE -ne 0) { throw "isolated Python standard library preparation failed (exit $LASTEXITCODE)" }
     $runtimeFingerprintScript = Join-Path $Root "frontend\scripts\runtime-fingerprint.mjs"
     & node $runtimeFingerprintScript write $pythonRoot
     if ($LASTEXITCODE -ne 0) { throw "runtime fingerprint manifest failed (exit $LASTEXITCODE)" }
@@ -198,12 +210,25 @@ function Bundle-PythonInto {
     param(
         [Parameter(Mandatory)][string]$PythonDestDir
     )
+    $dest = [IO.Path]::GetFullPath($PythonDestDir).TrimEnd('\')
+    $allowedDestinations = @(
+        [IO.Path]::GetFullPath((Join-Path $Root "python")).TrimEnd('\'),
+        [IO.Path]::GetFullPath((Join-Path $OutDir "python")).TrimEnd('\')
+    )
+    if ($dest -notin $allowedDestinations) { throw "Unexpected Python staging destination: $dest" }
     if ($PortablePythonDir.Trim()) {
         $PySrc = (Resolve-Path $PortablePythonDir).Path
         $PyExeSrc = Join-Path $PySrc "python.exe"
         if (-not (Test-Path $PyExeSrc)) {
             throw "python.exe not found under PortablePythonDir: $PyExeSrc"
         }
+        $source = [IO.Path]::GetFullPath($PySrc).TrimEnd('\')
+        if ($source -ieq $dest -or $source.StartsWith($dest + '\', [StringComparison]::OrdinalIgnoreCase) -or
+            $dest.StartsWith($source + '\', [StringComparison]::OrdinalIgnoreCase)) {
+            throw "PortablePythonDir and staging destination must not overlap."
+        }
+        & $PyExeSrc -I -B (Join-Path $PSScriptRoot "verify_python_version.py")
+        if ($LASTEXITCODE -ne 0) { throw "Portable Python security version preflight failed." }
         Write-Step "Copy portable Python into: $PythonDestDir"
         if (Test-Path $PythonDestDir) { Remove-Item -Recurse -Force $PythonDestDir }
         Ensure-Directory (Split-Path $PythonDestDir -Parent)
@@ -243,7 +268,7 @@ if ($ElectronStagePythonOnly) {
 if (-not $SkipPnpm) {
     $Pnpm = Get-Command pnpm.cmd -ErrorAction SilentlyContinue
     if (-not $Pnpm) { $Pnpm = Get-Command pnpm -ErrorAction SilentlyContinue }
-    if (-not $Pnpm) { throw "pnpm 11.9.0 is required to build the frontend." }
+    if (-not $Pnpm) { throw "pnpm 12.14.0 is required to build the frontend." }
     if ($CleanPnpm) {
         Write-Step "CleanPnpm: stop node.exe, remove frontend\node_modules"
         Get-Process -Name node -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
@@ -362,12 +387,15 @@ else {
 $DataSrc = Join-Path $Root "data"
 $DestData = Join-Path $OutDir "data"
 if (Test-Path $DataSrc) {
-    Write-Step "Copy data/ (templates; excluding db, user config, backups, logs)"
-    robocopy $DataSrc $DestData /E /NFL /NDL /NJH /NJS /nc /ns /np `
-        /XD .cs2_config_backup .obs_config_backups logs `
-        /XF cs2-insight.config.json cs2-insight.db cs2-insight.db-wal cs2-insight.db-shm `
-        | Out-Null
-    if ($LASTEXITCODE -ge 8) { throw "robocopy data failed (exit $LASTEXITCODE)" }
+    Write-Step "Copy data/ configuration templates only"
+    # Never recursively copy writable data, recordings, caches or developer runtimes.
+    New-Item -ItemType Directory -Path $DestData -Force | Out-Null
+    foreach ($TemplateName in @('basic.ini', 'cs2-insight.config.example.json')) {
+        $TemplatePath = Join-Path $DataSrc $TemplateName
+        if (Test-Path -LiteralPath $TemplatePath -PathType Leaf) {
+            Copy-Item -LiteralPath $TemplatePath -Destination (Join-Path $DestData $TemplateName)
+        }
+    }
     if (-not (Test-Path (Join-Path $DestData "cs2-insight.config.example.json"))) {
         Write-Host "警告：打包结果缺少 data/cs2-insight.config.example.json（仓库 data 目录是否齐全？）" -ForegroundColor Yellow
     }
@@ -555,7 +583,7 @@ set "ROOT=%~dp0"
 
 where uv >nul 2>&1
 if errorlevel 1 (
-  echo [错误] 安装依赖需要 uv 0.11.x。
+  echo [错误] 安装依赖需要 uv 0.13.5+。
   pause
   exit /b 1
 )

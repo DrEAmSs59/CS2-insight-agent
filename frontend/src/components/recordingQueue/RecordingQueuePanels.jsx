@@ -24,6 +24,7 @@ import {
   isFreezeToDeathCompilation,
 } from "../../utils/freezeToDeathRoundFilter";
 import RecordingPlanPreview from "./RecordingPlanPreview";
+import RoundCompilationTiming from "./RoundCompilationTiming";
 import AiDirectorPreview from "./AiDirectorPreview";
 import { estimateItemRecordSeconds } from "../../utils/recordingQueueDerive";
 import { timelineQueueMetaOneLiner } from "../../utils/timelineQueue";
@@ -697,7 +698,11 @@ function QueueItemCard({
 
       {/* 可展开区：节奏微调 */}
       {pacingExpanded ? (
-        isClipPacingAndPovLocked(cd) ? (
+        isFreezeToDeathCompilation(cd) ? (
+          <div className="mt-2">
+            <RoundCompilationTiming item={item} updateItemPacing={updateItemPacing} />
+          </div>
+        ) : isClipPacingAndPovLocked(cd) ? (
           <p className="mt-2 rounded border border-cs2-amber-surface bg-cs2-amber-surface px-2 py-1.5 text-[10px] text-cs2-amber-on-surface">
             {isRoundTimelineRoundClip(cd)
               ? t("queue.pacingLockedTimeline")

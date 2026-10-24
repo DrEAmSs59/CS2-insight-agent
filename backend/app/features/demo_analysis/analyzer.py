@@ -1934,17 +1934,13 @@ class DemoAnalyzer:
             sorted(_round_end_evt_tick_map.keys()), _last_rnd_num, _terminal_play_round, _done_rounds,
         )
         for _c in clips:
+            if _c.compilation_kind == "freeze_to_death":
+                # Raw round facts are bounded only by the recording planner.
+                continue
             if _c.clip_max_tick is not None:
                 pass
             elif _c.category == "compilation":
-                _ck = str(getattr(_c, "compilation_kind", None) or "").strip()
-                if _ck == "freeze_to_death":
-                    _ld = getattr(_c, "death_tick", None)
-                    if _ld is not None and int(_ld) > 0:
-                        _c.clip_max_tick = int(_ld) + _last_kill_buf_ticks
-                        if _c.end_tick > _c.clip_max_tick:
-                            _c.end_tick = _c.clip_max_tick
-                elif _terminal_play_round is not None:
+                if _terminal_play_round is not None:
                     _rounds_src = getattr(_c, "source_rounds", None) or []
                     _kts = getattr(_c, "kill_ticks", None) or []
                     _last_match_evt: Optional[int] = None

@@ -1,5 +1,6 @@
 import { BACKEND_DEFAULT_PACING } from "../stores/recordingQueueStore";
 import { DEMO_TICK_RATE } from "./montageUtils";
+import { isFreezeToDeathCompilation } from "./freezeToDeathRoundFilter";
 
 /** @param {Record<string, unknown>} gp */
 function gNum(gp, key) {
@@ -69,8 +70,11 @@ const _KILLER_POV_POST_DEFAULT = 1.5;
  * @param {import("../stores/recordingQueueStore").RecordingQueueItem} item
  * @param {Record<string, unknown>} globalPacing
  */
-export function estimateItemRecordSeconds(item, globalPacing) {
+export function estimateItemRecordSeconds(item, globalPacing, roundPlan) {
   const clip = item.clipData || {};
+  if (isFreezeToDeathCompilation(clip)) {
+    return roundPlan?.status === "ready" ? roundPlan.plan.estimated_duration_sec : null;
+  }
   const po = item.pacing_override && typeof item.pacing_override === "object" ? item.pacing_override : {};
   const gp = globalPacing && typeof globalPacing === "object" ? globalPacing : {};
   const { pre_first_sec, post_last_sec, max_gap_sec } = mergedPacingForItem(item, globalPacing);
@@ -168,9 +172,10 @@ export function estimateItemRecordSeconds(item, globalPacing) {
  * @param {import("../stores/recordingQueueStore").RecordingQueueItem[]} queue
  * @param {Record<string, unknown>} globalPacing
  */
-export function estimateQueueTotalSeconds(queue, globalPacing) {
+export function estimateQueueTotalSeconds(queue, globalPacing, roundPlans = {}) {
   if (!queue?.length) return 0;
-  return queue.reduce((s, it) => s + estimateItemRecordSeconds(it, globalPacing), 0);
+  const durations = queue.map((it) => estimateItemRecordSeconds(it, globalPacing, roundPlans[it.id]));
+  return durations.every(Number.isFinite) ? durations.reduce((sum, value) => sum + value, 0) : null;
 }
 
 /** @param {import("../stores/recordingQueueStore").RecordingQueueItem[]} queue */

@@ -23,7 +23,11 @@ from app.features.lite_cut.project_file import (
 
 
 def test_lite_cut_router_exposes_linked_project_files_without_portable_package_routes():
-    paths = {getattr(route, "path", "") for route in api.router.routes}
+    from fastapi import FastAPI
+
+    app = FastAPI()
+    app.include_router(api.router)
+    paths = set(app.openapi()["paths"])
 
     assert "/api/lite-cut/assets/link" in paths
     assert "/api/lite-cut/assets/link-recording" in paths

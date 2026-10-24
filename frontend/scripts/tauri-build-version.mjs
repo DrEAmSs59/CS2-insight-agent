@@ -1,3 +1,5 @@
+import { requireSecureNode } from "./require-secure-node.mjs";
+requireSecureNode();
 import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync, rmSync } from "node:fs";
 import { homedir } from "node:os";

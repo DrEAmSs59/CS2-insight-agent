@@ -47,11 +47,13 @@ def project_output_settings(body: dict[str, Any], ref: dict[str, Any]) -> tuple[
         fps = float(output.get("fps") if output.get("fps") is not None else float(ref.get("fps") or OUTPUT_FPS_DEFAULT))
     except (TypeError, ValueError):
         fps = float(ref.get("fps") or OUTPUT_FPS_DEFAULT)
-    return (
-        integer_setting("width", int(ref.get("width") or OUTPUT_WIDTH_DEFAULT), OUTPUT_WIDTH_MIN, OUTPUT_WIDTH_MAX),
-        integer_setting("height", int(ref.get("height") or OUTPUT_HEIGHT_DEFAULT), OUTPUT_HEIGHT_MIN, OUTPUT_HEIGHT_MAX),
-        max(OUTPUT_FPS_MIN, min(OUTPUT_FPS_MAX, fps)),
-    )
+    width = integer_setting("width", int(ref.get("width") or OUTPUT_WIDTH_DEFAULT), OUTPUT_WIDTH_MIN, OUTPUT_WIDTH_MAX)
+    height = integer_setting("height", int(ref.get("height") or OUTPUT_HEIGHT_DEFAULT), OUTPUT_HEIGHT_MIN, OUTPUT_HEIGHT_MAX)
+    if width % 2 or height % 2:
+        from ...video_composer import MontageComposerError
+
+        raise MontageComposerError("LITECUT_EXPORT_RESOLUTION_INVALID", width=width, height=height)
+    return width, height, max(OUTPUT_FPS_MIN, min(OUTPUT_FPS_MAX, fps))
 
 
 def project_encoder_tier(body: dict[str, Any]) -> str:

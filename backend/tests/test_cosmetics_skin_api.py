@@ -940,3 +940,101 @@ def test_post_falls_back_to_one_shot_compat_when_baseline_cache_fails(
     assert response.status_code == 200
     assert order == ["baseline-failed", "fallback-compat", "rewrite"]
     assert seen_input is not None and not seen_input.exists()
+
+
+@pytest.mark.parametrize("loadout", [{"agent_t": 4619}, {"agent_ct": 5105}, {"agent_t": True}, {"music_kit": 999999}, {"model": "invisible"}])
+def test_invalid_player_loadout_preserves_demo(api_env, monkeypatch, loadout):
+    monkeypatch.setattr(cosmetics_skin, "run_rewrite_owned_batch", lambda **kw: pytest.fail("invalid loadout reached sidecar"))
+    before = api_env["cached"].read_bytes()
+    response = api_env["client"].post(f"/api/demos/{api_env['demo_id']}/cosmetics/custom-plan",
+        json={"steamid": STEAM_ID, "player_loadout": loadout})
+    assert response.status_code == 400
+    assert api_env["cached"].read_bytes() == before
+
+
+def test_loadout_only_save_reload_other_player_and_restore(api_env, monkeypatch):
+    calls = []
+    def rewrite(**kw):
+        calls.append(kw)
+        Path(kw["output_dem"]).write_bytes(Path(kw["input_dem"]).read_bytes() + kw["steam_id64"].encode())
+        return {"ok": True, "player_loadout_applied": True, "succeeded": [], "failed": []}
+    monkeypatch.setattr(cosmetics_skin, "run_rewrite_owned_batch", rewrite)
+    client = api_env["client"]
+    route = f"/api/demos/{api_env['demo_id']}/cosmetics/custom-plan"
+    original = api_env["original"].read_bytes()
+    loadout = {"agent_t": 5105, "agent_ct": 4619, "music_kit": 3}
+    first = client.post(route, json={"steamid": STEAM_ID, "player_loadout": loadout})
+    assert first.status_code == 200 and first.json()["ok"]
+    assert calls[-1]["items"] == [] and calls[-1]["player_loadout"] == loadout
+    assert client.get(route, params={"steamid": STEAM_ID}).json()["plan"]["player_loadout"] == loadout
+    second_id = "76561198000000002"
+    assert client.post(route, json={"steamid": second_id, "player_loadout": {"music_kit": 3}}).json()["ok"]
+    assert [r["steam_id64"] for r in calls[-2:]] == [STEAM_ID, second_id]
+    assert api_env["cached"].read_bytes() == original + STEAM_ID.encode() + second_id.encode()
+    assert client.post(route, json={"steamid": STEAM_ID, "player_loadout": {}}).json()["ok"]
+    assert api_env["cached"].read_bytes() == original + second_id.encode()
+    assert "player_loadout" not in client.get(route, params={"steamid": STEAM_ID}).json()["plan"]
+    assert api_env["original"].read_bytes() == original
+
+
+def test_loadout_requires_explicit_sidecar_confirmation(api_env, monkeypatch):
+    def old_core(**kw):
+        Path(kw["output_dem"]).write_bytes(b"not verified")
+        return {"ok": True, "items_rewritten": 0}
+    monkeypatch.setattr(cosmetics_skin, "run_rewrite_owned_batch", old_core)
+    before = api_env["cached"].read_bytes()
+    response = api_env["client"].post(f"/api/demos/{api_env['demo_id']}/cosmetics/custom-plan",
+        json={"steamid": STEAM_ID, "player_loadout": {"music_kit": 3}})
+    assert response.status_code == 502
+    assert api_env["cached"].read_bytes() == before
+
+
+def test_weapon_and_loadout_saves_preserve_each_other(api_env, monkeypatch):
+    calls = []
+    def rewrite(**kw):
+        calls.append(kw)
+        Path(kw["output_dem"]).write_bytes(b"BOTH")
+        return {"ok": True, "player_loadout_applied": True, "items_rewritten": len(kw["items"])}
+    monkeypatch.setattr(cosmetics_skin, "run_rewrite_owned_batch", rewrite)
+    client = api_env["client"]
+    route = f"/api/demos/{api_env['demo_id']}/cosmetics/custom-plan"
+    assert client.post(route, json={"steamid": STEAM_ID, "replacements": {"id:10": _replacement()}}).json()["ok"]
+    assert client.post(route, json={"steamid": STEAM_ID, "player_loadout": {"music_kit": 3}}).json()["ok"]
+    assert len(calls[-1]["items"]) == 1
+    assert calls[-1]["player_loadout"] == {"music_kit": 3}
+    assert client.post(route, json={"steamid": STEAM_ID, "replacements": {"id:10": _replacement()}}).json()["ok"]
+    assert calls[-1]["player_loadout"] == {"music_kit": 3}
+    assert client.post(route, json={"steamid": STEAM_ID, "player_loadout": {}}).json()["ok"]
+    assert len(calls[-1]["items"]) == 1 and not calls[-1].get("player_loadout")
+    plan = client.get(route, params={"steamid": STEAM_ID}).json()["plan"]
+    assert len(plan["items"]) == 1 and "player_loadout" not in plan
+
+
+def test_free_name_is_host_policy_for_new_and_replayed_plans(api_env, monkeypatch):
+    calls = []
+    def rewrite(**kw):
+        calls.append(kw)
+        Path(kw["output_dem"]).write_bytes(b"REWRITTEN")
+        return {"ok": True, "player_loadout_applied": True, "items_rewritten": len(kw["items"])}
+    monkeypatch.setattr(cosmetics_skin, "run_rewrite_owned_batch", rewrite)
+    route = f"/api/demos/{api_env['demo_id']}/cosmetics/custom-plan"
+    malicious = _replacement(custom_name="Override", attachments={"custom_name": ""})
+    response = api_env["client"].post(route, json={"steamid": STEAM_ID, "replacements": {"id:10": malicious}})
+    assert response.json()["ok"]
+    assert calls[-1]["items"][0]["attachments"] == {"custom_name": "CS2 INSIGHT AGENT"}
+    response = api_env["client"].post(route, json={"steamid": "76561198000000002", "player_loadout": {"music_kit": 3}})
+    assert response.json()["ok"]
+    assert calls[-2]["steam_id64"] == STEAM_ID
+    assert calls[-2]["items"][0]["attachments"] == {"custom_name": "CS2 INSIGHT AGENT"}
+
+
+def test_loadout_requires_explicit_sidecar_confirmation(api_env, monkeypatch):
+    def old_core(**kw):
+        Path(kw["output_dem"]).write_bytes(b"unverified")
+        return {"ok": True, "items_rewritten": 0}
+    monkeypatch.setattr(cosmetics_skin, "run_rewrite_owned_batch", old_core)
+    before = api_env["cached"].read_bytes()
+    response = api_env["client"].post(f"/api/demos/{api_env['demo_id']}/cosmetics/custom-plan",
+        json={"steamid": STEAM_ID, "player_loadout": {"music_kit": 3}})
+    assert response.status_code == 502
+    assert api_env["cached"].read_bytes() == before

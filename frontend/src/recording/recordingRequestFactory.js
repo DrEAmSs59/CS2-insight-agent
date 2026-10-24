@@ -1,3 +1,5 @@
+import { readRoundFacts, selectedRoundFacts, withoutLegacyRoundWindows } from "./roundCompilation";
+
 export const DEFAULT_RECORDING_OPTIONS = {
   highlight_pre_sec: 3.0,
   highlight_post_sec: 2.0,
@@ -14,6 +16,7 @@ export const DEFAULT_RECORDING_OPTIONS = {
   death_compilation_merge_gap_sec: 2.0,
   round_freeze_preroll_sec: 3.0,
   round_death_post_sec: 2.0,
+  round_alive_post_sec: 3.0,
   enable_victim_pov: false,
   interleave_pov_pairs: false,
   use_ai_director: false,
@@ -121,27 +124,6 @@ function buildSourceRef(clipData, queueItem) {
 
 function newRequestId() {
   return crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2);
-}
-
-function deriveNextRoundFreezeStart(round, clipData) {
-  const windows = clipData.freeze_to_death_round_windows || [];
-  const next = windows.find((w) => Number(w.round) === Number(round) + 1);
-  // Use the actual freeze_start_tick of the next round, NOT freeze_end_tick.
-  return next ? (next.freeze_start_tick ?? null) : null;
-}
-
-function deriveNextRoundFreezeEnd(round, clipData) {
-  const windows = clipData.freeze_to_death_round_windows || [];
-  const next = windows.find((w) => Number(w.round) === Number(round) + 1);
-  return next ? (next.freeze_end_tick ?? null) : null;
-}
-
-function deriveNextRoundStartTick(round, clipData) {
-  const windows = clipData.freeze_to_death_round_windows || [];
-  const next = windows.find((w) => Number(w.round) === Number(round) + 1);
-  // Use the real round_start_tick from the demo's round_start event (added by demo_parser).
-  // Fall back to start_tick (freeze_end - 8s) only when round_start_tick is unavailable.
-  return next ? (next.round_start_tick ?? next.start_tick ?? null) : null;
 }
 
 export function buildHighlightRecordingRequest(clipData, queueItem, matchMeta, options = {}) {
@@ -360,72 +342,38 @@ export function buildDeathCompilationRecordingRequest(clipData, queueItem, match
 }
 
 export function buildRoundCompilationRecordingRequest(clipData, queueItem, matchMeta, options = {}) {
-  const mergedOptions = { ...DEFAULT_RECORDING_OPTIONS, ...options };
-
-  // Old saved analyses may not have the real PBDEMS2 EOF. In that fallback case,
-  // derive enough headroom from the selected round windows. A real matchMeta EOF
-  // is authoritative and must never be enlarged by a derived round boundary.
-  const filter = clipData.freeze_to_death_round_filter;
-  const filterSet =
-    Array.isArray(filter) && filter.length > 0 ? new Set(filter.map(Number)) : null;
-  // demo_end_tick must give the backend headroom for the final round's tail:
-  //  - death window: end_tick is death+2s, round_end_tick is the real (later) round end
-  //  - alive window: end_tick ≈ real demo end (freeze+150s capped to demo_max)
-  // Take the larger of the two per window so an alive final round can linger 2s past
-  // round_end into the post-round. Falls back gracefully when round_end_tick is absent.
-  const maxRoundEndTick = (clipData.freeze_to_death_round_windows || [])
-    .filter((w) => filterSet === null || filterSet.has(Number(w.round)))
-    .reduce((mx, w) => Math.max(mx, Number(w.round_end_tick) || 0, Number(w.end_tick) || 0), 0);
-
-  const baseDemo = buildDemoContext(clipData, queueItem, matchMeta);
-  const hasRealDemoEndTick = Number(matchMeta?.demo_end_tick) > 0;
-  const demo = !hasRealDemoEndTick && maxRoundEndTick > 0
-    ? { ...baseDemo, demo_end_tick: Math.max(baseDemo.demo_end_tick, maxRoundEndTick) }
-    : baseDemo;
-
-  const targetSpecSlot = clipData.target_spec_slot ?? null;
-  const targetPlayer = buildTargetPlayer(queueItem.targetPlayer, queueItem.targetSteamId, targetSpecSlot);
+  const facts = readRoundFacts(clipData);
+  const selected = selectedRoundFacts(clipData, facts);
+  // Keep existing fallbacks for old saved analyses, without new recording gates.
+  // A real demo EOF always wins over legacy recording-window bounds.
+  const legacy = clipData.freeze_to_death_round_windows || [];
+  const demo = buildDemoContext(withoutLegacyRoundWindows(clipData), queueItem, matchMeta);
+  if (!(Number(matchMeta?.demo_end_tick) > 0)) {
+    const maxRoundEnd = selected.reduce((max, row) => Math.max(max,
+      Number(row.round_end_tick) || 0,
+      Number(legacy.find((w) => Number(w.round) === row.round)?.end_tick) || 0), 0);
+    demo.demo_end_tick = Math.max(demo.demo_end_tick, maxRoundEnd);
+  }
+  const rounds = selected.map((row) => {
+    const next = facts.find((candidate) => candidate.round === row.round + 1);
+    const old = legacy.find((w) => Number(w.round) === row.round);
+    const oldNext = legacy.find((w) => Number(w.round) === row.round + 1);
+    return {
+      round: row.round, round_start_tick: row.round_start_tick ?? old?.start_tick ?? null,
+      round_end_tick: row.round_end_tick, freeze_start_tick: null,
+      freeze_end_tick: row.freeze_end_tick,
+      next_round_start_tick: next?.round_start_tick ?? oldNext?.start_tick ?? null,
+      next_round_freeze_start_tick: oldNext?.freeze_start_tick ?? null,
+      next_round_freeze_end_tick: next?.freeze_end_tick ?? null,
+      target_death_tick: row.death_tick,
+    };
+  });
   return {
-    request_id: newRequestId(),
-    request_type: "round_compilation",
-    source_type: "round",
+    request_id: newRequestId(), request_type: "round_compilation", source_type: "round",
     demo,
-    target_player: targetPlayer,
-    events: [],
-    rounds: (() => {
-      // freeze_to_death_round_windows keeps ALL rounds so deriveNextRoundFreezeStart can
-      // look up consecutive rounds (e.g. round 6 when user only selected 4, 5, 9).
-      // filterSet is already computed above for demo_end_tick — reuse it here.
-      return (clipData.freeze_to_death_round_windows || [])
-        .filter((w) => filterSet === null || filterSet.has(Number(w.round)))
-        .map((w) => {
-          const nextStart = deriveNextRoundStartTick(w.round, clipData);
-          const nextFreezeStart = deriveNextRoundFreezeStart(w.round, clipData);
-          const nextFreezeEnd = deriveNextRoundFreezeEnd(w.round, clipData);
-          // round_end_tick must be the parser's real round-end tick, never a derived
-          // recording-window value (e.g. next_freeze_end - 5 s). Use null if unavailable
-          // so the backend Planner falls back to next_round_start_tick.
-          const roundEndTick = w.round_end_tick ?? null;
-          console.log(
-            `[RecordingV3][RoundDTO] round=${w.round} raw round_end=${roundEndTick} ` +
-            `next_start=${nextStart} next_freeze_start=${nextFreezeStart} next_freeze_end=${nextFreezeEnd}`
-          );
-          return {
-            round: w.round,
-            // round_start_tick: real freeze-phase start from the demo's round_start event.
-            // Falls back to start_tick (freeze_end - 8s) for older parsed data.
-            round_start_tick: w.round_start_tick ?? w.start_tick,
-            round_end_tick: roundEndTick,
-            freeze_start_tick: null,
-            freeze_end_tick: w.freeze_end_tick ?? null,
-            next_round_start_tick: nextStart,
-            next_round_freeze_start_tick: nextFreezeStart,
-            next_round_freeze_end_tick: nextFreezeEnd,
-            target_death_tick: w.death_tick ?? null,
-          };
-        });
-    })(),
-    options: mergedOptions,
+    target_player: buildTargetPlayer(queueItem.targetPlayer, queueItem.targetSteamId, clipData.target_spec_slot ?? null),
+    events: [], rounds,
+    options: { ...DEFAULT_RECORDING_OPTIONS, ...options },
     source_ref: buildSourceRef(clipData, queueItem),
   };
 }
