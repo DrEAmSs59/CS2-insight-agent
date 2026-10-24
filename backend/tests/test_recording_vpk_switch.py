@@ -9,8 +9,15 @@ from app.demo_voice_hud import DemoVoiceHudBuild, DemoVoiceHudError
 from app.env_utils import OBSConfig
 from app.obs_director import OBSDirector, RecordingWarmupExtras
 from app.pov_hud_manager import PovHudError, PovHudManager
-from app.recording import plan_builder
+from app.recording import plan_builder, obs_targets
 from app.recording.executor import obs_recording_controller
+
+
+@pytest.fixture(autouse=True)
+def isolate_target_parsing(monkeypatch):
+    # Entity resolution has separate integration coverage; these tests exercise
+    # VPK installation/restoration using synthetic plans without real Demo files.
+    monkeypatch.setattr(obs_targets, "prepare_obs_plan_targets", lambda plans, _: plans)
 
 
 @pytest.mark.parametrize("hud", [False, True])
@@ -26,7 +33,7 @@ def test_persistent_killfeed_groups_protagonists_and_preserves_requested_cuts(mo
     monkeypatch.setattr(pov_hud_manager, "PovHudManager", Manager)
     monkeypatch.setattr(pov_hud_manager, "restore_pov_after_cs2_exit", lambda *a, **k: {"verified": True})
     monkeypatch.setattr(obs_recording_controller, "OBSRecordingController", Controller)
-    monkeypatch.setattr(plan_builder, "build_plan", lambda dto: SimpleNamespace(segments=[
+    monkeypatch.setattr(plan_builder, "build_plan", lambda dto: SimpleNamespace(request_id=dto.request_id, segments=[
         SimpleNamespace(start_tick=int(dto.request_id)*100, end_tick=int(dto.request_id)*100+50, disabled=False),
         SimpleNamespace(start_tick=900, end_tick=999, disabled=True),
     ]))

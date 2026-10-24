@@ -10,9 +10,10 @@ import re
 from dataclasses import MISSING, fields
 from typing import Any, Optional
 
-from openai import APIConnectionError, APIError, APITimeoutError, AsyncOpenAI, RateLimitError
+from openai import APIConnectionError, APIError, APITimeoutError, AsyncOpenAI, DefaultAsyncHttpxClient, RateLimitError
 
 from .demo_parser import Clip, meme_series_badges_for_kd
+from .tls import public_ssl_context
 from .env_utils import LLMConfig, llm_base_url_is_local_host
 from .llm_compat import (
     ai_review_fallback_message,
@@ -201,7 +202,7 @@ class AIReviewer:
         if not key or key.startswith("****"):
             raise ValueError("AIReviewer: invalid or masked api_key")
         bu = normalize_llm_base_url((base_url or "").strip() or None)
-        self._client = AsyncOpenAI(api_key=key, base_url=bu, timeout=timeout_seconds)
+        self._client = AsyncOpenAI(api_key=key, base_url=bu, timeout=timeout_seconds, http_client=DefaultAsyncHttpxClient(verify=public_ssl_context()))
         self._model = (model_name or "").strip() or "gpt-4o-mini"
         self._base_url = bu
         self._timeout = timeout_seconds

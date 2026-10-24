@@ -66,7 +66,7 @@ from .pov_constants import (
 )
 from .obs_legacy_sources import cleanup_legacy_overlay_sources
 from .runtime_session import mark_runtime_cs2_launched
-from .win_cs2_console import ensure_cs2_foreground, find_cs2_hwnd, inject_console_sequence, send_cs2_space_taps
+from .win_cs2_console import ensure_cs2_foreground, find_cs2_hwnd, inject_obs_console_sequence as inject_console_sequence, send_cs2_space_taps
 
 logger = logging.getLogger(__name__)
 
@@ -3601,6 +3601,7 @@ class OBSDirector:
         legacy pipeline; only the per-segment recording loop is new.
         """
         from .recording.plan_builder import build_plan
+        from .recording.obs_targets import prepare_obs_plan_targets
         from .recording.executor.recording_executor import RecordingExecutor
         from .recording.executor.obs_client import OBSClient, OBSConnectionError
         from .recording.services.result_writer import write_result
@@ -3752,6 +3753,25 @@ class OBSDirector:
                 logger.info("[RecordingV3] Job %d/%d: %s (%d requests)",
                             job_idx + 1, len(demo_groups), demo_name, len(demo_requests))
                 self._check_abort()
+
+                # Resolve all active targets from the actual playback source before
+                # changing game files or launching CS2. Raw cached slots are not trusted.
+                try:
+                    valid_plans = [_plan_cache[dto.request_id] for dto in demo_requests
+                                   if _plan_cache.get(dto.request_id) is not None]
+                    resolved_plans = await asyncio.to_thread(prepare_obs_plan_targets, valid_plans, demo_abs)
+                    self._check_abort()
+                    for plan in resolved_plans:
+                        _plan_cache[plan.request_id] = plan
+                except RecordingAborted:
+                    raise
+                except Exception as exc:
+                    logger.error("[RecordingV3] OBS controller resolution failed: %s", exc)
+                    all_results.extend({
+                        "request_id": dto.request_id, "success": False,
+                        "error": str(exc), "segment_results": [], "warnings": [],
+                    } for dto in demo_requests)
+                    continue
 
                 # The speaking schedule is demo-specific. CS2 is stopped between
                 # groups, so restore/reinstall the package with this demo's data.
@@ -4045,6 +4065,7 @@ class OBSDirector:
                                     dto.request_id, dto.request_type.value)
                         try:
                             plan = build_plan(dto)
+                            plan = (await asyncio.to_thread(prepare_obs_plan_targets, [plan], demo_abs))[0]
                         except NormalizationError as e:
                             logger.warning("[RecordingV3] Normalization failed: %s", e)
                             all_results.append({

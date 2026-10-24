@@ -46,7 +46,7 @@ function crc32(bytes) {
 }
 
 function encodeInspectHex(attributes) {
-  const payload = CEconItemPreviewDataBlock.toBinary(attributes);
+  const payload = CEconItemPreviewDataBlock.toBinary(CEconItemPreviewDataBlock.create(attributes));
   const encoded = new Uint8Array(payload.length + 5);
   encoded[0] = 0;
   encoded.set(payload, 1);
@@ -127,7 +127,7 @@ export function buildCs2InspectLink(item) {
     keychains: keychain ? [keychain] : [],
   };
   if (typeof item?.custom_name === "string" && item.custom_name) {
-    attributes.customname = item.custom_name;
+    attributes.customnames = [item.custom_name];
   }
   const statTrak = optionalInteger(item?.stat_trak ?? item?.stattrak, { min: 0 });
   if (statTrak !== undefined) {

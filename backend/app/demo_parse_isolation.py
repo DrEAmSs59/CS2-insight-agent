@@ -126,6 +126,13 @@ def get_player_list_isolated(dem_path: str) -> list[dict]:
     return result
 
 
+def resolve_obs_targets_isolated(dem_path: str, targets: list[dict]) -> list[dict]:
+    result = run_parse_worker("obs_targets", dem_path=dem_path, targets=targets)
+    if not isinstance(result, list):
+        raise IsolatedParseError("OBS 玩家控制器 worker 返回了无效结果")
+    return result
+
+
 def get_demo_match_summary_isolated(dem_path: str) -> dict:
     result = run_parse_worker("summary", dem_path=dem_path)
     if not isinstance(result, dict):

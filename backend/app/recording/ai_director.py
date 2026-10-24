@@ -9,9 +9,10 @@ import os
 import re
 from typing import Any, Literal, Optional
 
-from openai import APIConnectionError, APIError, APITimeoutError, AsyncOpenAI, RateLimitError
+from openai import APIConnectionError, APIError, APITimeoutError, AsyncOpenAI, DefaultAsyncHttpxClient, RateLimitError
 from pydantic import BaseModel, Field, ValidationError, field_validator
 
+from ..tls import public_ssl_context
 from ..env_utils import LLMConfig, llm_api_key_configured, llm_base_url_is_local_host, load_config, resolve_config_path
 from ..llm_compat import completion_extra_body, completion_temperature, message_text, normalize_llm_base_url
 from .normalizer import NormalizedRequest
@@ -790,7 +791,7 @@ async def suggest_recording_outline(
 
     model = (cfg_llm.model or "").strip() or "gpt-4o-mini"
     base_url = normalize_llm_base_url(cfg_llm.base_url)
-    client = AsyncOpenAI(api_key=api_key, base_url=base_url, timeout=timeout_sec)
+    client = AsyncOpenAI(api_key=api_key, base_url=base_url, timeout=timeout_sec, http_client=DefaultAsyncHttpxClient(verify=public_ssl_context()))
 
     user_msg = (
         "请为以下击杀列表生成录制大纲 JSON。\n"

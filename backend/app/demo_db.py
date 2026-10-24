@@ -10,6 +10,8 @@ from typing import Any, Iterable, Literal, Optional
 
 import aiosqlite
 
+from .econ_item_ids import json_safe_item_id
+
 logger = logging.getLogger(__name__)
 
 DemoListFilters = dict[str, Any]
@@ -1626,7 +1628,7 @@ class DemoDB:
             for row in rows:
                 item = dict(row)
                 raw = item.pop("result_json", None)
-                item["result"] = json.loads(raw) if raw else None
+                item["result"] = json.loads(raw, object_hook=json_safe_item_id) if raw else None
                 out.append(item)
             players_by_id = await self._players_by_demo_id(
                 conn,
@@ -1750,7 +1752,7 @@ class DemoDB:
                     item = dict(row)
                     raw = item.pop("result_json", None)
                     try:
-                        item["result"] = json.loads(raw) if raw else None
+                        item["result"] = json.loads(raw, object_hook=json_safe_item_id) if raw else None
                         item["result_error"] = None
                     except (TypeError, ValueError) as exc:
                         item["result"] = None
@@ -1795,7 +1797,7 @@ class DemoDB:
             row = await cur.fetchone()
             if not row:
                 return None
-            return json.loads(str(row[0]))
+            return json.loads(str(row[0]), object_hook=json_safe_item_id)
 
     async def get_demo_by_id(self, demo_id: int) -> Optional[dict[str, Any]]:
         async with aiosqlite.connect(self.db_path) as conn:
@@ -1972,7 +1974,7 @@ class DemoDB:
         if not row:
             return None
         item = dict(row)
-        item["plan_json"] = json.loads(str(item["plan_json"]))
+        item["plan_json"] = json.loads(str(item["plan_json"]), object_hook=json_safe_item_id)
         return item
 
     async def list_custom_skin_plans_for_demo(
@@ -1998,7 +2000,7 @@ class DemoDB:
         out: list[dict[str, Any]] = []
         for row in rows:
             item = dict(row)
-            item["plan_json"] = json.loads(str(item["plan_json"]))
+            item["plan_json"] = json.loads(str(item["plan_json"]), object_hook=json_safe_item_id)
             out.append(item)
         return out
 

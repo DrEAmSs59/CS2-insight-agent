@@ -12,6 +12,14 @@ import {
 import { listDefaultLoadout } from "./cosmeticsCatalog.js";
 
 describe("cosmeticsLayout", () => {
+  test("keeps uint64 item IDs distinct and accepts old numeric cache entries", () => {
+    const id = "14204636884736196609";
+    expect(slotKey({ item_id: id })).toBe(`id:${id}`);
+    expect(teamSlotKey({ item_id: id }, "ct")).toBe(`ct:id:${id}`);
+    expect(slotKey({ item_id: "14204636884736196610" })).not.toBe(slotKey({ item_id: id }));
+    expect(slotKey({ item_id: Number(id) })).toBe("id:14204636884736196608");
+  });
+
   test("slotKey prefers item_id then stable fallback", () => {
     expect(slotKey({ item_id: 99, def_index: 7 })).toBe("id:99");
     expect(slotKey({ def_index: 7, paint_index: 282, paint_seed: 1, paint_wear: 0.2 }))

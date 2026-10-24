@@ -9,6 +9,9 @@ export const RUNTIME_FINGERPRINT_INPUTS = Object.freeze([
   "uv.lock",
   "packaging/demoparser-lean/demoparser-runtime.json",
   "packaging/windows/package_portable.ps1",
+  "packaging/windows/python-runtime.json",
+  "packaging/windows/verify_python_version.py",
+  "packaging/windows/prepare_python_stdlib.py",
   "frontend/scripts/runtime-fingerprint.mjs",
 ]);
 

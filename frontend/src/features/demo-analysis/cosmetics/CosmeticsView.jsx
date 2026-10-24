@@ -29,6 +29,7 @@ import Modal from "../../../components/ui/Modal";
 import Button from "../../../components/ui/Button";
 import { craftNameParts, formatCraftPipeName, imageUrlForWear, listDefaultLoadout } from "./cosmeticsCatalog.js";
 import { isCustomizable, itemsForTeam, mergeLoadoutWithEvidence, slotKey, sortCosmeticsForRow, teamSlotKey } from "./cosmeticsLayout.js";
+import PlayerLoadoutEditor, { loadoutCandidates } from "./PlayerLoadoutEditor.jsx";
 import SkinReplacementPicker from "./SkinReplacementPicker.jsx";
 import { saveCustomSkinPlan, loadCustomSkinPlan } from "./saveCustomSkinPlan.js";
 import {
@@ -66,8 +67,14 @@ function originalCustomName(item, snapshot, replacement = null) {
 }
 
 function planRowSlotKeys(row, inventory = []) {
-  const key = String(row?.slot_key || "").trim();
+  let key = String(row?.slot_key || "").trim();
   if (!key) return [];
+  const oldId = key.match(/^(?:(?:t|ct):)?id:(\d+)$/i)?.[1];
+  const originalKey = slotKey(row?.original);
+  if (oldId && originalKey.startsWith("id:")
+      && Number(oldId) === Number(row?.original?.item_id)) {
+    key = key.replace(/id:\d+$/, originalKey);
+  }
   const scopedTeam = key.match(/^(t|ct):/i)?.[1]?.toLowerCase() || null;
   const baseKey = scopedTeam ? key.replace(/^(?:t|ct):/i, "") : key;
   const keys = [];
@@ -1035,6 +1042,8 @@ export default function CosmeticsView({ workspace, selectedPlayer, locale = "zh"
   const [viewMode, setViewMode] = useState("browse");
   const [localReplacements, setLocalReplacements] = useState({});
   const [savedReplacements, setSavedReplacements] = useState({});
+  const [playerLoadout, setPlayerLoadout] = useState({});
+  const [savedLoadout, setSavedLoadout] = useState({});
   const [originalBySlot, setOriginalBySlot] = useState({});
   const [savedOriginals, setSavedOriginals] = useState({});
   const [pickerItem, setPickerItem] = useState(null);
@@ -1062,10 +1071,22 @@ export default function CosmeticsView({ workspace, selectedPlayer, locale = "zh"
   );
   const browseMode = viewMode === "browse";
   const hasReplacements = Object.keys(localReplacements).length > 0;
-  const canSavePlan = Boolean(demoId) && hasReplacements && !saving;
+  const loadoutChanged = JSON.stringify(playerLoadout) !== JSON.stringify(savedLoadout);
+  const canSavePlan = Boolean(demoId) && (hasReplacements || loadoutChanged) && !saving;
   const rewriteOperations = useMemo(
-    () => rewriteOperationRows(localReplacements, originalBySlot, inventory, locale),
-    [inventory, localReplacements, locale, originalBySlot],
+    () => {
+      const zh = String(locale).startsWith("zh");
+      const labels = { agent_t: zh ? "T 探员" : "T agent", agent_ct: zh ? "CT 探员" : "CT agent", music_kit: zh ? "音乐盒" : "Music kit" };
+      const loadoutRows = Object.keys(labels).filter(key => playerLoadout[key] !== savedLoadout[key]).map(key => {
+        const describe = value => {
+          const item = loadoutCandidates(key).find(row => (key === "music_kit" ? row.index : row.def) === value);
+          return (zh ? item?.nameZh : item?.nameEn) || (zh ? "Demo 原设置" : "Original demo setting");
+        };
+        return { key: `loadout:${key}`, from: `${labels[key]} · ${describe(savedLoadout[key])}`, to: describe(playerLoadout[key]) };
+      });
+      return [...rewriteOperationRows(localReplacements, originalBySlot, inventory, locale), ...loadoutRows];
+    },
+    [inventory, localReplacements, locale, originalBySlot, playerLoadout, savedLoadout],
   );
 
   const clearOverlays = () => {
@@ -1085,6 +1106,8 @@ export default function CosmeticsView({ workspace, selectedPlayer, locale = "zh"
     setViewMode("browse");
     setLocalReplacements({});
     setSavedReplacements({});
+    setPlayerLoadout({});
+    setSavedLoadout({});
     setOriginalBySlot({});
     setSavedOriginals({});
     setPickerItem(null);
@@ -1113,6 +1136,8 @@ export default function CosmeticsView({ workspace, selectedPlayer, locale = "zh"
         const seeded = replacementsFromPlan(data?.plan, inventory);
         const originals = originalsFromPlan(data?.plan, inventory);
         setSavedReplacements(seeded || {});
+        setPlayerLoadout(data?.plan?.player_loadout || {});
+        setSavedLoadout(data?.plan?.player_loadout || {});
         setLocalReplacements(seeded || {});
         setSavedOriginals(originals);
         setOriginalBySlot(originals);
@@ -1221,6 +1246,7 @@ export default function CosmeticsView({ workspace, selectedPlayer, locale = "zh"
   };
 
   const cancelCustomize = () => {
+    setPlayerLoadout({ ...savedLoadout });
     setLocalReplacements({ ...savedReplacements });
     setOriginalBySlot({ ...savedOriginals });
     clearOverlays();
@@ -1271,7 +1297,7 @@ export default function CosmeticsView({ workspace, selectedPlayer, locale = "zh"
   const savePlan = async (overrides = null) => {
     const replacementsToSave = overrides?.replacements || localReplacements;
     const originalsToSave = overrides?.originals || originalBySlot;
-    if (!demoId || !Object.keys(replacementsToSave).length || saving) return;
+    if (!demoId || (!Object.keys(replacementsToSave).length && !loadoutChanged) || saving) return;
     const requestedScope = planScope;
     setSaving(true);
     setNotice({ tone: "info", text: t("analysis.cosmetics.savingPlan") });
@@ -1281,6 +1307,7 @@ export default function CosmeticsView({ workspace, selectedPlayer, locale = "zh"
         steamid,
         replacements: replacementsForApi(replacementsToSave),
         originals: originalsToSave,
+        ...(loadoutChanged ? { playerLoadout } : {}),
       });
       // A batch demo can be switched while the rewrite request is in flight.
       // Never apply demo A's late result to the reused view for demo B.
@@ -1290,6 +1317,12 @@ export default function CosmeticsView({ workspace, selectedPlayer, locale = "zh"
         inventory,
         replacementsToSave,
       );
+      if (result?.ok && loadoutChanged) {
+        succeeded.push(...rewriteOperations.filter(row => row.key.startsWith("loadout:")).map(row => ({
+          slot_key: row.key, original_name_zh: row.from, original_name_en: row.from,
+          replacement_name_zh: row.to, replacement_name_en: row.to,
+        })));
+      }
       const failed = enrichSaveResultRows(
         Array.isArray(result?.failed) ? result.failed : [],
         inventory,
@@ -1314,6 +1347,8 @@ export default function CosmeticsView({ workspace, selectedPlayer, locale = "zh"
         // Prefer in-session first-seen originals over plan rows (inventory may already be the new skin).
         const originals = mergeOriginalsPreferExisting(fromPlan, originalsToSave);
         setSavedReplacements(seeded);
+        setPlayerLoadout(result?.plan?.player_loadout || {});
+        setSavedLoadout(result?.plan?.player_loadout || {});
         setSavedOriginals(originals);
         if (failed.length > 0) {
           // Keep succeeded overlays from the saved plan; only retain failed slots as
@@ -1483,6 +1518,8 @@ export default function CosmeticsView({ workspace, selectedPlayer, locale = "zh"
         <div className="mb-3 flex items-center gap-2 border border-cs2-border bg-cs2-bg-input px-3 py-2 text-[10px] text-cs2-text-muted"><WifiOff className="h-3.5 w-3.5" />{t("analysis.cosmetics.onlineAssetsOff")}</div>
       ) : null}
 
+      <PlayerLoadoutEditor key={planScope} value={playerLoadout} onChange={setPlayerLoadout}
+        editable={!browseMode && !saving} locale={locale} onlineAssetsEnabled={onlineAssetsEnabled} />
       <div className="space-y-[18px]" data-testid="cosmetics-team-stack">
         {[
           ["ct", ctItems],

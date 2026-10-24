@@ -13,6 +13,8 @@ from typing import Any
 
 from .features.demo_analysis.cs2_item_catalog import resolve_cs2_item, resolve_cs2_item_by_catalog_id
 
+from .econ_item_ids import JS_MAX_SAFE_INTEGER, json_safe_item_id
+
 logger = logging.getLogger(__name__)
 
 _ALLOWED_TYPES = frozenset({"melee", "glove", "weapon"})
@@ -43,6 +45,10 @@ def _js_number(value: Any) -> int | float:
 def _finite_item_id(item: Any) -> int | None:
     if not isinstance(item, dict):
         return None
+    value = item.get("item_id")
+    if isinstance(value, int) or (isinstance(value, str) and value.strip().isdigit()):
+        number = int(value)
+        return number if 0 < number < (1 << 64) else None
     try:
         num = float(item.get("item_id"))
     except (TypeError, ValueError):
@@ -250,6 +256,25 @@ def _normalized_team(value: Any) -> str | None:
     return None
 
 
+def _trusted_zero_id_sources(plan_json: dict[str, Any] | None) -> dict[str, dict[str, Any]]:
+    """Recover original weapon rows removed by a previously saved rewrite.
+
+    Only server-persisted, exactly matching scoped source keys are eligible.
+    Client originals are display snapshots, not proof that a source existed.
+    """
+    sources = {}
+    for entry in (plan_json or {}).get("items", []):
+        if not isinstance(entry, dict):
+            continue
+        key = str(entry.get("slot_key") or "").strip().lower()
+        team, base = _split_team_slot_key(key)
+        original = entry.get("original")
+        if (team and base.startswith("def:") and isinstance(original, dict)
+                and _finite_item_id(original) is None and slot_key(original) == base):
+            sources[key] = original
+    return sources
+
+
 def _entry_team(entry: dict[str, Any], original: dict[str, Any]) -> str | None:
     scoped, _ = _split_team_slot_key(entry.get("slot_key"))
     return scoped or _batch_team(original)
@@ -281,6 +306,56 @@ def _display_fields(row: dict[str, Any]) -> dict[str, Any]:
         if key in row:
             out[key] = row[key]
     return out
+
+
+def _restore_materialized_slots(replacements, originals, rows, trusted_plan):
+    """Rebase synthetic cache entities onto their server-recorded zero-ID source.
+
+    Rewrites start from the original demo. IDs created by a previous rewrite
+    exist only in its cache, so sending them to the core cannot find an owner.
+    Only a unique same-side inventory match backed by a saved plan is eligible.
+    """
+    aliases = {}
+    for entry in (trusted_plan or {}).get("items", []):
+        if not isinstance(entry, dict):
+            continue
+        original, applied = entry.get("original"), entry.get("replacement")
+        if not isinstance(original, dict) or not isinstance(applied, dict):
+            continue
+        team, base = _split_team_slot_key(entry.get("slot_key"))
+        if not team or not base.startswith(("placeholder:", "def:")) or _finite_item_id(original):
+            continue
+        candidates = [row for row in rows if isinstance(row, dict)
+                      and _finite_item_id(row) is not None
+                      and team.lower() in [str(side).lower() for side in (row.get("observed_teams") or [])]
+                      and row.get("type") == applied.get("type")
+                      and _js_number(row.get("def_index")) == _js_number(applied.get("def_index"))
+                      and _js_number(row.get("paint_index")) == _js_number(applied.get("paint_index"))
+                      and _js_number(row.get("paint_seed")) == _js_number(applied.get("paint_seed"))
+                      and abs(_js_number(row.get("paint_wear")) - _js_number(applied.get("paint_wear"))) < 0.00001]
+        if len(candidates) == 1:
+            aliases.setdefault((team, _finite_item_id(candidates[0])), []).append(entry)
+    normalized = dict(replacements)
+    for key, replacement in replacements.items():
+        team, base = _split_team_slot_key(key)
+        if not base.startswith("id:"):
+            continue
+        requested_id = _finite_item_id({"item_id": base[3:]})
+        matches = aliases.get((team, requested_id), [])
+        if not matches and requested_id and requested_id > JS_MAX_SAFE_INTEGER:
+            matches = [entry for (side, item_id), entries in aliases.items()
+                       if side == team and float(item_id) == float(requested_id)
+                       for entry in entries]
+        if len(matches) != 1:
+            continue
+        source = matches[0]
+        source_key = str(source["slot_key"])
+        normalized.pop(key)
+        # A visible synthetic alias is the user's current edit; it supersedes
+        # the same plan's hidden original-slot entry rather than duplicating it.
+        normalized[source_key] = replacement
+        originals[source_key] = source["original"]
+    return normalized
 
 
 def build_batch_and_plan(
@@ -326,6 +401,8 @@ def build_batch_and_plan(
         if isinstance(value, dict)
     }
     trusted_scoped_keys = _trusted_scoped_slot_keys(trusted_plan)
+    trusted_zero_id_sources = _trusted_zero_id_sources(trusted_plan)
+    replacements = _restore_materialized_slots(replacements, originals_by_key, rows, trusted_plan)
 
     batch_items: list[dict[str, Any]] = []
     plan_entries: list[dict[str, Any]] = []
@@ -335,11 +412,29 @@ def build_batch_and_plan(
             raise CosmeticsSkinPlanError(f"invalid replacement for slot {key!r}")
         scoped_team, base_key = _split_team_slot_key(key)
         inventory_row = by_key.get(base_key)
+        # Old browser sessions rendered uint64 IDs through Number.toString().
+        # Resolve that lossy key only if one owned inventory identity matches.
+        # The batch always uses the server's exact ID, never the rounded input.
+        if inventory_row is None and base_key.startswith("id:"):
+            legacy_id = _finite_item_id({"item_id": base_key[3:]})
+            if legacy_id is not None and legacy_id > JS_MAX_SAFE_INTEGER:
+                matches = [row for row in by_key.values()
+                           if (exact_id := _finite_item_id(row)) is not None
+                           and float(exact_id) == float(legacy_id)]
+                if len(matches) == 1:
+                    inventory_row = matches[0]
         client_original = (
             originals_by_key.get(str(key))
             or originals_by_key.get(base_key)
             or {}
         )
+        if inventory_row is None:
+            restored_source = trusted_zero_id_sources.get(str(key).strip().lower())
+            if restored_source is not None:
+                # The cache now contains a synthetic item ID, but every save
+                # rewrites the library original where this source still has ID 0.
+                inventory_row = restored_source
+                client_original = restored_source
         if inventory_row is None and base_key.startswith("placeholder:"):
             try:
                 source_def = int(
@@ -436,6 +531,10 @@ def build_batch_and_plan(
         if team:
             batch_item["team"] = team
 
+        if item_type in {"weapon", "melee"}:
+            # The sidecar has no edition-specific branding policy.
+            batch_item["attachments"] = {"custom_name": "CS2 INSIGHT AGENT"}
+
         batch_items.append(batch_item)
 
         if client_original:
@@ -458,8 +557,8 @@ def build_batch_and_plan(
         plan_entries.append(
             {
                 "slot_key": str(key),
-                "original": plan_original,
-                "replacement": plan_replacement,
+                "original": json_safe_item_id(plan_original),
+                "replacement": json_safe_item_id(plan_replacement),
             }
         )
 
@@ -682,3 +781,25 @@ def map_item_statuses(
             mapped["error"] = str(err).strip()
         out.append(mapped)
     return out
+
+
+def validate_player_loadout(value: Any) -> dict[str, int]:
+    """Official cosmetics only; agent slots are strictly same-team."""
+    from .features.demo_analysis.cs2_item_catalog import load_cs2_item_catalog
+    if not isinstance(value, dict) or set(value) - {"agent_t", "agent_ct", "music_kit"}:
+        raise CosmeticsSkinPlanError("invalid player_loadout")
+    catalog = load_cs2_item_catalog()["items"].values()
+    result = {}
+    for field, number in value.items():
+        if isinstance(number, bool) or not isinstance(number, int) or number <= 0:
+            raise CosmeticsSkinPlanError(f"invalid {field}")
+        if field == "music_kit":
+            valid = any(row.get("type") == "musickit" and row.get("paint") == number for row in catalog)
+        else:
+            team = 0 if field == "agent_t" else 1
+            valid = any(row.get("type") == "agent" and row.get("def") == number
+                        and row.get("teams") == team for row in catalog)
+        if not valid:
+            raise CosmeticsSkinPlanError(f"unsupported or wrong-team {field}")
+        result[field] = number
+    return result

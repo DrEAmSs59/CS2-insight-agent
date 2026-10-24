@@ -14,9 +14,10 @@ import os
 import re
 from typing import Any, Callable, Literal, Optional
 
-from openai import APIConnectionError, APIError, APITimeoutError, AsyncOpenAI, RateLimitError
+from openai import APIConnectionError, APIError, APITimeoutError, AsyncOpenAI, DefaultAsyncHttpxClient, RateLimitError
 from pydantic import BaseModel, Field, ValidationError
 
+from .tls import public_ssl_context
 from .env_utils import LLMConfig, llm_base_url_is_local_host
 from .llm_compat import completion_extra_body, completion_temperature, message_text, normalize_llm_base_url
 from .obs_tuning import ObsTuningGoal
@@ -168,7 +169,7 @@ async def review_tuning_plan(
         }
 
     base_url = normalize_llm_base_url(llm.base_url)
-    client = client_factory(api_key=key, base_url=base_url, timeout=timeout_seconds)
+    client = client_factory(api_key=key, base_url=base_url, timeout=timeout_seconds, http_client=DefaultAsyncHttpxClient(verify=public_ssl_context()))
     user_message = "请评估以下 OBS 录制目标：\n" + json.dumps(
         _sanitized_payload(goal, discovery, recommendation),
         ensure_ascii=False,

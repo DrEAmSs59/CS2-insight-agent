@@ -35,6 +35,10 @@ def _analyze_with_keyboard_probe(dem_path: str, analyze: Callable[[], _T]) -> tu
 
 def _run(payload: dict) -> object:
     action = str(payload.get("action") or "")
+    if action == "obs_targets":
+        from app.recording.obs_targets import resolve_obs_targets
+
+        return resolve_obs_targets(str(payload["dem_path"]), payload["targets"])
     if action == "radar_timeline":
         args = {k: v for k, v in payload.items() if k != "action"}
         return extract_radar_timeline_impl(**args)

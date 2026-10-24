@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 
 [CmdletBinding()]
 param(
@@ -44,7 +44,7 @@ function Remove-DemoparserInstall {
 }
 
 & $UvExe --version
-if ($LASTEXITCODE -ne 0) { throw "uv 0.11.x is required. Install uv and retry." }
+if ($LASTEXITCODE -ne 0) { throw "uv 0.13.5+ is required. Install uv and retry." }
 & $UvExe sync --project $repoRoot --frozen
 if ($LASTEXITCODE -ne 0) { throw "Installing the locked backend environment with uv failed." }
 
