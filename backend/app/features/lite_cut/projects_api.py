@@ -7,7 +7,7 @@ from pydantic import BaseModel
 
 from .models import LiteCutProjectCreate, LiteCutProjectPatch
 from .proxy_api import _stop_preview_proxy_job
-from .repositories import DbProjectRepository
+from .repositories import DbProjectRepository, DbAssetRepository
 from .runtime import get_lite_cut_db
 from .service_http import service_call
 from .services import ProjectAssetStorage, ProjectService, preset_asset_warnings
@@ -17,7 +17,7 @@ router = APIRouter(prefix="/api/lite-cut", tags=["lite-cut-projects"])
 
 def _project_service() -> ProjectService:
     projects = DbProjectRepository(get_lite_cut_db())
-    return ProjectService(projects, ProjectAssetStorage(projects, _stop_preview_proxy_job))
+    return ProjectService(projects, ProjectAssetStorage(projects, _stop_preview_proxy_job), DbAssetRepository(get_lite_cut_db()))
 
 
 # Project CRUD endpoints intentionally stay independent from the linked
@@ -45,7 +45,7 @@ async def list_lite_cut_projects(
 
 @router.post("/projects")
 async def create_lite_cut_project(body: LiteCutProjectCreate):
-    return await service_call(_project_service().create(name=body.name, body=body.body))
+    return await service_call(_project_service().create(name=body.name, body=body.body, duplicate_from=body.duplicate_from))
 
 
 @router.get("/projects/{project_id}")

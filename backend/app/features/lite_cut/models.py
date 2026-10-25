@@ -468,6 +468,7 @@ class LiteCutPresetPatch(BaseModel):
 
 
 class LiteCutProjectCreate(BaseModel):
+    duplicate_from: Optional[int] = Field(default=None, gt=0)
     name: str = Field(default="", max_length=240)
     body: Optional[dict[str, Any]] = None
 

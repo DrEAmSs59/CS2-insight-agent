@@ -272,6 +272,7 @@ export const useLiteCutEditorStore = create((set, get) => ({
       const copyName = `${sourceName || "LiteCut"} Copy`;
       const data = await liteCutClient.createProject({
         name: copyName,
+        duplicate_from: id,
         body: normalizeLiteCutBody(sourceBody).body,
       });
       sessionStorage.setItem(SESSION_PROJECT_KEY, String(data.id));

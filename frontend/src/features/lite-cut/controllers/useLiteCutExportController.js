@@ -85,7 +85,10 @@ export function useLiteCutExportController({
     setExportJob(null);
     publishExportPhase("running", { progress: 0, stage: "queued" });
     try {
-      if (dirty) await saveProject();
+      if (dirty) {
+        const saved = await saveProject();
+        if (!saved?.ok) throw new Error("项目保存失败，请重试后导出");
+      }
       const result = await startLiteCutExport({
         projectId,
         body: useLiteCutEditorStore.getState().body,

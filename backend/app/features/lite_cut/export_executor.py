@@ -89,7 +89,10 @@ async def prepare_export(
     try:
         output_path = await asyncio.to_thread(unique_output_path, body.output_path, reserved=reserved_paths)
         await asyncio.to_thread(ensure_ffmpeg_runnable, ffmpeg_bin)
-        source_paths = project_file_paths(project_body, clip_paths.values())
+        source_paths = project_file_paths({"clips": [
+            *export_plan.base_clips, *export_plan.video_layers,
+            *export_plan.transition_layers, *export_plan.audio_events,
+        ]}, clip_paths.values())
         source_bytes = await asyncio.to_thread(ensure_files_readable, source_paths)
         await asyncio.to_thread(
             ensure_lite_cut_audio_command_length,

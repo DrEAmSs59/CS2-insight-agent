@@ -85,3 +85,31 @@ def test_direct_render_plan_cannot_bypass_resolution_validation():
     with pytest.raises(MontageComposerError) as error:
         build_lite_cut_export_plan(project(1155, 900))
     assert error.value.code == "LITECUT_EXPORT_RESOLUTION_INVALID"
+
+
+@pytest.mark.parametrize("track_type,hidden,muted,excluded", [
+    ("video", True, True, True), ("video", False, False, False),
+    ("audio", False, False, False), ("audio", False, True, True),
+])
+def test_export_only_checks_media_used_by_render_plan(tmp_path, monkeypatch, track_type, hidden, muted, excluded):
+    from fastapi import HTTPException
+    body = project(1920, 1080)
+    media = tmp_path / "video.mp4"
+    media.write_bytes(b"media")
+    body["tracks"][0]["clips"][0]["file_path"] = str(media)
+    body["tracks"].append({"id":"optional", "type":track_type, "hidden":hidden, "muted":muted,
+        "clips":[{"id":"unused", "source_type":"file", "file_path":str(tmp_path / ("missing.mp3" if track_type == "audio" else "missing.mp4")), "trim_out":3}]})
+    monkeypatch.setattr(export_executor, "load_config", lambda: SimpleNamespace(ffmpeg_path="ffmpeg.exe", montage_encoder="auto"))
+    monkeypatch.setattr(export_executor, "resolve_ffmpeg_binary", lambda _: Path("ffmpeg.exe"))
+    monkeypatch.setattr(export_executor, "ensure_ffmpeg_runnable", lambda _: None)
+    monkeypatch.setattr(export_executor, "ensure_lite_cut_audio_command_length", lambda **kw: None)
+    monkeypatch.setattr(export_executor, "ensure_output_space", lambda *args: None)
+    async def run():
+        return await export_executor.prepare_export(export_api.LiteCutExportBody(body=body, output_path=str(tmp_path / "out.mp4")),
+            projects=None, montage_db=None, active_jobs={}, resolve_encoder=lambda *a: "auto")
+    if excluded:
+        assert asyncio.run(run())["project_body"]
+    else:
+        with pytest.raises(HTTPException) as error:
+            asyncio.run(run())
+        assert error.value.detail["code"] == "MONTAGE_CLIP_FILE_MISSING"

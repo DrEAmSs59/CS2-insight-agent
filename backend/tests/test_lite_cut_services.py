@@ -117,3 +117,43 @@ def test_http_routes_do_not_own_database_file_copy_or_ffmpeg_execution():
         "zipfile.ZipFile",
     )
     assert all(token not in source for token in forbidden)
+
+
+def test_duplicate_owns_media_after_original_is_deleted(tmp_path, monkeypatch):
+    from pathlib import Path
+    from app.features.lite_cut.db import LiteCutDB
+    from app.features.lite_cut.models import empty_project
+    from app.features.lite_cut.services import ProjectAssetStorage
+    from app.features.lite_cut import assets
+    root = tmp_path / "assets"
+    root.mkdir()
+    media = root / "original.mp4"
+    media.write_bytes(b"managed media")
+    linked = tmp_path / "external.wav"
+    linked.write_bytes(b"external audio")
+    monkeypatch.setattr(assets, "lite_cut_assets_dir", lambda: root)
+    monkeypatch.setattr("app.file_quarantine.get_data_dir", lambda: tmp_path)
+    db = LiteCutDB(tmp_path / "db.sqlite")
+    projects, asset_repo = DbProjectRepository(db), DbAssetRepository(db)
+    service = ProjectService(projects, ProjectAssetStorage(projects, AsyncMock()), asset_repo)
+    async def run():
+        await db.init_tables()
+        original = await service.create(name="Original", body=None)
+        asset_id = await db.create_asset(name="video", kind="video", project_id=original["id"], file_path=str(media))
+        audio_id = await db.create_asset(name="audio", kind="audio", project_id=original["id"], file_path=str(linked), storage_mode="link")
+        body = empty_project().model_dump(mode="json", by_alias=True)
+        body["tracks"][0]["clips"] = [{"id":"clip", "source_type":"file", "file_path":str(media), "trim_out":2, "meta":{"asset_id":asset_id}}]
+        body["audio"]["bgm"] = {"path":str(linked), "asset_id":audio_id}
+        copied = await service.create(name="Copy", body=body, duplicate_from=original["id"])
+        await service.delete(original["id"])
+        reopened = await LiteCutDB(db.db_path).get_project(copied["id"])
+        clip = reopened["body"]["tracks"][0]["clips"][0]
+        assert clip["meta"]["asset_id"] != asset_id
+        assert Path(clip["file_path"]).read_bytes() == b"managed media"
+        assert (await db.get_asset(clip["meta"]["asset_id"]))["project_id"] == copied["id"]
+        assert linked.read_bytes() == b"external audio"
+        assert not media.exists()
+        await service.delete(copied["id"])
+        assert not Path(clip["file_path"]).exists()
+        assert linked.read_bytes() == b"external audio"
+    asyncio.run(run())
