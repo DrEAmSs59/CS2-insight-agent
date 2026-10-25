@@ -12,6 +12,7 @@ import { useT } from "../../i18n/useT.js";
  *   onClear: () => void,
  *   disabledStart: boolean,
  *   obsConfigured: boolean,
+ *   experimentalPanel?: import("react").ReactNode,
  * }} props
  */
 export default function RecordingControlDock({
@@ -24,6 +25,7 @@ export default function RecordingControlDock({
   onClear,
   disabledStart,
   obsConfigured,
+  experimentalPanel = null,
 }) {
   const t = useT();
 
@@ -42,34 +44,35 @@ export default function RecordingControlDock({
   const startDisabled = disabledStart;
 
   return (
-    <div data-testid="recording-control-dock" className="flex shrink-0 flex-wrap items-center justify-between gap-2">
-      <div
-        data-testid="recording-control-status-tray"
-        className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-1 rounded-lg border border-cs2-border bg-cs2-bg-card px-3 py-2 font-mono text-[11px] text-cs2-text-muted"
-      >
-        <span className="inline-flex items-center gap-1">
-          <Layers className="h-3 w-3 text-cs2-text-muted" />
-          <span className="text-cs2-text-muted">{t("queue.dockTasks")}</span>
-          <span className="tabular-nums text-cs2-text-secondary">{queueLength}</span>
-        </span>
-        <span className="inline-flex items-center gap-1">
-          <Timer className="h-3 w-3 text-cs2-text-muted" />
-          <span className="text-cs2-text-muted">{t("queue.dockEst")}</span>
-          <span className="tabular-nums text-cs2-text-secondary">{estLabel}</span>
-        </span>
-        <span className="inline-flex items-center gap-1">
-          <span
-            className={`h-1.5 w-1.5 rounded-full ${batchRecording ? "animate-pulse bg-emerald-400" : "bg-zinc-600"}`}
-          />
-          {statusLabel}
-        </span>
-      </div>
+    <div data-testid="recording-control-dock" className="flex shrink-0 flex-col gap-2">
+      {experimentalPanel ? <div className="w-full">{experimentalPanel}</div> : null}
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div
+          data-testid="recording-control-status-tray"
+          className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-1 rounded-lg border border-cs2-border bg-cs2-bg-card px-3 py-2 font-mono text-[11px] text-cs2-text-muted"
+        >
+          <span className="inline-flex items-center gap-1">
+            <Layers className="h-3 w-3 text-cs2-text-muted" />
+            <span className="text-cs2-text-muted">{t("queue.dockTasks")}</span>
+            <span className="tabular-nums text-cs2-text-secondary">{queueLength}</span>
+          </span>
+          <span className="inline-flex items-center gap-1">
+            <Timer className="h-3 w-3 text-cs2-text-muted" />
+            <span className="text-cs2-text-muted">{t("queue.dockEst")}</span>
+            <span className="tabular-nums text-cs2-text-secondary">{estLabel}</span>
+          </span>
+          <span className="inline-flex items-center gap-1">
+            <span
+              className={`h-1.5 w-1.5 rounded-full ${batchRecording ? "animate-pulse bg-emerald-400" : "bg-zinc-600"}`}
+            />
+            {statusLabel}
+          </span>
+        </div>
 
-      <div
-        data-testid="recording-control-action-tray"
-        className="flex min-w-[300px] max-w-full flex-wrap items-center justify-between gap-2.5 p-2"
-      >
-        <div className="flex flex-col items-end gap-0.5">
+        <div
+          data-testid="recording-control-action-tray"
+          className="flex min-w-[300px] max-w-full flex-wrap items-center justify-between gap-2.5 p-2"
+        >
           <button
             type="button"
             disabled={startDisabled}
@@ -79,25 +82,25 @@ export default function RecordingControlDock({
             <Play className="h-3.5 w-3.5" />
             {t("queue.btnStartRecording")}
           </button>
+          <button
+            type="button"
+            disabled={!batchRecording || abortRequested}
+            onClick={() => void onAbort()}
+            className="inline-flex items-center gap-1 rounded-md border border-cs2-border px-3.5 py-2 text-[12px] font-semibold text-cs2-text-secondary transition-colors hover:border-red-500/40 hover:text-cs2-red-on-surface disabled:cursor-not-allowed disabled:opacity-30"
+          >
+            <Square className="h-3.5 w-3.5" />
+            {t("queue.btnStop")}
+          </button>
+          <button
+            type="button"
+            disabled={queueLength === 0 || batchRecording}
+            onClick={() => onClear()}
+            className="inline-flex items-center gap-1 rounded-md border border-cs2-border px-3.5 py-2 text-[12px] font-semibold text-cs2-text-muted transition-colors hover:border-red-500/35 hover:text-cs2-red-on-surface disabled:opacity-30"
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+            {t("queue.btnClear")}
+          </button>
         </div>
-        <button
-          type="button"
-          disabled={!batchRecording || abortRequested}
-          onClick={() => void onAbort()}
-          className="inline-flex items-center gap-1 rounded-md border border-cs2-border px-3.5 py-2 text-[12px] font-semibold text-cs2-text-secondary transition-colors hover:border-red-500/40 hover:text-cs2-red-on-surface disabled:cursor-not-allowed disabled:opacity-30"
-        >
-          <Square className="h-3.5 w-3.5" />
-          {t("queue.btnStop")}
-        </button>
-        <button
-          type="button"
-          disabled={queueLength === 0 || batchRecording}
-          onClick={() => onClear()}
-          className="inline-flex items-center gap-1 rounded-md border border-cs2-border px-3.5 py-2 text-[12px] font-semibold text-cs2-text-muted transition-colors hover:border-red-500/35 hover:text-cs2-red-on-surface disabled:opacity-30"
-        >
-          <Trash2 className="h-3.5 w-3.5" />
-          {t("queue.btnClear")}
-        </button>
       </div>
     </div>
   );

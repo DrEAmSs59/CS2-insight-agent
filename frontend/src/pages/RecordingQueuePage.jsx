@@ -13,6 +13,7 @@ import QueueWorkspaceRow from "../components/recordingQueue/QueueWorkspaceRow";
 import QueueInspectorPanel from "../components/recordingQueue/QueueInspectorPanel";
 import QueueGlobalPacingPanel from "../components/recordingQueue/QueueGlobalPacingPanel";
 import RecordingControlDock from "../components/recordingQueue/RecordingControlDock";
+import ExperimentalNrPanel from "../components/recordingQueue/ExperimentalNrPanel";
 import RecordingQueueEmptyState from "../components/recordingQueue/RecordingQueueEmptyState";
 import PageContainer from "../components/PageContainer";
 import { Search } from "lucide-react";
@@ -31,6 +32,73 @@ export default function RecordingQueuePage() {
   const [dropTargetIndex, setDropTargetIndex] = useState(null);
   const [query, setQuery] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("all");
+
+  // 实验性：游戏内神经重画（仅 A 卡，耗时超长）。开关存量在 localStorage，开录前先做环境校验。
+  const [experimentalNr, setExperimentalNr] = useState(() => {
+    try {
+      return localStorage.getItem("cs2insight.experimentalNr") === "1";
+    } catch {
+      return false;
+    }
+  });
+  const [experimentalStatus, setExperimentalStatus] = useState(/** @type {{ state: string, data?: any, message?: string }} */ ({ state: "idle" }));
+  const [experimentalRunning, setExperimentalRunning] = useState(false);
+  const [experimentalStartedAt, setExperimentalStartedAt] = useState(/** @type {number | null} */ (null));
+  const [experimentalResult, setExperimentalResult] = useState(
+    /** @type {null | { ok: boolean, message?: string, finalOutput?: string, output?: string, logPath?: string }} */ (null),
+  );
+
+  const checkExperimentalEnv = useCallback(async () => {
+    setExperimentalStatus({ state: "checking" });
+    try {
+      // prepare 会顺带确保 CIAP Pro 录制后端在线（实验档依赖它的 HLAE 抓帧）
+      const { data } = await API.post("/recording/experimental-nr/prepare", {}, { timeout: 90000 });
+      if (data?.available) {
+        setExperimentalStatus({ state: "ready", data });
+      } else {
+        const missing = Array.isArray(data?.missing) ? data.missing : [];
+        setExperimentalStatus({
+          state: "unsupported",
+          data,
+          message: missing.length ? `${t("queue.expMissing")}: ${missing.join(", ")}` : "",
+        });
+      }
+      return data;
+    } catch (error) {
+      setExperimentalStatus({ state: "error", message: error?.message || String(error) });
+      return null;
+    }
+  }, [t]);
+
+  const handleExperimentalNrChange = useCallback(
+    (next) => {
+      setExperimentalNr(next);
+      setExperimentalResult(null);
+      try {
+        localStorage.setItem("cs2insight.experimentalNr", next ? "1" : "0");
+      } catch {
+        /* ignore quota errors */
+      }
+      if (next) void checkExperimentalEnv();
+      else setExperimentalStatus({ state: "idle" });
+    },
+    [checkExperimentalEnv],
+  );
+
+
+  useEffect(() => {
+    if (!experimentalNr) return undefined;
+    let cancelled = false;
+    void (async () => {
+      if (cancelled) return;
+      await checkExperimentalEnv();
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // 只在首次挂载时自动探测一次；用户点「重新检测」走 checkExperimentalEnv
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // OBS 配置状态：与首页 /api/config/quick-check 一致，后端判断 host + password + port > 0
   const [obsConfigured, setObsConfigured] = useState(false);
@@ -75,6 +143,93 @@ export default function RecordingQueuePage() {
     () => (selectedId ? queue.find((q) => q.id === selectedId) ?? null : null),
     [queue, selectedId]
   );
+
+  // 实验档要一个 demo + tick 窗口，直接从「回合合集」的预览计划里取（与后端 planner 同一份 DTO）。
+  const experimentalPlan = useMemo(() => {
+    if (!experimentalNr || !selectedItem) return null;
+    const preview = roundPlans?.[selectedItem.id];
+    const planData = preview?.plan;
+    const segment = Array.isArray(planData?.active_segments) ? planData.active_segments[0] : null;
+    if (!segment || !Number.isFinite(segment.start_tick) || !Number.isFinite(segment.end_tick)) return null;
+    const demoPath = planData?.demo_path || selectedItem.demoPath;
+    if (!demoPath) return null;
+    return {
+      demoPath,
+      demoFile: planData?.demo_file || demoPath.split(/[\\/]/).pop() || "",
+      startTick: segment.start_tick,
+      endTick: segment.end_tick,
+    };
+  }, [experimentalNr, selectedItem, roundPlans]);
+
+  const experimentalPlanStatus = useMemo(() => {
+    if (!experimentalNr || !selectedItem) return "missing";
+    const preview = roundPlans?.[selectedItem.id];
+    if (preview?.status === "loading") return "loading";
+    if (preview?.status === "error") return "error";
+    return experimentalPlan ? "ready" : "missing";
+  }, [experimentalNr, selectedItem, roundPlans, experimentalPlan]);
+
+  const runExperimentalCapture = useCallback(async () => {
+    if (!experimentalPlan) {
+      setExperimentalResult({ ok: false, message: t("queue.expPlanMissing") });
+      return null;
+    }
+    setExperimentalRunning(true);
+    setExperimentalStartedAt(Date.now());
+    setExperimentalResult(null);
+    try {
+      const { data } = await API.post(
+        "/recording/experimental-nr/start",
+        {
+          demo_path: experimentalPlan.demoPath,
+          start_tick: experimentalPlan.startTick,
+          end_tick: experimentalPlan.endTick,
+          dry_run: false,
+          postprocess: true,
+        },
+        { timeout: 3600000 },
+      );
+      setExperimentalResult({
+        ok: Boolean(data?.ok),
+        message: data?.message || data?.reason || "",
+        finalOutput: data?.final_output || data?.postprocess?.output || "",
+        output: data?.output || "",
+        logPath: data?.log_path || "",
+      });
+      return data;
+    } catch (error) {
+      setExperimentalResult({
+        ok: false,
+        message: error?.response?.data?.detail || error?.message || String(error),
+      });
+      return null;
+    } finally {
+      setExperimentalRunning(false);
+      setExperimentalStartedAt(null);
+    }
+  }, [experimentalPlan, t]);
+
+  const handleStartRecording = useCallback(async () => {
+    if (!experimentalNr) {
+      s.openBatchWarmup();
+      return;
+    }
+    const data = experimentalStatus?.state === "ready" ? experimentalStatus.data : await checkExperimentalEnv();
+    if (!data?.available) return;
+    if (experimentalPlanStatus !== "ready") {
+      setExperimentalResult({ ok: false, message: t("queue.expPlanMissing") });
+      return;
+    }
+    await runExperimentalCapture();
+  }, [
+    experimentalNr,
+    experimentalStatus,
+    checkExperimentalEnv,
+    experimentalPlanStatus,
+    runExperimentalCapture,
+    s,
+    t,
+  ]);
 
   const filteredQueue = useMemo(() => {
     const needle = query.trim().toLocaleLowerCase();
@@ -285,12 +440,27 @@ export default function RecordingQueuePage() {
         queueLength={queue.length}
         totalEstimateSec={totalEstimateSec}
         batchRecording={s.batchRecording}
-        onStart={s.openBatchWarmup}
+        onStart={handleStartRecording}
         onAbort={s.handleAbortBatchRecording}
         abortRequested={s.recordingAbortRequested}
         onClear={handleClear}
         disabledStart={queue.length === 0 || s.batchRecording}
         obsConfigured={obsConfigured}
+        experimentalPanel={
+          <ExperimentalNrPanel
+            enabled={experimentalNr}
+            onToggle={handleExperimentalNrChange}
+            disabled={s.batchRecording || experimentalRunning}
+            status={experimentalStatus}
+            onCheck={checkExperimentalEnv}
+            plan={experimentalPlan}
+            planStatus={experimentalPlanStatus}
+            running={experimentalRunning}
+            startedAt={experimentalStartedAt}
+            result={experimentalResult}
+            onRun={runExperimentalCapture}
+          />
+        }
       />
     </div>
     </PageContainer>
