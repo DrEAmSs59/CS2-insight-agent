@@ -1533,7 +1533,7 @@ def test_drawtext_filter_uses_center_anchor_and_escapes_text():
         enable_expr="between(t,1,4)",
     )
     assert "drawtext=" in fc
-    assert "A\\:B\\'s 100\\%" in fc
+    assert r"A\:B'\\\''s 100\%" in fc
     assert "x='(w-text_w)/2'" in fc
     assert "y='(h-text_h)/2'" in fc
     assert "s=1248x194" in fc
@@ -1554,6 +1554,55 @@ def test_drawtext_filter_preserves_text_newlines_for_ffmpeg():
     )
     assert "CLUTCH\nTETE" in fc
     assert "CLUTCHnTETE" not in fc
+
+
+@pytest.mark.parametrize("content", [
+    "what's",
+    "he knows exactly what's waiting for them.\n他好像知道A大会有很多人。",
+    "'Players' say ''go''",
+])
+def test_drawtext_apostrophes_render_identically_to_literal_text_file(content, tmp_path):
+    ffmpeg = shutil.which("ffmpeg")
+    if not ffmpeg:
+        pytest.skip("FFmpeg is required for subtitle rendering regression")
+
+    graph = _drawtext_filter_complex(
+        text_clip={
+            "type": "text",
+            "duration": 0.1,
+            "text": {"content": content, "font_family": "Noto Sans SC", "font_size": 20},
+        },
+        enable_expr="between(t,0,0.1)",
+        canvas_width=960,
+        canvas_height=240,
+        fps=10,
+    )
+    # textfile bypasses inline escaping and supplies the literal reference glyphs.
+    text_file = tmp_path / "subtitle.txt"
+    text_file.write_bytes(content.encode("utf-8"))
+    text_path = str(text_file).replace("\\", "/").replace(":", "\\:")
+    before_text, text_and_options = graph.split(":text=", 1)
+    _, after_text = text_and_options.split(":fontsize=", 1)
+    reference_graph = f"{before_text}:textfile='{text_path}':fontsize={after_text}"
+
+    def render(filter_graph):
+        result = subprocess.run(
+            [
+                ffmpeg, "-hide_banner", "-loglevel", "error",
+                "-f", "lavfi", "-i", "color=black:s=960x240:r=10:d=0.1",
+                "-filter_complex", filter_graph, "-map", "[vout]",
+                "-frames:v", "1", "-pix_fmt", "rgb24", "-f", "rawvideo", "-",
+            ],
+            capture_output=True,
+            timeout=20,
+        )
+        assert result.returncode == 0, result.stderr.decode("utf-8", errors="replace")
+        return result.stdout
+
+    reference = render(reference_graph)
+    assert len(reference) == 960 * 240 * 3
+    assert any(reference)
+    assert render(graph) == reference
 
 
 @pytest.mark.parametrize(("align", "expected_x"), [("left", "0"), ("center", "(w-text_w)/2"), ("right", "w-text_w")])
