@@ -48,6 +48,60 @@ from .player_aliases import prepare_recording_aliases
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/recording", tags=["recording"])
 
+
+class ExperimentalNrStartBody(BaseModel):
+    demo_path: str = ""
+    output_path: str = ""
+    start_tick: Optional[int] = None
+    end_tick: Optional[int] = None
+    dry_run: bool = True
+    postprocess: bool = True
+    luma_lock: bool = True
+
+
+@router.get("/experimental-nr/status")
+def experimental_nr_status():
+    """实验档（HLAE + ReShade/OpenNR 抓帧）环境探测。"""
+    from ..experimental_nr_capture import probe_environment
+
+    return probe_environment()
+
+
+@router.post("/experimental-nr/prepare")
+def experimental_nr_prepare():
+    """确保录制后端（CIAP Pro）在线，然后返回实验档环境探测结果。"""
+
+    from ..experimental_nr_capture import ensure_pro_agent, probe_environment
+
+    pro = ensure_pro_agent()
+    status = probe_environment()
+    status["pro"] = pro
+    return status
+
+
+@router.post("/experimental-nr/start")
+def experimental_nr_start(body: ExperimentalNrStartBody):
+    """启动实验档抓帧；缺资源时返回 missing 列表而不是静默失败。"""
+    from pathlib import Path as _Path
+
+    from ..experimental_nr_capture import start_capture
+
+    demo = _Path(body.demo_path) if body.demo_path else None
+    if demo is None or not demo.is_file():
+        raise HTTPException(status_code=400, detail="EXPERIMENTAL_NR_DEMO_MISSING")
+    out = _Path(body.output_path) if body.output_path else demo.with_name(demo.stem + "_nr_capture.mp4")
+    ticks = None
+    if body.start_tick is not None and body.end_tick is not None:
+        ticks = (int(body.start_tick), int(body.end_tick))
+    return start_capture(
+        demo=demo,
+        output_path=out,
+        ticks=ticks,
+        dry_run=bool(body.dry_run),
+        postprocess=bool(body.postprocess),
+        luma_lock=bool(body.luma_lock),
+    )
+
 # ── Lazy singleton for the shared cs2-insight.db ────────────────────────────
 _montage_db: Optional[MontageDB] = None
 
