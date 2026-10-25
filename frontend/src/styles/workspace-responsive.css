@@ -261,31 +261,56 @@
 .analysis-subnav {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  border-bottom: 1px solid var(--cs2-border-subtle);
+  gap: 6px;
 }
 
 .analysis-subnav > button {
-  position: relative;
-  min-height: 42px;
-  padding-inline: 14px;
-  color: var(--cs2-text-muted);
-  font-size: 11px;
-  font-weight: 800;
-}
-
-.analysis-subnav > button:hover,
-.analysis-subnav > button[data-active="true"] {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 36px;
+  padding: 6px 10px;
+  border: 1px solid var(--cs2-border);
+  border-radius: var(--cs2-radius-control);
+  background: var(--cs2-bg-input);
   color: var(--cs2-text-primary);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background-color 150ms, border-color 150ms, color 150ms;
 }
 
-.analysis-subnav > button[data-active="true"]::after {
-  position: absolute;
-  right: 8px;
-  bottom: -1px;
-  left: 8px;
-  height: 2px;
-  background: var(--cs2-accent);
-  content: "";
+.analysis-subnav > button:hover {
+  border-color: var(--cs2-accent);
+  background: var(--cs2-bg-hover);
+}
+
+.analysis-subnav > button[data-active="true"] {
+  border-color: var(--cs2-accent);
+  background: var(--cs2-accent-soft);
+  color: var(--orange-11);
+}
+
+.analysis-subnav > button:focus-visible {
+  outline: 2px solid var(--cs2-accent);
+  outline-offset: 2px;
+}
+
+.analysis-round-recording-hint {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 5px;
+  margin-top: 6px;
+  color: var(--cs2-red-on-surface);
+  text-align: right;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.analysis-round-recording-hint strong {
+  font-weight: 800;
 }
 
 .analysis-filterbar {

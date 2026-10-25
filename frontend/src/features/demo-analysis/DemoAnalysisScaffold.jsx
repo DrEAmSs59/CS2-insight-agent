@@ -5,6 +5,8 @@ import {
   Check,
   ChevronDown,
   CircleDollarSign,
+  CircleAlert,
+  Crosshair,
   Film,
   Flame,
   Gem,
@@ -339,12 +341,17 @@ function HighlightWorkspaceToolbar({
         </div>
         <div className="min-w-[360px] sm:min-w-[420px]">
           <div className="analysis-subnav">
-            {[["clips", "analysis.tabClips"], ["rounds", "analysis.tabTimeline"], ["weapons", "analysis.tabWeaponKills"]].map(([key, labelKey]) => (
-              <button key={key} type="button" data-active={activeHighlightView === key ? "true" : "false"} onClick={() => setActiveHighlightView(key)}>
-                {t(labelKey)}
+            {[["clips", "analysis.tabClips", Film], ["rounds", "analysis.tabTimeline", Activity], ["weapons", "analysis.tabWeaponKills", Crosshair]].map(([key, labelKey, Icon]) => (
+              <button key={key} type="button" aria-pressed={activeHighlightView === key} data-active={activeHighlightView === key ? "true" : "false"} onClick={() => setActiveHighlightView(key)}>
+                <Icon className="h-4 w-4 shrink-0" aria-hidden="true" />
+                <span>{t(labelKey)}</span>
               </button>
             ))}
           </div>
+          <p className="analysis-round-recording-hint">
+            <CircleAlert className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+            <span>{t("analysis.roundRecordingHint")}<strong>{t("analysis.roundRecordingHintStrong")}</strong>{t("analysis.roundRecordingHintSuffix")}</span>
+          </p>
         </div>
       </div>
       {aiMode && activeHighlightView === "clips" && (playerAiReviewing || playerAiReviewed) ? (
