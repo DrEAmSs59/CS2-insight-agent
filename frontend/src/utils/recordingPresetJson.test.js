@@ -17,6 +17,14 @@ const preset = {
 };
 
 describe("recording preset share JSON", () => {
+  test("caps the old 20-second pre-roll while retaining the other imported parameters", () => {
+    const file = buildRecordingPresetFile({ ...preset, recording_global_pacing: {
+      pre_first_sec: 20, post_last_sec: 10, max_gap_sec: 2,
+    } });
+    expect(parseRecordingPresetFile(file, RECORD_WARMUP_DEFAULT_OPTIONS).recording_global_pacing)
+      .toEqual({ pre_first_sec: 10, post_last_sec: 10, max_gap_sec: 2 });
+  });
+
   test("round trips a valid preset", () => {
     const file = buildRecordingPresetFile(preset, "2026-07-03T00:00:00.000Z");
     expect(parseRecordingPresetFile(file, RECORD_WARMUP_DEFAULT_OPTIONS)).toEqual(preset);

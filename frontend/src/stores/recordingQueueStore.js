@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { limitRecordingPacing } from "../utils/recordingPacing.js";
 
 /**
  * @typedef {Object} PacingOverride
@@ -164,6 +165,7 @@ export const useRecordingQueue = create((set, get) => ({
         ...it,
         id: it.id || newId(),
         clientClipUid: it.clientClipUid || it.clipData?.client_clip_uid || "",
+        ...(it.pacing_override ? { pacing_override: limitRecordingPacing(it.pacing_override) } : {}),
       };
       return applyEnqueuePovDefaults(base, gp);
     });
@@ -217,10 +219,10 @@ export const useRecordingQueue = create((set, get) => ({
         const prev = q.pacing_override && typeof q.pacing_override === "object" ? q.pacing_override : {};
         return {
           ...q,
-          pacing_override: {
+          pacing_override: limitRecordingPacing({
             ...prev,
             ...pacingConfig,
-          },
+          }),
         };
       }),
     }));
@@ -233,7 +235,7 @@ export const useRecordingQueue = create((set, get) => ({
   setGlobalPacing(partial) {
     if (!partial || typeof partial !== "object") return;
     set((s) => ({
-      globalPacing: { ...s.globalPacing, ...partial },
+      globalPacing: limitRecordingPacing({ ...s.globalPacing, ...partial }),
     }));
   },
 
@@ -246,7 +248,7 @@ export const useRecordingQueue = create((set, get) => ({
   setPresetPacing(partial) {
     if (!partial || typeof partial !== "object") return;
     set((s) => ({
-      presetPacing: { ...s.presetPacing, ...partial },
+      presetPacing: limitRecordingPacing({ ...s.presetPacing, ...partial }),
     }));
   },
 
@@ -300,16 +302,14 @@ export const useRecordingQueue = create((set, get) => ({
    */
   hydrateGlobalPacing(obj) {
     set({
-      globalPacing:
-        obj && typeof obj === "object" && !Array.isArray(obj) ? { ...obj } : {},
+      globalPacing: limitRecordingPacing(obj),
     });
   },
 
   /** 从配置文件载入「设置 → 录制预设」的节奏默认值。 */
   hydratePresetPacing(obj) {
     set({
-      presetPacing:
-        obj && typeof obj === "object" && !Array.isArray(obj) ? { ...obj } : {},
+      presetPacing: limitRecordingPacing(obj),
     });
   },
 

@@ -3,6 +3,7 @@ import { ChevronDown, ChevronRight, Download, Loader2, Save, Upload, X } from "l
 import { OptionRow, RECORD_WARMUP_DEFAULT_OPTIONS } from "./RecordWarmupModal";
 import ExperimentalPovSection from "./ExperimentalPovSection";
 import { BACKEND_DEFAULT_PACING, useRecordingQueue } from "../stores/recordingQueueStore";
+import { MAX_EVENT_PREROLL_SECONDS } from "../utils/recordingPacing.js";
 import Cs2LaunchConsoleFields from "./Cs2LaunchConsoleFields";
 import { POV_CONFLICT_HUD, RecordingHudCard } from "./RecordingHudCard";
 import {
@@ -139,6 +140,7 @@ function PacingSlider({
   onCommit,
   accentClass = "accent-cs2-orange",
 }) {
+  const clamp = (n) => Math.min(max, Math.max(min, n));
   const range = Math.max(Number(max) - Number(min), 0);
   const progress = range > 0
     ? Math.min(100, Math.max(0, ((Number(value) - Number(min)) / range) * 100))
@@ -160,7 +162,7 @@ function PacingSlider({
           step={step}
           disabled={disabled}
           value={value}
-          onChange={(e) => onCommit(parseFloat(e.target.value))}
+          onChange={(e) => onCommit(clamp(parseFloat(e.target.value)))}
           className="cs2-data-slider min-w-0 flex-1 disabled:cursor-not-allowed disabled:opacity-40"
           style={{
             "--cs2-range-progress": `${progress}%`,
@@ -171,11 +173,12 @@ function PacingSlider({
           type="number"
           step={step}
           min={min}
+          max={max}
           disabled={disabled}
           value={value}
           onChange={(e) => {
             const n = parseFloat(e.target.value);
-            if (Number.isFinite(n)) onCommit(n);
+            if (Number.isFinite(n)) onCommit(clamp(n));
           }}
           className="w-20 rounded-lg border border-cs2-border bg-cs2-bg-input px-2.5 py-1.5 font-mono text-xs text-cs2-text-primary outline-none focus:border-cs2-accent disabled:opacity-40 text-right"
         />
@@ -641,7 +644,7 @@ export default function CommonParamsModal({
               <PacingSlider
                 label={t("record.commonPacingPreSlider")}
                 min={0}
-                max={20}
+                max={MAX_EVENT_PREROLL_SECONDS}
                 step={0.1}
                 value={pre}
                 disabled={batchRecording}

@@ -1,9 +1,10 @@
-import { render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import API from "../api/api";
 import { useLocaleStore } from "../i18n/localeStore.js";
 import CommonParamsModal from "./CommonParamsModal.jsx";
+import { useRecordingQueue } from "../stores/recordingQueueStore";
 
 vi.mock("../api/api", () => ({
   default: {
@@ -46,6 +47,22 @@ describe("CommonParamsModal recording preset layout", () => {
     vi.clearAllMocks();
     API.get.mockReturnValue(new Promise(() => {}));
     useLocaleStore.getState().hydrate("zh");
+    useRecordingQueue.setState({ presetPacing: {} });
+  });
+
+  it("limits the pre-roll slider and numeric entry to ten seconds", () => {
+    setDesktopLayout(false);
+    renderPresetPage();
+    const name = "击杀段/死亡段前预留 (秒)";
+    const field = within(screen.getByText(name).closest("label"));
+    const slider = field.getByRole("slider");
+    const number = field.getByRole("spinbutton");
+    expect(slider.max).toBe("10");
+    expect(number.max).toBe("10");
+    expect(slider.value).toBe("2");
+    fireEvent.change(number, { target: { value: "20" } });
+    expect(useRecordingQueue.getState().presetPacing.pre_first_sec).toBe(10);
+    expect(number.value).toBe("10");
   });
 
   it("keeps the two preset-only sections on top and matches warmup order below", () => {

@@ -13,6 +13,7 @@ import {
 } from "./recordingWeatherEffect.js";
 import { isPovVoiceMode, normalizePovVoiceMode } from "./povVoiceMode.js";
 import { isInputHudPosition, normalizeInputHudPosition } from "./inputHudPlacement.js";
+import { limitRecordingPacing } from "./recordingPacing.js";
 
 export const RECORDING_PRESET_FORMAT = "cs2-insight-recording-preset";
 export const RECORDING_PRESET_VERSION = 7;
@@ -21,7 +22,7 @@ export const RECORDING_PRESET_MAX_BYTES = 256 * 1024;
 const isObject = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
 
 const PACING_NUMBER_RANGES = {
-  pre_first_sec: [0, 20],
+  pre_first_sec: [0, 20], // Accept legacy shares, then apply the current padding cap.
   post_last_sec: [0, 10],
   max_gap_sec: [2, 70],
   victim_pov_pre_sec: [0, 5],
@@ -67,7 +68,7 @@ function parsePacing(value) {
   for (const key of PACING_BOOLEAN_KEYS) {
     if (Object.hasOwn(value, key)) result[key] = requireBoolean(value[key], `recording_global_pacing.${key}`);
   }
-  return result;
+  return limitRecordingPacing(result);
 }
 
 function parseWarmup(value, defaults) {

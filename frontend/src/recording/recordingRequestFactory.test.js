@@ -70,6 +70,18 @@ describe("recording demo EOF metadata", () => {
 describe("kill/death pre/post padding", () => {
   const pacing = { pre_first_sec: 4, post_last_sec: 0.8 };
 
+  test("caps legacy per-item padding at submission while keeping post-roll and gap", () => {
+    const request = buildDtoFromQueueItem({
+      ...queueItem,
+      clipData: { category: "fail", death_tick: 10_000, round: 1, tick_rate: 64 },
+      pacing_override: { pre_first_sec: 20, post_last_sec: 10, max_gap_sec: 2 },
+    }, matchMeta, { pre_first_sec: 3 });
+    expect(request.options.death_pre_sec).toBe(10);
+    expect(request.options.death_post_sec).toBe(10);
+    expect(request.options.kill_compilation_pre_sec).toBe(10);
+    expect(request.options.kill_compilation_jump_cut_threshold_sec).toBe(2);
+  });
+
   test("maps shared padding onto fail and death compilation options", () => {
     const fail = buildDtoFromQueueItem(
       {

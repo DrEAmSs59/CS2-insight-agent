@@ -10,6 +10,7 @@ import {
   OctagonX,
 } from "lucide-react";
 import { useRecordingQueue, BACKEND_DEFAULT_PACING, clipHasNoKillerPovTags, clipKillerPovEnqueueEligible } from "../../stores/recordingQueueStore";
+import { MAX_EVENT_PREROLL_SECONDS } from "../../utils/recordingPacing.js";
 import {
   formatClipCombatSummaryLine,
   isTimelineSourceClip,
@@ -149,7 +150,7 @@ export function PacingMicroPanel({ item, updateItemPacing, embedded = false }) {
             label={t("record.commonPacingPreSlider")}
             value={pre}
             min={0}
-            max={20}
+            max={MAX_EVENT_PREROLL_SECONDS}
             step={0.1}
             onChange={(n) => commit({ pre_first_sec: n })}
           />
@@ -486,7 +487,7 @@ export function GlobalPacingPanel({
           label={t("record.commonPacingPreSlider")}
           value={pre}
           min={0}
-          max={20}
+          max={MAX_EVENT_PREROLL_SECONDS}
           step={0.1}
           onChange={(n) => commit({ pre_first_sec: n })}
         />
