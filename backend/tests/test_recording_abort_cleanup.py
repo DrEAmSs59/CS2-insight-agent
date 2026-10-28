@@ -87,7 +87,7 @@ def test_abort_before_cs2_launch_runs_final_cleanup_and_returns_aborted(monkeypa
             },
         }
     ]
-    assert cleanup_calls == ["obs", "cs2_and_config", "artifacts"]
+    assert cleanup_calls == ["cs2_and_config", "artifacts"]
 
 
 def test_executor_promotes_segment_abort_to_request_result():
@@ -260,7 +260,7 @@ def test_unexpected_cs2_exit_runs_recovery_cleanup_and_returns_dedicated_code(
             },
         }
     ]
-    assert cleanup_calls == ["obs", "cs2_and_config", "artifacts"]
+    assert cleanup_calls == ["cs2_and_config", "artifacts"]
 
 
 @pytest.mark.parametrize("restore_verified", [True, False])

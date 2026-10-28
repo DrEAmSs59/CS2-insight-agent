@@ -126,6 +126,7 @@ async def lifespan(_: FastAPI):
 
     await demo_db.init_db()
     await montage_db.init_tables()
+    await montage_db.recover_interrupted_exports()
     await lite_cut_db.init_tables()
     from .features.demo_analysis.replay_cache_storage import ensure_replay_cache_owner_index
 
@@ -173,7 +174,12 @@ async def lifespan(_: FastAPI):
                 abort_event.set()
             from .features.lite_cut.api import shutdown_lite_cut_jobs
 
-            await shutdown_lite_cut_jobs(timeout_sec=5.0)
+            from .montage_export_runtime import shutdown_montage_export_jobs
+
+            await asyncio.gather(
+                shutdown_lite_cut_jobs(timeout_sec=5.0),
+                shutdown_montage_export_jobs(timeout_sec=5.0),
+            )
             if application_state.demo_watcher is not None:
                 await application_state.demo_watcher.stop()
             await replay_cache_index_task
@@ -276,7 +282,12 @@ async def app_shutdown():
     abort_event = get_queue_abort_event()
     if abort_event is not None:
         abort_event.set()
-    jobs_clean = await shutdown_lite_cut_jobs(timeout_sec=8.0)
+    from .montage_export_runtime import shutdown_montage_export_jobs
+
+    jobs_clean = all(await asyncio.gather(
+        shutdown_lite_cut_jobs(timeout_sec=8.0),
+        shutdown_montage_export_jobs(timeout_sec=8.0),
+    ))
     if application_state.demo_watcher is not None:
         await application_state.demo_watcher.stop()
 
@@ -293,7 +304,8 @@ async def app_shutdown():
         await asyncio.to_thread(_write_recovery_marker, reason)
 
     # Delay until the HTTP response has been handed back to the desktop shell.
-    loop.call_later(0.25, request_server_shutdown)
+    if safe_to_exit:
+        loop.call_later(0.25, request_server_shutdown)
     return {
         "safe_to_exit": safe_to_exit,
         "jobs_clean": jobs_clean,

@@ -775,7 +775,7 @@ class LiteCutDB:
         """Rewrite every persisted LiteCut path after the storage tree was copied."""
         old = old_root.expanduser().resolve(strict=False)
         new = new_root.expanduser().resolve(strict=False)
-        counts = {"assets": 0, "projects": 0, "presets": 0, "exports": 0}
+        counts = {"assets": 0, "projects": 0, "presets": 0, "exports": 0, "project_snapshots": 0}
         async with aiosqlite.connect(self.db_path) as conn:
             conn.row_factory = aiosqlite.Row
 
@@ -796,6 +796,7 @@ class LiteCutDB:
 
             for table, id_column, path_columns in (
                 ("lite_cut_projects", "id", ("body_json",)),
+                ("lite_cut_project_snapshots", "id", ("body_json",)),
                 ("lite_cut_presets", "id", ("body_json", "thumb_path")),
                 ("lite_cut_exports", "id", ("body_json", "output_path")),
             ):

@@ -256,6 +256,7 @@ async def _persist_v3_results(
             continue
         output_path = (r.get("output_path") or "").strip()
         if not output_path:
+            r.update(success=False, error="Recording output path is missing")
             continue
 
         dto = dto_by_id.get(r.get("request_id") or "")
@@ -321,6 +322,7 @@ async def _persist_v3_results(
                 clip_meta.get("source_rounds", []),
             )
         except Exception:
+            r.update(success=False, error="Recording finished, but saving it to the library failed")
             logger.exception(
                 "[RecordingV3] recorded_clips insert failed clip_id=%s path=%s",
                 clip_id, output_path,
@@ -469,9 +471,13 @@ async def execute_recording(
     global _queue_abort_event
     abort_ev = asyncio.Event()
     _queue_abort_event = abort_ev
+    executor = None
     try:
         try:
-            obs_client.connect()
+            await asyncio.to_thread(obs_client.connect)
+            status = await asyncio.to_thread(obs_client.get_record_status)
+            if status["outputActive"]:
+                raise HTTPException(409, "OBS is already recording; stop that recording before starting Insight")
         except OBSConnectionError as e:
             raise HTTPException(status_code=503, detail=f"OBS connection failed: {e}")
 
@@ -487,6 +493,9 @@ async def execute_recording(
         )
         result = await executor.execute(plan)
     finally:
+        if executor is not None:
+            await executor.stop_owned_recording()
+        await asyncio.to_thread(obs_client.disconnect)
         if _queue_abort_event is abort_ev:
             _queue_abort_event = None
 
@@ -586,11 +595,13 @@ async def execute_recording_queue(
     # only to discover OBS is down.
     try:
         _pre_obs_client = OBSClient(obs_cfg)
-        _pre_obs_client.connect()
+        await asyncio.to_thread(_pre_obs_client.connect)
         try:
-            _pre_obs_client.disconnect()
-        except Exception:
-            pass
+            status = await asyncio.to_thread(_pre_obs_client.get_record_status)
+            if status["outputActive"]:
+                raise HTTPException(409, "OBS is already recording. Stop that recording before starting Insight.")
+        finally:
+            await asyncio.to_thread(_pre_obs_client.disconnect)
         logger.info("[RecordingV3] OBS pre-check: connection OK")
     except OBSConnectionError as e:
         raise HTTPException(

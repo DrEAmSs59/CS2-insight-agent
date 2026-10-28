@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from datetime import UTC, datetime
@@ -2186,6 +2187,21 @@ class DemoDB:
                 WHERE watch_root = ? AND path NOT IN (SELECT path FROM _tmp_existing_paths)
                 """,
                 (watch_root,),
+            )
+            # Absence from a depth-limited scan is not evidence of deletion.
+            candidates = await (await conn.execute("SELECT id, path FROM _tmp_missing_demo_ids")).fetchall()
+            def retained_ids():
+                retained = []
+                for demo_id, path in candidates:
+                    try:
+                        Path(path).stat()
+                    except FileNotFoundError:
+                        continue
+                    retained.append((demo_id,))
+                return retained
+            await conn.executemany(
+                "DELETE FROM _tmp_missing_demo_ids WHERE id = ?",
+                await asyncio.to_thread(retained_ids),
             )
             await conn.execute("DELETE FROM match_results WHERE demo_path IN (SELECT path FROM _tmp_missing_demo_ids)")
             await conn.execute("DELETE FROM demo_result_summaries WHERE demo_path IN (SELECT path FROM _tmp_missing_demo_ids)")

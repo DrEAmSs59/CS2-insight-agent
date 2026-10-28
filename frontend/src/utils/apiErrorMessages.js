@@ -67,6 +67,7 @@ export const API_ERROR_I18N_KEYS = {
   MONTAGE_CLIPS_EMPTY: "montage.exportErrorNoClips",
   MONTAGE_CLIP_FILE_MISSING: "montage.err.clipFileMissing",
   MONTAGE_SOURCE_NOT_READABLE: "montage.err.sourceNotReadable",
+  MONTAGE_EXPORT_INTERRUPTED: "montage.err.exportInterrupted",
   LITECUT_EXPORT_INTERRUPTED: "montage.err.exportInterrupted",
   LITECUT_EXPORT_RESOLUTION_INVALID: "liteCut.exportResolutionInvalid",
   MONTAGE_INTRO_MISSING: "montage.err.introMissing",

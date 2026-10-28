@@ -144,7 +144,7 @@ def test_recording_api_keeps_copy_alive_through_director_then_cleans(monkeypatch
     monkeypatch.setattr(api, "ensure_cs2_path", lambda value: value)
     monkeypatch.setattr(cs2_config_backup, "is_cs2_running", lambda: False)
     monkeypatch.setattr(cs2_config_backup, "is_restore_required", lambda: False)
-    monkeypatch.setattr(api, "OBSClient", Mock(return_value=Mock()))
+    monkeypatch.setattr(api, "OBSClient", Mock(return_value=Mock(get_record_status=Mock(return_value={"outputActive": False}))))
     monkeypatch.setattr(api, "OBSFadeController", Mock(return_value=Mock(setup=AsyncMock(return_value=True))))
     monkeypatch.setattr(api, "resolve_working_demo_path", AsyncMock(return_value=source))
     monkeypatch.setattr(api, "_persist_v3_results", AsyncMock())

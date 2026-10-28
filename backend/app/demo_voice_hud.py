@@ -20,6 +20,7 @@ import struct
 from typing import Any, Callable, Iterable, Mapping
 import zlib
 
+from .panorama_resource import rewrite_panorama_data
 from .pov_constants import DEFAULT_POV_VOICE_MODE, normalize_pov_voice_mode
 
 # Radar overview edge mask for CT dropped-C4 LOS (grid^2 bits, hex-packed).
@@ -71,6 +72,7 @@ INPUT_AUDIO_EDGE_PAYLOAD_INDEX = 17
 INPUT_PRESENTATION_PAYLOAD_INDEX = 18
 COMBAT_STATS_PAYLOAD_INDEX = 19
 POV_VISUALS_PAYLOAD_INDEX = 20
+RECORDING_CONTROL_PAYLOAD_INDEX = 21
 WEAPON_SELECT_PAYLOAD_INDEX = 6
 INPUT_HUD_POSITIONS = ("bottom_center", "minimap_below", "weapon_right")
 DEFAULT_INPUT_HUD_POSITION = "bottom_center"
@@ -601,7 +603,7 @@ def _normalize_map_name(raw: Any) -> str:
 
 def _pad_payload_slots(
     packed: list[Any],
-    length: int = POV_VISUALS_PAYLOAD_INDEX + 1,
+    length: int = RECORDING_CONTROL_PAYLOAD_INDEX + 1,
 ) -> list[Any]:
     if not isinstance(packed, list):
         raise DemoVoiceHudError("voice HUD payload has an unsupported shape")
@@ -623,9 +625,81 @@ def _normalize_session_console_commands(
         if len(command) > 256 or any(char in command for char in "\r\n;"):
             raise DemoVoiceHudError("session console command is unsafe")
         normalized.append(command)
-        if len(normalized) > 32:
+        if len(normalized) > 128:
             raise DemoVoiceHudError("too many session console commands")
     return normalized
+
+
+_RECORDING_CONTROL_TOKEN_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+_RECORDING_CONTROL_XUID_RE = re.compile(r"^[0-9]{0,32}$")
+
+
+def _normalize_recording_control(
+    raw: Mapping[str, Any] | None,
+    *,
+    controller_only: bool = False,
+) -> list[Any]:
+    """Validate and compact the trusted Panorama recording-control payload.
+
+    The payload contains data, never arbitrary commands.  Dynamic console text
+    is deliberately limited to numeric ``spec_mode`` / ``spec_player`` values
+    assembled by the injected script.
+    """
+    if raw is None:
+        return []
+    session_id = str(raw.get("session_id") or "").strip()
+    if not _RECORDING_CONTROL_TOKEN_RE.fullmatch(session_id):
+        raise DemoVoiceHudError("recording control session id is unsafe")
+
+    raw_segments = raw.get("segments")
+    if not isinstance(raw_segments, list) or not raw_segments:
+        raise DemoVoiceHudError("recording control plan has no segments")
+    if len(raw_segments) > 2048:
+        raise DemoVoiceHudError("recording control plan has too many segments")
+
+    packed_segments: list[list[Any]] = []
+    seen_operation_ids: set[str] = set()
+    for raw_segment in raw_segments:
+        if not isinstance(raw_segment, Mapping):
+            raise DemoVoiceHudError("recording control segment has an unsupported shape")
+        operation_id = str(raw_segment.get("operation_id") or "").strip()
+        if not _RECORDING_CONTROL_TOKEN_RE.fullmatch(operation_id):
+            raise DemoVoiceHudError("recording control operation id is unsafe")
+        if operation_id in seen_operation_ids:
+            raise DemoVoiceHudError("recording control operation id is duplicated")
+        seen_operation_ids.add(operation_id)
+
+        try:
+            start_tick = int(raw_segment.get("start_tick"))
+            end_tick = int(raw_segment.get("end_tick"))
+            target_slot = int(raw_segment.get("target_slot") or 0)
+            spec_mode = int(raw_segment.get("spec_mode") or 5)
+        except (TypeError, ValueError) as exc:
+            raise DemoVoiceHudError("recording control segment contains invalid numbers") from exc
+        target_xuid = str(raw_segment.get("target_xuid") or "").strip()
+        if start_tick < 0 or end_tick <= start_tick:
+            raise DemoVoiceHudError("recording control segment has an invalid tick range")
+        if target_slot < 0 or target_slot > 64:
+            raise DemoVoiceHudError("recording control target slot is invalid")
+        if spec_mode < 1 or spec_mode > 6:
+            raise DemoVoiceHudError("recording control spec mode is invalid")
+        if not _RECORDING_CONTROL_XUID_RE.fullmatch(target_xuid):
+            raise DemoVoiceHudError("recording control target XUID is unsafe")
+        packed_segment = [operation_id, start_tick, end_tick, target_slot, target_xuid, spec_mode]
+        if raw_segment.get("seek_tick") is not None:
+            try:
+                seek_tick = int(raw_segment["seek_tick"])
+            except (TypeError, ValueError) as exc:
+                raise DemoVoiceHudError("recording control seek tick is invalid") from exc
+            if seek_tick < 0 or seek_tick > start_tick:
+                raise DemoVoiceHudError("recording control seek tick is invalid")
+            packed_segment.append(seek_tick)
+        packed_segments.append(packed_segment)
+
+    packed_control = [1, session_id, packed_segments, 1 if controller_only else 0]
+    if raw.get("capture_backend") is not None:
+        raise DemoVoiceHudError("Free recording supports OBS only")
+    return packed_control
 
 
 def _encode_kill_feedback_events(
@@ -4650,7 +4724,7 @@ def add_advanced_playback_track_to_payload(
     }
 
 
-def inject_voice_payload(template_vpk: bytes, payload: bytes) -> bytes:
+def inject_voice_payload(template_vpk: bytes, payload: bytes, *, obs_control=None) -> bytes:
     """Replace the compiled Panorama payload and rebuild the VPK with fresh CRCs.
 
     The payload lives inside the ``DATA`` block of a compiled Panorama resource.
@@ -4662,62 +4736,59 @@ def inject_voice_payload(template_vpk: bytes, payload: bytes) -> bytes:
     if script is None:
         raise DemoVoiceHudError(f"voice HUD template is missing {VOICE_SCRIPT_PATH}")
 
-    if len(script) < 16:
-        raise DemoVoiceHudError("compiled Panorama resource is truncated")
-    total_size = struct.unpack_from("<I", script, 0)[0]
-    block_count = struct.unpack_from("<I", script, 12)[0]
-    if total_size != len(script) or block_count <= 0 or block_count > 64:
-        raise DemoVoiceHudError("compiled Panorama resource header is unsupported")
+    def replace_payload(data_source: bytes) -> bytes:
+        begin = data_source.find(VOICE_DATA_BEGIN)
+        end = data_source.find(VOICE_DATA_END, begin + len(VOICE_DATA_BEGIN))
+        if begin < 0 or end < 0:
+            raise DemoVoiceHudError("voice HUD template data markers were not found")
+        data = data_source[:begin + len(VOICE_DATA_BEGIN)] + payload + data_source[end:]
+        if obs_control:
+            from .recording.obs_controller import compose_recording_controller
+            from .recording.obs_observer import compose_obs_observer
+            data = compose_recording_controller(data.decode("utf-8")).encode("utf-8")
+            data = compose_obs_observer(data.decode("utf-8"), obs_control).encode("utf-8")
+        return data
 
-    descriptors: list[tuple[int, bytes, int, int]] = []
-    for index in range(block_count):
-        descriptor = 16 + index * 12
-        if descriptor + 12 > len(script):
-            raise DemoVoiceHudError("compiled Panorama block table is truncated")
-        name = script[descriptor : descriptor + 4]
-        relative_offset, size = struct.unpack_from("<II", script, descriptor + 4)
-        start = descriptor + 4 + relative_offset
-        end = start + size
-        if start < 0 or end > len(script):
-            raise DemoVoiceHudError(
-                f"compiled Panorama block {name!r} exceeds the resource"
-            )
-        descriptors.append((descriptor, name, start, size))
-
-    data = next((item for item in descriptors if item[1] == b"DATA"), None)
-    if data is None:
-        raise DemoVoiceHudError("compiled Panorama resource has no DATA block")
-    data_descriptor, _, data_start, old_data_size = data
-    old_data_end = data_start + old_data_size
-    data_source = script[data_start:old_data_end]
-    begin = data_source.find(VOICE_DATA_BEGIN)
-    end = data_source.find(VOICE_DATA_END, begin + len(VOICE_DATA_BEGIN))
-    if begin < 0 or end < 0:
-        raise DemoVoiceHudError("voice HUD template data markers were not found")
-    payload_start = begin + len(VOICE_DATA_BEGIN)
-    rebuilt_data = b"".join(
-        (
-            data_source[:payload_start],
-            payload,
-            data_source[end:],
-        )
-    )
-    delta = len(rebuilt_data) - old_data_size
-    rebuilt_script = bytearray(
-        script[:data_start] + rebuilt_data + script[old_data_end:]
-    )
-    struct.pack_into("<I", rebuilt_script, 0, len(rebuilt_script))
-    struct.pack_into("<I", rebuilt_script, data_descriptor + 8, len(rebuilt_data))
-    for descriptor, name, start, _ in descriptors:
-        if name != b"DATA" and start >= old_data_end:
-            relative_offset = struct.unpack_from(
-                "<I", rebuilt_script, descriptor + 4
-            )[0]
-            struct.pack_into(
-                "<I", rebuilt_script, descriptor + 4, relative_offset + delta
-            )
-    entries[VOICE_SCRIPT_PATH] = bytes(rebuilt_script)
+    try:
+        entries[VOICE_SCRIPT_PATH] = rewrite_panorama_data(script, replace_payload)
+    except ValueError as exc:
+        raise DemoVoiceHudError(str(exc)) from exc
     return write_inline_vpk(entries)
+
+
+def build_recording_controller_vpk(
+    template_vpk_path: str | Path,
+    *,
+    recording_control: Mapping[str, Any],
+    session_console_commands: Iterable[object] | None = None,
+) -> DemoVoiceHudBuild:
+    """Build the lean, controller-only package without parsing demo tracks."""
+    packed = _pad_payload_slots([[], [], [], []])
+    packed[VOICE_MODE_PAYLOAD_INDEX] = "mute"
+    packed[POV_VISUALS_PAYLOAD_INDEX] = 0
+    packed[SESSION_CONSOLE_COMMANDS_PAYLOAD_INDEX] = (
+        _normalize_session_console_commands(session_console_commands)
+    )
+    packed[INPUT_PRESENTATION_PAYLOAD_INDEX] = [0, "active", 100, 0, 100, 0]
+    packed[RECORDING_CONTROL_PAYLOAD_INDEX] = _normalize_recording_control(
+        recording_control,
+        controller_only=True,
+    )
+    payload = json.dumps(
+        packed,
+        ensure_ascii=True,
+        separators=(",", ":"),
+    ).encode("ascii")
+    template = Path(template_vpk_path).read_bytes()
+    return DemoVoiceHudBuild(
+        vpk_bytes=inject_voice_payload(template, payload, obs_control=recording_control),
+        voice_packets=0,
+        speakers=0,
+        intervals=0,
+        location_changes=0,
+        payload_bytes=len(payload),
+        location_parse_failed=0,
+    )
 
 
 def build_demo_voice_hud_vpk(
@@ -4738,6 +4809,7 @@ def build_demo_voice_hud_vpk(
     input_audio_volume_percent: int = 100,
     combat_stats_enabled: bool = True,
     session_console_commands: Iterable[object] | None = None,
+    recording_control: Mapping[str, Any] | None = None,
 ) -> DemoVoiceHudBuild:
     from .demo_input_policy import demo_disables_player_input
 
@@ -4935,6 +5007,7 @@ def build_demo_voice_hud_vpk(
         _normalize_session_console_commands(session_console_commands)
     )
     packed[POV_VISUALS_PAYLOAD_INDEX] = 1 if pov_visuals_enabled else 0
+    packed[RECORDING_CONTROL_PAYLOAD_INDEX] = _normalize_recording_control(recording_control)
     payload = json.dumps(
         packed,
         ensure_ascii=True,
@@ -4964,7 +5037,7 @@ def build_demo_voice_hud_vpk(
         )
 
     template = Path(template_vpk_path).read_bytes()
-    vpk_bytes = inject_voice_payload(template, payload)
+    vpk_bytes = inject_voice_payload(template, payload, obs_control=recording_control)
     return DemoVoiceHudBuild(
         vpk_bytes=vpk_bytes,
         **stats,

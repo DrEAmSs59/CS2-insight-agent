@@ -8,7 +8,9 @@ connections frequently do not return a response (recv thread becomes stale).
 The old code blocked waiting for that response for up to OBS_COMMAND_TIMEOUT_SEC
 (5 s), causing 5 s of frozen demo footage at the start of every segment.
 
-Fix: fire each command on a *fresh* connection (background task, ignore response),
+Pause/resume use a fresh background connection and state observation.
+Start and stop await their command responses for ownership and output paths.
+Fire pause/resume on a *fresh* connection,
 then immediately poll GetRecordStatus on a *second* fresh connection every 80 ms
 until the expected state is observed.  Typical latency: 50–300 ms.
 
@@ -22,7 +24,7 @@ import logging
 import time
 from typing import Callable, Optional
 
-from .obs_client import OBSClient, OBSConnectionError, OBSRecordError
+from .obs_client import OBSClient
 from ...env_utils import OBSConfig
 
 logger = logging.getLogger(__name__)
@@ -51,9 +53,8 @@ class OBSRecordingController:
     """
     Async-safe OBS recording controller using fire-and-observe.
 
-    Each recording command is sent on a fresh OBS connection (background
-    fire-and-forget task) while a separate fresh connection polls
-    GetRecordStatus every 80 ms to verify the state transition.
+    Commands use fresh connections. Start/stop responses establish ownership
+    and output identity; pause/resume use background commands and status polling.
     """
 
     def __init__(
@@ -66,6 +67,9 @@ class OBSRecordingController:
         # client is kept for backward-compatible API; not used for recording ops.
         self._client = client
         self._timeout = command_timeout_sec
+        self._owns_recording = False
+        self._output_path = None
+        self._stop_confirmation_pending = False
 
     # ── Internal: fresh client factory ───────────────────────────────────────
 
@@ -236,16 +240,31 @@ class OBSRecordingController:
 
     async def start_record_safe(self) -> str:
         """
-        Fire StartRecord; poll until outputActive=true (≤1.2 s).
+        Confirm StartRecord ownership, then observe outputActive=true.
 
         Returns "ok".
         Raises OBSControlError if the state is not observed in time.
         """
-        await self._fast_observe(
-            "StartRecord",
-            "start_record",
-            predicate=lambda s: bool(s.get("outputActive")),
-            deadline_sec=OBS_FAST_START_DEADLINE_SEC,
+        if self._stop_confirmation_pending:
+            raise OBSControlError("Previous OBS stop is not confirmed")
+        self._output_path = None
+        if (await self._fresh_status())["outputActive"]:
+            raise OBSControlError("OBS is already recording; stop that recording before starting Insight")
+        fresh = self._new_client(command_timeout=self._timeout)
+        try:
+            await asyncio.to_thread(fresh.connect)
+            # A successful StartRecord response establishes ownership. Observing
+            # another client's active recording cannot establish it.
+            await asyncio.to_thread(fresh.start_record)
+            self._owns_recording = True
+            self._output_path = None
+        except Exception as exc:
+            raise OBSControlError(f"StartRecord failed: {exc}") from exc
+        finally:
+            await asyncio.to_thread(fresh.disconnect)
+        await self._observe_state(
+            "StartRecord", lambda status: bool(status["outputActive"]),
+            OBS_FAST_START_DEADLINE_SEC,
         )
         return "ok"
 
@@ -256,6 +275,8 @@ class OBSRecordingController:
         Returns "ok".
         Raises OBSControlError if the state is not observed in time.
         """
+        if not self._owns_recording:
+            raise OBSControlError("No Insight-owned OBS recording")
         await self._fast_observe(
             "ResumeRecord",
             "resume_record",
@@ -272,8 +293,10 @@ class OBSRecordingController:
           "ok"               — OBS is recording and paused
           "fallback_stopped" — OBS stopped instead of pausing (no further resume possible)
 
-        Never raises — errors are logged.
+        Raises if this controller does not own the recording or stopping fails.
         """
+        if not self._owns_recording:
+            raise OBSControlError("No Insight-owned OBS recording")
         try:
             status = await self._fast_observe(
                 "PauseRecord",
@@ -297,87 +320,27 @@ class OBSRecordingController:
                 _pe,
             )
 
-        # Fallback: fire StopRecord and wait for stop confirmation
-        self._fire_bg("stop_record", "StopRecord_fallback")
-        try:
-            await self._observe_state(
-                "StopRecord_fallback",
-                predicate=lambda s: not bool(s.get("outputActive", True)),
-                deadline_sec=3.0,
-            )
-        except OBSControlError as _se:
-            logger.error(
-                "[RecordingV3][OBS_FAST] StopRecord fallback also failed: %s", _se
-            )
+        await self.stop_record_safe()
         return "fallback_stopped"
 
     async def stop_record_safe(self) -> Optional[str]:
-        """
-        Fire StopRecord; poll until outputActive=false (≤5 s).
-
-        Returns outputPath if the command response arrives in time, else None.
-        (None is expected when OBS is unresponsive; obs_director.py scan handles it.)
-        Never raises.
-        """
-        fire_t0 = time.monotonic()
-        logger.info("[RecordingV3][OBS_FAST] StopRecord fired")
-
-        # Shared box so the bg task can pass back outputPath if the response arrives.
-        output_path_box: list[Optional[str]] = [None]
-
-        async def _fire_stop_capture() -> None:
-            fresh = self._new_client(command_timeout=OBS_COMMAND_TIMEOUT_SEC)
-            try:
-                await asyncio.to_thread(fresh.connect)
-                try:
-                    path = await asyncio.wait_for(
-                        asyncio.to_thread(fresh.stop_record),
-                        timeout=OBS_COMMAND_TIMEOUT_SEC + 1.0,
-                    )
-                    if path:
-                        output_path_box[0] = path
-                        logger.info(
-                            "[RecordingV3][OBS_FAST] StopRecord response path=%s", path
-                        )
-                    else:
-                        logger.debug("[RecordingV3][OBS_FAST] StopRecord response: no path")
-                except asyncio.TimeoutError:
-                    logger.warning(
-                        "[RecordingV3][OBS_FAST] StopRecord bg response timed out (ignored)"
-                    )
-                except Exception as _e:
-                    logger.warning(
-                        "[RecordingV3][OBS_FAST] StopRecord bg error (ignored): %s", _e
-                    )
-            except Exception as _conn_e:
-                logger.warning(
-                    "[RecordingV3][OBS_FAST] StopRecord bg connect failed: %s", _conn_e
-                )
-            finally:
-                try:
-                    await asyncio.to_thread(fresh.disconnect)
-                except Exception:
-                    pass
-
-        asyncio.create_task(_fire_stop_capture())
-
+        """Wait for both the StopRecord response path and stopped state."""
+        if not self._owns_recording and not self._stop_confirmation_pending:
+            return self._output_path
         try:
+            # The response, not a separate status poll, owns the output path.
+            if self._owns_recording:
+                self._output_path = await self._fresh_stop()
+                self._owns_recording = False
+                self._stop_confirmation_pending = True
             await self._observe_state(
-                "StopRecord",
-                predicate=lambda s: not bool(s.get("outputActive", True)),
-                deadline_sec=OBS_FAST_STOP_DEADLINE_SEC,
+                "StopRecord", lambda status: not status["outputActive"],
+                OBS_FAST_STOP_DEADLINE_SEC,
             )
-            latency_ms = int((time.monotonic() - fire_t0) * 1000)
-            logger.info(
-                "[RecordingV3][OBS_FAST] outputActive=false observed after %d ms",
-                latency_ms,
-            )
-        except OBSControlError as _e:
-            logger.error(
-                "[RecordingV3][OBS_FAST] StopRecord: stop not confirmed: %s", _e
-            )
-
-        return output_path_box[0]
+            self._stop_confirmation_pending = False
+        except Exception as exc:
+            raise OBSControlError(f"StopRecord finalization failed: {exc}") from exc
+        return self._output_path
 
     async def get_record_status_safe(self) -> dict:
         """Fetch current OBS record status via a fresh connection. Returns {} on failure."""
@@ -393,10 +356,17 @@ class OBSRecordingController:
         Used in abort handling and finally-block cleanup.
         Returns True if confirmed stopped, False if all attempts failed.
         """
+        if not self._owns_recording and not self._stop_confirmation_pending:
+            return True
         logger.info("[RecordingV3][ABORT] force stopping OBS recording")
 
         for attempt in range(1, OBS_STOP_RETRIES + 1):
             try:
+                if self._stop_confirmation_pending:
+                    # Stop was accepted: only confirm its state, never stop a
+                    # recording another client may have started since then.
+                    await self.stop_record_safe()
+                    return True
                 status = await self._fresh_status()
                 active = status.get("outputActive", False)
                 paused = status.get("outputPaused", False)
@@ -405,11 +375,12 @@ class OBSRecordingController:
                     active, paused,
                 )
                 if not active:
+                    self._owns_recording = False
                     logger.info("[RecordingV3][ABORT] OBS already stopped")
                     return True
 
                 logger.info("[RecordingV3][ABORT] StopRecord sent (attempt %d)", attempt)
-                await self._fresh_stop()
+                await self.stop_record_safe()
                 logger.info("[RecordingV3][ABORT] OBS stopped")
                 return True
             except Exception as e:

@@ -92,7 +92,8 @@ export default function MontageWorkbenchDrawer({ open, onClose, layout = "drawer
   const draftDirtyBoot = useRef(true);
   const [playerAvatars, setPlayerAvatars] = useState({}); // { [player_key]: { avatar_path, avatar_url } }
   const [nameCardsEnabled, setNameCardsEnabled] = useState(false);
-  const [exportJob, setExportJob] = useState(null);
+  const exportJob = useMontageStore((s) => s.exportJob);
+  const setExportJob = useMontageStore((s) => s.setExportJob);
   const [exportDialog, setExportDialog] = useState({ phase: "idle", result: null, error: "" });
 
   // ── 数据雷达图 ──

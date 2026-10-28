@@ -96,6 +96,30 @@ def test_purge_stale_pending_removes_missing_files(tmp_path: Path):
     _run(scenario())
 
 
+def test_shallower_scan_retains_existing_demo_and_analysis(tmp_path):
+    async def scenario():
+        db = DemoDB(tmp_path / "demo.sqlite3")
+        await db.init_db()
+        root = tmp_path / "watch"
+        deep = root / "nested" / "match.dem"
+        deep.parent.mkdir(parents=True)
+        deep.write_bytes(b"demo")
+        demo_id, _ = await db.add_demo(str(deep), watch_root=str(root), status="loaded")
+        result = {"clips": [], "target_player": "test"}
+        await db.save_result(str(deep), result)
+
+        assert await db.purge_deleted_demo_files(str(root), set()) == 0
+        reopened = DemoDB(db.db_path)
+        assert await reopened.get_demo_by_id(demo_id)
+        assert await reopened.get_result(str(deep)) == result
+
+        deep.unlink()
+        assert await reopened.purge_deleted_demo_files(str(root), set()) == 1
+        assert await reopened.get_demo_by_id(demo_id) is None
+        assert await reopened.get_result(str(deep)) is None
+    _run(scenario())
+
+
 def test_purge_stale_pending_removes_outside_active_watch_roots(tmp_path: Path):
     async def scenario():
         db = DemoDB(tmp_path / "demo.sqlite3")

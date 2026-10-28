@@ -35,6 +35,7 @@ from .demo_voice_hud import (
     DemoVoiceHudError,
     DEFAULT_INPUT_HUD_POSITION,
     build_demo_voice_hud_vpk,
+    build_recording_controller_vpk,
     normalize_input_hud_position,
     read_inline_vpk,
 )
@@ -975,6 +976,9 @@ class PovHudManager:
         combat_stats_enabled: bool = True,
         persistent_killfeed: bool = False,
         killfeed_only: bool = False,
+        recording_control: Optional[Mapping[str, Any]] = None,
+        recording_controller_only: bool = False,
+        session_console_commands: Optional[list[str]] = None,
         persistent_killfeed_target_xuid: str = "",
         persistent_killfeed_segments: Optional[list[dict]] = None,
         hide_killfeed_clan_tags: bool = True,
@@ -1001,6 +1005,9 @@ class PovHudManager:
                 combat_stats_enabled=combat_stats_enabled,
                 persistent_killfeed=persistent_killfeed,
                 killfeed_only=killfeed_only,
+                recording_control=recording_control,
+                recording_controller_only=recording_controller_only,
+                session_console_commands=session_console_commands,
                 persistent_killfeed_target_xuid=persistent_killfeed_target_xuid,
                 persistent_killfeed_segments=persistent_killfeed_segments,
                 hide_killfeed_clan_tags=hide_killfeed_clan_tags,
@@ -1030,6 +1037,9 @@ class PovHudManager:
         combat_stats_enabled: bool = True,
         persistent_killfeed: bool = False,
         killfeed_only: bool = False,
+        recording_control: Optional[Mapping[str, Any]] = None,
+        recording_controller_only: bool = False,
+        session_console_commands: Optional[list[str]] = None,
         persistent_killfeed_target_xuid: str = "",
         persistent_killfeed_segments: Optional[list[dict]] = None,
         hide_killfeed_clan_tags: bool = True,
@@ -1095,7 +1105,7 @@ class PovHudManager:
             legacy_voice_disabled=not voice_enabled,
         )
         resolved_input_track_report = input_track_report
-        if demo_path is not None and resolved_input_track_report is None and not killfeed_only:
+        if demo_path is not None and resolved_input_track_report is None and not killfeed_only and not recording_controller_only:
             try:
                 resolved_input_track_report = load_input_report(demo_path)
             except InputCommandError as exc:
@@ -1106,14 +1116,14 @@ class PovHudManager:
         voice_build: Optional[DemoVoiceHudBuild] = None
         voice_template = self.get_voice_hud_template_path(
             advanced_playback_enabled=advanced_playback_enabled,
-            pov_visuals_enabled=pov_visuals_enabled,
+            pov_visuals_enabled=pov_visuals_enabled and not recording_controller_only,
         )
         demo_template_required = (
-            require_demo_hud or advanced_playback_enabled or not pov_visuals_enabled
+            require_demo_hud or advanced_playback_enabled or not pov_visuals_enabled or recording_control is not None
         )
         if demo_path is not None and demo_template_required and not voice_template.is_file():
             raise PovHudError(f"未找到 Demo HUD 模板：{voice_template}")
-        if demo_path is not None and voice_template.is_file() and not killfeed_only:
+        if demo_path is not None and voice_template.is_file() and not killfeed_only and not recording_controller_only:
             try:
                 voice_build = build_demo_voice_hud_vpk(
                     demo_path,
@@ -1130,7 +1140,8 @@ class PovHudManager:
                     input_audio_enabled=input_audio_enabled,
                     input_audio_volume_percent=input_audio_volume_percent,
                     combat_stats_enabled=combat_stats_enabled,
-                    session_console_commands=visual_layer_console_commands(
+                    **({"recording_control": recording_control} if recording_control is not None else {}),
+                    session_console_commands=session_console_commands if session_console_commands is not None else visual_layer_console_commands(
                         map_material_id=selected_map_material,
                         weather_effect_id=selected_weather,
                     ),
@@ -1170,11 +1181,16 @@ class PovHudManager:
                     exc,
                 )
 
+        if recording_controller_only:
+            if recording_control is None:
+                raise PovHudError("OBS controller plan is missing")
+            voice_build = build_recording_controller_vpk(voice_template,
+                recording_control=recording_control, session_console_commands=session_console_commands)
         package_bytes: Optional[bytes] = voice_build.vpk_bytes if voice_build is not None else None
         if persistent_killfeed:
             from .persistent_killfeed import bind_persistent_killfeed, killfeed_only_template
             try:
-                if killfeed_only:
+                if killfeed_only and not recording_controller_only:
                     package_bytes = killfeed_only_template(voice_template.read_bytes())
                 if package_bytes is None:
                     raise PovHudError("击杀常驻缺少 Panorama 模板")

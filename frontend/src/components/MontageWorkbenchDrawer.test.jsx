@@ -4,6 +4,7 @@ import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import MontageWorkbenchDrawer from "./MontageWorkbenchDrawer.jsx";
+import { useMontageStore } from "../stores/montageStore.js";
 
 const mocks = vi.hoisted(() => ({
   get: vi.fn(),
@@ -62,6 +63,7 @@ vi.mock("./montage/MontageWorkbenchPanels", () => ({
 
 describe("MontageWorkbenchDrawer", () => {
   beforeEach(() => {
+    useMontageStore.setState(useMontageStore.getInitialState(), true);
     mocks.get.mockReset();
     mocks.post.mockReset();
     mocks.put.mockReset();
@@ -71,6 +73,33 @@ describe("MontageWorkbenchDrawer", () => {
     mocks.materialProps = null;
     mocks.post.mockResolvedValue({ data: {} });
     mocks.put.mockResolvedValue({ data: { status: "ok" } });
+  });
+
+  it("resumes polling the same export after the page unmounts and remounts", async () => {
+    let status = "running";
+    mocks.get.mockImplementation((url) => {
+      if (url === "config/ffmpeg-check") return Promise.resolve({ data: { ok: true } });
+      if (url === "/recorded-clips") return Promise.resolve({ data: { items: [] } });
+      if (url === "/montage/exports/41") return Promise.resolve({
+        data: { export_id: 41, status, progress: status === "done" ? 1 : 0.2, output_path: "finished.mp4" },
+      });
+      return Promise.resolve({ data: {} });
+    });
+    useMontageStore.setState({ exporting: true, exportJob: { export_id: 41, status: "queued" } });
+    const page = () => (
+      <MemoryRouter initialEntries={["/montage"]}>
+        <MontageWorkbenchDrawer open layout="page" onClose={() => {}} />
+      </MemoryRouter>
+    );
+    const first = render(page());
+    await waitFor(() => expect(useMontageStore.getState().exportJob.status).toBe("running"));
+    first.unmount();
+    expect(useMontageStore.getState().exporting).toBe(true);
+    status = "done";
+    render(page());
+    await waitFor(() => expect(useMontageStore.getState().exporting).toBe(false));
+    expect(useMontageStore.getState().lastExport).toMatchObject({ ok: true, output_path: "finished.mp4" });
+    expect(mocks.get.mock.calls.filter(([url]) => url === "/montage/exports/41")).toHaveLength(2);
   });
 
   it("renders the workbench as four independent rounded blocks", async () => {

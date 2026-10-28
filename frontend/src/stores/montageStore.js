@@ -1,6 +1,8 @@
 import { create } from "zustand";
 
 export const useMontageStore = create((set) => ({
+  exportJob: null,
+  setExportJob: (exportJob) => set({ exportJob }),
   exporting: false,
   setExporting: (v) => set({ exporting: v }),
 

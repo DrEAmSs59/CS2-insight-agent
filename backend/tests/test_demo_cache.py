@@ -95,3 +95,27 @@ def test_ensure_row_cached_persists_path(tmp_path: Path, demo_file: Path, monkey
 def test_default_cache_root_under_data_dir(tmp_path: Path, monkeypatch):
     monkeypatch.setattr("app.demo_cache.get_data_dir", lambda: tmp_path)
     assert default_demo_cache_root() == (tmp_path / "demo-cache").resolve()
+
+
+def test_cache_status_counts_only_registered_working_copies(tmp_path, monkeypatch):
+    from app.demo_cache import cache_status_payload
+
+    root = tmp_path / "cache"
+    root.mkdir()
+    original, cached, unrelated = [root / name for name in ("source.dem", "working.dem", "other.dem")]
+    original.write_bytes(b"original")
+    cached.write_bytes(b"rewritten")
+    unrelated.write_bytes(b"unmanaged")
+    outside = tmp_path / "outside.dem"
+    outside.write_bytes(b"outside")
+    monkeypatch.setattr("app.demo_cache.resolve_demo_cache_root", lambda cfg=None: root)
+    rows = [
+        {"path": str(original), "cached_path": str(cached)},
+        {"path": str(original), "cached_path": str(cached)},
+        {"path": str(original), "cached_path": str(original)},
+        {"path": str(original), "cached_path": str(outside)},
+    ]
+    stats = cache_status_payload(cache_rows=rows)
+    assert stats["file_count"] == 1
+    assert stats["total_bytes"] == len(b"rewritten")
+    assert cache_status_payload(cache_rows=[rows[2]])["file_count"] == 0

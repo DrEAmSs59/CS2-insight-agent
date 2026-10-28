@@ -16,6 +16,11 @@ from .demo_controller import (
     DemoSeekError, inject_console_sequence,
 )
 from .kill_markers import KillMarkerTimeline
+from .panorama_control import (
+    PanoramaControlAborted,
+    PanoramaControlBridge,
+    PanoramaControlError,
+)
 from .spec_controller import obs_spec_slot, spec_by_slot
 from .gsi_verifier import verify_spec_target
 
@@ -396,18 +401,23 @@ class RecordingExecutor:
         abort_event: Optional[asyncio.Event] = None,
         fade_controller: Optional[OBSFadeController] = None,
         post_spec_console_lines: Optional[list[str]] = None,
+        panorama_control: Optional[PanoramaControlBridge] = None,
     ):
         self._obs = obs_client
         self._abort_event = abort_event
         self._fade: Optional[OBSFadeController] = fade_controller
         # 本次实际 warmup 命令中需在每片段 spec_player 锁定后补注入的白名单子集。
         self._post_spec_console_lines: list[str] = list(post_spec_console_lines or [])
-        # Controller is created per-execute call so it always holds the current client.
-        self._ctrl: Optional[OBSRecordingController] = None
+        self._panorama_control = panorama_control
+        # Keep recording ownership through every request and final cleanup in this executor.
+        self._ctrl = OBSRecordingController(obs_client.config, obs_client)
         # Tracks whether OBS program output is currently on the black scene.
         # Persists across execute() calls so the next clip skips a redundant
         # fade_to_black() when OBS was already left on black by the previous stop.
         self._obs_on_black: bool = False
+
+    async def stop_owned_recording(self) -> bool:
+        return await self._ctrl.force_stop_recording()
 
     def _is_aborted(self) -> bool:
         return self._abort_event is not None and self._abort_event.is_set()
@@ -474,12 +484,227 @@ class RecordingExecutor:
 
         return output_path if is_last else None
 
+    async def _execute_panorama(self, plan: RecordingPlan) -> ExecutionResult:
+        """Execute one plan while Panorama owns all demo state and boundaries."""
+        bridge = self._panorama_control
+        if bridge is None:
+            raise RuntimeError("Panorama controller bridge is missing")
+
+        result = ExecutionResult(request_id=plan.request_id)
+        active_segments = [segment for segment in plan.segments if not segment.disabled]
+        self._obs_force_stopped = False
+        try:
+            obs_dir = await asyncio.to_thread(self._obs.get_record_directory)
+            if obs_dir:
+                result.obs_record_directory = obs_dir
+        except Exception as exc:
+            logger.warning("[RecordingV3][Panorama] record directory unavailable: %s", exc)
+
+        if not active_segments:
+            result.success = True
+            result.warnings.extend(plan.warnings)
+            return result
+
+        logger.info(
+            "[RecordingV3][Panorama] execute %d segment(s) for %s",
+            len(active_segments),
+            plan.request_id,
+        )
+        obs_recording_started = False
+        final_output_path: Optional[str] = None
+        kill_timeline = KillMarkerTimeline(plan.tick_rate)
+
+        for index, segment in enumerate(active_segments):
+            is_last = index == len(active_segments) - 1
+            operation_id = str(segment.metadata.get("panorama_operation_id") or "")
+            if not operation_id:
+                result.error = "Panorama operation id is missing"
+                break
+            segment_record_t0: Optional[float] = None
+            try:
+                ready = await bridge.wait_for(
+                    "READY",
+                    operation_id=operation_id,
+                    timeout_sec=45.0,
+                )
+                if abs(int(ready.tick) - int(segment.start_tick)) > 4:
+                    raise PanoramaControlError(
+                        f"Panorama READY tick {ready.tick} does not match {segment.start_tick}"
+                    )
+                body_timeline = segment.metadata.get("obs_body_timeline")
+                if body_timeline:
+                    from ..obs_observer import expected_body
+                    body = expected_body(body_timeline, int(ready.tick)) or body_timeline[0]
+                    if (not body or not body["pawn"] or ready.observer_mode != 2
+                            or ready.observer_pawn != body["pawn"]):
+                        raise PanoramaControlError("OBS READY 未确认目标身体，无法开始 BOT 接管录制")
+                elif segment.target_steamid64 and ready.xuid != str(segment.target_steamid64):
+                    raise PanoramaControlError(
+                        f"Panorama READY XUID {ready.xuid!r} does not match target "
+                        f"{segment.target_steamid64!r}"
+                    )
+
+                if not obs_recording_started:
+                    result.recording_started_at = time.time()
+                    await self._ctrl.start_record_safe()
+                    obs_record_mono = time.monotonic()
+                    obs_recording_started = True
+                    self._obs_on_black = False
+                else:
+                    if self._fade is not None:
+                        await self._fade.prime_fade_to_game()
+                    await self._ctrl.resume_record_safe()
+                    obs_record_mono = time.monotonic()
+
+                resume_ok = await demo_resume_silent_strict()
+                if resume_ok is not True:
+                    raise PanoramaControlError("silent start acknowledgement was not delivered")
+
+                started = await bridge.wait_for(
+                    "STARTED",
+                    operation_id=operation_id,
+                    timeout_sec=3.0,
+                )
+                demo_resume_mono = started.received_monotonic
+                if self._fade is not None and index > 0:
+                    fade_ok = await self._fade.execute_primed_fade_to_game()
+                    if not fade_ok:
+                        logger.warning(
+                            "[RecordingV3][Panorama] fade_to_game failed; using hard cut"
+                        )
+                self._obs_on_black = False
+
+                segment_record_t0 = obs_record_mono
+                kill_timeline.open_segment(
+                    segment,
+                    overhead_sec=0.0,
+                    lead_in_sec=max(0.0, demo_resume_mono - obs_record_mono),
+                )
+
+                expected_duration = max(
+                    0.1,
+                    (segment.end_tick - segment.start_tick) / max(1.0, plan.tick_rate),
+                )
+                ended = await bridge.wait_for(
+                    "ENDED",
+                    operation_id=operation_id,
+                    timeout_sec=expected_duration + 30.0,
+                )
+                if abs(int(ended.tick) - int(segment.end_tick)) > 4:
+                    result.warnings.append(
+                        f"segment {segment.segment_index}: Panorama ended at tick "
+                        f"{ended.tick}, expected {segment.end_tick}"
+                    )
+
+                if self._fade is not None and not is_last:
+                    fade_ok = await self._fade.fade_to_black()
+                    if fade_ok:
+                        self._obs_on_black = True
+                if is_last:
+                    final_output_path = await self._ctrl.stop_record_safe()
+                    result.recording_stopped_at = time.time()
+                    obs_recording_started = False
+                else:
+                    pause_result = await self._ctrl.pause_record_safe()
+                    if pause_result == "fallback_stopped":
+                        self._obs_force_stopped = True
+                        raise OBSControlError("OBS pause fell back to stop")
+
+                kill_timeline.close_segment(time.monotonic() - segment_record_t0)
+                segment_record_t0 = None
+
+                # In await_advance the same silent key is an acknowledgement,
+                # not playback: Panorama immediately pauses and prepares the
+                # next preloaded operation while OBS is already inactive.
+                advance_ok = await demo_resume_silent_strict()
+                if advance_ok is not True:
+                    raise PanoramaControlError("silent advance acknowledgement was not delivered")
+
+                result.segment_results.append(SegmentResult(
+                    segment_index=segment.segment_index,
+                    status="ok",
+                    start_tick=segment.start_tick,
+                    end_tick=segment.end_tick,
+                    perspective=segment.perspective,
+                    output_path=final_output_path if is_last else None,
+                ))
+            except PanoramaControlAborted:
+                if segment_record_t0 is not None:
+                    kill_timeline.close_segment(time.monotonic() - segment_record_t0)
+                if obs_recording_started:
+                    await asyncio.gather(
+                        demo_pause_silent_strict(),
+                        self._ctrl.stop_record_safe(),
+                        return_exceptions=True,
+                    )
+                    obs_recording_started = False
+                result.segment_results.append(SegmentResult(
+                    segment_index=segment.segment_index,
+                    status="skipped",
+                    start_tick=segment.start_tick,
+                    end_tick=segment.end_tick,
+                    perspective=segment.perspective,
+                    error="aborted",
+                ))
+                result.error = "aborted"
+                break
+            except Exception as exc:
+                logger.error(
+                    "[RecordingV3][Panorama] segment %d failed: %s",
+                    segment.segment_index,
+                    exc,
+                )
+                if segment_record_t0 is not None:
+                    kill_timeline.close_segment(
+                        time.monotonic() - segment_record_t0,
+                        keep_markers=False,
+                    )
+                if obs_recording_started:
+                    await asyncio.gather(
+                        demo_pause_silent_strict(),
+                        self._ctrl.stop_record_safe(),
+                        return_exceptions=True,
+                    )
+                    obs_recording_started = False
+                result.segment_results.append(SegmentResult(
+                    segment_index=segment.segment_index,
+                    status="skipped",
+                    start_tick=segment.start_tick,
+                    end_tick=segment.end_tick,
+                    perspective=segment.perspective,
+                    error=str(exc),
+                ))
+                result.error = str(exc)
+                break
+
+        if obs_recording_started:
+            try:
+                final_output_path = await self._ctrl.stop_record_safe()
+            except Exception:
+                await self._ctrl.force_stop_recording()
+        result.output_path = final_output_path
+        result.kill_markers = kill_timeline.markers
+        if result.error == "aborted" or self._is_aborted():
+            result.success = False
+            result.error = "aborted"
+        else:
+            result.success = not result.error and len(result.segment_results) == len(active_segments)
+        if result.success and not result.output_path:
+            result.success = False
+            result.error = "OBS stopped without a confirmed output path"
+        result.warnings.extend(plan.warnings)
+        return result
+
     async def execute(self, plan: RecordingPlan) -> ExecutionResult:
+        if self._panorama_control is not None:
+            return await self._execute_panorama(plan)
         result = ExecutionResult(request_id=plan.request_id)
         active_segments = [s for s in plan.segments if not s.disabled]
 
-        # Lazy-create controller using the client provided at construction time.
-        self._ctrl = OBSRecordingController(self._obs.config, self._obs)
+        if any(s.metadata.get("obs_body_timeline") for s in active_segments):
+            result.error = "OBS BOT 接管录制需要 Panorama 身体校验，不能使用旧版选人流程"
+            return result
+
         self._obs_force_stopped = False  # set True when pause_record_safe fallback-stops
 
         # Fetch OBS record directory now, while obs_client is connected.
@@ -626,9 +851,9 @@ class RecordingExecutor:
                             "recording aborted to avoid capturing wrong POV"
                         )
                         if obs_recording_started:
-                            await self._ctrl.stop_record_safe()
+                            final_output_path = await self._ctrl.stop_record_safe()
                         result.output_path = final_output_path
-                        result.success = any(r.status == "ok" for r in result.segment_results)
+                        result.success = bool(final_output_path) and any(r.status == "ok" for r in result.segment_results)
                         result.warnings.extend(plan.warnings)
                         return result
 
@@ -699,9 +924,9 @@ class RecordingExecutor:
                                 "recording aborted to avoid capturing wrong POV"
                             )
                             if obs_recording_started:
-                                await self._ctrl.stop_record_safe()
+                                final_output_path = await self._ctrl.stop_record_safe()
                             result.output_path = final_output_path
-                            result.success = any(r.status == "ok" for r in result.segment_results)
+                            result.success = bool(final_output_path) and any(r.status == "ok" for r in result.segment_results)
                             result.warnings.extend(plan.warnings)
                             return result
                     if segment.voice_listen_mask is not None:
@@ -1005,5 +1230,8 @@ class RecordingExecutor:
             result.success = False
         else:
             result.success = any(r.status == "ok" for r in result.segment_results)
+        if result.success and not result.output_path:
+            result.success = False
+            result.error = "OBS stopped without a confirmed output path"
         result.warnings.extend(plan.warnings)
         return result

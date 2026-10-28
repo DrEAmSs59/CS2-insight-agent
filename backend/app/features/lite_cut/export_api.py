@@ -22,7 +22,7 @@ from ...video_export_log import (
     video_export_session,
 )
 from .dependencies import build_lite_cut_services
-from .export_executor import execute_prepared_export, remove_partial_export
+from .export_executor import execute_prepared_export
 from .service_http import service_call
 from .runtime import (
     LiteCutExportJob,
@@ -48,10 +48,10 @@ class LiteCutExportBody(BaseModel):
     body: dict[str, Any] | None = None
     output_path: str
 
-async def _prepare_lite_cut_export(body: LiteCutExportBody) -> dict[str, Any]:
+def _prepare_lite_cut_export(body: LiteCutExportBody):
     from .export_executor import prepare_export
 
-    return await prepare_export(
+    return prepare_export(
         body,
         projects=_services().projects,
         montage_db=get_montage_db(),
@@ -128,7 +128,6 @@ async def _run_lite_cut_export_job_in_session(job: LiteCutExportJob, prepared: d
             cancel_event=job.cancel_event,
         )
     except MontageComposerError as e:
-        await remove_partial_export(job.output_path)
         if e.code == "MONTAGE_EXPORT_CANCELLED" or job.cancel_event.is_set():
             job.status = "cancelled"
             job.stage = "cancelled"
@@ -162,7 +161,6 @@ async def _run_lite_cut_export_job_in_session(job: LiteCutExportJob, prepared: d
         )
         return
     except Exception as e:
-        await remove_partial_export(job.output_path)
         logger.exception("lite_cut background export failed")
         code = "MONTAGE_EXPORT_FAILED"
         job.status = "error"
@@ -202,103 +200,102 @@ async def lite_cut_export(body: LiteCutExportBody):
     from ...montage_errors import montage_detail_from_exception
     from ...video_composer import MontageComposerError
 
-    prepared = await _prepare_lite_cut_export(body)
-    if body.project_id is not None:
-        project = await _services().projects.get(int(body.project_id))
-        if project:
-            await service_call(_services().snapshots.create(int(body.project_id), reason="before_export"))
-    export_id = await _services().exports.create(
-        project_id=int(body.project_id) if body.project_id is not None else None,
-        body=prepared["project_body"],
-        status="running",
-        output_path=prepared["output_path"],
-    )
-    set_video_export_database_id(export_id)
-    export_event(
-        "pipeline_started",
-        database_export_id=export_id,
-        project_id=body.project_id,
-        output_name=Path(prepared["output_path"]).name,
-        requested_encoder=prepared["montage_encoder"],
-        framemeld_enabled=bool(
-            (prepared["project_body"].get("output") or {}).get("framemeld_enabled")
-        ),
-    )
-
-    try:
-        out = await execute_prepared_export(prepared)
-    except MontageComposerError as e:
-        await remove_partial_export(prepared["output_path"])
-        detail = montage_detail_from_exception(e)
-        await _services().exports.update(
-            export_id, status="error", error_msg=str(detail.get("code") or "MONTAGE_EXPORT_FAILED")
+    async with _prepare_lite_cut_export(body) as prepared:
+        if body.project_id is not None:
+            project = await _services().projects.get(int(body.project_id))
+            if project:
+                await service_call(_services().snapshots.create(int(body.project_id), reason="before_export"))
+        export_id = await _services().exports.create(
+            project_id=int(body.project_id) if body.project_id is not None else None,
+            body=prepared["project_body"],
+            status="running",
+            output_path=prepared["output_path"],
         )
-        error_code = str(detail.get("code") or "MONTAGE_EXPORT_FAILED")
+        set_video_export_database_id(export_id)
         export_event(
-            "pipeline_failed",
-            level=logging.ERROR,
-            status="error",
-            error_code=error_code,
-            failure_domain=detail.get("failure_domain"),
-            encoder=detail.get("encoder"),
-            branch=detail.get("branch"),
+            "pipeline_started",
+            database_export_id=export_id,
+            project_id=body.project_id,
+            output_name=Path(prepared["output_path"]).name,
+            requested_encoder=prepared["montage_encoder"],
+            framemeld_enabled=bool(
+                (prepared["project_body"].get("output") or {}).get("framemeld_enabled")
+            ),
         )
-        logger.error(
-            "video export summary feature=lite_cut export_id=%s status=error code=%s",
-            export_id,
-            error_code,
-        )
-        raise HTTPException(400, detail) from e
 
-    await _services().exports.update(export_id, status="done", error_msg="", output_path=str(out))
-    export_event(
-        "pipeline_completed",
-        status="done",
-        output_name=Path(str(out)).name,
-    )
-    logger.info(
-        "video export summary feature=lite_cut export_id=%s status=done output=%s",
-        export_id,
-        Path(str(out)).name,
-    )
-    return {"export_id": export_id, "status": "done", "output_path": str(out)}
+        try:
+            out = await execute_prepared_export(prepared)
+        except MontageComposerError as e:
+            detail = montage_detail_from_exception(e)
+            await _services().exports.update(
+                export_id, status="error", error_msg=str(detail.get("code") or "MONTAGE_EXPORT_FAILED")
+            )
+            error_code = str(detail.get("code") or "MONTAGE_EXPORT_FAILED")
+            export_event(
+                "pipeline_failed",
+                level=logging.ERROR,
+                status="error",
+                error_code=error_code,
+                failure_domain=detail.get("failure_domain"),
+                encoder=detail.get("encoder"),
+                branch=detail.get("branch"),
+            )
+            logger.error(
+                "video export summary feature=lite_cut export_id=%s status=error code=%s",
+                export_id,
+                error_code,
+            )
+            raise HTTPException(400, detail) from e
+
+        await _services().exports.update(export_id, status="done", error_msg="", output_path=str(out))
+        export_event(
+            "pipeline_completed",
+            status="done",
+            output_name=Path(str(out)).name,
+        )
+        logger.info(
+            "video export summary feature=lite_cut export_id=%s status=done output=%s",
+            export_id,
+            Path(str(out)).name,
+        )
+        return {"export_id": export_id, "status": "done", "output_path": str(out)}
 
 
 @router.post("/export/start")
 @video_export_endpoint("lite_cut")
 async def start_lite_cut_export(body: LiteCutExportBody):
-    prepared = await _prepare_lite_cut_export(body)
-    if body.project_id is not None:
-        project = await _services().projects.get(int(body.project_id))
-        if project:
-            await service_call(_services().snapshots.create(int(body.project_id), reason="before_export"))
-    export_id = await _services().exports.create(
-        project_id=int(body.project_id) if body.project_id is not None else None,
-        body=prepared["project_body"],
-        status="queued",
-        output_path=prepared["output_path"],
-    )
-    set_video_export_database_id(export_id)
-    prepared["video_export_session_id"] = current_video_export_session_id()
-    current_context = current_video_export_context()
-    if current_context is not None:
-        prepared["video_export_started_monotonic"] = current_context.started_monotonic
-    export_event(
-        "background_job_queued",
-        status="queued",
-        database_export_id=export_id,
-        project_id=body.project_id,
-        output_name=Path(prepared["output_path"]).name,
-        requested_encoder=prepared["montage_encoder"],
-    )
-    job = LiteCutExportJob(
-        export_id=export_id,
-        project_id=int(body.project_id) if body.project_id is not None else None,
-        output_path=prepared["output_path"],
-    )
-    export_jobs[export_id] = job
-    job.task = asyncio.create_task(_run_lite_cut_export_job(job, prepared))
-    return export_job_snapshot(job)
+    async with _prepare_lite_cut_export(body) as prepared:
+        if body.project_id is not None:
+            project = await _services().projects.get(int(body.project_id))
+            if project:
+                await service_call(_services().snapshots.create(int(body.project_id), reason="before_export"))
+        export_id = await _services().exports.create(
+            project_id=int(body.project_id) if body.project_id is not None else None,
+            body=prepared["project_body"],
+            status="queued",
+            output_path=prepared["output_path"],
+        )
+        set_video_export_database_id(export_id)
+        prepared["video_export_session_id"] = current_video_export_session_id()
+        current_context = current_video_export_context()
+        if current_context is not None:
+            prepared["video_export_started_monotonic"] = current_context.started_monotonic
+        export_event(
+            "background_job_queued",
+            status="queued",
+            database_export_id=export_id,
+            project_id=body.project_id,
+            output_name=Path(prepared["output_path"]).name,
+            requested_encoder=prepared["montage_encoder"],
+        )
+        job = LiteCutExportJob(
+            export_id=export_id,
+            project_id=int(body.project_id) if body.project_id is not None else None,
+            output_path=prepared["output_path"],
+        )
+        export_jobs[export_id] = job
+        job.task = asyncio.create_task(_run_lite_cut_export_job(job, prepared))
+        return export_job_snapshot(job)
 
 
 @router.get("/exports")
