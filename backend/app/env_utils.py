@@ -367,6 +367,13 @@ class ExperimentalConfig(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     pov_enabled: bool = False
+    # 实验档录制（复用 CIAP Pro 的 HLAE 后端 + ReShade/OpenNR 抓帧）。
+    # 留空时按 data 目录/环境变量自动探测，见 docs/experimental-amd-nr.md。
+    nr_runtime_dir: str = ""
+    nr_capture_dir: str = ""
+    nr_pro_exe: str = ""
+    nr_pro_data_dir: str = ""
+    nr_pro_base: str = ""
 
 
 class SpecPlayerVerifyConfig(BaseModel):
