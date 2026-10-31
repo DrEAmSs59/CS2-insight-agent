@@ -47,7 +47,7 @@ CS2 Insight Agent 在编译与运行时依赖以下开源组件。所有依赖�
 ## Bundled / optional Windows runtime pieces
 
 - **CPython Windows runtime** (installer and portable zip): sourced from the Astral `python-build-standalone` project (`install_only` tarball), Python Software Foundation license. See `packaging/windows/python-runtime.json` for the pinned URL.
-- **Optional FFmpeg** (GPL): when the user selects the matching Inno task, the installer downloads `ffmpeg-8.1.1-essentials_build.zip` from the GyanD `codexffmpeg` GitHub release (see `packaging/windows/ffmpeg-redist.json`). FFmpeg is a trademark of the FFmpeg project.
+- **FFmpeg** is supplied separately by the user. FFmpeg is a trademark of the FFmpeg project.
 
 ## External FrameMeld runtime
 
