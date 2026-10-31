@@ -17,6 +17,7 @@ import uuid
 from pathlib import Path
 from typing import Any, AsyncIterator
 
+from ..cosmetics_glove_sources import canonical_glove_batch, has_glove_entries, read_original_glove_inventory, replay_glove_plan
 from ..cosmetics_player_loadout import loadout_originals, read_original_loadout
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -301,6 +302,10 @@ async def post_custom_skin_plan(
         if isinstance(candidate, dict):
             trusted_plan = candidate
         break
+    glove_inventory = None
+    if any(row.get("type") == "glove" for row in body.replacements.values() if isinstance(row, dict)) or any(has_glove_entries(row.get("plan_json")) for row in stored_plans):
+        glove_inventory = await asyncio.to_thread(read_original_glove_inventory, Path(original_path))
+    source_gloves = None if glove_inventory is None else glove_inventory.get(steamid, [])
     try:
         loadout = validate_player_loadout(body.player_loadout if body.player_loadout is not None
             else (trusted_plan or {}).get("player_loadout", {}))
@@ -314,8 +319,9 @@ async def post_custom_skin_plan(
             trusted_plan=trusted_plan,
         ) if body.replacements else ([], {"steamid": steamid, "items": []})
         if not body.replacements and (trusted_plan or {}).get("items"):
-            batch_items = build_batch_from_plan_json(trusted_plan, inventory)
+            batch_items = replay_glove_plan(trusted_plan, inventory, source_gloves)
             plan_json["items"] = trusted_plan["items"]
+        batch_items, plan_json = canonical_glove_batch(batch_items, plan_json, source_gloves)
         if loadout:
             plan_json["player_loadout"] = loadout
     except CosmeticsSkinPlanError as exc:
@@ -347,7 +353,8 @@ async def post_custom_skin_plan(
         other_inventory = _inventory_for_steamid(result, other_steamid)
         try:
             other_loadout = validate_player_loadout(other_plan.get("player_loadout", {}))
-            other_batch = build_batch_from_plan_json(other_plan, other_inventory) if other_plan.get("items") else []
+            other_sources = None if glove_inventory is None else glove_inventory.get(other_steamid, [])
+            other_batch = replay_glove_plan(other_plan, other_inventory, other_sources) if other_plan.get("items") else []
         except CosmeticsSkinPlanError as exc:
             logger.error(
                 "stored cosmetics plan could not be rebuilt: demo_id=%s steamid=%s",
