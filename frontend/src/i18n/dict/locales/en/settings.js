@@ -596,7 +596,7 @@ export default {
   "settings.presetInputHudLabel": "Input overlay",
   "settings.presetInputHudDesc": "In-game key and mouse display with no delay",
   "settings.presetSceneEffects": "Scene effects · usable without POV",
-  "settings.presetMapMaterialDesc": "Replace map materials or add rain and snow",
+  "settings.presetMapMaterialDesc": "Replace map materials or add rain",
   "settings.presetPostProcessDesc": "Adjust brightness and bloom of the recording",
   "settings.presetSkyboxDesc": "Used by normal and POV recordings",
   "settings.presetLaunchDesc": "The first 5 are built in and cannot be removed",

@@ -12,9 +12,10 @@ vi.mock("../api/api", () => ({
   },
 }));
 
-function renderSection() {
+function renderSection(layout = "card") {
   return render(
     <ExperimentalPovSection
+      layout={layout}
       visible
       experimentalPovEnabled
       onExperimentalPovChange={() => {}}
@@ -102,13 +103,14 @@ describe("ExperimentalPovSection POV recovery", () => {
     expect(onSkyboxChange).toHaveBeenCalledWith("cartoon4");
   });
 
-  it("places the in-game input selector above map material and supports overlay positions", () => {
+  it.each(["card", "rows"])("places the in-game input selector above map material and supports overlay positions (%s)", (layout) => {
     API.get.mockReturnValue(new Promise(() => {}));
     const onInputHudEnabledChange = vi.fn();
     const onInputHudDisplayModeChange = vi.fn();
     const onInputHudPositionChange = vi.fn();
     render(
       <ExperimentalPovSection
+        layout={layout}
         visible
         experimentalPovEnabled
         onExperimentalPovChange={() => {}}
@@ -187,7 +189,7 @@ describe("ExperimentalPovSection POV recovery", () => {
     expect(onInputModeChange).toHaveBeenCalledWith("hybrid");
   });
 
-  it("loads an available custom skybox into the recording selector", async () => {
+  it.each(["card", "rows"])("loads an available custom skybox into the recording selector (%s)", async (layout) => {
     const customId = "custom:0123456789abcdef0123456789abcdef";
     API.get.mockImplementation((path) => Promise.resolve({
       data: path === "game-resources/skyboxes"
@@ -204,6 +206,7 @@ describe("ExperimentalPovSection POV recovery", () => {
 
     render(
       <ExperimentalPovSection
+        layout={layout}
         visible
         experimentalPovEnabled={false}
         onExperimentalPovChange={() => {}}
@@ -337,7 +340,7 @@ describe("ExperimentalPovSection POV recovery", () => {
     expect(screen.queryByTestId("experimental-pov-disclaimer")).toBeNull();
   });
 
-  it("explains orphaned residue and reports semantic cleanup", async () => {
+  it.each(["card", "rows"])("explains orphaned residue and reports semantic cleanup (%s)", async (layout) => {
     API.get.mockResolvedValue({
       data: {
         state: "orphaned",
@@ -356,7 +359,7 @@ describe("ExperimentalPovSection POV recovery", () => {
       },
     });
 
-    renderSection();
+    renderSection(layout);
 
     expect(await screen.findByText(/没有恢复记录的 POV 残留/)).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "恢复 POV 修改" }));
@@ -365,7 +368,7 @@ describe("ExperimentalPovSection POV recovery", () => {
     expect(screen.queryByText(/没有恢复记录的 POV 残留/)).toBeNull();
   });
 
-  it("keeps the recovery action visible and shows the backend failure", async () => {
+  it.each(["card", "rows"])("keeps the recovery action visible and shows the backend failure (%s)", async (layout) => {
     API.get.mockResolvedValue({
       data: {
         state: "managed",
@@ -377,10 +380,20 @@ describe("ExperimentalPovSection POV recovery", () => {
       response: { data: { detail: "拒绝访问 gameinfo.gi" } },
     });
 
-    renderSection();
+    renderSection(layout);
     fireEvent.click(await screen.findByRole("button", { name: "恢复 POV 修改" }));
 
     expect(await screen.findByText(/POV 恢复失败：拒绝访问 gameinfo\.gi/)).toBeTruthy();
     expect(screen.getByRole("button", { name: "恢复 POV 修改" }).disabled).toBe(false);
+  });
+
+  it.each(["card", "rows"])("retains recovery when restoration is unverified (%s)", async (layout) => {
+    API.get.mockResolvedValue({ data: { state: "managed", needs_restore: true } });
+    API.post.mockResolvedValue({ data: { ok: true, restore: { verified: false, error: "校验未通过" } } });
+    renderSection(layout);
+    fireEvent.click(await screen.findByRole("button", { name: "恢复 POV 修改" }));
+    expect(await screen.findByText(/POV 恢复失败：校验未通过/)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "恢复 POV 修改" }).disabled).toBe(false);
+    expect(screen.queryByText(/POV 残留已安全清理/)).toBeNull();
   });
 });

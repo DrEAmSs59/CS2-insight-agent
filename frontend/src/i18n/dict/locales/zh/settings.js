@@ -596,7 +596,7 @@ export default {
   "settings.presetInputHudLabel": "键鼠可视化",
   "settings.presetInputHudDesc": "游戏内显示按键与鼠标，无延迟",
   "settings.presetSceneEffects": "场景效果 · 可与 POV 独立使用",
-  "settings.presetMapMaterialDesc": "替换地图材质，或启用雨雪天气",
+  "settings.presetMapMaterialDesc": "替换地图材质，或启用下雨效果",
   "settings.presetPostProcessDesc": "调整录制画面的明暗与辉光",
   "settings.presetSkyboxDesc": "普通录制与 POV 录制都会使用",
   "settings.presetLaunchDesc": "前 5 条为内置参数，不可移除",

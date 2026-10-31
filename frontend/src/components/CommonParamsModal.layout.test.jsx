@@ -27,6 +27,9 @@ describe("Free shared recording settings", () => {
     const { container } = renderPreset();
     expect([...container.querySelectorAll("section[id]")].map(x => x.id)).toEqual(["rp-pacing", "rp-replay", "rp-camera", "rp-experimental", "rp-hud", "rp-canvas", "rp-launch"]);
     expect(screen.queryByText(/HLAE|ReShade|时光|夜间暴雨|下雪|POV 死亡效果|跟随玩家 TAB/)).toBeNull();
+    expect(screen.getByRole("switch", { name: "POV HUD 增强" })).toBeTruthy();
+    expect(screen.getByRole("radiogroup", { name: "语音控制" })).toBeTruthy();
+    expect(screen.queryByTestId("experimental-feature-card")).toBeNull();
     expect(API.get.mock.calls.some(([url]) => /capabilities|inspect3d|subtitle/.test(url))).toBe(false);
   });
 });
