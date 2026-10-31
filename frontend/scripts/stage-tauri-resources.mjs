@@ -165,7 +165,7 @@ copyFiltered("data", (rel) => bundledDataFiles.has(rel.toLowerCase()));
 /** Open-source DEM truth-source and names-only rewrite sidecars. */
 function buildAndStageDemoTools() {
   const manifest = join(repoRoot, "tools", "demo-cosmetic-rewriter", "Cargo.toml");
-  const binaries = ["demo-input-hud-track", "demo-player-aliases", "demo-sky-handle-rewriter"];
+  const binaries = ["demo-input-hud-track", "demo-player-aliases", "demo-sky-handle-rewriter", "demo-native-targets"];
   const result = spawnSync(
     "cargo",
     [

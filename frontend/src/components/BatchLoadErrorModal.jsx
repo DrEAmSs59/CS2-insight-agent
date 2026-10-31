@@ -21,9 +21,9 @@ export default function BatchLoadErrorModal({ open, failed = [], mode = "load", 
       role="dialog"
       aria-modal="true"
     >
-      <div className="relative w-full max-w-md rounded-xl bg-zinc-900 border border-zinc-700 shadow-2xl">
-        <div className="flex items-center justify-between px-5 pt-5 pb-3 border-b border-zinc-700">
-          <div className="flex items-center gap-2 text-red-400">
+      <div className="relative w-full max-w-md rounded-xl bg-cs2-bg-card border border-cs2-border shadow-2xl">
+        <div className="flex items-center justify-between px-5 pt-5 pb-3 border-b border-cs2-border">
+          <div className="flex items-center gap-2 text-cs2-rose-on-surface">
             <AlertCircle size={18} />
             <span className="font-semibold text-sm">
               {t(analyzing ? "dialog.batchAnalysisErrorTitle" : "dialog.batchLoadErrorTitle")}
@@ -31,7 +31,7 @@ export default function BatchLoadErrorModal({ open, failed = [], mode = "load", 
           </div>
           <button
             onClick={onClose}
-            className="text-zinc-500 hover:text-zinc-300 transition-colors"
+            className="text-cs2-text-muted hover:text-cs2-text-primary transition-colors"
             aria-label={t("dialog.batchLoadErrorClose")}
           >
             <X size={18} />
@@ -39,7 +39,7 @@ export default function BatchLoadErrorModal({ open, failed = [], mode = "load", 
         </div>
 
         {analyzing ? (
-          <p className="px-5 pt-4 text-xs leading-relaxed text-zinc-400">
+          <p className="px-5 pt-4 text-xs leading-relaxed text-cs2-text-secondary">
             {t("dialog.batchAnalysisErrorHint")}
           </p>
         ) : null}
@@ -47,8 +47,8 @@ export default function BatchLoadErrorModal({ open, failed = [], mode = "load", 
         <ul className="px-5 py-4 space-y-2 max-h-60 overflow-y-auto">
           {failed.map((item) => (
             <li key={`${item.id}-${item.filename}`} className="text-sm">
-              <span className="text-zinc-200 font-medium">{item.filename}</span>
-              <span className="text-zinc-500 ml-2">— {item.reason}</span>
+              <span className="text-cs2-text-primary font-medium">{item.filename}</span>
+              <span className="text-cs2-text-muted ml-2">— {item.reason}</span>
             </li>
           ))}
         </ul>
@@ -56,7 +56,7 @@ export default function BatchLoadErrorModal({ open, failed = [], mode = "load", 
         <div className="px-5 pb-5 pt-2 flex justify-end">
           <button
             onClick={onClose}
-            className="px-4 py-1.5 rounded-lg bg-zinc-700 hover:bg-zinc-600 text-sm text-zinc-200 transition-colors"
+            className="px-4 py-1.5 rounded-lg bg-cs2-bg-active hover:bg-cs2-bg-hover text-sm text-cs2-text-primary transition-colors"
           >
             {t(analyzing ? "dialog.batchAnalysisErrorClose" : "dialog.batchLoadErrorReselect")}
           </button>

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import uuid
 import asyncio
 import logging
 from concurrent.futures import ThreadPoolExecutor
@@ -90,7 +91,7 @@ async def upload_demo(
         raise HTTPException(400, error_detail("DEMO_INVALID_EXTENSION"))
 
     filename = Path(file.filename).name
-    dest = UPLOAD_DIR / filename
+    dest = UPLOAD_DIR / uuid.uuid4().hex / filename
     uploaded_md5 = await asyncio.to_thread(save_uploaded_demo, file, dest)
     persistent_path = await asyncio.to_thread(
         verified_upload_source_path,
@@ -137,7 +138,7 @@ async def upload_demos(
         try:
             if not file.filename or not str(file.filename).lower().endswith(".dem"):
                 raise ValueError("not a .dem file")
-            dest = UPLOAD_DIR / filename
+            dest = UPLOAD_DIR / uuid.uuid4().hex / filename
             uploaded_md5 = await asyncio.to_thread(save_uploaded_demo, file, dest)
             persistent_path = await asyncio.to_thread(
                 verified_upload_source_path,

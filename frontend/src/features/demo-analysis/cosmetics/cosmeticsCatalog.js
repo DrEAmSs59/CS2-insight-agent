@@ -115,6 +115,8 @@ export function imageUrlForWear(imageUrl, wear, item = null) {
   const url = String(imageUrl || "").trim();
   if (!url) return "";
   const base = url.replace(/_(light|medium|heavy)\.webp/i, ".webp");
+  // Glove cards use the original inventory icon, without an equipped hand.
+  if (item?.type === "glove") return base;
   // Vanilla/default art has no wear variants on the CDN.
   if (item && (item.is_placeholder || item.is_base || !(Number(item.paint_index) > 0))) {
     return base.includes(".webp") ? base : url;
@@ -185,4 +187,9 @@ export function listDefaultLoadout(team) {
       finish_known: true,
       ownership_evidence: "default_loadout",
     }));
+}
+
+export function isVanillaKnife(item) {
+  return item?.type === "melee" && Number(item.paint_index ?? item.index) === 0
+    && CS2_COSMETICS_ITEMS.some(row => row.type === "melee" && row.base && !row.free && Number(row.def) === Number(item.def_index ?? item.def));
 }

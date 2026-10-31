@@ -64,6 +64,41 @@ def test_migration_keeps_external_paths_unchanged(tmp_path):
     asyncio.run(run())
 
 
+def test_migrate_then_restore_snapshot_keeps_media_in_new_directory(tmp_path):
+    from app.features.lite_cut.models import empty_project
+    from app.features.lite_cut.repositories import DbProjectRepository
+    from app.features.lite_cut.services import ProjectService
+
+    async def run():
+        db = LiteCutDB(tmp_path / "litecut.db")
+        await db.init_tables()
+        old_root, new_root = tmp_path / "old", tmp_path / "new"
+        old_root.mkdir()
+        new_root.mkdir()
+        old_media = old_root / "clip.mp4"
+        old_media.write_bytes(b"media")
+        body = empty_project().model_dump(mode="json", by_alias=True)
+        body["tracks"][0]["clips"] = [{
+            "id": "video", "source_type": "file", "file_path": str(old_media),
+            "trim_in": 0, "trim_out": 3, "duration": 3, "timeline_start": 0,
+        }]
+        projects = DbProjectRepository(db)
+        project_id = await db.create_project(name="Project", body=body)
+        snapshot_id = await projects.snapshot(project_id, name="Project", body=body, reason="manual")
+        old_media.rename(new_root / "clip.mp4")
+        counts = await db.migrate_asset_storage_paths(old_root, new_root)
+        assert counts["project_snapshots"] == 1
+
+        reopened = LiteCutDB(db.db_path)
+        service = ProjectService(DbProjectRepository(reopened), storage=None)
+        restored = await service.restore_snapshot(project_id, snapshot_id)
+        media_path = restored["body"]["tracks"][0]["clips"][0]["file_path"]
+        assert Path(media_path) == new_root / "clip.mp4"
+        assert Path(media_path).read_bytes() == b"media"
+        assert (await reopened.get_project(project_id))["body"] == restored["body"]
+    asyncio.run(run())
+
+
 def test_storage_endpoint_copies_files_switches_config_and_removes_old_tree(tmp_path, monkeypatch):
     async def run():
         db = LiteCutDB(tmp_path / "litecut.db")

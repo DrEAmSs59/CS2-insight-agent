@@ -161,11 +161,11 @@ export default function MatchHistoryPage() {
       {/* Demo retention notice */}
       <div
         className="flex items-start gap-3 rounded-[10px] border px-4 py-3 text-[13px]"
-        style={{ background: "rgba(56,178,196,0.08)", borderColor: "rgba(56,178,196,0.25)", color: "#a5f3fc" }}
+        style={{ background: "rgba(56,178,196,0.08)", borderColor: "rgba(56,178,196,0.25)", color: "var(--cs2-cyan-on-surface)" }}
       >
-        <Info className="mt-0.5 h-4 w-4 shrink-0 text-[#38b2c4]" />
+        <Info className="mt-0.5 h-4 w-4 shrink-0 text-cs2-cyan-on-surface" />
         <span>
-          <strong className="text-[#38b2c4]">{t("match.demoRetentionTitle")}</strong>
+          <strong className="text-cs2-cyan-on-surface">{t("match.demoRetentionTitle")}</strong>
           {t("match.demoRetentionBody", { days: 8 })}
         </span>
       </div>

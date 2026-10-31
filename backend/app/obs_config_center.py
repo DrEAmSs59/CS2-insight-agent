@@ -10,6 +10,7 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
 import threading
 from datetime import datetime, timezone
 from pathlib import Path
@@ -233,11 +234,7 @@ def _get_record_directory_via_ws(ws: obsws) -> str:
 
 
 def _copy_profile_tree(src: Path, dst: Path) -> None:
-    if not src.is_dir():
-        return
     dst.parent.mkdir(parents=True, exist_ok=True)
-    if dst.exists():
-        shutil.rmtree(dst, ignore_errors=True)
     shutil.copytree(src, dst)
 
 
@@ -474,10 +471,10 @@ def _create_backup(
     reason: str,
     project_profile: str,
 ) -> tuple[str, Path]:
-    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
     backup_id = f"{ts}_{reason}"
     dest = _backup_root() / backup_id
-    dest.mkdir(parents=True, exist_ok=True)
+    dest.parent.mkdir(parents=True, exist_ok=True)
     prof_name, sc_name = _read_global_profile_names(obs_root)
     manifest = {
         "created_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
@@ -488,13 +485,16 @@ def _create_backup(
         "project_profile": project_profile,
         "app_version": APP_VERSION,
     }
-    (dest / "manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
-    g = obs_root / "global.ini"
-    if g.is_file():
-        _safe_copy_file(g, dest / "global.ini")
     pp = obs_root / "basic" / "profiles" / project_profile
-    if pp.is_dir():
-        _copy_profile_tree(pp, dest / "profiles" / project_profile)
+    if not (pp / "basic.ini").is_file():
+        raise ValueError("OBS 配置缺少 basic.ini，无法创建可恢复的备份")
+    with tempfile.TemporaryDirectory(prefix=".pending-", dir=dest.parent) as temporary:
+        staging = Path(temporary) / "backup"
+        staging.mkdir()
+        _safe_copy_file(obs_root / "global.ini", staging / "global.ini")
+        _copy_profile_tree(pp, staging / "profiles" / project_profile)
+        (staging / "manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+        staging.rename(dest)
     return backup_id, dest
 
 
@@ -542,12 +542,35 @@ def create_active_profile_backup(*, reason: str = "ai_obs_tuning") -> dict[str, 
 
 def _restore_backup_pack(backup_dir: Path, obs_root: Path, project_profile: str) -> bool:
     g_bak = backup_dir / "global.ini"
-    if g_bak.is_file():
-        _safe_copy_file(g_bak, obs_root / "global.ini")
     prof_bak = backup_dir / "profiles" / project_profile
-    if prof_bak.is_dir():
-        tgt = obs_root / "basic" / "profiles" / project_profile
-        _copy_profile_tree(prof_bak, tgt)
+    if not g_bak.is_file() or not (prof_bak / "basic.ini").is_file():
+        raise ValueError("备份不完整，未修改当前 OBS 配置")
+    target = obs_root / "basic" / "profiles" / project_profile
+    target.parent.mkdir(parents=True, exist_ok=True)
+    staging = Path(tempfile.mkdtemp(prefix=".obs-restore-", dir=obs_root))
+    old_profile, old_global = staging / "old-profile", staging / "old-global.ini"
+    global_path = obs_root / "global.ini"
+    installed_profile = False
+    try:
+        _copy_profile_tree(prof_bak, staging / "new-profile")
+        _safe_copy_file(g_bak, staging / "new-global.ini")
+        if target.exists():
+            target.rename(old_profile)
+        (staging / "new-profile").rename(target)
+        installed_profile = True
+        if global_path.exists():
+            global_path.rename(old_global)
+        (staging / "new-global.ini").rename(global_path)
+    except Exception:
+        if installed_profile:
+            shutil.rmtree(target)
+        if old_profile.exists():
+            old_profile.rename(target)
+        if old_global.exists():
+            os.replace(old_global, global_path)
+        shutil.rmtree(staging)
+        raise
+    shutil.rmtree(staging)
     return True
 
 
@@ -565,6 +588,9 @@ def list_backups() -> list[dict[str, Any]]:
         try:
             data = json.loads(mf.read_text(encoding="utf-8"))
         except json.JSONDecodeError:
+            continue
+        profile = str(data.get("project_profile") or "")
+        if not profile or not (child / "global.ini").is_file() or not (child / "profiles" / profile / "basic.ini").is_file():
             continue
         items.append(
             {
@@ -1193,8 +1219,8 @@ def restore_backup(backup_id: str, obs_cfg, *, project_profile: Optional[str] = 
     manifest: dict[str, Any] = {}
     try:
         manifest = json.loads((bdir / "manifest.json").read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        manifest = {}
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError("备份清单无效，未修改当前 OBS 配置") from exc
     pp = _effective_project_profile(
         obs_root,
         project_profile or str(manifest.get("project_profile") or ""),

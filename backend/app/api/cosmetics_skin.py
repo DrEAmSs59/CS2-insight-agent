@@ -17,6 +17,8 @@ import uuid
 from pathlib import Path
 from typing import Any, AsyncIterator
 
+from ..cosmetics_player_loadout import loadout_originals, read_original_loadout
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
@@ -150,7 +152,7 @@ def _run_one_owned_batch(
     """Invoke skin-core once; raise SkinCore* / Exception for the caller to map."""
     # Experimental consent belongs to the saved plan, not the native protocol.
     player_loadout = {key: value for key, value in (player_loadout or {}).items()
-                      if key in {"agent_t", "agent_ct", "music_kit"}}
+                      if key in {"agent_t", "agent_ct", "music_kit", "music_kit_t", "music_kit_ct"}}
     if not items and not player_loadout:
         # Clearing the player's loadout restores the original while retaining
         # other players' already replayed plans in current_input.
@@ -243,9 +245,13 @@ async def get_custom_skin_plan(
     stored = await demo_db.get_custom_skin_plan(str(row["path"]), str(steamid))
     if not stored:
         return {"ok": True, "plan": None}
+    plan = dict(stored["plan_json"])
+    if plan.get("player_loadout") and "player_loadout_originals" not in plan:
+        original_rows = await asyncio.to_thread(read_original_loadout, Path(row["path"]), str(steamid))
+        plan["player_loadout_originals"] = loadout_originals([], plan, original_rows)
     return {
         "ok": True,
-        "plan": stored["plan_json"],
+        "plan": plan,
         "output_sha256": stored.get("output_sha256"),
     }
 
@@ -321,6 +327,12 @@ async def post_custom_skin_plan(
             exc,
         )
         raise HTTPException(400, str(exc)) from exc
+
+    if loadout or (trusted_plan or {}).get("player_loadout_originals") is not None:
+        original_rows = None
+        if "player_loadout_originals" not in (trusted_plan or {}):
+            original_rows = await asyncio.to_thread(read_original_loadout, Path(original_path), steamid)
+        plan_json["player_loadout_originals"] = loadout_originals(inventory, trusted_plan, original_rows)
 
     # Other players' persisted plans must be re-applied onto the original before
     # this player's pass; skin-core accepts one steamid per call.
@@ -470,6 +482,8 @@ async def post_custom_skin_plan(
             succeeded_rows=succeeded_raw if isinstance(succeeded_raw, list) else [],
         )
 
+        if "player_loadout_originals" in plan_json:
+            filtered_plan["player_loadout_originals"] = plan_json["player_loadout_originals"]
         if loadout:
             filtered_plan["player_loadout"] = loadout
 

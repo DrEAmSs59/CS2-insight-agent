@@ -1,11 +1,13 @@
 // zh / api — keep keys scoped to this feature catalog.
 export default {
+  "api.err.demoPlaybackConfigRestoreRequired": "上次录制或播放的玩家配置尚未恢复，已停止启动以保留原始备份。请关闭 CS2，在 Insight 中点击“一键恢复玩家配置”后重试。",
   "api.err.recordingDemoPathEmpty": "Demo 路径为空",
   "api.err.recordingDemoNotFound": "未找到 Demo 文件：{path}",
   "api.err.recordingCs2PathMissing": "未配置 CS2 路径且自动探测失败。请在设置中填写 cs2.exe 完整路径，或点击自动探测。",
   "api.err.recordingCs2Running": "CS2 正在运行，请先关闭 CS2 再开始录制。",
   "api.err.recordingObsConnectFail": "无法连接 OBS：{err}。请在开始录制前确认 OBS 已运行且 WebSocket 配置正确。",
   "api.err.recordingAlreadyRunning": "已有录制任务进行中，请先中止或等待结束。",
+  "api.err.recordingControllerNotReady": "Demo 内录制控制器未在限定时间内就绪，已安全中止本次录制。",
   "api.err.recordingFailed": "录制失败：{err}",
   "api.err.configNoManifest": "无 manifest 备份",
   "api.err.recordingGsiNotReady": "CS2 未在限定时间内进入游戏画面，已中止本次录制以避免在读条页面注入控制台命令。",

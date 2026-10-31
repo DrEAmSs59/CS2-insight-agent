@@ -142,7 +142,7 @@ function toWorkspaceRecommendation(raw, fallback) {
 function ConnectionStatus({ icon: Icon, label, value, ok, loading = false }) {
   return (
     <div className="flex items-center gap-3 rounded-xl border border-cs2-border/75 bg-cs2-bg-input/45 p-3">
-      <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${loading ? "bg-cs2-accent/10 text-cs2-accent" : ok ? "bg-emerald-400/10 text-emerald-300" : "bg-amber-400/10 text-amber-300"}`}>
+      <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${loading ? "bg-cs2-accent/10 text-cs2-accent" : ok ? "bg-cs2-emerald-surface text-cs2-emerald-on-surface" : "bg-cs2-amber-surface text-cs2-amber-on-surface"}`}>
         {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Icon className="h-4 w-4" />}
       </span>
       <div className="min-w-0">
@@ -191,7 +191,7 @@ function ConnectionDialog({
                   <h2 id="obs-connection-title" className="text-base font-bold text-cs2-text-primary">
                     {discoveryLoading ? "正在检查 OBS" : connected ? "OBS 已经准备好了" : "还没有连接到 OBS"}
                   </h2>
-                  {!discoveryLoading && !connected && <span className="rounded-full border border-amber-400/30 bg-amber-400/10 px-2 py-0.5 text-[9px] font-bold text-amber-300">连接后才能继续</span>}
+                  {!discoveryLoading && !connected && <span className="rounded-full border border-cs2-amber-border bg-cs2-amber-surface px-2 py-0.5 text-[9px] font-bold text-cs2-amber-on-surface">连接后才能继续</span>}
                 </div>
                 <p className="mt-1 text-[11px] leading-relaxed text-cs2-text-secondary">
                   点击下面的橙色按钮，我们会自动打开 OBS 并完成连接。大多数情况下不需要你手动设置。
@@ -223,7 +223,7 @@ function ConnectionDialog({
                   <li className="flex gap-2"><span className="font-mono text-cs2-accent">03</span><span>读取现在的画质、帧率和电脑配置。</span></li>
                 </ol>
               </div>
-              <div className="rounded-xl border border-emerald-400/20 bg-emerald-400/[0.04] p-4">
+              <div className="rounded-xl border border-cs2-emerald-border bg-cs2-emerald-surface p-4">
                 <div className="flex items-center gap-2 text-[11px] font-bold text-cs2-text-success"><LockKeyhole className="h-4 w-4" />不会动你的这些设置</div>
                 <ul className="mt-3 space-y-2 text-[10px] leading-relaxed text-cs2-text-secondary">
                   {["不会修改 OBS 连接密码", "不会改场景、画面来源和声音", "不会改直播平台和推流设置", "这里只负责连接，不会马上改画质和帧率"].map((item) => (
@@ -235,16 +235,16 @@ function ConnectionDialog({
           )}
 
           {bootstrapResult && !bootstrapResult.ok && (
-            <div className="rounded-xl border border-amber-400/30 bg-amber-400/[0.06] p-3.5">
+            <div className="rounded-xl border border-cs2-amber-border bg-cs2-amber-surface p-3.5">
               <div className="flex items-start gap-2.5">
-                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-300" />
+                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-cs2-amber-on-surface" />
                 <div className="min-w-0 flex-1">
-                  <div className="text-[11px] font-bold text-amber-200">还差一步</div>
+                  <div className="text-[11px] font-bold text-cs2-amber-on-surface">还差一步</div>
                   <p className="mt-1 text-[10px] leading-relaxed text-cs2-text-secondary">{BOOTSTRAP_STATUS_TEXT[bootstrapResult.status] || "自动连接没有完成，请按提示处理后再试。"}</p>
                   {(bootstrapResult.events || []).length > 0 && (
                     <div className="mt-2 flex flex-wrap gap-1.5">
                       {bootstrapResult.events.map((event) => (
-                        <span key={`${event.step}-${event.status}`} title={event.message} className="rounded-full border border-cs2-border bg-black/10 px-2 py-1 text-[9px] text-cs2-text-secondary">
+                        <span key={`${event.step}-${event.status}`} title={event.message} className="rounded-full border border-cs2-border bg-cs2-bg-input px-2 py-1 text-[9px] text-cs2-text-secondary">
                           {BOOTSTRAP_STEP_TEXT[event.step] || "连接步骤"} · {BOOTSTRAP_EVENT_STATUS_TEXT[event.status] || "未完成"}
                         </span>
                       ))}
@@ -263,7 +263,7 @@ function ConnectionDialog({
             </div>
           )}
 
-          {errorMessage && <div className="rounded-xl border border-rose-400/30 bg-rose-400/[0.05] px-3 py-2.5 text-[10px] text-cs2-rose-on-surface">{errorMessage}</div>}
+          {errorMessage && <div className="rounded-xl border border-cs2-rose-border bg-cs2-rose-surface px-3 py-2.5 text-[10px] text-cs2-rose-on-surface">{errorMessage}</div>}
 
           {!discoveryLoading && (
             <label className="flex cursor-pointer items-start gap-2.5 rounded-xl border border-cs2-border/70 bg-cs2-bg-input/25 px-3 py-2.5 text-[10px] text-cs2-text-secondary">
@@ -348,8 +348,8 @@ function CurrentObsConfiguration({ discovery, previewMode, refreshing, kept, onK
       <div className="border-b border-cs2-border bg-[radial-gradient(circle_at_top_right,rgba(224,127,10,0.12),transparent_45%)] p-5">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
           <div className="flex items-start gap-3">
-            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-emerald-400/25 bg-emerald-400/10 text-cs2-text-success"><CheckCircle2 className="h-5 w-5" /></span>
-            <div><div className="flex flex-wrap items-center gap-2"><h2 className="text-[15px] font-bold text-cs2-text-primary">OBS 已连接，这是你现在的录制设置</h2><span className="rounded-full border border-emerald-400/30 bg-emerald-400/10 px-2 py-0.5 text-[9px] font-bold text-emerald-300">只读查看</span></div><p className="mt-1 max-w-3xl text-[11px] leading-relaxed text-cs2-text-secondary">先确认当前设置是否已经满足需要。只有你主动选择“使用 AI 调整”，系统才会进入分辨率和帧率选择；留在这里不会修改 OBS。</p></div>
+            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-cs2-emerald-border bg-cs2-emerald-surface text-cs2-text-success"><CheckCircle2 className="h-5 w-5" /></span>
+            <div><div className="flex flex-wrap items-center gap-2"><h2 className="text-[15px] font-bold text-cs2-text-primary">OBS 已连接，这是你现在的录制设置</h2><span className="rounded-full border border-cs2-emerald-border bg-cs2-emerald-surface px-2 py-0.5 text-[9px] font-bold text-cs2-emerald-on-surface">只读查看</span></div><p className="mt-1 max-w-3xl text-[11px] leading-relaxed text-cs2-text-secondary">先确认当前设置是否已经满足需要。只有你主动选择“使用 AI 调整”，系统才会进入分辨率和帧率选择；留在这里不会修改 OBS。</p></div>
           </div>
           <button type="button" onClick={onRefresh} disabled={refreshing || previewMode} className="inline-flex shrink-0 items-center gap-2 rounded-xl border border-cs2-border bg-cs2-bg-input px-3 py-2 text-[10px] font-semibold text-cs2-text-secondary disabled:opacity-45"><RefreshCw className={`h-3.5 w-3.5 ${refreshing ? "animate-spin" : ""}`} />重新读取</button>
         </div>
@@ -358,12 +358,12 @@ function CurrentObsConfiguration({ discovery, previewMode, refreshing, kept, onK
         <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
           {rows.map(([Icon, label, value, detail]) => <div key={label} className="rounded-xl border border-cs2-border bg-cs2-bg-input/35 p-4"><div className="flex items-center gap-2 text-[9px] font-bold uppercase tracking-[0.12em] text-cs2-text-muted"><Icon className="h-3.5 w-3.5 text-cs2-accent" />{label}</div><div className="mt-2 break-words font-mono text-[13px] font-bold text-cs2-text-primary">{value}</div><div className="mt-1 text-[9px] text-cs2-text-muted">{detail}</div></div>)}
         </div>
-        {kept && <div className="mt-4 flex items-start gap-2 rounded-xl border border-emerald-400/25 bg-emerald-400/[0.05] px-3 py-2.5 text-[10px] text-cs2-text-secondary"><CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-cs2-text-success" /><span><strong className="text-cs2-text-success">已经保持当前设置。</strong> 系统没有修改 OBS；以后需要时仍可让 AI 帮你调整。</span></div>}
+        {kept && <div className="mt-4 flex items-start gap-2 rounded-xl border border-cs2-emerald-border bg-cs2-emerald-surface px-3 py-2.5 text-[10px] text-cs2-text-secondary"><CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-cs2-text-success" /><span><strong className="text-cs2-text-success">已经保持当前设置。</strong> 系统没有修改 OBS；以后需要时仍可让 AI 帮你调整。</span></div>}
         <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-end">
           <button type="button" onClick={onKeep} className="rounded-xl border border-cs2-border bg-cs2-bg-input px-4 py-2.5 text-[11px] font-semibold text-cs2-text-secondary">保持当前设置</button>
           <button type="button" onClick={onUseAi} disabled={!hasVideo} className="inline-flex items-center justify-center gap-2 rounded-xl bg-cs2-accent px-4 py-2.5 text-[11px] font-bold text-cs2-text-on-accent disabled:cursor-not-allowed disabled:opacity-45"><WandSparkles className="h-4 w-4" />使用 AI 检查并调整</button>
         </div>
-        {!hasVideo && <p className="mt-2 text-right text-[9px] text-amber-300">还没有读到有效的分辨率和帧率，请重新读取后再使用 AI 调整。</p>}
+        {!hasVideo && <p className="mt-2 text-right text-[9px] text-cs2-amber-on-surface">还没有读到有效的分辨率和帧率，请重新读取后再使用 AI 调整。</p>}
       </div>
     </section>
   );
@@ -386,13 +386,13 @@ function PlanWorkspace({ plan, loading, onApply, onBack }) {
       <section className="rounded-2xl border border-cs2-border bg-cs2-bg-card p-5">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div>
-            <div className="flex flex-wrap items-center gap-2"><h2 className="text-[15px] font-bold text-cs2-text-primary">准备使用这些设置</h2><span className={`rounded-full border px-2 py-0.5 text-[9px] font-bold ${plan.can_apply ? "border-emerald-400/30 bg-emerald-400/10 text-emerald-300" : "border-amber-400/30 bg-amber-400/10 text-amber-300"}`}>{plan.can_apply ? "可以继续" : "需要先处理问题"}</span></div>
+            <div className="flex flex-wrap items-center gap-2"><h2 className="text-[15px] font-bold text-cs2-text-primary">准备使用这些设置</h2><span className={`rounded-full border px-2 py-0.5 text-[9px] font-bold ${plan.can_apply ? "border-cs2-emerald-border bg-cs2-emerald-surface text-cs2-emerald-on-surface" : "border-cs2-amber-border bg-cs2-amber-surface text-cs2-amber-on-surface"}`}>{plan.can_apply ? "可以继续" : "需要先处理问题"}</span></div>
             <p className="mt-1 text-[11px] text-cs2-text-secondary">现在只是让你确认，点击下一步前不会修改 OBS。</p>
           </div>
           <span className="rounded-lg border border-cs2-border bg-cs2-bg-input px-2.5 py-1.5 font-mono text-[9px] text-cs2-text-muted">{plan.plan_id}</span>
         </div>
 
-        {plan.blockers?.length > 0 && <div className="mt-4 rounded-xl border border-amber-400/25 bg-amber-400/[0.05] px-3 py-2.5 text-[10px] text-amber-200"><div className="font-bold">还差几项准备</div><ul className="mt-1.5 space-y-1">{plan.blockers.map((item) => <li key={item}>· {item}</li>)}</ul></div>}
+        {plan.blockers?.length > 0 && <div className="mt-4 rounded-xl border border-cs2-amber-border bg-cs2-amber-surface px-3 py-2.5 text-[10px] text-cs2-amber-on-surface"><div className="font-bold">还差几项准备</div><ul className="mt-1.5 space-y-1">{plan.blockers.map((item) => <li key={item}>· {item}</li>)}</ul></div>}
         <div className="mt-4 overflow-hidden rounded-xl border border-cs2-border">
           <div className="grid grid-cols-[1.1fr_0.85fr_0.85fr] gap-2 border-b border-cs2-border bg-cs2-bg-input/60 px-3 py-2 text-[9px] font-bold uppercase tracking-wider text-cs2-text-muted"><span>设置项目</span><span>现在</span><span>准备改成</span></div>
           {(plan.changes || []).map((change) => (
@@ -411,7 +411,7 @@ function PlanWorkspace({ plan, loading, onApply, onBack }) {
           {!plan.ai_review?.used && <p className="mt-2 text-[9px] leading-relaxed text-cs2-text-muted">这里不决定最终是否流畅；系统仍会通过真实短录制和掉帧检查给出结论。</p>}
           {plan.ai_review?.reasons?.length > 0 && <ul className="mt-2 space-y-1 text-[9px] leading-relaxed text-cs2-text-muted">{plan.ai_review.reasons.map((item) => <li key={item}>· {item}</li>)}</ul>}
         </div>
-        <div className="rounded-2xl border border-emerald-400/20 bg-emerald-400/[0.04] p-4">
+        <div className="rounded-2xl border border-cs2-emerald-border bg-cs2-emerald-surface p-4">
           <div className="flex items-center gap-2 text-[12px] font-bold text-cs2-text-success"><ShieldCheck className="h-4 w-4" />设置时会自动保护</div>
           <ul className="mt-3 space-y-2 text-[10px] leading-relaxed text-cs2-text-secondary">{["修改前保存一份当前设置", "确认 OBS 没在录制或直播", "修改后马上读取实际结果", "失败时尝试恢复原来的视频设置"].map((item) => <li key={item} className="flex gap-2"><Check className="mt-0.5 h-3 w-3 shrink-0 text-cs2-text-success" />{item}</li>)}</ul>
         </div>
@@ -465,9 +465,9 @@ function ApplyWorkspace({ result, loading, elapsedSeconds = 0, testSeconds = 10,
   }));
   return (
     <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_300px]">
-      <section className={`rounded-2xl border bg-cs2-bg-card p-5 ${success ? "border-emerald-400/25" : result ? "border-amber-400/25" : "border-cs2-border"}`}>
+      <section className={`rounded-2xl border bg-cs2-bg-card p-5 ${success ? "border-cs2-emerald-border" : result ? "border-cs2-amber-border" : "border-cs2-border"}`}>
         <div className="flex items-start gap-3">
-          <span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border ${success ? "border-emerald-400/25 bg-emerald-400/10 text-cs2-text-success" : result ? "border-amber-400/25 bg-amber-400/10 text-amber-300" : "border-cs2-accent/25 bg-cs2-accent/10 text-cs2-accent"}`}>
+          <span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border ${success ? "border-cs2-emerald-border bg-cs2-emerald-surface text-cs2-text-success" : result ? "border-cs2-amber-border bg-cs2-amber-surface text-cs2-amber-on-surface" : "border-cs2-accent/25 bg-cs2-accent/10 text-cs2-accent"}`}>
             {loading ? <Loader2 className="h-5 w-5 animate-spin" /> : success ? <CheckCircle2 className="h-5 w-5" /> : <AlertTriangle className="h-5 w-5" />}
           </span>
           <div>
@@ -484,7 +484,7 @@ function ApplyWorkspace({ result, loading, elapsedSeconds = 0, testSeconds = 10,
             const failed = ["failed", "blocked"].includes(event.status);
             return (
               <div key={`${event.step}-${event.label}`} className="flex items-start gap-3 rounded-xl border border-cs2-border/75 bg-cs2-bg-input/35 px-3 py-3">
-                <span className={`mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full ${done ? "bg-emerald-400/10 text-cs2-text-success" : failed ? "bg-amber-400/10 text-amber-300" : "bg-cs2-accent/10 text-cs2-accent"}`}>
+                <span className={`mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full ${done ? "bg-cs2-emerald-surface text-cs2-text-success" : failed ? "bg-cs2-amber-surface text-cs2-amber-on-surface" : "bg-cs2-accent/10 text-cs2-accent"}`}>
                   {done ? <Check className="h-3.5 w-3.5" /> : failed ? <AlertTriangle className="h-3.5 w-3.5" /> : <Loader2 className={`h-3.5 w-3.5 ${event.status === "running" ? "animate-spin" : "opacity-35"}`} />}
                 </span>
                 <div className="min-w-0"><div className="text-[11px] font-bold text-cs2-text-primary">{event.label}</div><div className="mt-0.5 text-[9px] leading-relaxed text-cs2-text-muted">{event.detail}</div></div>
@@ -495,9 +495,9 @@ function ApplyWorkspace({ result, loading, elapsedSeconds = 0, testSeconds = 10,
 
         {video && (
           <div className="mt-4 grid gap-2 sm:grid-cols-3">
-            <div className="rounded-xl border border-emerald-400/20 bg-emerald-400/[0.04] p-3"><div className="text-[9px] font-bold text-cs2-text-muted">实际清晰度</div><div className="mt-1 font-mono text-[14px] font-bold text-cs2-text-primary">{video.output_width} × {video.output_height}</div><div className="mt-1 text-[9px] text-cs2-text-muted">画布仍为 {video.base_width} × {video.base_height}</div></div>
-            <div className="rounded-xl border border-emerald-400/20 bg-emerald-400/[0.04] p-3"><div className="text-[9px] font-bold text-cs2-text-muted">实际帧率</div><div className="mt-1 font-mono text-[14px] font-bold text-cs2-text-primary">{video.fps_num} / {video.fps_den} FPS</div><div className="mt-1 text-[9px] text-cs2-text-muted">已按整数帧率回读确认</div></div>
-            {result?.actual?.recording && <div className="rounded-xl border border-emerald-400/20 bg-emerald-400/[0.04] p-3"><div className="text-[9px] font-bold text-cs2-text-muted">显卡录制方式</div><div className="mt-1 truncate text-[12px] font-bold text-cs2-text-primary">{result.actual.recording.encoder_label}</div><div className="mt-1 text-[9px] text-cs2-text-muted">Hybrid MP4</div></div>}
+            <div className="rounded-xl border border-cs2-emerald-border bg-cs2-emerald-surface p-3"><div className="text-[9px] font-bold text-cs2-text-muted">实际清晰度</div><div className="mt-1 font-mono text-[14px] font-bold text-cs2-text-primary">{video.output_width} × {video.output_height}</div><div className="mt-1 text-[9px] text-cs2-text-muted">画布仍为 {video.base_width} × {video.base_height}</div></div>
+            <div className="rounded-xl border border-cs2-emerald-border bg-cs2-emerald-surface p-3"><div className="text-[9px] font-bold text-cs2-text-muted">实际帧率</div><div className="mt-1 font-mono text-[14px] font-bold text-cs2-text-primary">{video.fps_num} / {video.fps_den} FPS</div><div className="mt-1 text-[9px] text-cs2-text-muted">已按整数帧率回读确认</div></div>
+            {result?.actual?.recording && <div className="rounded-xl border border-cs2-emerald-border bg-cs2-emerald-surface p-3"><div className="text-[9px] font-bold text-cs2-text-muted">显卡录制方式</div><div className="mt-1 truncate text-[12px] font-bold text-cs2-text-primary">{result.actual.recording.encoder_label}</div><div className="mt-1 text-[9px] text-cs2-text-muted">Hybrid MP4</div></div>}
           </div>
         )}
 
@@ -510,8 +510,8 @@ function ApplyWorkspace({ result, loading, elapsedSeconds = 0, testSeconds = 10,
       </section>
 
       <aside className="space-y-3">
-        {result?.backup && <div className="rounded-2xl border border-emerald-400/20 bg-emerald-400/[0.04] p-4"><div className="flex items-center gap-2 text-[12px] font-bold text-cs2-text-success"><ShieldCheck className="h-4 w-4" />原设置已保存</div><p className="mt-2 text-[10px] leading-relaxed text-cs2-text-secondary">如果后续发现问题，可以恢复到修改前。</p><p title={result.backup.path} className="mt-2 truncate font-mono text-[9px] text-cs2-text-muted">{result.backup.path}</p></div>}
-        <div className={`rounded-2xl border p-4 ${result?.validation?.passed ? "border-emerald-400/20 bg-emerald-400/[0.04]" : "border-amber-400/20 bg-amber-400/[0.04]"}`}><div className={`flex items-center gap-2 text-[12px] font-bold ${result?.validation?.passed ? "text-cs2-text-success" : "text-amber-200"}`}><FileCheck2 className="h-4 w-4" />{result?.validation ? result.validation.passed ? "真实录制测试通过" : "真实录制测试未达标" : "等待真实录制测试"}</div><p className="mt-2 text-[10px] leading-relaxed text-cs2-text-secondary">{result?.validation ? result.validation.passed ? "ffprobe、实时帧率、渲染掉帧、编码掉帧和日志均已检查。" : "没有自动降低设置；请在完整报告中查看瓶颈和最小调整建议。" : "执行后会检查实际视频文件与 OBS 掉帧。"}</p></div>
+        {result?.backup && <div className="rounded-2xl border border-cs2-emerald-border bg-cs2-emerald-surface p-4"><div className="flex items-center gap-2 text-[12px] font-bold text-cs2-text-success"><ShieldCheck className="h-4 w-4" />原设置已保存</div><p className="mt-2 text-[10px] leading-relaxed text-cs2-text-secondary">如果后续发现问题，可以恢复到修改前。</p><p title={result.backup.path} className="mt-2 truncate font-mono text-[9px] text-cs2-text-muted">{result.backup.path}</p></div>}
+        <div className={`rounded-2xl border p-4 ${result?.validation?.passed ? "border-cs2-emerald-border bg-cs2-emerald-surface" : "border-cs2-amber-border bg-cs2-amber-surface"}`}><div className={`flex items-center gap-2 text-[12px] font-bold ${result?.validation?.passed ? "text-cs2-text-success" : "text-cs2-amber-on-surface"}`}><FileCheck2 className="h-4 w-4" />{result?.validation ? result.validation.passed ? "真实录制测试通过" : "真实录制测试未达标" : "等待真实录制测试"}</div><p className="mt-2 text-[10px] leading-relaxed text-cs2-text-secondary">{result?.validation ? result.validation.passed ? "ffprobe、实时帧率、渲染掉帧、编码掉帧和日志均已检查。" : "没有自动降低设置；请在完整报告中查看瓶颈和最小调整建议。" : "执行后会检查实际视频文件与 OBS 掉帧。"}</p></div>
       </aside>
     </div>
   );
@@ -526,12 +526,12 @@ function ReportWorkspace({ result, onBack, onRestore, restoreLoading, restoreRes
   const passed = Boolean(validation.passed);
   return (
     <div className="space-y-4">
-      <section className={`rounded-2xl border p-5 ${passed ? "border-emerald-400/25 bg-emerald-400/[0.035]" : "border-amber-400/25 bg-amber-400/[0.035]"}`}>
+      <section className={`rounded-2xl border p-5 ${passed ? "border-cs2-emerald-border bg-cs2-emerald-surface" : "border-cs2-amber-border bg-cs2-amber-surface"}`}>
         <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-          <div className="flex items-start gap-3"><span className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl ${passed ? "bg-emerald-400/10 text-cs2-text-success" : "bg-amber-400/10 text-amber-300"}`}>{passed ? <CheckCircle2 className="h-5 w-5" /> : <AlertTriangle className="h-5 w-5" />}</span><div><h2 className="text-base font-bold text-cs2-text-primary">{passed ? "稳定性测试通过" : "没有稳定达到目标"}</h2><p className="mt-1 text-[11px] leading-relaxed text-cs2-text-secondary">{result?.message}</p></div></div>
-          <span className={`rounded-full border px-3 py-1 text-[10px] font-bold ${passed ? "border-emerald-400/30 bg-emerald-400/10 text-cs2-text-success" : "border-amber-400/30 bg-amber-400/10 text-amber-200"}`}>{passed ? "可以使用" : "建议调整后重测"}</span>
+          <div className="flex items-start gap-3"><span className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl ${passed ? "bg-cs2-emerald-surface text-cs2-text-success" : "bg-cs2-amber-surface text-cs2-amber-on-surface"}`}>{passed ? <CheckCircle2 className="h-5 w-5" /> : <AlertTriangle className="h-5 w-5" />}</span><div><h2 className="text-base font-bold text-cs2-text-primary">{passed ? "稳定性测试通过" : "没有稳定达到目标"}</h2><p className="mt-1 text-[11px] leading-relaxed text-cs2-text-secondary">{result?.message}</p></div></div>
+          <span className={`rounded-full border px-3 py-1 text-[10px] font-bold ${passed ? "border-cs2-emerald-border bg-cs2-emerald-surface text-cs2-text-success" : "border-cs2-amber-border bg-cs2-amber-surface text-cs2-amber-on-surface"}`}>{passed ? "可以使用" : "建议调整后重测"}</span>
         </div>
-        {!passed && validation.reasons?.length > 0 && <div className="mt-4 rounded-xl border border-amber-400/20 bg-black/10 p-3"><div className="text-[10px] font-bold text-amber-200">未通过原因</div><ul className="mt-2 space-y-1 text-[10px] text-cs2-text-secondary">{validation.reasons.map((item) => <li key={item}>· {item}</li>)}</ul>{validation.minimum_adjustment && <p className="mt-2 border-t border-cs2-border/60 pt-2 text-[10px] text-cs2-text-primary">最小调整：{validation.minimum_adjustment}</p>}</div>}
+        {!passed && validation.reasons?.length > 0 && <div className="mt-4 rounded-xl border border-cs2-amber-border bg-cs2-bg-input p-3"><div className="text-[10px] font-bold text-cs2-amber-on-surface">未通过原因</div><ul className="mt-2 space-y-1 text-[10px] text-cs2-text-secondary">{validation.reasons.map((item) => <li key={item}>· {item}</li>)}</ul>{validation.minimum_adjustment && <p className="mt-2 border-t border-cs2-border/60 pt-2 text-[10px] text-cs2-text-primary">最小调整：{validation.minimum_adjustment}</p>}</div>}
       </section>
 
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
@@ -540,7 +540,7 @@ function ReportWorkspace({ result, onBack, onRestore, restoreLoading, restoreRes
           ["视频分辨率", `${mediaVideo.width || 0} × ${mediaVideo.height || 0}`, mediaVideo.codec_name || "编码未知", validation.media_resolution_ok],
           ["渲染掉帧", stats.rendering_lag_percent == null ? "未知" : `${stats.rendering_lag_percent}%`, `${stats.render_skipped_frames || 0} / ${stats.render_total_frames || 0} 帧`, stats.rendering_lag_percent != null && stats.rendering_lag_percent <= 1],
           ["编码掉帧", stats.encoding_lag_percent == null ? "未知" : `${stats.encoding_lag_percent}%`, `${stats.output_skipped_frames || 0} / ${stats.output_total_frames || 0} 帧`, stats.encoding_lag_percent != null && stats.encoding_lag_percent <= 1],
-        ].map(([label, value, detail, ok]) => <div key={label} className={`rounded-xl border p-3.5 ${ok ? "border-emerald-400/20 bg-emerald-400/[0.035]" : "border-amber-400/20 bg-cs2-bg-card"}`}><div className="text-[9px] font-bold uppercase tracking-wider text-cs2-text-muted">{label}</div><div className="mt-2 font-mono text-[14px] font-bold text-cs2-text-primary">{value}</div><div className="mt-1 text-[9px] text-cs2-text-muted">{detail}</div></div>)}
+        ].map(([label, value, detail, ok]) => <div key={label} className={`rounded-xl border p-3.5 ${ok ? "border-cs2-emerald-border bg-cs2-emerald-surface" : "border-cs2-amber-border bg-cs2-bg-card"}`}><div className="text-[9px] font-bold uppercase tracking-wider text-cs2-text-muted">{label}</div><div className="mt-2 font-mono text-[14px] font-bold text-cs2-text-primary">{value}</div><div className="mt-1 text-[9px] text-cs2-text-muted">{detail}</div></div>)}
       </div>
 
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
@@ -551,7 +551,7 @@ function ReportWorkspace({ result, onBack, onRestore, restoreLoading, restoreRes
         </section>
         <aside className="rounded-2xl border border-cs2-border bg-cs2-bg-card p-4">
           <div className="flex items-center gap-2 text-[12px] font-bold text-cs2-text-primary"><ShieldCheck className="h-4 w-4 text-cs2-accent" />恢复原设置</div><p className="mt-2 text-[10px] leading-relaxed text-cs2-text-secondary">恢复完整备份前必须正常关闭 OBS，避免 OBS 同时写配置。</p>
-          {restoreResult && <div className={`mt-3 rounded-lg border px-3 py-2 text-[9px] ${restoreResult.ok ? "border-emerald-400/20 text-cs2-text-success" : "border-amber-400/20 text-amber-200"}`}>{restoreResult.message}</div>}
+          {restoreResult && <div className={`mt-3 rounded-lg border px-3 py-2 text-[9px] ${restoreResult.ok ? "border-cs2-emerald-border text-cs2-text-success" : "border-cs2-amber-border text-cs2-amber-on-surface"}`}>{restoreResult.message}</div>}
           <button type="button" disabled={!result?.backup?.id || restoreLoading} onClick={onRestore} className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-xl border border-cs2-border bg-cs2-bg-input px-3 py-2.5 text-[10px] font-bold text-cs2-text-secondary disabled:opacity-40">{restoreLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}恢复到测试前</button>
         </aside>
       </div>
@@ -865,7 +865,7 @@ export default function ObsAiSettingsPanel({
         <div className="flex items-start gap-3">
           <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-cs2-accent/30 bg-cs2-accent/10 text-cs2-accent"><Sparkles className="h-5 w-5" /></span>
           <div>
-            <div className="flex flex-wrap items-center gap-2"><h2 className="text-[15px] font-bold text-cs2-text-primary">智能录制设置</h2><span className="rounded-full border border-cs2-accent/30 bg-cs2-accent/10 px-2 py-0.5 text-[9px] font-bold text-cs2-accent">由你决定是否使用 AI</span><span className={`rounded-full border px-2 py-0.5 text-[9px] font-bold ${effectiveConnected ? "border-emerald-400/30 bg-emerald-400/10 text-emerald-300" : "border-amber-400/30 bg-amber-400/10 text-amber-300"}`}>{effectiveConnected ? "OBS 已连接" : "OBS 未连接"}</span></div>
+            <div className="flex flex-wrap items-center gap-2"><h2 className="text-[15px] font-bold text-cs2-text-primary">智能录制设置</h2><span className="rounded-full border border-cs2-accent/30 bg-cs2-accent/10 px-2 py-0.5 text-[9px] font-bold text-cs2-accent">由你决定是否使用 AI</span><span className={`rounded-full border px-2 py-0.5 text-[9px] font-bold ${effectiveConnected ? "border-cs2-emerald-border bg-cs2-emerald-surface text-cs2-emerald-on-surface" : "border-cs2-amber-border bg-cs2-amber-surface text-cs2-amber-on-surface"}`}>{effectiveConnected ? "OBS 已连接" : "OBS 未连接"}</span></div>
             <p className="mt-1 text-[10px] leading-relaxed text-cs2-text-secondary">连接后先展示当前 OBS 设置；只有你主动选择时，AI 才会帮助调整。</p>
           </div>
         </div>
@@ -877,7 +877,7 @@ export default function ObsAiSettingsPanel({
 
       {effectiveConnected ? (
         <>
-          {errorMessage && <div className="rounded-xl border border-rose-400/30 bg-rose-400/[0.05] px-3 py-2.5 text-[10px] text-cs2-rose-on-surface">{errorMessage}</div>}
+          {errorMessage && <div className="rounded-xl border border-cs2-rose-border bg-cs2-rose-surface px-3 py-2.5 text-[10px] text-cs2-rose-on-surface">{errorMessage}</div>}
           {screen === "overview" ? (
             <CurrentObsConfiguration discovery={discovery} previewMode={previewMode} refreshing={discoveryLoading} kept={keepCurrentConfirmed} onKeep={() => setKeepCurrentConfirmed(true)} onRefresh={() => void refreshDiscovery()} onUseAi={startAiAdjustment} />
           ) : (
@@ -892,7 +892,7 @@ export default function ObsAiSettingsPanel({
               ) : (
                 <ReportWorkspace result={applyResult} onBack={() => setScreen("run")} onRestore={() => void handleRestore()} restoreLoading={restoreLoading} restoreResult={restoreResult} />
               )}
-              {!effectiveFfprobeReady && <div className="flex items-start gap-2 rounded-xl border border-amber-400/25 bg-amber-400/[0.04] px-3 py-2.5 text-[10px] text-cs2-text-secondary"><AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-300" />没有找到 ffprobe，无法检查真实测试文件；请确认 FFmpeg 工具包中同时包含 ffprobe。</div>}
+              {!effectiveFfprobeReady && <div className="flex items-start gap-2 rounded-xl border border-cs2-amber-border bg-cs2-amber-surface px-3 py-2.5 text-[10px] text-cs2-text-secondary"><AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-cs2-amber-on-surface" />没有找到 ffprobe，无法检查真实测试文件；请确认 FFmpeg 工具包中同时包含 ffprobe。</div>}
             </>
           )}
         </>

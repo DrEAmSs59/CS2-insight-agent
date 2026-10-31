@@ -1,0 +1,78 @@
+<svg data-chicken-master="true" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none" role="img" aria-label="手办风格奶白色小鸡拍打翅膀，来回跳过三个低矮木箱" style="width:100%;height:100%">
+          <defs>
+            <radialGradient id="cc-toy-body" cx="32%" cy="20%" r="88%"><stop stop-color="#fffef3"/><stop offset=".62" stop-color="#edead6"/><stop offset="1" stop-color="#c7bc92"/></radialGradient>
+            <radialGradient id="cc-toy-head" cx="30%" cy="25%" r="88%"><stop stop-color="#fff0b5"/><stop offset=".65" stop-color="#ead18a"/><stop offset="1" stop-color="#c5aa6a"/></radialGradient>
+            <radialGradient id="cc-toy-wing" cx="35%" cy="20%" r="90%"><stop stop-color="#fffdf0"/><stop offset=".7" stop-color="#eee9d2"/><stop offset="1" stop-color="#cabf9b"/></radialGradient>
+          </defs>
+          <style>
+            @keyframes cc-x{0%,3%,100%{transform:translateX(16px)}22%,28%,72%,78%{transform:translateX(32px)}47%,53%{transform:translateX(48px)}97%{transform:translateX(16px)}}
+            @keyframes cc-y{0%,3%,100%{transform:translateY(50px);animation-timing-function:cubic-bezier(.15,.65,.4,1)}12.5%{transform:translateY(34px);animation-timing-function:cubic-bezier(.6,0,.85,.35)}22%,28%{transform:translateY(48px);animation-timing-function:cubic-bezier(.15,.65,.4,1)}37.5%{transform:translateY(32px);animation-timing-function:cubic-bezier(.6,0,.85,.35)}47%,53%{transform:translateY(46px);animation-timing-function:cubic-bezier(.15,.65,.4,1)}62.5%{transform:translateY(34px);animation-timing-function:cubic-bezier(.6,0,.85,.35)}72%,78%{transform:translateY(48px);animation-timing-function:cubic-bezier(.15,.65,.4,1)}87.5%{transform:translateY(36px);animation-timing-function:cubic-bezier(.6,0,.85,.35)}97%{transform:translateY(50px)}}
+            @keyframes cc-face{0%{transform:scaleX(1)}50%{transform:scaleX(-1)}100%{transform:scaleX(1)}}
+            @keyframes cc-body{0%,100%{transform:translateY(0) rotate(0deg) scale(1,1)}8%{transform:translateY(0) rotate(7deg) scale(1.1,.82)}19%{transform:translateY(-.6px) rotate(-9deg) scale(.94,1.08)}36%{transform:translateY(-.5px) rotate(-7deg) scale(1,1)}53%{transform:translateY(0) rotate(-1deg) scale(1,1)}76%{transform:translateY(0) rotate(7deg) scale(1,1)}88%{transform:translateY(0) rotate(5deg) scale(1.1,.84)}96%{transform:translateY(0) rotate(-2deg) scale(.99,1.02)}}
+            @keyframes cc-wing{0%,8%,87%,100%{transform:rotate(0deg)}20%{transform:rotate(55deg)}34%{transform:rotate(-34deg)}48%{transform:rotate(48deg)}63%{transform:rotate(-22deg)}77%{transform:rotate(12deg)}}
+            @keyframes cc-leg-front{0%,8%,88%,100%{transform:translate(0,0) rotate(0deg)}20%{transform:translate(-1px,-1px) rotate(28deg)}38%,58%{transform:translate(-.7px,-2px) rotate(40deg)}76%{transform:translate(1px,0) rotate(-24deg)}}
+            @keyframes cc-leg-back{0%,8%,88%,100%{transform:translate(0,0) rotate(0deg)}25%{transform:translate(-1px,0) rotate(35deg)}43%,64%{transform:translate(-1px,-1.5px) rotate(24deg)}78%{transform:translate(.5px,0) rotate(-12deg)}}
+            @keyframes cc-head{0%,100%{transform:rotate(0deg)}10%{transform:rotate(-5deg)}25%{transform:rotate(9deg)}47%{transform:rotate(2deg)}75%{transform:rotate(-7deg)}91%{transform:rotate(7deg)}}
+            @keyframes cc-tail{0%,100%{transform:rotate(0deg)}15%{transform:rotate(-13deg)}35%{transform:rotate(18deg)}60%{transform:rotate(5deg)}80%{transform:rotate(-10deg)}94%{transform:rotate(9deg)}}
+            @keyframes cc-shadow{0%,12%,88%,100%{transform:scaleX(1);opacity:.22}35%,60%{transform:scaleX(.55);opacity:.09}}
+            @keyframes cc-blink{0%,46%,50%,100%{transform:scaleY(1)}48%{transform:scaleY(.12)}}
+            .cc-x{animation:cc-x var(--cc-cycle,4s) linear infinite}
+            .cc-y{animation:cc-y var(--cc-cycle,4s) linear infinite}
+            .cc-face{animation:cc-face var(--cc-cycle,4s) steps(1,end) infinite}
+            .cc-body{animation:cc-body var(--cc-hop,1s) ease-in-out infinite;transform-origin:0 0}
+            .cc-wing{animation:cc-wing var(--cc-hop,1s) ease-in-out infinite;transform-origin:0 -13px}
+            .cc-leg-front{animation:cc-leg-front var(--cc-hop,1s) ease-in-out infinite;transform-origin:3px -6px}
+            .cc-leg-back{animation:cc-leg-back var(--cc-hop,1s) ease-in-out infinite;transform-origin:-3px -6px}
+            .cc-head{animation:cc-head var(--cc-hop,1s) ease-in-out infinite;transform-origin:5px -14px}
+            .cc-tail{animation:cc-tail var(--cc-hop,1s) ease-in-out infinite;transform-origin:-8px -12px}
+            .cc-shadow{animation:cc-shadow var(--cc-hop,1s) ease-in-out infinite;transform-origin:0 57px}
+            .cc-eye{animation:cc-blink var(--cc-cycle,4s) linear infinite;transform-origin:7.8px -22.2px}
+            @media(prefers-reduced-motion:reduce){.cc-x,.cc-y,.cc-face,.cc-body,.cc-wing,.cc-leg-front,.cc-leg-back,.cc-head,.cc-tail,.cc-shadow,.cc-eye{animation:none}.cc-x{transform:translateX(32px)}.cc-y{transform:translateY(48px)}.cc-shadow{opacity:.2}}
+          </style>
+          <path d="M8 57.5h48" stroke="#aaa087" stroke-width=".45" opacity=".15"/>
+          <g class="cc-x"><ellipse class="cc-shadow" cx="0" cy="57" rx="8" ry="1.15" fill="#be9052"/></g>
+          <g stroke-linejoin="round">
+            <path d="M10.5 50h11v6.5h-11z" fill="#766046" stroke="#332d25" stroke-width=".55"/>
+            <path d="m10.5 50 1-1h10l.5 1z" fill="#ad9470"/>
+            <path d="M11 51.8h10m-10 2.4h10" stroke="#443b2d" stroke-width=".45"/>
+            <path d="M11.5 50.4v5.6m9-5.6V56" stroke="#a38a64" stroke-width="1"/>
+            <path d="m12.5 55 7-4" stroke="#b29870" stroke-width="1.2"/>
+            <path d="M26.5 48h11v8.5h-11z" fill="#816b4f" stroke="#332d25" stroke-width=".55"/>
+            <path d="m26.5 48 1-1h10l.5 1z" fill="#b6a080"/>
+            <path d="M27 50.5h10M27 54h10" stroke="#4e402e" stroke-width=".45"/>
+            <path d="M27.5 48.4v7.7m9-7.7v7.7" stroke="#b09972" stroke-width="1.1"/>
+            <path d="m29.5 54.6 2-4 2.3 4m-3.3-1.3h2.5" stroke="#e79737" stroke-width=".9" stroke-linecap="round"/>
+            <path d="M42.5 46h11v10.5h-11z" fill="#6c5b43" stroke="#332d25" stroke-width=".55"/>
+            <path d="m42.5 46 1-1h10l.5 1z" fill="#a98e67"/>
+            <path d="M43 49h10m-10 3.5h10" stroke="#433b2e" stroke-width=".45"/>
+            <path d="M43.5 46.5v9.5m9-9.5V56" stroke="#9f8860" stroke-width="1.1"/>
+            <path d="m44.5 54.8 7-7.3" stroke="#a78b60" stroke-width="1.35"/>
+            <g fill="#302c25"><circle cx="11.6" cy="51" r=".3"/><circle cx="20.4" cy="55.3" r=".3"/><circle cx="27.5" cy="49" r=".3"/><circle cx="36.5" cy="55.3" r=".3"/><circle cx="43.5" cy="47" r=".3"/><circle cx="52.5" cy="55.3" r=".3"/></g>
+          </g>
+          <g class="cc-x"><g class="cc-y"><g class="cc-face"><g class="cc-body">
+            <g stroke-linecap="round" stroke-linejoin="round">
+              <path class="cc-leg-back" d="M-3-6v2.5L-2 0m0-.3-2.5.3m2.5-.3L0 0" stroke="#c58d36" stroke-width="1.2"/>
+              <path class="cc-leg-front" d="M3-6 2-3l.4 3m0-.3L5 0m-2.6-.3L1 0" stroke="#e5ae49" stroke-width="1.4"/>
+            </g>
+            <g class="cc-tail">
+              <path d="M-8-8.5c-4-1.7-6-5.7-6.8-9.4-.2-.9.5-1.1 1.4-.8 1.5.4 3 1.4 4 2.5-1-2.8.2-3.2 1.5-1.9 1.8 1.6 3.1 3.7 3.3 6.3Z" fill="#e4e3d0" stroke="#c3bda0" stroke-width=".4" stroke-linejoin="round"/>
+              <path d="M-13.8-18c1.4.2 3 1.3 4.2 2.7" stroke="#fffdef" stroke-width=".85" stroke-linecap="round"/>
+            </g>
+            <path d="M-10-16c3.2-3.1 8.4-3.1 12.8-2.1 1.1-1.4 2.8-1.6 4.2-.1 3 2.4 5.3 6.6 3.6 10.1C9.1-4.5 4-3.1-1.1-3.8-7.6-4.7-12.7-10.9-10-16Z" fill="url(#cc-toy-body)" stroke="#c7bea0" stroke-width=".35"/>
+            <path d="M-9.1-15.4c2.5-2.3 6.3-2.4 9.6-1.8" stroke="#fffff5" stroke-width="1" stroke-linecap="round" opacity=".65"/>
+            <g class="cc-head">
+              <path d="M3.4-23.5c-1.5-.9-2.7-2.8-2-3.4.7-.6 1.8.4 2.6.5-.4-2.4.7-3.2 1.8-2.3.6.5.9 1.3 1.2 1.6.7-2.3 2.2-2.6 2.7-.7.1.5.1 1.1.4 1.3 1.7-1.7 3-1.1 2.2.6-.5 1.1-1.2 1.6-2.1 2.1Z" fill="#c64f42" stroke="#9f4036" stroke-width=".4"/>
+              <path d="M1.1-18.3c-.2-4.8 2-7.7 5.6-7.1 4.4.6 5.2 4.6 3 7.6l-1.5 2.6-6.2.2Z" fill="url(#cc-toy-head)" stroke="#cfb879" stroke-width=".3"/>
+              <path d="M1.2-18.2c2.1.5 5 .5 7.9.1-.5 2 .4 3.7 1 5.1-1.2 1.7-3.6 2.4-5.8 2.1-2.7-.4-3.8-2.1-4.9-3.4 1.6-.7 1.9-2.3 1.8-3.9Z" fill="url(#cc-toy-body)"/>
+              <path d="M2.2-22.2c.8-2 2.5-2.9 4.3-2.6" stroke="#fff4c9" stroke-width=".8" stroke-linecap="round"/>
+              <path d="M9.3-19.4c1.6.2 1.9 2.6.5 3.1-1.3.5-2-1.1-1.5-2.5Z" fill="#be5140"/>
+              <path d="M9.4-21.1c1.4-.1 3.6.2 3.5 1.2-.1 1-2 1.1-3.6.7Z" fill="#edb848" stroke="#c39034" stroke-width=".35"/>
+              <path d="m10-20.7 1.7.1" stroke="#ffe187" stroke-width=".4" stroke-linecap="round"/>
+              <g class="cc-eye"><circle cx="7.8" cy="-22.2" r=".66" fill="#35352b"/><circle cx="8" cy="-22.4" r=".15" fill="#fff4d0"/></g>
+            </g>
+            <g class="cc-wing">
+              <path d="M-.1-14.2c-1.9-1.5-4.4-1.8-6.3-.7-2.5 1.5-1.9 4.8.5 6.3 2.4 1.6 6.3.8 7.5-1.3-1.5-.7-2.1-2.5-1.7-4.3Z" fill="url(#cc-toy-wing)" stroke="#c9c2a6" stroke-width=".4"/>
+              <path d="M-6.4-13.5c1.2-1.1 3.1-1.3 4.5-.6" stroke="#fffef2" stroke-width=".65" stroke-linecap="round"/>
+            </g>
+          </g></g></g></g>
+        </svg>

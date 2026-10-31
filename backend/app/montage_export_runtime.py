@@ -8,6 +8,8 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
+from .features.lite_cut.job_runtime import JobRegistry
+
 
 @dataclass
 class MontageExportJob:
@@ -26,7 +28,12 @@ class MontageExportJob:
     cancel_event: threading.Event = field(default_factory=threading.Event)
 
 
-montage_export_jobs: dict[int, MontageExportJob] = {}
+_job_registry = JobRegistry()
+montage_export_jobs: dict[int, MontageExportJob] = _job_registry.bucket("montage_export")
+
+
+async def shutdown_montage_export_jobs(timeout_sec: float = 10.0) -> bool:
+    return await _job_registry.shutdown(timeout_sec)
 
 
 def montage_export_job_snapshot(job: MontageExportJob) -> dict[str, Any]:

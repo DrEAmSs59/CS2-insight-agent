@@ -19,7 +19,6 @@ export const DEFAULT_RECORDING_OPTIONS = {
   round_alive_post_sec: 3.0,
   enable_victim_pov: false,
   interleave_pov_pairs: false,
-  use_ai_director: false,
   // victim_pov_pre_sec: null means "use highlight_pre_sec" on the backend
   victim_pov_pre_sec: null,
   victim_pov_post_sec: 1.5,

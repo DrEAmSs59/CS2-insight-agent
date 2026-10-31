@@ -63,7 +63,7 @@ export default function LiteCutProjectStartPage({ projects = [], loading = false
         </header>
 
         {errorMessage ? (
-          <div role="alert" className="mx-6 mt-5 flex items-start gap-3 rounded-xl border border-amber-500/30 bg-cs2-amber-surface px-4 py-3 text-xs leading-5 text-cs2-amber-on-surface sm:mx-8">
+          <div role="alert" className="mx-6 mt-5 flex items-start gap-3 rounded-xl border border-cs2-amber-border bg-cs2-amber-surface px-4 py-3 text-xs leading-5 text-cs2-amber-on-surface sm:mx-8">
             <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-cs2-amber-on-surface" />
             <span>{errorMessage}</span>
           </div>
@@ -86,7 +86,7 @@ export default function LiteCutProjectStartPage({ projects = [], loading = false
               <FolderOpen className="h-4 w-4 text-cs2-accent" />
               <h2 className="text-sm font-bold text-cs2-text-primary">{t("liteCut.project.startRecent")}</h2>
               <span className="text-[10px] text-cs2-text-muted">{recentProjects.length}</span>
-              <button type="button" title={t("liteCut.project.refresh")} onClick={onRefresh} className="ml-auto rounded p-2 text-cs2-text-muted hover:bg-white/5 hover:text-white"><RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} /></button>
+              <button type="button" title={t("liteCut.project.refresh")} onClick={onRefresh} className="ml-auto rounded p-2 text-cs2-text-muted hover:bg-cs2-bg-hover hover:text-cs2-text-primary"><RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} /></button>
             </div>
 
             <div className="mt-3 max-h-[430px] space-y-2 overflow-y-auto pr-1">

@@ -56,10 +56,10 @@ describe("demo analysis cache coverage", () => {
     expect(buildPendingDemoAnalysisSpecs([legacy])).toHaveLength(1);
   });
 
-  test("rebuilds a cached workspace produced by an older replay algorithm", () => {
+  test("rebuilds a cached workspace that omitted agent and music-kit evidence", () => {
     const stale = demo();
     stale.cached_result.analysis_workspace.algorithm_version =
-      "match-workspace-2026.08.15-keyboard-input-v1";
+      "match-workspace-2026.09.19-keyboard-input-v2";
 
     expect(hasCompleteCachedDemoAnalysis(stale)).toBe(false);
     expect(buildPendingDemoAnalysisSpecs([stale])).toHaveLength(1);

@@ -49,7 +49,7 @@ describe("ObsAiSettingsPanel connection gate", () => {
     expect(screen.getByText(/已经保持当前设置/)).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "使用 AI 检查并调整" }));
     expect(screen.getByRole("heading", { name: "选择帧率和分辨率" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: /^480\s*FPS$/ })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "480 FPS" })).toBeTruthy();
     expect(screen.queryByText("你主要想怎么用这段视频？")).toBeNull();
     expect(screen.queryByText("你更看重什么？")).toBeNull();
     expect(screen.queryByText("视频格式")).toBeNull();
@@ -67,7 +67,7 @@ describe("ObsAiSettingsPanel connection gate", () => {
     );
 
     fireEvent.click(screen.getByRole("button", { name: "使用 AI 检查并调整" }));
-    fireEvent.click(screen.getByRole("button", { name: /^480\s*FPS$/ }));
+    fireEvent.click(screen.getByRole("button", { name: "480 FPS" }));
     fireEvent.click(screen.getByRole("button", { name: "看看推荐设置" }));
     expect(await screen.findByText("设置分析")).toBeTruthy();
     expect(screen.getByText(/RTX 5070 具备高帧率硬件编码能力/)).toBeTruthy();

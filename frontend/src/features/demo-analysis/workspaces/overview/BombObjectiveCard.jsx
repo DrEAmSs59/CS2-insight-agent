@@ -28,7 +28,7 @@ function SiteDonut({ siteA, siteB }) {
             cy={size / 2}
             r={r}
             fill="none"
-            stroke="#38bdf8"
+            stroke="var(--cs2-team-blue)"
             strokeWidth={stroke}
             strokeDasharray={`${aLen} ${c - aLen}`}
           />
@@ -37,23 +37,23 @@ function SiteDonut({ siteA, siteB }) {
             cy={size / 2}
             r={r}
             fill="none"
-            stroke="#fbbf24"
+            stroke="var(--cs2-team-amber)"
             strokeWidth={stroke}
             strokeDasharray={`${bLen} ${c - bLen}`}
             strokeDashoffset={-aLen}
           />
         </g>
       </svg>
-      <div className="space-y-0.5 text-[10px]">
+      <div className="space-y-0.5 text-[11px]">
         <div className="flex items-center gap-1">
-          <span className="h-1.5 w-1.5 rounded-full bg-sky-400" />
+          <span className="h-1.5 w-1.5 rounded-full bg-cs2-team-blue" />
           <span className="text-cs2-text-muted">A</span>
-          <span className="font-bold tabular-nums text-sky-400">{pctA}%</span>
+          <span className="font-bold tabular-nums text-cs2-team-blue">{pctA}%</span>
         </div>
         <div className="flex items-center gap-1">
-          <span className="h-1.5 w-1.5 rounded-full bg-amber-400" />
+          <span className="h-1.5 w-1.5 rounded-full bg-cs2-team-amber" />
           <span className="text-cs2-text-muted">B</span>
-          <span className="font-bold tabular-nums text-amber-400">{pctB}%</span>
+          <span className="font-bold tabular-nums text-cs2-team-amber">{pctB}%</span>
         </div>
       </div>
     </div>
@@ -62,12 +62,12 @@ function SiteDonut({ siteA, siteB }) {
 
 function StatRow({ label, a, b }) {
   return (
-    <div className="flex min-h-[22px] items-center justify-between gap-2 text-[11px]">
+    <div className="flex min-h-[24px] items-center justify-between gap-2 text-xs">
       <span className="text-cs2-text-muted">{label}</span>
-      <span className="tabular-nums">
-        <span className="font-bold text-sky-400">{a}</span>
+      <span className="font-mono tabular-nums">
+        <span className="font-bold text-cs2-team-blue">{a}</span>
         <span className="mx-1 text-cs2-text-muted">/</span>
-        <span className="font-bold text-amber-400">{b}</span>
+        <span className="font-bold text-cs2-team-amber">{b}</span>
       </span>
     </div>
   );
@@ -105,8 +105,8 @@ export default function BombObjectiveCard({
   return (
     <InsightCard
       title="目标与包点"
-      icon={<Bomb className="h-3.5 w-3.5 text-cs2-accent" />}
-      compact
+      icon={Bomb}
+      tone="rose"
       className={className}
     >
       <div className={`flex flex-1 gap-3 ${showDonut ? "items-center" : "flex-col justify-center"}`}>
@@ -120,12 +120,12 @@ export default function BombObjectiveCard({
           <StatRow label="成功拆包" a={teamA.defuses ?? 0} b={teamB.defuses ?? 0} />
           <StatRow label="爆炸取胜" a={teamA.explodeWins ?? 0} b={teamB.explodeWins ?? 0} />
           {dominantHint ? (
-            <p className="mt-1 text-[9px] text-cs2-text-muted">{dominantHint}</p>
+            <p className="mt-1 text-[11px] text-cs2-text-muted">{dominantHint}</p>
           ) : (
-            <p className="mt-1 text-[9px] text-cs2-text-muted">
-              <span className="text-sky-400">{teamAName}</span>
+            <p className="mt-1 text-[11px] text-cs2-text-muted">
+              <span className="text-cs2-team-blue">{teamAName}</span>
               {" · "}
-              <span className="text-amber-400">{teamBName}</span>
+              <span className="text-cs2-team-amber">{teamBName}</span>
             </p>
           )}
         </div>

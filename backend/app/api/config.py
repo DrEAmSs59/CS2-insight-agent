@@ -528,7 +528,7 @@ async def get_demo_cache_status():
     from ..demo_cache import cache_status_payload
 
     coverage = await demo_db.demo_cache_coverage()
-    return cache_status_payload(coverage)
+    return cache_status_payload(coverage, cache_rows=await demo_db.list_demo_cache_paths())
 
 
 @router.post("/api/demo-cache/migrate")

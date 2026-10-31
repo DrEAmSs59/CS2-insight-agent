@@ -13,7 +13,7 @@ export default function TimelineNode({ result, targetKills, targetDeaths, glow =
   const hasDeath = targetDeaths > 0;
   const multiKill = targetKills >= 3;
 
-  let ring = "ring-1 ring-white/12";
+  let ring = "ring-1 ring-cs2-border-subtle";
   let fill = "bg-cs2-accent";
   if (won) {
     ring = "ring-2 ring-emerald-500/70";

@@ -176,6 +176,17 @@ function trimPolylineEnd(points, distance) {
   return next;
 }
 
+function nearestFrame(frames, tick) {
+  if (!frames.length) return null;
+  const previousIndex = findPreviousFrameIndex(frames, tick);
+  const nextIndex = Math.min(frames.length - 1, previousIndex + 1);
+  const previous = frames[previousIndex];
+  const next = frames[nextIndex];
+  return Math.abs(Number(next?.tick) - tick) < Math.abs(Number(previous?.tick) - tick)
+    ? next
+    : previous;
+}
+
 export function computeBombState(roundEvents, currentTick, framePlayers, initialCarrier, transform) {
   let carrier = safeLabel(initialCarrier);
   let status = carrier ? "carried" : "unknown";
@@ -625,25 +636,35 @@ export default function ReplaySceneCanvas({
       })));
   }, [frames, frameCursorIndex, layers.traces, mapLayer, playing, sampleStride, transform, workspacePlayers]);
 
+  const grenadeTrajectories = useMemo(() => {
+    const trajectories = new Map();
+    if (!layers.grenades) return trajectories;
+    for (const event of roundEvents) {
+      if (event.type !== "grenade") continue;
+      const eventTick = Number(event.tick || 0);
+      const actorName = safeLabel(event.actor).toLowerCase();
+      const points = [...(event.trajectory || [])]
+        .sort((a, b) => Number(a.tick || 0) - Number(b.tick || 0))
+        .map((point) => {
+          if (point.z != null && point.z !== "" && Number.isFinite(Number(point.z))) return point;
+          const sourceFrame = nearestFrame(frames, Number(point.tick || eventTick));
+          const thrower = sourceFrame?.players?.find((item) => safeLabel(item.name).toLowerCase() === actorName);
+          return withFallbackZ(point, thrower);
+        });
+      trajectories.set(event, points);
+    }
+    return trajectories;
+  }, [frames, layers.grenades, roundEvents]);
+
   const recentEvents = useMemo(() => {
     const events = roundEvents;
-    const nearestFrame = (tick) => {
-      if (!frames.length) return null;
-      const previousIndex = findPreviousFrameIndex(frames, tick);
-      const nextIndex = Math.min(frames.length - 1, previousIndex + 1);
-      const previous = frames[previousIndex];
-      const next = frames[nextIndex];
-      return Math.abs(Number(next?.tick) - tick) < Math.abs(Number(previous?.tick) - tick)
-        ? next
-        : previous;
-    };
     const kills = [];
     const grenades = [];
     for (const event of events) {
       const eventTick = Number(event.tick || 0);
       const age = currentTick - eventTick;
       if (event.type === "kill" && layers.kills && age >= 0 && age <= tickRate * 4) {
-        const sourceFrame = nearestFrame(eventTick);
+        const sourceFrame = nearestFrame(frames, eventTick);
         const frameActor = sourceFrame?.players?.find((item) => String(item.name || "").toLowerCase() === String(event.actor || "").toLowerCase());
         const frameTarget = sourceFrame?.players?.find((item) => String(item.name || "").toLowerCase() === String(event.target || "").toLowerCase());
         const actorSource = Number.isFinite(Number(event.actor_x))
@@ -658,18 +679,12 @@ export default function ReplaySceneCanvas({
         if (actor && target) kills.push({ ...event, actor, target, opacity: 1 - age / Math.max(1, tickRate * 5) });
       }
       if (event.type === "grenade" && layers.grenades) {
-        const rawTrajectory = [...(event.trajectory || [])]
-          .sort((a, b) => Number(a.tick || 0) - Number(b.tick || 0))
-          .map((point) => {
-            const sourceFrame = nearestFrame(Number(point.tick || eventTick));
-            const thrower = sourceFrame?.players?.find((item) => safeLabel(item.name).toLowerCase() === safeLabel(event.actor).toLowerCase());
-            return withFallbackZ(point, thrower);
-          });
+        const rawTrajectory = grenadeTrajectories.get(event);
         const isSmoke = /烟|smoke/i.test(safeLabel(event.kind));
         const rawStartTick = Number(rawTrajectory[0]?.tick || 0);
         const rawEndTick = Number(rawTrajectory.at(-1)?.tick || 0);
         const rawEnd = rawTrajectory.at(-1);
-        const eventFrameActor = nearestFrame(eventTick)?.players?.find((item) => safeLabel(item.name).toLowerCase() === safeLabel(event.actor).toLowerCase());
+        const eventFrameActor = nearestFrame(frames, eventTick)?.players?.find((item) => safeLabel(item.name).toLowerCase() === safeLabel(event.actor).toLowerCase());
         const eventPoint = withFallbackZ(event, rawEnd || eventFrameActor);
         const rawEndpointDistance = rawEnd && Number.isFinite(Number(event.x)) && Number.isFinite(Number(event.y))
           ? Math.hypot(Number(rawEnd.x) - Number(event.x), Number(rawEnd.y) - Number(event.y))
@@ -690,7 +705,7 @@ export default function ReplaySceneCanvas({
         let trajectory = trajectoryValid ? rawTrajectory : [];
         let trajectoryInferred = false;
         if (trajectory.length < 2 && Number.isFinite(Number(event.x)) && Number.isFinite(Number(event.y))) {
-          const throwFrame = nearestFrame(throwTick);
+          const throwFrame = nearestFrame(frames, throwTick);
           const thrower = throwFrame?.players?.find((item) => safeLabel(item.name).toLowerCase() === safeLabel(event.actor).toLowerCase());
           if (thrower && Number.isFinite(Number(thrower.x)) && Number.isFinite(Number(thrower.y))) {
             trajectory = [
@@ -763,15 +778,19 @@ export default function ReplaySceneCanvas({
       }
     }
     return { kills, grenades };
-  }, [currentTick, frames, layers.grenades, layers.kills, mapLayer, replayEndTick, roundEvents, selectedRound, teamKeyByName, tickRate, transform]);
+  }, [currentTick, frames, grenadeTrajectories, layers.grenades, layers.kills, mapLayer, replayEndTick, roundEvents, selectedRound, teamKeyByName, tickRate, transform]);
+
+  const replayShots = useMemo(() => {
+    if (!layers.shots) return [];
+    const workspaceShots = selectedRound?.shots || [];
+    return workspaceShots.length
+      ? workspaceShots
+      : frames.flatMap((sourceFrame) => sourceFrame.shots || []);
+  }, [frames, layers.shots, selectedRound?.shots]);
 
   const recentShots = useMemo(() => {
     if (!layers.shots) return [];
     const life = Math.max(1, tickRate * 0.22);
-    const workspaceShots = selectedRound?.shots || [];
-    const replayShots = workspaceShots.length
-      ? workspaceShots
-      : frames.flatMap((sourceFrame) => sourceFrame.shots || []);
     return replayShots.flatMap((shot) => {
       const age = currentTick - Number(shot.tick || 0);
       if (age < 0 || age > life) return [];
@@ -788,7 +807,7 @@ export default function ReplaySceneCanvas({
       const length = 11;
       return [{ ...shot, origin, target: { x: origin.x + Math.cos(radians) * length, y: origin.y - Math.sin(radians) * length }, opacity: 1 - age / life }];
     });
-  }, [currentTick, frames, layers.shots, mapLayer, selectedRound?.shots, tickRate, transform]);
+  }, [currentTick, frames, layers.shots, mapLayer, replayShots, tickRate, transform]);
 
   const killFeed = useMemo(() => roundEvents
     .filter((event) => event.type === "kill" && Number(event.tick) <= currentTick && currentTick - Number(event.tick) <= tickRate * 7)

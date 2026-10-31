@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { limitRecordingPacing } from "../utils/recordingPacing.js";
 
 /**
  * @typedef {Object} PacingOverride
@@ -10,7 +11,6 @@ import { create } from "zustand";
  * @property {number} [round_alive_post_sec] 回合合辑普通回合存活结束后保留（秒），1–3，默认 3
  * @property {boolean} [victim_pov]     是否追加 POV（高光→受害者、失误→击杀者）
  * @property {boolean} [pov_interleaved] 连贯 POV：每事件后立即切对方视角（否则先全部主视角再全部 POV）
- * @property {boolean} [ai_director] LLM 导播大纲（合并击杀簇 + 精选受害者 POV）
  * @property {number} [victim_pov_pre_sec]
  * @property {number} [victim_pov_post_sec]
  * @property {number} [killer_pov_pre_sec]
@@ -164,6 +164,7 @@ export const useRecordingQueue = create((set, get) => ({
         ...it,
         id: it.id || newId(),
         clientClipUid: it.clientClipUid || it.clipData?.client_clip_uid || "",
+        ...(it.pacing_override ? { pacing_override: limitRecordingPacing(it.pacing_override) } : {}),
       };
       return applyEnqueuePovDefaults(base, gp);
     });
@@ -217,11 +218,28 @@ export const useRecordingQueue = create((set, get) => ({
         const prev = q.pacing_override && typeof q.pacing_override === "object" ? q.pacing_override : {};
         return {
           ...q,
-          pacing_override: {
+          pacing_override: limitRecordingPacing({
             ...prev,
             ...pacingConfig,
-          },
+          }),
         };
+      }),
+    }));
+  },
+
+  /**
+   * 删除单片段的若干覆写字段，让它们重新跟随全局节奏。
+   * @param {string} id
+   * @param {string[]} keys
+   */
+  clearItemPacingKeys(id, keys) {
+    if (!id || !Array.isArray(keys) || keys.length === 0) return;
+    set((s) => ({
+      queue: s.queue.map((q) => {
+        if (q.id !== id || !q.pacing_override || typeof q.pacing_override !== "object") return q;
+        const next = { ...q.pacing_override };
+        for (const key of keys) delete next[key];
+        return { ...q, pacing_override: next };
       }),
     }));
   },
@@ -233,7 +251,7 @@ export const useRecordingQueue = create((set, get) => ({
   setGlobalPacing(partial) {
     if (!partial || typeof partial !== "object") return;
     set((s) => ({
-      globalPacing: { ...s.globalPacing, ...partial },
+      globalPacing: limitRecordingPacing({ ...s.globalPacing, ...partial }),
     }));
   },
 
@@ -246,7 +264,7 @@ export const useRecordingQueue = create((set, get) => ({
   setPresetPacing(partial) {
     if (!partial || typeof partial !== "object") return;
     set((s) => ({
-      presetPacing: { ...s.presetPacing, ...partial },
+      presetPacing: limitRecordingPacing({ ...s.presetPacing, ...partial }),
     }));
   },
 
@@ -300,16 +318,14 @@ export const useRecordingQueue = create((set, get) => ({
    */
   hydrateGlobalPacing(obj) {
     set({
-      globalPacing:
-        obj && typeof obj === "object" && !Array.isArray(obj) ? { ...obj } : {},
+      globalPacing: limitRecordingPacing(obj),
     });
   },
 
   /** 从配置文件载入「设置 → 录制预设」的节奏默认值。 */
   hydratePresetPacing(obj) {
     set({
-      presetPacing:
-        obj && typeof obj === "object" && !Array.isArray(obj) ? { ...obj } : {},
+      presetPacing: limitRecordingPacing(obj),
     });
   },
 

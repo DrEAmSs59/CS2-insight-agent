@@ -306,11 +306,17 @@ def proxy_cache_inventory(asset_rows: list[dict[str, Any]], *, max_edge: int = 7
     }
 
 
-def remove_asset_preview_files(row: dict[str, Any]) -> None:
+def remove_asset_preview_files(row: dict[str, Any]) -> dict[str, int]:
     from .assets import asset_preview_paths
 
+    removed_files = 0
+    removed_bytes = 0
     for candidate in asset_preview_paths(row):
+        if candidate.is_file():
+            removed_bytes += candidate.stat().st_size
+            removed_files += 1
         candidate.unlink(missing_ok=True)
+    return {"removed_files": removed_files, "removed_bytes": removed_bytes}
 
 
 def remove_segment_preview_files(row: dict[str, Any]) -> dict[str, int]:

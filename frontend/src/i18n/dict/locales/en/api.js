@@ -1,11 +1,13 @@
 // en / api — keep keys scoped to this feature catalog.
 export default {
+  "api.err.demoPlaybackConfigRestoreRequired": "Player settings from the previous session could not be restored. Playback was stopped to preserve the original backup. Close CS2, restore player settings in Insight, then try again.",
   "api.err.recordingDemoPathEmpty": "Demo path is empty",
   "api.err.recordingDemoNotFound": "Demo file not found: {path}",
   "api.err.recordingCs2PathMissing": "CS2 path is not configured and auto-detect failed. Set the full cs2.exe path in Settings, or use auto-detect.",
   "api.err.recordingCs2Running": "CS2 is running. Please close CS2 before starting a recording.",
   "api.err.recordingObsConnectFail": "Cannot connect to OBS: {err}. Ensure OBS is running and WebSocket settings are correct before recording.",
   "api.err.recordingAlreadyRunning": "A recording task is already in progress. Abort it or wait for it to finish.",
+  "api.err.recordingControllerNotReady": "The in-demo recording controller did not become ready in time. Recording was stopped safely.",
   "api.err.recordingFailed": "Recording failed: {err}",
   "api.err.configNoManifest": "No manifest backup found",
   "api.err.recordingGsiNotReady": "CS2 did not enter the game in time. Recording was aborted to avoid injecting console commands on the loading screen.",

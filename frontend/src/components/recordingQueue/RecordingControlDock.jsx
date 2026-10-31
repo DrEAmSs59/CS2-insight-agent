@@ -42,10 +42,10 @@ export default function RecordingControlDock({
   const startDisabled = disabledStart;
 
   return (
-    <div data-testid="recording-control-dock" className="flex shrink-0 flex-wrap items-center justify-between gap-2">
+    <div data-testid="recording-control-dock" className="flex w-full shrink-0 flex-wrap items-center justify-between gap-2 rounded-lg border border-cs2-border-subtle bg-cs2-bg-card/90 backdrop-blur-md p-2.5">
       <div
         data-testid="recording-control-status-tray"
-        className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-1 rounded-lg border border-cs2-border bg-cs2-bg-card px-3 py-2 font-mono text-[11px] text-cs2-text-muted"
+        className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-1 font-mono text-[11px] text-cs2-text-muted"
       >
         <span className="inline-flex items-center gap-1">
           <Layers className="h-3 w-3 text-cs2-text-muted" />
@@ -67,7 +67,7 @@ export default function RecordingControlDock({
 
       <div
         data-testid="recording-control-action-tray"
-        className="flex min-w-[300px] max-w-full flex-wrap items-center justify-between gap-2.5 p-2"
+        className="flex min-w-[300px] max-w-full flex-wrap items-center justify-between gap-2.5"
       >
         <div className="flex flex-col items-end gap-0.5">
           <button
@@ -84,7 +84,7 @@ export default function RecordingControlDock({
           type="button"
           disabled={!batchRecording || abortRequested}
           onClick={() => void onAbort()}
-          className="inline-flex items-center gap-1 rounded-md border border-cs2-border px-3.5 py-2 text-[12px] font-semibold text-cs2-text-secondary transition-colors hover:border-red-500/40 hover:text-cs2-red-on-surface disabled:cursor-not-allowed disabled:opacity-30"
+          className="inline-flex items-center gap-1 rounded-md border border-cs2-border px-3.5 py-2 text-[12px] font-semibold text-cs2-text-secondary transition-colors hover:border-cs2-rose-border hover:text-cs2-red-on-surface disabled:cursor-not-allowed disabled:opacity-30"
         >
           <Square className="h-3.5 w-3.5" />
           {t("queue.btnStop")}
@@ -93,7 +93,7 @@ export default function RecordingControlDock({
           type="button"
           disabled={queueLength === 0 || batchRecording}
           onClick={() => onClear()}
-          className="inline-flex items-center gap-1 rounded-md border border-cs2-border px-3.5 py-2 text-[12px] font-semibold text-cs2-text-muted transition-colors hover:border-red-500/35 hover:text-cs2-red-on-surface disabled:opacity-30"
+          className="inline-flex items-center gap-1 rounded-md border border-cs2-border px-3.5 py-2 text-[12px] font-semibold text-cs2-text-muted transition-colors hover:border-cs2-rose-border hover:text-cs2-red-on-surface disabled:opacity-30"
         >
           <Trash2 className="h-3.5 w-3.5" />
           {t("queue.btnClear")}

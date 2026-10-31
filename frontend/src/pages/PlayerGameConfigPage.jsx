@@ -51,32 +51,33 @@ export default function PlayerGameConfigPage() {
           </div>
         ) : st?.fetch_failed ? (
           <section
-            className="rounded-xl border border-red-500/40 bg-red-500/10 px-4 py-4"
+            className="rounded-xl border border-cs2-rose-border bg-cs2-rose-surface px-4 py-4"
             role="alert"
           >
-            <p className="text-sm font-bold text-red-200">{t("playercfg.fetchFailTitle")}</p>
-            <p className="mt-2 text-[12px] leading-relaxed text-red-100/85">{st.message}</p>
+            <p className="text-sm font-bold text-cs2-rose-on-surface">{t("playercfg.fetchFailTitle")}</p>
+            <p className="mt-2 text-[12px] leading-relaxed text-cs2-rose-on-surface/85">{st.message}</p>
             <p className="mt-2 text-[11px] leading-relaxed text-cs2-text-muted">
               {t("playercfg.fetchFailHint", { data: "data", data2: "data", backup: ".cs2_config_backup" })}
             </p>
           </section>
         ) : st?.restore_required ? (
           <section
-            className="rounded-xl border border-amber-500/45 bg-amber-500/10 px-4 py-4 shadow-sm"
+            className="rounded-xl border border-cs2-amber-border bg-cs2-amber-surface px-4 py-4 shadow-sm"
             role="status"
           >
             <div className="flex flex-wrap items-start gap-3">
-              <ShieldAlert className="mt-0.5 h-5 w-5 shrink-0 text-amber-400" aria-hidden />
+              <ShieldAlert className="mt-0.5 h-5 w-5 shrink-0 text-cs2-amber-on-surface" aria-hidden />
               <div className="min-w-0 flex-1 space-y-2">
                 <p className="text-sm font-bold text-cs2-amber-on-surface">{t("playercfg.restoreTitle")}</p>
                 <p className="text-[12px] leading-relaxed text-cs2-amber-on-surface/85">
-                  {t("playercfg.restoreDesc")}
+                  {t(st.native_recovery?.required ? "playercfg.restoreDescNative" : "playercfg.restoreDesc")}
                 </p>
                 {typeof st.cs2_running === "boolean" && (
                   <p className="font-mono text-[12px] text-cs2-amber-on-surface">
                     {st.cs2_running ? t("playercfg.cs2StatusRunning") : t("playercfg.cs2StatusStopped")}
                   </p>
                 )}
+                {st.process_error && <p className="text-[12px] text-cs2-rose-on-surface">{st.process_error}</p>}
                 {st.backup_dir ? (
                   <p className="break-all font-mono text-[11px] leading-relaxed text-cs2-text-muted">
                     {t("playercfg.backupDir")}<span className="text-cs2-text-secondary">{st.backup_dir}</span>
@@ -85,7 +86,7 @@ export default function PlayerGameConfigPage() {
                 <div className="flex flex-wrap gap-2 pt-2">
                   <button
                     type="button"
-                    className="rounded-md border border-amber-400/60 bg-amber-500/25 px-4 py-2 text-[12px] font-bold text-cs2-amber-on-surface hover:bg-amber-500/35"
+                    className="rounded-md border border-cs2-amber-border bg-amber-500/25 px-4 py-2 text-[12px] font-bold text-cs2-amber-on-surface hover:bg-amber-500/35"
                     onClick={() => void s.handleRestorePlayerConfig()}
                   >
                     {t("playercfg.btnRestore")}
@@ -103,7 +104,7 @@ export default function PlayerGameConfigPage() {
             </div>
           </section>
         ) : (
-          <section className="rounded-xl border border-emerald-500/35 bg-cs2-emerald-surface px-4 py-4">
+          <section className="rounded-xl border border-cs2-emerald-border bg-cs2-emerald-surface px-4 py-4">
             <div className="flex flex-wrap items-start gap-3">
               <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-cs2-emerald-on-surface" aria-hidden />
               <div className="min-w-0 flex-1 space-y-2">

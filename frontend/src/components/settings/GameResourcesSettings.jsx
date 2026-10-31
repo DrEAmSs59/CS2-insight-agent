@@ -157,7 +157,7 @@ export default function GameResourcesSettings({ search = "" }) {
             {item.source === "builtin" ? t("settings.skyboxBuiltinBadge") : t("settings.skyboxCustomBadge")}
           </span>
           {!item.available ? (
-            <span className="text-[10px] font-semibold text-amber-300">{t("settings.skyboxBroken")}</span>
+            <span className="text-[10px] font-semibold text-cs2-amber-on-surface">{t("settings.skyboxBroken")}</span>
           ) : null}
         </div>
         <p className="mt-1 truncate font-mono text-[10px] text-cs2-text-muted">
@@ -180,7 +180,7 @@ export default function GameResourcesSettings({ search = "" }) {
           disabled={busy}
           onClick={() => void removeSkybox(item)}
           aria-label={t("settings.skyboxDelete")}
-          className="rounded-md border border-cs2-border p-1.5 text-cs2-text-muted hover:border-rose-400/50 hover:text-rose-300 disabled:opacity-40"
+          className="rounded-md border border-cs2-border p-1.5 text-cs2-text-muted hover:border-cs2-rose-border hover:text-cs2-rose-on-surface disabled:opacity-40"
         >
           <Trash2 className="h-3.5 w-3.5" />
         </button>
@@ -277,11 +277,11 @@ export default function GameResourcesSettings({ search = "" }) {
         ) : null}
 
         {message ? (
-          <p className={`mb-3 rounded-md border px-3 py-2 text-[11px] ${message.tone === "ok" ? "border-emerald-500/30 bg-emerald-500/5 text-emerald-300" : "border-rose-500/30 bg-rose-500/5 text-rose-300"}`}>
+          <p className={`mb-3 rounded-md border px-3 py-2 text-[11px] ${message.tone === "ok" ? "border-cs2-emerald-border bg-cs2-emerald-surface text-cs2-emerald-on-surface" : "border-cs2-rose-border bg-cs2-rose-surface text-cs2-rose-on-surface"}`}>
             {message.text}
           </p>
         ) : null}
-        {error ? <p className="mb-3 text-[11px] text-rose-300">{error}</p> : null}
+        {error ? <p className="mb-3 text-[11px] text-cs2-rose-on-surface">{error}</p> : null}
 
         {loading && items.length === 0 ? (
           <div className="flex items-center justify-center gap-2 py-8 text-xs text-cs2-text-muted">
@@ -333,9 +333,9 @@ export default function GameResourcesSettings({ search = "" }) {
                           <div className="px-2.5 py-2">
                             <div className="flex items-center gap-2">
                               {item.available ? (
-                                <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-emerald-300" />
+                                <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-cs2-emerald-on-surface" />
                               ) : (
-                                <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-amber-300" />
+                                <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-cs2-amber-on-surface" />
                               )}
                               <p className="truncate text-[11px] font-semibold text-cs2-text-primary">{itemDisplayName(item)}</p>
                             </div>

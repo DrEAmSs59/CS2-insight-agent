@@ -286,19 +286,19 @@ async def clear_demo_cache(demo_db: Any) -> dict[str, Any]:
     }
 
 
-def cache_status_payload(demo_db_stats: dict[str, Any] | None = None) -> dict[str, Any]:
+def cache_status_payload(demo_db_stats: dict[str, Any] | None = None, *, cache_rows: list[dict[str, Any]]) -> dict[str, Any]:
     cfg = load_config()
     root = resolve_demo_cache_root(cfg)
     file_count = 0
     total_bytes = 0
-    if root.is_dir():
-        for path in root.rglob("*.dem"):
-            if path.is_file():
-                file_count += 1
-                try:
-                    total_bytes += path.stat().st_size
-                except OSError:
-                    pass
+    originals = {_norm(row["path"]) for row in cache_rows}
+    paths = {_norm(row["cached_path"]): Path(row["cached_path"]) for row in cache_rows if row.get("cached_path")}
+    for key, path in paths.items():
+        if key in originals or not is_under_directory(path, root):
+            continue
+        if path.is_file():
+            file_count += 1
+            total_bytes += path.stat().st_size
     return {
         "path": str(root),
         "default_path": str(default_demo_cache_root()),

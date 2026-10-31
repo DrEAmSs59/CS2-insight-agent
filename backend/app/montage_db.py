@@ -331,6 +331,16 @@ class MontageDB:
             await conn.commit()
             return cur.rowcount > 0
 
+    async def recover_interrupted_exports(self) -> None:
+        async with aiosqlite.connect(self.db_path) as conn:
+            await conn.execute(
+                "UPDATE montage_exports SET status = 'error', "
+                "error_msg = 'MONTAGE_EXPORT_INTERRUPTED', updated_at = ? "
+                "WHERE status IN ('pending', 'queued', 'running', 'cancelling')",
+                (utc_now_iso(),),
+            )
+            await conn.commit()
+
     async def create_export(
         self,
         *,

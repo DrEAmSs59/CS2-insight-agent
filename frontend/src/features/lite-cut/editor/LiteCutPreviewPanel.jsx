@@ -791,7 +791,7 @@ export default function LiteCutPreviewPanel({
           <div
             ref={canvasRef}
             data-preview-canvas
-            className={`relative overflow-hidden rounded-md bg-black ring-1 transition-shadow ${              dropHover ? "ring-2 ring-cs2-accent ring-offset-2 ring-offset-cs2-bg-page" : "ring-white/10"
+            className={`relative overflow-hidden rounded-md bg-black ring-1 transition-shadow ${              dropHover ? "ring-2 ring-cs2-accent ring-offset-2 ring-offset-cs2-bg-page" : "ring-cs2-border-subtle"
             }`}
             onDragOver={handleCanvasDragOver}
             onDragLeave={() => setDropHover(false)}
@@ -1094,20 +1094,20 @@ export default function LiteCutPreviewPanel({
       <div className="shrink-0 border-t border-cs2-border bg-cs2-bg-card px-4 py-2.5">
         <div className="mx-auto flex max-w-[920px] flex-wrap items-center gap-3">
           <div className="flex items-center gap-1">
-            <button type="button" className="rounded-full p-2 text-cs2-text-muted hover:bg-white/5 hover:text-white" onClick={() => sequenceMode && onTimelineSeek ? onTimelineSeek(0) : onPlayheadChange?.(0)}>
+            <button type="button" className="rounded-full p-2 text-cs2-text-muted hover:bg-cs2-bg-hover hover:text-cs2-text-primary" onClick={() => sequenceMode && onTimelineSeek ? onTimelineSeek(0) : onPlayheadChange?.(0)}>
               <SkipBack className="h-4 w-4" />
             </button>
             <button
               type="button"
               onClick={() => onTogglePlay?.()}
               disabled={!hasStream && !sequenceMode}
-              className="rounded-full bg-white p-2.5 text-black shadow-lg hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-40"
+              className="rounded-full bg-cs2-text-primary p-2.5 text-cs2-bg-card shadow-lg hover:bg-cs2-text-primary/90 disabled:cursor-not-allowed disabled:opacity-40"
             >
               {isPlaying ? <Pause className="h-4 w-4 fill-current" /> : <Play className="h-4 w-4 fill-current" />}
             </button>
             <button
               type="button"
-              className="rounded-full p-2 text-cs2-text-muted hover:bg-white/5 hover:text-white"
+              className="rounded-full p-2 text-cs2-text-muted hover:bg-cs2-bg-hover hover:text-cs2-text-primary"
               onClick={() => sequenceMode && onTimelineSeek ? onTimelineSeek(rulerTotal) : onPlayheadChange?.(effectiveTotal)}
               disabled={!hasStream && !sequenceMode}
             >
@@ -1164,11 +1164,11 @@ export default function LiteCutPreviewPanel({
           />
 
           <div className="ml-auto flex items-center gap-2">
-            <button type="button" title="缩小预览" onClick={() => changePreviewZoom(-1)} className="rounded p-1 text-cs2-text-muted hover:bg-white/5 hover:text-white"><ZoomOut className="h-4 w-4" /></button>
+            <button type="button" title="缩小预览" onClick={() => changePreviewZoom(-1)} className="rounded p-1 text-cs2-text-muted hover:bg-cs2-bg-hover hover:text-cs2-text-primary"><ZoomOut className="h-4 w-4" /></button>
             <select value={previewZoom} onChange={(event) => setPreviewZoom(Number(event.target.value))} className="rounded border border-cs2-border bg-cs2-bg-input px-1.5 py-1 font-mono text-[10px] text-cs2-text-secondary" aria-label="预览缩放">
               {[25, 50, 75, 100, 125, 150, 175, 200].map((value) => <option key={value} value={value}>{value}%</option>)}
             </select>
-            <button type="button" title="放大预览" onClick={() => changePreviewZoom(1)} className="rounded p-1 text-cs2-text-muted hover:bg-white/5 hover:text-white"><ZoomIn className="h-4 w-4" /></button>
+            <button type="button" title="放大预览" onClick={() => changePreviewZoom(1)} className="rounded p-1 text-cs2-text-muted hover:bg-cs2-bg-hover hover:text-cs2-text-primary"><ZoomIn className="h-4 w-4" /></button>
             <Volume2 className="h-4 w-4 text-cs2-text-muted" />
             <input
               type="range"

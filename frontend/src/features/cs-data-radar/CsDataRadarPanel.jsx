@@ -138,7 +138,7 @@ export default function CsDataRadarPanel({
           </p>
         ) : null}
         {error ? (
-          <p className="mt-2 rounded-lg border border-rose-500/25 bg-rose-500/10 px-2.5 py-1.5 text-[11px] text-rose-300">
+          <p className="mt-2 rounded-lg border border-cs2-rose-border bg-cs2-rose-surface px-2.5 py-1.5 text-[11px] text-cs2-rose-on-surface">
             {String(error)}
           </p>
         ) : null}
@@ -164,7 +164,7 @@ export default function CsDataRadarPanel({
           </button>
         </div>
         {!radarEnabled ? (
-          <p className="mt-2.5 rounded-lg border border-amber-500/25 bg-amber-500/10 px-2.5 py-2 text-[11px] leading-relaxed text-amber-200">
+          <p className="mt-2.5 rounded-lg border border-cs2-amber-border bg-cs2-amber-surface px-2.5 py-2 text-[11px] leading-relaxed text-cs2-amber-on-surface">
             {t("radar.exportToggleOffHint")}
           </p>
         ) : null}
@@ -189,7 +189,7 @@ export default function CsDataRadarPanel({
                         {item.playerName || t("radar.unknownPlayer")}
                       </p>
                       {!live ? (
-                        <p className="mt-0.5 text-[10px] font-bold uppercase tracking-wide text-amber-300">
+                        <p className="mt-0.5 text-[10px] font-bold uppercase tracking-wide text-cs2-amber-on-surface">
                           {t("radar.orphanBadge")}
                         </p>
                       ) : null}
@@ -197,7 +197,7 @@ export default function CsDataRadarPanel({
                     <button
                       type="button"
                       onClick={() => onRemoveRadarItem?.(item.id)}
-                      className="shrink-0 rounded-lg p-1.5 text-cs2-text-muted hover:bg-rose-500/15 hover:text-rose-400 transition-colors"
+                      className="shrink-0 rounded-lg p-1.5 text-cs2-text-muted hover:bg-cs2-rose-surface hover:text-cs2-rose-on-surface transition-colors"
                       aria-label={t("radar.segmentRemove")}
                     >
                       <Trash2 className="h-3.5 w-3.5" />
@@ -292,7 +292,7 @@ export default function CsDataRadarPanel({
                         {` · ${t("radar.segmentCount", { n: candidate.segment_count || 1 })}`}
                       </p>
                       {missing ? (
-                        <p className="mt-1 text-[10px] font-medium text-rose-300">{t("radar.missingParse")}</p>
+                        <p className="mt-1 text-[10px] font-medium text-cs2-rose-on-surface">{t("radar.missingParse")}</p>
                       ) : (
                         <p className="mt-1 line-clamp-2 text-[10px] leading-relaxed text-cs2-text-muted" title={radarCompositionLine(radar)}>
                           {radarCompositionLine(radar)}

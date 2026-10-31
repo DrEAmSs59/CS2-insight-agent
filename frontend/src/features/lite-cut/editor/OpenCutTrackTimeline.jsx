@@ -81,7 +81,7 @@ function ContextMenuItem({ label, shortcut = "", disabled = false, reason = "", 
       disabled={disabled}
       title={disabled && reason ? reason : label}
       onClick={onClick}
-      className={`flex w-full items-center justify-between gap-4 rounded-md px-2.5 py-1.5 text-left text-[11px] disabled:cursor-not-allowed disabled:opacity-35 ${danger ? "text-rose-300 hover:bg-rose-500/10" : "text-cs2-text-secondary hover:bg-white/5 hover:text-cs2-text-primary"}`}
+      className={`flex w-full items-center justify-between gap-4 rounded-md px-2.5 py-1.5 text-left text-[11px] disabled:cursor-not-allowed disabled:opacity-35 ${danger ? "text-cs2-rose-on-surface hover:bg-rose-500/10" : "text-cs2-text-secondary hover:bg-cs2-bg-hover hover:text-cs2-text-primary"}`}
     >
       <span>{label}</span>
       {shortcut ? <kbd className="font-mono text-[9px] text-cs2-text-muted">{shortcut}</kbd> : null}
@@ -1033,7 +1033,7 @@ export default function OpenCutTrackTimeline({ body, onDropMedia }) {
                 style={{ width: TRACK_HEADER_WIDTH, height: killAxisHeight }}
                 title={t("liteCut.killAxis.laneHint")}
               >
-                <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded border border-orange-400/35 bg-orange-500/10 text-orange-300"><Crosshair className="h-3 w-3" /></span>
+                <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded border border-orange-400/35 bg-orange-500/10 text-cs2-amber-on-surface"><Crosshair className="h-3 w-3" /></span>
                 <span className="min-w-0 flex-1 truncate text-[10px] font-bold text-cs2-text-secondary">{t("liteCut.killAxis.name")}</span>
                 <span className="shrink-0 font-mono text-[9px] text-cs2-text-muted">{killAxisItems.length}</span>
               </div>
@@ -1191,7 +1191,7 @@ export default function OpenCutTrackTimeline({ body, onDropMedia }) {
                     <span className="block truncate px-1.5 pt-1 text-[9px] font-semibold text-current">{drag.label}</span>
                   </div> : null}
                   {isExternalTarget && externalDrop.createsTrack ? <div className={`pointer-events-none absolute inset-x-0 z-30 h-0.5 bg-amber-300 shadow-[0_0_8px_rgba(252,211,77,.9)] ${externalDrop.insertionEdge === "bottom" ? "bottom-0" : "top-0"}`}><span className={`absolute left-2 rounded bg-amber-300 px-1.5 py-0.5 text-[9px] font-bold text-black ${externalDrop.insertionEdge === "bottom" ? "-bottom-5" : "-top-5"}`}>{t("liteCut.timeline.autoCreateVideoTrack")}</span></div> : null}
-                  {isExternalTarget && !externalDrop.createsTrack ? <div className="pointer-events-none absolute inset-y-1 border border-dashed border-amber-200 bg-amber-300/20" style={{ left: externalDrop.time * pixelsPerSecond, width: Math.max(8, externalDrop.width * pixelsPerSecond) }} /> : null}
+                  {isExternalTarget && !externalDrop.createsTrack ? <div className="pointer-events-none absolute inset-y-1 border border-dashed border-cs2-amber-on-surface bg-amber-300/20" style={{ left: externalDrop.time * pixelsPerSecond, width: Math.max(8, externalDrop.width * pixelsPerSecond) }} /> : null}
                 </div>
               </div>
               {isLastOverlayRow ? <div
@@ -1234,7 +1234,7 @@ export default function OpenCutTrackTimeline({ body, onDropMedia }) {
                   onDrop={(event) => handleAutoVideoTrackDrop(event, row)}
                 >
                   <span className="pointer-events-none">{t("liteCut.timeline.dropCreateVideoTrack")}</span>
-                  {externalDrop?.rowId === `auto-video:${row.id}` ? <div className="pointer-events-none absolute inset-y-1 border border-dashed border-amber-200 bg-amber-300/20" style={{ left: externalDrop.time * pixelsPerSecond, width: Math.max(8, externalDrop.width * pixelsPerSecond) }} /> : null}
+                  {externalDrop?.rowId === `auto-video:${row.id}` ? <div className="pointer-events-none absolute inset-y-1 border border-dashed border-cs2-amber-on-surface bg-amber-300/20" style={{ left: externalDrop.time * pixelsPerSecond, width: Math.max(8, externalDrop.width * pixelsPerSecond) }} /> : null}
                   {drag?.createBelow && drag.type === "video" ? <div className="pointer-events-none absolute inset-y-1 border border-dashed border-cs2-accent bg-cs2-accent-soft" style={{ left: drag.start * pixelsPerSecond, width: Math.max(8, drag.width * pixelsPerSecond) }}><span className="block truncate px-1.5 pt-1 text-[9px] font-semibold text-cs2-text-primary">{drag.label}</span></div> : null}
                 </div>
               </div> : null}
@@ -1311,7 +1311,7 @@ export default function OpenCutTrackTimeline({ body, onDropMedia }) {
         <div className="max-h-[80vh] w-full max-w-xl overflow-auto rounded-2xl border border-cs2-border bg-cs2-bg-elevated p-4 shadow-2xl" onPointerDown={(event) => event.stopPropagation()}>
           <div className="flex items-center justify-between">
             <div><h3 className="text-sm font-bold text-cs2-text-primary">{t("liteCut.timeline.help.title")}</h3><p className="mt-0.5 text-[10px] text-cs2-text-muted">{t("liteCut.timeline.help.subtitle")}</p></div>
-            <button type="button" onClick={() => setShortcutHelpOpen(false)} className="rounded-md px-2 py-1 text-cs2-text-muted hover:bg-white/5 hover:text-white">{t("liteCut.timeline.help.close")}</button>
+            <button type="button" onClick={() => setShortcutHelpOpen(false)} className="rounded-md px-2 py-1 text-cs2-text-muted hover:bg-cs2-bg-hover hover:text-cs2-text-primary">{t("liteCut.timeline.help.close")}</button>
           </div>
           <div className="mt-4 grid grid-cols-2 gap-x-6 gap-y-2 text-[11px]">
             {[

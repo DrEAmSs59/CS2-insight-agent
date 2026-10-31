@@ -34,7 +34,7 @@ def test_persistent_killfeed_groups_protagonists_and_preserves_requested_cuts(mo
     monkeypatch.setattr(pov_hud_manager, "restore_pov_after_cs2_exit", lambda *a, **k: {"verified": True})
     monkeypatch.setattr(obs_recording_controller, "OBSRecordingController", Controller)
     monkeypatch.setattr(plan_builder, "build_plan", lambda dto: SimpleNamespace(request_id=dto.request_id, segments=[
-        SimpleNamespace(start_tick=int(dto.request_id)*100, end_tick=int(dto.request_id)*100+50, disabled=False),
+        SimpleNamespace(start_tick=int(dto.request_id)*100, end_tick=int(dto.request_id)*100+50, disabled=False, metadata={}),
         SimpleNamespace(start_tick=900, end_tick=999, disabled=True),
     ]))
     director = OBSDirector(OBSConfig(), "")

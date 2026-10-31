@@ -1,6 +1,7 @@
 import { BACKEND_DEFAULT_PACING } from "../stores/recordingQueueStore";
 import { DEMO_TICK_RATE } from "./montageUtils";
 import { isFreezeToDeathCompilation } from "./freezeToDeathRoundFilter";
+import { limitRecordingPacing } from "./recordingPacing.js";
 
 /** @param {Record<string, unknown>} gp */
 function gNum(gp, key) {
@@ -21,11 +22,11 @@ export function mergedPacingForItem(item, globalPacing) {
     po.max_gap_sec != null
       ? po.max_gap_sec
       : gNum(gp, "max_gap_sec") ?? BACKEND_DEFAULT_PACING.max_gap_sec;
-  return {
+  return limitRecordingPacing({
     pre_first_sec: pre,
     post_last_sec: post,
     max_gap_sec: mid,
-  };
+  });
 }
 
 /**

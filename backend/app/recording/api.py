@@ -9,13 +9,6 @@ from pydantic import BaseModel, Field
 from .models import RecordingRequestDTO, RecordingPlan, RequestType, RecordingOptions
 from .plan_builder import build_plan
 from .normalizer import NormalizationError, normalize
-from .ai_director import (
-    suggest_recording_outline,
-    outline_to_preview_lines,
-    victim_pov_omitted_kills,
-    count_available_victim_pov,
-)
-from .planners.ai_directed_planner import plan_from_ai_outline
 from ..env_utils import OBSConfig, AppConfig, load_config, ensure_cs2_path, resolve_config_path
 from .executor.obs_client import OBSClient, OBSConnectionError
 from .executor.recording_executor import RecordingExecutor, ExecutionResult
@@ -256,6 +249,7 @@ async def _persist_v3_results(
             continue
         output_path = (r.get("output_path") or "").strip()
         if not output_path:
+            r.update(success=False, error="Recording output path is missing")
             continue
 
         dto = dto_by_id.get(r.get("request_id") or "")
@@ -321,6 +315,7 @@ async def _persist_v3_results(
                 clip_meta.get("source_rounds", []),
             )
         except Exception:
+            r.update(success=False, error="Recording finished, but saving it to the library failed")
             logger.exception(
                 "[RecordingV3] recorded_clips insert failed clip_id=%s path=%s",
                 clip_id, output_path,
@@ -402,49 +397,6 @@ async def create_recording_plan(dto: RecordingRequestDTO) -> dict:
     }
 
 
-@router.post("/ai-director/preview", response_model=dict)
-async def ai_director_preview(dto: RecordingRequestDTO) -> dict:
-    """LLM 导播大纲预览（不执行录制）。"""
-    try:
-        req = normalize(dto)
-    except NormalizationError as e:
-        raise HTTPException(status_code=422, detail=str(e))
-
-    outline, source, llm_error = await suggest_recording_outline(req)
-    preview_lines = outline_to_preview_lines(outline, req)
-    segments = plan_from_ai_outline(req, outline)
-    victim_count = sum(1 for s in segments if str(getattr(s.perspective, "value", s.perspective)) == "victim")
-    victim_blocks = sum(
-        1 if b.type == "kill_with_victim" else len(b.kill_indices)
-        for b in outline.blocks
-        if b.type in {"kill_with_victim", "killer_merged_with_victims"}
-    )
-    omitted = victim_pov_omitted_kills(outline, req)
-    victim_eligible = count_available_victim_pov(req.events)
-
-    blocks_out = []
-    for b in outline.blocks:
-        row = {"type": b.type, "label": b.label or ""}
-        if b.type in {"killer_merged", "killer_merged_with_victims"}:
-            row["kill_indices"] = list(b.kill_indices)
-        else:
-            row["kill_index"] = b.kill_index
-        blocks_out.append(row)
-
-    return {
-        "source": source,
-        "llm_error": llm_error,
-        "rationale": outline.rationale,
-        "blocks": blocks_out,
-        "preview_lines": preview_lines,
-        "estimated_segments": len(segments),
-        "victim_pov_count": victim_count,
-        "victim_pov_blocks": victim_blocks,
-        "victim_pov_eligible_count": victim_eligible,
-        "victim_pov_cap": victim_eligible,
-        "victim_pov_omitted": omitted,
-        "kill_count": len(req.events),
-    }
 
 
 @router.post("/execute", response_model=dict)
@@ -469,9 +421,13 @@ async def execute_recording(
     global _queue_abort_event
     abort_ev = asyncio.Event()
     _queue_abort_event = abort_ev
+    executor = None
     try:
         try:
-            obs_client.connect()
+            await asyncio.to_thread(obs_client.connect)
+            status = await asyncio.to_thread(obs_client.get_record_status)
+            if status["outputActive"]:
+                raise HTTPException(409, "OBS is already recording; stop that recording before starting Insight")
         except OBSConnectionError as e:
             raise HTTPException(status_code=503, detail=f"OBS connection failed: {e}")
 
@@ -487,6 +443,9 @@ async def execute_recording(
         )
         result = await executor.execute(plan)
     finally:
+        if executor is not None:
+            await executor.stop_owned_recording()
+        await asyncio.to_thread(obs_client.disconnect)
         if _queue_abort_event is abort_ev:
             _queue_abort_event = None
 
@@ -586,11 +545,13 @@ async def execute_recording_queue(
     # only to discover OBS is down.
     try:
         _pre_obs_client = OBSClient(obs_cfg)
-        _pre_obs_client.connect()
+        await asyncio.to_thread(_pre_obs_client.connect)
         try:
-            _pre_obs_client.disconnect()
-        except Exception:
-            pass
+            status = await asyncio.to_thread(_pre_obs_client.get_record_status)
+            if status["outputActive"]:
+                raise HTTPException(409, "OBS is already recording. Stop that recording before starting Insight.")
+        finally:
+            await asyncio.to_thread(_pre_obs_client.disconnect)
         logger.info("[RecordingV3] OBS pre-check: connection OK")
     except OBSConnectionError as e:
         raise HTTPException(

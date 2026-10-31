@@ -511,6 +511,13 @@ def build_batch_and_plan(
             repl.get("paint_wear"), replacement_definition_index, paint_kit
         )
 
+        if (item_type == "glove" and definition_index in {5028, 5029}
+                and replacement_definition_index == definition_index and paint_kit == 0):
+            # Every save starts from the library original. Restoring its default
+            # gloves removes the overlay; it must not materialize a paint-zero
+            # rule that skin-core rejects. Other players' plans still replay.
+            continue
+
         batch_item: dict[str, Any] = {
             "item_id64": item_id64,
             "definition_index": definition_index,
@@ -786,14 +793,14 @@ def map_item_statuses(
 def validate_player_loadout(value: Any) -> dict[str, int]:
     """Official cosmetics only; agent slots are strictly same-team."""
     from .features.demo_analysis.cs2_item_catalog import load_cs2_item_catalog
-    if not isinstance(value, dict) or set(value) - {"agent_t", "agent_ct", "music_kit"}:
+    if not isinstance(value, dict) or set(value) - {"agent_t", "agent_ct", "music_kit", "music_kit_t", "music_kit_ct"}:
         raise CosmeticsSkinPlanError("invalid player_loadout")
     catalog = load_cs2_item_catalog()["items"].values()
     result = {}
     for field, number in value.items():
         if isinstance(number, bool) or not isinstance(number, int) or number <= 0:
             raise CosmeticsSkinPlanError(f"invalid {field}")
-        if field == "music_kit":
+        if field in {"music_kit", "music_kit_t", "music_kit_ct"}:
             valid = any(row.get("type") == "musickit" and row.get("paint") == number for row in catalog)
         else:
             team = 0 if field == "agent_t" else 1

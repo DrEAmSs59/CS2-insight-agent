@@ -21,8 +21,8 @@ function teamLabel(key, teamAName, teamBName) {
 
 function CompactRow({ label, children }) {
   return (
-    <div className="flex min-h-[32px] items-center gap-2 border-t border-cs2-border/50 first:border-t-0">
-      <span className="w-[78px] shrink-0 text-[10px] text-cs2-text-muted">{label}</span>
+    <div className="flex min-h-[34px] items-center gap-2 border-t border-cs2-border-subtle py-1 first:border-t-0">
+      <span className="w-[84px] shrink-0 text-xs text-cs2-text-muted">{label}</span>
       <div className="min-w-0 flex-1">{children}</div>
     </div>
   );
@@ -54,24 +54,24 @@ export default function EconomyInsightCard({
   return (
     <InsightCard
       title="经济表现"
-      icon={<Coins className="h-3.5 w-3.5 text-cs2-accent" />}
-      compact
+      icon={Coins}
+      tone="accent"
       className={className}
     >
       {!hasData ? (
-        <p className="text-[11px] text-cs2-text-muted">
+        <p className="text-xs text-cs2-text-muted">
           {model?.summary || "本场未产生明显经济翻盘回合"}
         </p>
       ) : (
-        <div className="flex flex-1 flex-col justify-center text-[11px]">
+        <div className="flex flex-1 flex-col justify-center text-xs">
           <CompactRow label="手枪局转化率">
             <div className="flex flex-col gap-0.5 leading-snug">
               <span>
-                <span className="text-sky-400">{teamAName}</span>{" "}
+                <span className="text-cs2-team-blue">{teamAName}</span>{" "}
                 <span className="font-semibold text-cs2-text-primary">{formatPistolStreak(teamA)}</span>
               </span>
               <span>
-                <span className="text-amber-400">{teamBName}</span>{" "}
+                <span className="text-cs2-team-amber">{teamBName}</span>{" "}
                 <span className="font-semibold text-cs2-text-primary">{formatPistolStreak(teamB)}</span>
               </span>
             </div>
@@ -79,11 +79,11 @@ export default function EconomyInsightCard({
           <CompactRow label="强起翻盘回合">
             <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5">
               <span>
-                <span className="text-sky-400">{teamAName}</span>{" "}
+                <span className="text-cs2-team-blue">{teamAName}</span>{" "}
                 <span className="font-bold tabular-nums text-cs2-text-primary">{forceCountA}</span>
               </span>
               <span>
-                <span className="text-amber-400">{teamBName}</span>{" "}
+                <span className="text-cs2-team-amber">{teamBName}</span>{" "}
                 <span className="font-bold tabular-nums text-cs2-text-primary">{forceCountB}</span>
               </span>
             </div>

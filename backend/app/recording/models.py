@@ -1,8 +1,9 @@
 from enum import Enum
 from typing import Any, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from ..player_aliases import PlayerAliases
+from ..recording_limits import MAX_EVENT_PREROLL_SECONDS, limit_event_preroll_seconds
 
 
 class RequestType(str, Enum):
@@ -84,17 +85,17 @@ class RoundInfo(BaseModel):
 
 
 class RecordingOptions(BaseModel):
-    highlight_pre_sec: float = 3.0
+    highlight_pre_sec: float = Field(default=3.0, ge=0, le=MAX_EVENT_PREROLL_SECONDS, allow_inf_nan=False)
     highlight_post_sec: float = 2.0
     kill_jump_cut_threshold_sec: float = 12.0
-    timeline_kill_pre_sec: float = 3.0
+    timeline_kill_pre_sec: float = Field(default=3.0, ge=0, le=MAX_EVENT_PREROLL_SECONDS, allow_inf_nan=False)
     timeline_kill_post_sec: float = 2.0
-    death_pre_sec: float = 3.0
+    death_pre_sec: float = Field(default=3.0, ge=0, le=MAX_EVENT_PREROLL_SECONDS, allow_inf_nan=False)
     death_post_sec: float = 2.0
-    kill_compilation_pre_sec: float = 2.0
+    kill_compilation_pre_sec: float = Field(default=2.0, ge=0, le=MAX_EVENT_PREROLL_SECONDS, allow_inf_nan=False)
     kill_compilation_post_sec: float = 1.5
     kill_compilation_jump_cut_threshold_sec: float = 10.0
-    death_compilation_pre_sec: float = 2.0
+    death_compilation_pre_sec: float = Field(default=2.0, ge=0, le=MAX_EVENT_PREROLL_SECONDS, allow_inf_nan=False)
     death_compilation_post_sec: float = 1.5
     death_compilation_merge_gap_sec: float = 2.0
     round_freeze_preroll_sec: float = Field(default=3.0, ge=3, le=10, allow_inf_nan=False)
@@ -118,7 +119,12 @@ class RecordingOptions(BaseModel):
     obs_transition_name: Optional[str] = None
     obs_transition_duration_ms: Optional[int] = None
     # LLM 导播大纲：合并击杀簇 + 精选受害者 POV（替代纯规则/全量 K→V）
-    use_ai_director: bool = False
+
+    @field_validator("highlight_pre_sec", "timeline_kill_pre_sec", "death_pre_sec",
+                     "kill_compilation_pre_sec", "death_compilation_pre_sec", mode="before")
+    @classmethod
+    def limit_legacy_event_preroll(cls, value):
+        return limit_event_preroll_seconds(value)
 
 
 class SourceRef(BaseModel):

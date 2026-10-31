@@ -10,6 +10,7 @@ import {
   buildTimelineRoundRecordingRequest,
 } from "./recordingRequestFactory";
 import { stripGlobalPacingMetaKeys } from "../stores/recordingQueueStore";
+import { limitRecordingPacing } from "../utils/recordingPacing.js";
 
 /**
  * Map pacing_override fields to RecordingOptions keys.
@@ -43,7 +44,6 @@ function pacingOverrideToOptions(pacing) {
   }
   if (pacing.victim_pov === true) opts.enable_victim_pov = true;
   if (pacing.pov_interleaved === true) opts.interleave_pov_pairs = true;
-  if (pacing.ai_director === true) opts.use_ai_director = true;
 
   // Victim POV independent timing — maps to dedicated backend fields.
   if (pacing.victim_pov_pre_sec != null) opts.victim_pov_pre_sec = pacing.victim_pov_pre_sec;
@@ -82,10 +82,10 @@ export function buildDtoFromQueueItem(item, matchMeta, globalPacing = {}) {
   if (!clipData || typeof clipData !== "object") return null;
 
   // Merge: global pacing (stripped of meta-only keys) < item pacing_override
-  const mergedPacing = {
+  const mergedPacing = limitRecordingPacing({
     ...stripGlobalPacingMetaKeys(globalPacing || {}),
     ...(item.pacing_override || {}),
-  };
+  });
   const options = pacingOverrideToOptions(mergedPacing);
 
   // Per-item obs_transition overrides (null = use AppConfig global default).

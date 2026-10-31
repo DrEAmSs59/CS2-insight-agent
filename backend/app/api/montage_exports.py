@@ -31,7 +31,7 @@ async def get_montage_export(export_id: int):
     row = await montage_db.get_export(export_id)
     if not row:
         raise HTTPException(404, "导出记录不存在")
-    return row
+    return {**row, "export_id": row["id"], "error": row.get("error_msg") or ""}
 
 
 @router.post("/api/montage/exports/{export_id}/cancel")

@@ -15,15 +15,15 @@ function fmtDate(iso) {
 }
 
 function ratingColor(r) {
-  if (r >= 1.2) return "#2eb86a";
-  if (r < 0.95) return "#e0556a";
+  if (r >= 1.2) return "var(--cs2-emerald-on-surface)";
+  if (r < 0.95) return "var(--cs2-rose-on-surface)";
   return undefined;
 }
 
 function kdColor(k, d) {
   const kd = d > 0 ? k / d : k;
-  if (kd >= 1.2) return "text-[#2eb86a]";
-  if (kd < 0.95) return "text-[#e0556a]";
+  if (kd >= 1.2) return "text-cs2-emerald-on-surface";
+  if (kd < 0.95) return "text-cs2-rose-on-surface";
   return "text-cs2-text-primary";
 }
 
@@ -31,9 +31,9 @@ export default function MatchHistoryRow({ match, onDownload, onGoToLibrary }) {
   const t = useT();
 
   const RESULT_STYLE = {
-    win:  { bar: "#2eb86a", badge: "bg-[#2eb86a]/15 text-[#2eb86a]", label: t("match.filterResultWin") },
-    loss: { bar: "#e0556a", badge: "bg-[#e0556a]/15 text-[#e0556a]", label: t("match.filterResultLoss") },
-    tie:  { bar: "#d97706", badge: "bg-[#d97706]/15 text-[#d97706]", label: t("match.filterResultTie") },
+    win:  { bar: "#2eb86a", badge: "bg-[#2eb86a]/15 text-cs2-emerald-on-surface", label: t("match.filterResultWin") },
+    loss: { bar: "#e0556a", badge: "bg-[#e0556a]/15 text-cs2-rose-on-surface", label: t("match.filterResultLoss") },
+    tie:  { bar: "#d97706", badge: "bg-[#d97706]/15 text-cs2-amber-on-surface", label: t("match.filterResultTie") },
   };
 
   const MODE_LABEL = {
@@ -126,12 +126,12 @@ export default function MatchHistoryRow({ match, onDownload, onGoToLibrary }) {
         </div>
         <div className="flex flex-wrap justify-center gap-1">
           {match.ace_count > 0 && (
-            <span className="rounded-[4px] bg-blue-500/15 px-1.5 py-0.5 font-mono text-[10px] font-bold text-blue-400">
+            <span className="rounded-[4px] bg-cs2-cyan-surface px-1.5 py-0.5 font-mono text-[10px] font-bold text-cs2-cyan-on-surface">
               {t("match.badgeAce", { n: match.ace_count })}
             </span>
           )}
           {match.mvp_count >= 4 && (
-            <span className="rounded-[4px] bg-[#2eb86a]/15 px-1.5 py-0.5 font-mono text-[10px] font-bold text-[#2eb86a]">
+            <span className="rounded-[4px] bg-[#2eb86a]/15 px-1.5 py-0.5 font-mono text-[10px] font-bold text-cs2-emerald-on-surface">
               {t("match.badgeMvp", { n: match.mvp_count })}
             </span>
           )}

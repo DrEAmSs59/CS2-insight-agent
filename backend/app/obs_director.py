@@ -2062,6 +2062,7 @@ class OBSDirector:
         self._copied_demo: Optional[Path] = None
         self._copied_cfg: Optional[Path] = None
         self._copied_gsi_cfg: Optional[Path] = None
+        self._control_log_path: Optional[Path] = None
         self._spec_calibration_by_demo: dict[str, dict[str, int]] = {}
         self._spec_parse_fallback_offset_by_demo: dict[str, int] = {}
         self._demo_steam_by_name_cache: dict[str, dict[str, str]] = {}
@@ -2320,6 +2321,7 @@ class OBSDirector:
             ("demo", self._copied_demo),
             ("cfg", self._copied_cfg),
             ("gsi cfg", self._copied_gsi_cfg),
+            ("Panorama control log", self._control_log_path),
         ):
             if p and p.is_file():
                 try:
@@ -2329,6 +2331,7 @@ class OBSDirector:
         self._copied_demo = None
         self._copied_cfg = None
         self._copied_gsi_cfg = None
+        self._control_log_path = None
 
     def _launch_cs2(
         self,
@@ -2336,6 +2339,7 @@ class OBSDirector:
         warmup: Optional[RecordingWarmupExtras] = None,
         *,
         chroma_demo_map_name: Optional[str] = None,
+        control_log_filename: Optional[str] = None,
     ) -> None:
         """
         将 Demo 复制到 CS2 的 game/csgo/ 下再以 +playdemo 启动。
@@ -2398,6 +2402,14 @@ class OBSDirector:
             logger.info("Removed %d stale CS2 Insight GSI config(s) before launch", len(removed_gsi_configs))
         stem = dest.stem  # _insight_<uuid>
         cfg_path = cfg_dir / f"{stem}.cfg"
+        if control_log_filename is not None:
+            if not re.fullmatch(r"_insight_control_[a-z0-9_-]+\.log", control_log_filename):
+                raise ValueError("invalid Panorama control log filename")
+            self._control_log_path = csgo_dir / control_log_filename
+            try:
+                self._control_log_path.unlink(missing_ok=True)
+            except OSError as exc:
+                raise RuntimeError(f"could not reset Panorama control log: {exc}") from exc
         # 用 cfg 里 playdemo 比单独 +playdemo 在 CS2 上更稳；路径仅 ASCII
         console_toggle_key = (os.environ.get("CS2_INSIGHT_CONSOLE_TOGGLE_KEY") or "F10").strip().upper()
         if console_toggle_key in {"~", "OEM_3"}:
@@ -2473,6 +2485,8 @@ class OBSDirector:
         if self._extra_launch_argv:
             argv.extend(self._extra_launch_argv)
 
+        if control_log_filename is not None:
+            argv.extend(["-con_logfile", str(self._control_log_path)])
         argv.extend(["+exec", stem])
         logger.info("Launch CS2 cwd=%s cmd=%s", cwd, " ".join(argv))
         creationflags = 0
@@ -3602,6 +3616,7 @@ class OBSDirector:
         """
         from .recording.plan_builder import build_plan
         from .recording.obs_targets import prepare_obs_plan_targets
+        from .recording.executor.panorama_control import PanoramaControlBridge, PanoramaControlError, build_recording_control_payload
         from .recording.executor.recording_executor import RecordingExecutor
         from .recording.executor.obs_client import OBSClient, OBSConnectionError
         from .recording.services.result_writer import write_result
@@ -3649,6 +3664,7 @@ class OBSDirector:
         # OBSClient is created here but connected lazily (right before the executor starts)
         # so the WebSocket receive thread does not die during the ~60s CS2 warmup window.
         obs_client = OBSClient(self.obs_config)
+        executor = None
 
         pov_mgr_v3: "Optional[PovHudManager]" = None
         pov_on_v3 = bool(warmup and getattr(warmup, "pov_hud_enabled", False))
@@ -3697,10 +3713,38 @@ class OBSDirector:
         weather_on_v3 = weather_effect_id_v3 != DEFAULT_WEATHER_EFFECT_ID
         visual_layer_on_v3 = skybox_on_v3 or map_material_on_v3 or weather_on_v3
         persistent_killfeed_v3 = bool(warmup and warmup.persistent_killfeed)
-        recording_vpk_on_v3 = recording_hud_on_v3 or visual_layer_on_v3 or persistent_killfeed_v3
+        panorama_fast_path_enabled = os.environ.get("CS2_INSIGHT_PANORAMA_FAST_PATH", "0").lower() in {"1", "true", "yes", "on"}
+        recording_vpk_on_v3 = recording_hud_on_v3 or visual_layer_on_v3 or persistent_killfeed_v3 or panorama_fast_path_enabled
         pov_install_attempted = False
         pov_expected_gameinfo_sha256: Optional[str] = None
         pov_restoration: Optional[dict[str, Any]] = None
+
+        def _recording_session_commands() -> list[str]:
+            key_bindings = ["bind KP_5 demo_pause", "bind KP_6 demo_resume"]
+            if warmup is None:
+                return [*key_bindings, "snd_voipvolume 0", "mp_forcecamera 0"]
+            commands = self._recording_warmup_console_lines(
+                warmup,
+                pov_enabled=recording_hud_on_v3,
+            )
+            commands.extend(visual_layer_console_commands(
+                map_material_id=map_material_id_v3,
+                weather_effect_id=weather_effect_id_v3,
+            ))
+            commands.extend(key_bindings)
+            if pov_on_v3:
+                commands.extend(POV_CORE_FORCED_COMMANDS)
+                commands.extend(
+                    pov_tail_commands(
+                        teamcounter_numeric=warmup.pov_teamcounter_numeric,
+                        radar_mode=warmup.pov_radar_mode,
+                        voice_mode=pov_voice_mode_v3,
+                        voice_disabled=warmup.pov_voice_disabled,
+                    )
+                )
+            elif recording_hud_on_v3 and pov_voice_mode_v3 != "mute":
+                commands.extend(["voice_modenable 1", "snd_voipvolume 1"])
+            return commands
 
         try:
             # ── Phase 0: CS2 启动前预构建录制计划 ──────────────────────────
@@ -3754,15 +3798,19 @@ class OBSDirector:
                             job_idx + 1, len(demo_groups), demo_name, len(demo_requests))
                 self._check_abort()
 
-                # Resolve all active targets from the actual playback source before
-                # changing game files or launching CS2. Raw cached slots are not trusted.
+                # A complete plan is required only for the optional controller.
+                # The established executor retains its own per-request error path.
+                group_plans = [_plan_cache.get(dto.request_id) for dto in demo_requests]
+                # Resolve the repaired/aliased playback source before either OBS
+                # controller payloads or a CS2 session are built. The disposable
+                # copy/chroma rewrite below does not change player entities.
                 try:
-                    valid_plans = [_plan_cache[dto.request_id] for dto in demo_requests
-                                   if _plan_cache.get(dto.request_id) is not None]
+                    valid_plans = [plan for plan in group_plans if plan is not None]
                     resolved_plans = await asyncio.to_thread(prepare_obs_plan_targets, valid_plans, demo_abs)
                     self._check_abort()
                     for plan in resolved_plans:
                         _plan_cache[plan.request_id] = plan
+                    group_plans = [_plan_cache.get(dto.request_id) for dto in demo_requests]
                 except RecordingAborted:
                     raise
                 except Exception as exc:
@@ -3772,6 +3820,53 @@ class OBSDirector:
                         "error": str(exc), "segment_results": [], "warnings": [],
                     } for dto in demo_requests)
                     continue
+                effective_warmup_cmds = _recording_session_commands()
+                killfeed_ranges = [{"start_tick": segment.start_tick, "end_tick": segment.end_tick}
+                    for plan in group_plans if plan is not None
+                    for segment in plan.segments if not segment.disabled] if persistent_killfeed_v3 else []
+                takeover_for_job = any(segment.metadata.get("obs_body_timeline")
+                    for plan in group_plans if plan is not None for segment in plan.segments if not segment.disabled)
+                fast_path_for_job = (panorama_fast_path_enabled or takeover_for_job) and all(group_plans)
+                if takeover_for_job:
+                    if not fast_path_for_job:
+                        raise PanoramaControlError("OBS BOT 接管录制需要完整的 Panorama 计划")
+                    recording_vpk_on_v3 = True
+                    if pov_mgr_v3 is None:
+                        from .env_utils import load_config as _load_cfg
+                        pov_mgr_v3 = PovHudManager(_load_cfg())
+                panorama_bridge: Optional[PanoramaControlBridge] = None
+                recording_control_payload: Optional[dict[str, Any]] = None
+                control_log_filename: Optional[str] = None
+                if fast_path_for_job:
+                    try:
+                        control_session_id = uuid.uuid4().hex
+                        control_log_filename = f"_insight_control_{control_session_id}.log"
+                        game_root = self._game_root_from_cs2_exe(Path(self.cs2_path))
+                        if game_root is None:
+                            raise PanoramaControlError(
+                                "cannot resolve CS2 game root for Panorama control log"
+                            )
+                        panorama_bridge = PanoramaControlBridge(
+                            game_root / "csgo" / control_log_filename,
+                            control_session_id,
+                            abort_event=self._abort_event,
+                        )
+                        recording_control_payload = build_recording_control_payload(
+                            group_plans,
+                            session_id=control_session_id,
+                        )
+                    except Exception as exc:
+                        if takeover_for_job:
+                            raise PanoramaControlError(f"OBS BOT 接管控制器准备失败：{exc}") from exc
+                        logger.warning(
+                            "[RecordingV3][Panorama] fast path is not eligible; "
+                            "using the original pipeline: %s",
+                            exc,
+                        )
+                        fast_path_for_job = False
+                        panorama_bridge = None
+                        recording_control_payload = None
+                        control_log_filename = None
 
                 # The speaking schedule is demo-specific. CS2 is stopped between
                 # groups, so restore/reinstall the package with this demo's data.
@@ -3817,7 +3912,7 @@ class OBSDirector:
                             demo_map_name,
                         )
                         pov_install_attempted = True
-                        if recording_hud_on_v3 or persistent_killfeed_v3:
+                        if recording_hud_on_v3 or persistent_killfeed_v3 or fast_path_for_job:
                             killfeed_ranges = [
                                 {"start_tick": segment.start_tick, "end_tick": segment.end_tick}
                                 for dto in demo_requests
@@ -3832,6 +3927,9 @@ class OBSDirector:
                                 pov_visuals_enabled=pov_on_v3,
                                 persistent_killfeed=persistent_killfeed_v3,
                                 killfeed_only=not recording_hud_on_v3,
+                                **({"recording_control": recording_control_payload,
+                                    "recording_controller_only": not recording_hud_on_v3,
+                                    "session_console_commands": effective_warmup_cmds} if fast_path_for_job else {}),
                                 persistent_killfeed_target_xuid=(
                                     demo_requests[0].target_player.steamid64 if persistent_killfeed_v3 else ""
                                 ),
@@ -3879,9 +3977,10 @@ class OBSDirector:
                             demo_abs,
                             warmup,
                             chroma_demo_map_name=demo_map_name,
+                            **({"control_log_filename": control_log_filename} if fast_path_for_job else {}),
                         )
                     else:
-                        self._launch_cs2(demo_abs, warmup)
+                        self._launch_cs2(demo_abs, warmup, **({"control_log_filename": control_log_filename} if fast_path_for_job else {}))
                 except CS2AlreadyRunningError:
                     raise
                 except CS2NotReadyError:
@@ -3916,114 +4015,64 @@ class OBSDirector:
                     await self._run_cleanup_step("CS2 artifact cleanup after GSI timeout", self._cleanup_cs2_artifacts, timeout=8.0)
                     raise
 
-                # ── Inject warmup console commands (+ POV HUD commands if enabled)
-                # Order: generic warmup first, then V3 demo-control key bindings,
-                # then POV HUD forced commands last (so POV overrides any conflicting warmup cvars).
-                # KP_5/KP_6 are bound here so that demo_pause_silent/demo_resume_silent
-                # can send a keypress instead of opening the console during recording.
-                _V3_DEMO_KEY_BINDINGS = ["bind KP_5 demo_pause", "bind KP_6 demo_resume"]
-                # POV manages the selected dynamic audience mask and matching
-                # speaking notices; non-POV recording only mutes global volume.
-                # The per-segment backend mask injector stays disabled.
-                _warmup_inject_ok = False
-                effective_warmup_cmds: list[str] = []
-                if warmup is not None:
-                    effective_warmup_cmds = self._recording_warmup_console_lines(
-                        warmup,
-                        pov_enabled=recording_hud_on_v3,
-                    )
-                    visual_cmds = visual_layer_console_commands(
-                        map_material_id=map_material_id_v3,
-                        weather_effect_id=weather_effect_id_v3,
-                    )
-                    if visual_cmds:
-                        effective_warmup_cmds = [
-                            *effective_warmup_cmds,
-                            *visual_cmds,
-                        ]
-                    effective_warmup_cmds = [
-                        *effective_warmup_cmds,
-                        *_V3_DEMO_KEY_BINDINGS,
-                    ]
-                    if self._pov_enabled:
-                        pov_cmds = [
-                            *POV_CORE_FORCED_COMMANDS,
-                            *pov_tail_commands(
-                                teamcounter_numeric=warmup.pov_teamcounter_numeric,
-                                radar_mode=warmup.pov_radar_mode,
-                                voice_mode=pov_voice_mode_v3,
-                                voice_disabled=warmup.pov_voice_disabled,
-                            ),
-                        ]
-                        effective_warmup_cmds = [*effective_warmup_cmds, *pov_cmds]
-                    elif recording_hud_on_v3 and pov_voice_mode_v3 != "mute":
-                        # Voice/input VPK mode is independent from the POV cvar
-                        # preset. Only enable the native demo voice path here;
-                        # the Panorama payload owns its selected audience mask.
-                        effective_warmup_cmds = [
-                            *effective_warmup_cmds,
-                            "voice_modenable 1",
-                            "snd_voipvolume 1",
-                        ]
+                # Once installed, the controller may already own seek/pause.
+                # Missing BOOT must fail closed: a late controller cannot safely
+                # share the same demo with the console executor.
+                if fast_path_for_job and panorama_bridge is not None:
+                    try:
+                        boot_timeout = self._env_float(
+                            "CS2_INSIGHT_PANORAMA_BOOT_PROBE_SEC", "2.0"
+                        )
+                        await panorama_bridge.wait_for("BOOT", timeout_sec=boot_timeout)
+                    except PanoramaControlError as exc:
+                        self._check_abort()
+                        raise CS2NotReadyError(str(exc)) from exc
+
+                # The original console warmup remains authoritative whenever
+                # the optional controller was not positively armed.
+                if not fast_path_for_job:
+                    warmup_inject_ok = False
                     if effective_warmup_cmds:
                         logger.info(
-                            "[RecordingV3] applying warmup console commands: %d",
+                            "[RecordingV3] applying original warmup console commands: %d",
                             len(effective_warmup_cmds),
                         )
-                        if self._pov_enabled:
-                            logger.info("[RecordingV3][POV] applying POV HUD commands after warmup")
-                            for _cmd in pov_cmds:
-                                logger.info("[RecordingV3][POV] inject command: %s", _cmd)
                         try:
-                            _warmup_inject_ok = bool(
-                                await asyncio.to_thread(inject_console_sequence, effective_warmup_cmds)
+                            warmup_inject_ok = bool(
+                                await asyncio.to_thread(
+                                    inject_console_sequence,
+                                    effective_warmup_cmds,
+                                )
                             )
-                            if not _warmup_inject_ok:
-                                logger.warning("[RecordingV3] warmup console injection returned false")
-                        except Exception as _wce:
-                            logger.warning("[RecordingV3] warmup console inject failed: %s", _wce)
-                else:
-                    # POV cannot be enabled without a warmup object. The non-POV
-                    # default intentionally mutes only the global voice volume.
-                    effective_warmup_cmds = [
-                        *_V3_DEMO_KEY_BINDINGS,
-                        "snd_voipvolume 0",
-                        "mp_forcecamera 0",
-                    ]
-                    try:
-                        _warmup_inject_ok = bool(await asyncio.to_thread(
-                            inject_console_sequence,
-                            effective_warmup_cmds,
-                        ))
-                        if not _warmup_inject_ok:
-                            logger.warning("[RecordingV3] default mute warmup injection returned false")
-                    except Exception as _wce:
-                        logger.warning("[RecordingV3] demo key bindings inject failed: %s", _wce)
-
-                self._check_abort()
-
-                if not _warmup_inject_ok:
-                    error = "voice isolation warmup injection failed; recording aborted fail-closed"
-                    logger.error("[RecordingV3] %s", error)
-                    for dto in demo_requests:
-                        all_results.append({
-                            "request_id": dto.request_id,
-                            "success": False,
-                            "error": error,
-                            "segment_results": [],
-                            "warnings": [],
-                        })
-                    await self._run_cleanup_step(
-                        "CS2 shutdown after recording voice policy failure",
-                        self._kill_cs2,
-                        timeout=30.0,
-                    )
-                    await self._run_cleanup_step(
-                        "CS2 artifact cleanup after recording voice policy failure",
-                        self._cleanup_cs2_artifacts,
-                        timeout=8.0,
-                    )
-                    continue
+                        except Exception as exc:
+                            logger.warning(
+                                "[RecordingV3] warmup console inject failed: %s", exc
+                            )
+                    if not warmup_inject_ok:
+                        error = (
+                            "voice isolation warmup injection failed; "
+                            "recording aborted fail-closed"
+                        )
+                        logger.error("[RecordingV3] %s", error)
+                        for dto in demo_requests:
+                            all_results.append({
+                                "request_id": dto.request_id,
+                                "success": False,
+                                "error": error,
+                                "segment_results": [],
+                                "warnings": [],
+                            })
+                        await self._run_cleanup_step(
+                            "CS2 shutdown after recording voice policy failure",
+                            self._kill_cs2,
+                            timeout=30.0,
+                        )
+                        await self._run_cleanup_step(
+                            "CS2 artifact cleanup after recording voice policy failure",
+                            self._cleanup_cs2_artifacts,
+                            timeout=8.0,
+                        )
+                        continue
 
                 # ── Connect OBS right before recording (fresh connection avoids dead recv thread)
                 if obs_client.is_connected():
@@ -4053,7 +4102,8 @@ class OBSDirector:
                     obs_client,
                     abort_event=self._abort_event,
                     fade_controller=fade_controller,
-                    post_spec_console_lines=post_spec_lines,
+                    post_spec_console_lines=[] if fast_path_for_job else post_spec_lines,
+                    panorama_control=panorama_bridge if fast_path_for_job else None,
                 )
                 for dto in demo_requests:
                     self._check_abort()
@@ -4102,6 +4152,10 @@ class OBSDirector:
                             "error": str(e), "segment_results": [], "warnings": [],
                         })
                         continue
+
+                    finally:
+                        if not await executor.stop_owned_recording():
+                            raise RuntimeError("Insight-owned OBS recording could not be stopped")
 
                     # ── Rename output file using legacy naming convention ──────
                     # recording_started_at from executor (set just before StartRecord) is
@@ -4208,6 +4262,11 @@ class OBSDirector:
                     except Exception as exc:  # noqa: BLE001 - 诊断产物不该影响录制
                         logger.warning("[RecordingV3] failed to write result JSON: %s", exc)
 
+                # Keep ownership until cleanup succeeds, before replacing the
+                # executor for the next demo group.
+                if not await executor.stop_owned_recording():
+                    raise RuntimeError("Insight-owned OBS recording could not be stopped")
+
                 # ── Kill CS2 after this demo group ────────────────────────────
                 # Always kill CS2 and restore user configs, even when aborted;
                 # _kill_cs2 calls _restore_user_configs internally.
@@ -4259,12 +4318,10 @@ class OBSDirector:
             raise
         finally:
             await self._stop_cs2_exit_monitor(expected=True)
-            # Force-stop OBS via a fresh connection in case the hot client's recv
-            # thread is dead or StartRecord/ResumeRecord left OBS in an unknown state.
-            from .recording.executor.obs_recording_controller import OBSRecordingController
-            _final_ctrl = OBSRecordingController(obs_client.config, obs_client)
+            # Only the executor that successfully started recording may stop it.
             try:
-                await _final_ctrl.force_stop_recording()
+                if executor is not None:
+                    await executor.stop_owned_recording()
             except Exception as _fse:
                 logger.warning("[RecordingV3] finally force_stop_recording failed: %s", _fse)
             try:

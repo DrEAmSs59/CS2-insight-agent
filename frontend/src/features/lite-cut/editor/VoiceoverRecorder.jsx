@@ -116,11 +116,11 @@ export default function VoiceoverRecorder({ disabled = false, onRecorded }) {
         {processing ? <Loader2 className="h-4 w-4 animate-spin" /> : recording ? <Square className="h-3.5 w-3.5 fill-current" /> : <Mic className="h-4 w-4" />}
       </button>
       <div className="min-w-0 flex-1">
-        <p className={`text-[10px] font-semibold ${recording ? "text-rose-300" : "text-cs2-text-secondary"}`}>
+        <p className={`text-[10px] font-semibold ${recording ? "text-cs2-rose-on-surface" : "text-cs2-text-secondary"}`}>
           {processing ? t("liteCut.voiceover.adding") : recording ? t("liteCut.voiceover.recording", { time: formatElapsed(elapsed) }) : t("liteCut.voiceover.start")}
         </p>
         {error ? (
-          <p className="mt-0.5 flex items-center gap-1 text-[9px] text-rose-300"><AlertCircle className="h-3 w-3 shrink-0" />{error}</p>
+          <p className="mt-0.5 flex items-center gap-1 text-[9px] text-cs2-rose-on-surface"><AlertCircle className="h-3 w-3 shrink-0" />{error}</p>
         ) : (
           <p className="mt-0.5 text-[9px] text-cs2-text-muted">{t("liteCut.voiceover.hint")}</p>
         )}

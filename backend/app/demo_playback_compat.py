@@ -2332,8 +2332,9 @@ def read_demo_end_tick(source_path: os.PathLike[str] | str) -> int:
             raise _fail("expected PBDEMS2 short header")
 
         max_tick = 0
+        # Keep a logical offset to avoid querying the file position per frame.
+        frame_offset = 16
         while True:
-            frame_offset = reader.tell()
             command_result = _read_stream_varint(
                 reader,
                 context="outer command",
@@ -2344,11 +2345,13 @@ def read_demo_end_tick(source_path: os.PathLike[str] | str) -> int:
             tick_result = _read_stream_varint(reader, context="outer tick")
             size_result = _read_stream_varint(reader, context="outer payload size")
             assert tick_result is not None and size_result is not None
-            tick, _raw_tick = tick_result
-            size, _raw_size = size_result
+            tick, raw_tick = tick_result
+            size, raw_size = size_result
             if size > _MAX_OUTER_FRAME_SIZE:
                 raise _fail(f"outer frame exceeds size limit: {size}")
-            payload_end = reader.tell() + size
+            payload_end = (
+                frame_offset + len(command_result[1]) + len(raw_tick) + len(raw_size) + size
+            )
             if payload_end > file_size:
                 # Reuse the strict terminal-tail classifier rather than turning
                 # every EOF overrun into a successful recording boundary.  The
@@ -2362,7 +2365,8 @@ def read_demo_end_tick(source_path: os.PathLike[str] | str) -> int:
                 ):
                     return max_tick
                 raise _fail("outer frame payload extends past end of file")
-            reader.seek(size, os.SEEK_CUR)
+            reader.seek(payload_end)
+            frame_offset = payload_end
             # PBDEMS2 uses uint32(-1) on terminal metadata/stop frames.  It is
             # a sentinel, not a playable tick.
             if int(tick) != _U32_MAX:

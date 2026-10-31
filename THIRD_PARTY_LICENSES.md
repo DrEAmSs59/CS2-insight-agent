@@ -62,3 +62,20 @@ If a future package distributes FrameMeld, the complete runtime must remain in
 a separate component directory and ship with its GPL license, copyright
 notices, exact version, and corresponding-source information. See
 `docs/FRAMEMELD_INTEGRATION.md` for the maintained integration boundary.
+
+## Ian Lucas CS2 Inventory Simulator UI
+
+The cosmetics workshop item tiles, filters, item picker and editor controls,
+dialogs and map backgrounds are adapted from [cs2-inventory-simulator](https://github.com/ianlucas/cs2-inventory-simulator)
+at commit `1fd61a6320659f36dc4e66bd873c1402fb3c1c8b`.
+Those portions retain Ian Lucas's MIT license and copyright. The complete notice
+is shipped at `frontend/public/licenses/ianlucas-inventory-simulator.txt` (web
+distribution: `licenses/ianlucas-inventory-simulator.txt`). Insight supplies its
+existing local storage, Demo integration and hosted web 3D viewer.
+
+The workshop uses the upstream-declared open fallback font Exo 2 (SIL OFL 1.1;
+`frontend/public/workshop/exo2-OFL.txt`), not its paid Typekit subscription.
+Font Awesome Free SVG icons are credited to Fonticons, Inc. under CC BY 4.0;
+their notice is shipped at `frontend/public/licenses/font-awesome.txt`.
+The 24 upstream background videos (`frontend/public/workshop/bg-*.webm`) are Valve game assets, not covered by the UI's MIT
+license. They remain separately attributed to Valve alongside existing CS2 assets.

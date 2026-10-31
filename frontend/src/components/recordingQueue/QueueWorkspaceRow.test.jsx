@@ -38,14 +38,12 @@ describe("QueueWorkspaceRow in-game input HUD warning", () => {
     });
   });
 
-  test("shows the warning only when input data is confirmed missing", () => {
+  test("flags missing input data with a compact warning icon", () => {
     const missing = renderRow(false);
     const warning = screen.getByTestId("queue-input-hud-warning");
-    expect(screen.getByText("该 Demo 缺少玩家键鼠数据")).toBeTruthy();
-    expect(screen.getByText("无法显示键鼠可视化")).toBeTruthy();
-    expect(screen.getByText("这可能与游戏平台有关")).toBeTruthy();
-    expect(warning.className).toContain("w-fit");
-    expect(warning.className).toContain("max-w-[290px]");
+    expect(warning.getAttribute("aria-label")).toBe("该 Demo 缺少玩家键鼠数据");
+    expect(warning.getAttribute("title")).toContain("无法显示键鼠可视化");
+    expect(screen.getByText("第 12 回合", { exact: false })).toBeTruthy();
     missing.unmount();
 
     renderRow(null);

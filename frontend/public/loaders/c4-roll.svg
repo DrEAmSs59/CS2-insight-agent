@@ -1,0 +1,56 @@
+<svg data-c4-master="true" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none" role="img" aria-label="C4 连续翻滚，每次腾空震动并闪亮指示灯" style="width:100%;height:100%;color:var(--c4-accent,#ff970f)">
+            <style>
+              @keyframes c4-hop-v2{0%,3%,100%{transform:translateY(0)}10%,16%{transform:translateY(-10px)}22%,26%{transform:translateY(4.8px)}40%,52%{transform:translateY(-13px)}65%,69%{transform:translateY(2.2px)}77%,83%{transform:translateY(-10px)}91%,95%{transform:translateY(0)}97%{transform:translateY(-.35px)}}
+              @keyframes c4-roll-v2{0%,3%{transform:rotate(0deg)}10%,16%{transform:rotate(45deg)}22%,26%{transform:rotate(90deg)}40%,52%{transform:rotate(180deg)}65%,69%{transform:rotate(270deg)}77%,83%{transform:rotate(315deg)}91%,100%{transform:rotate(360deg)}}
+              @keyframes c4-shake-v2{0%,10%,16%,40%,52%,77%,83%,100%{transform:translateX(0) rotate(0deg)}11%,42%,78%{transform:translateX(-.9px) rotate(-4deg)}12%,44%,79%{transform:translateX(.9px) rotate(4deg)}13%,46%,80%{transform:translateX(-.7px) rotate(-3deg)}14%,48%,81%{transform:translateX(.5px) rotate(2deg)}15%,50%,82%{transform:translateX(-.25px) rotate(-1deg)}}
+              @keyframes c4-shadow-v2{0%,3%,22%,26%,65%,69%,91%,100%{transform:scaleX(1);opacity:.25}10%,16%,77%,83%{transform:scaleX(.65);opacity:.12}40%,52%{transform:scaleX(.55);opacity:.1}}
+              @keyframes c4-led-v2{0%,10%,17%,40%,53%,77%,84%,100%{opacity:.25}11%,15%,42%,50%,78%,82%{opacity:1}}
+              @keyframes c4-signal-v2{0%,10%,17%,40%,53%,77%,84%,100%{opacity:0}11%,15%,42%,50%,78%,82%{opacity:.8}}
+              .c4-hop-v2{transform-origin:32px 50px;animation:c4-hop-v2 var(--c4-hop,3.6s) cubic-bezier(.4,0,.35,1) infinite}
+              .c4-rotation-v2{transform-origin:32px 33px;animation:c4-roll-v2 var(--c4-hop,3.6s) cubic-bezier(.4,0,.35,1) infinite}
+              .c4-shake-v2{transform-origin:32px 33px;animation:c4-shake-v2 var(--c4-hop,3.6s) linear infinite}
+              .c4-shadow-v2{transform-origin:32px 50.5px;animation:c4-shadow-v2 var(--c4-hop,3.6s) cubic-bezier(.4,0,.35,1) infinite}
+              .c4-led-v2{animation:c4-led-v2 var(--c4-hop,3.6s) linear infinite}
+              .c4-signal-v2{animation:c4-signal-v2 var(--c4-hop,3.6s) linear infinite}
+              @media(prefers-reduced-motion:reduce){.c4-hop-v2,.c4-rotation-v2,.c4-shake-v2,.c4-shadow-v2,.c4-led-v2,.c4-signal-v2{animation:none}.c4-signal-v2{opacity:0}.c4-shadow-v2{opacity:.2}}
+            </style>
+            <ellipse class="c4-shadow-v2" cx="32" cy="50.5" rx="13" ry="1.2" fill="currentColor"/>
+            <g class="c4-hop-v2"><g class="c4-rotation-v2"><g class="c4-shake-v2">
+              <g stroke-linejoin="round" stroke-linecap="round">
+                <g stroke="#6c624b" stroke-width=".65">
+                  <path d="M20 19.5 27 19l.5 30-7 .5z" fill="#b8ab86"/>
+                  <path d="M27.5 19h7.8l.5 30.5-8.3-.5z" fill="#c5b994"/>
+                  <path d="m35.7 18.8 7.3.7 1 29.5-7.8.5z" fill="#b2a581"/>
+                </g>
+                <path d="m21 20 5-.3m3 .1h5m3-.1 5 .5" stroke="#e3d6ad" stroke-width=".7" opacity=".7"/>
+                <path d="m20 45 7-.4m1.2.2h6.6m2 .2 6-.5" stroke="#81765b" stroke-width=".5"/>
+                <path d="M18.8 27.3 43.7 26.2l.2 5-24.7 1.4z" fill="#929b95" stroke="#c4c9bd" stroke-width=".5"/>
+                <path d="m20 28.5 23-1m-23 2.4 23-1m-22.8 2.3 22.8-1" stroke="#c5c9bc" stroke-width=".5" opacity=".65"/>
+                <path d="m20 43.5 24-1.8.2 4.6-24.2 1.5z" fill="#949a90" stroke="#b7bcb0" stroke-width=".5"/>
+                <path d="m21 44.8 22-1.5m-22 2.8 22-1.6" stroke="#d0d1bf" stroke-width=".5" opacity=".65"/>
+                <path d="M17 21.2h3v11h-3z" fill="#252922" stroke="#8b8b68" stroke-width=".5"/>
+                <path d="M17 21.5h3v4.4h-3z" fill="#a84c3e"/>
+                <path d="M17 26h3v5.8h-3z" fill="#b4ac72"/>
+                <path d="M17.5 22v2.5" stroke="#efaa90" stroke-width=".5"/>
+                <path d="M24 21h17v6H24z" fill="#33493a" stroke="#91a190" stroke-width=".5"/>
+                <rect x="25.2" y="21.8" width="14.6" height="4.3" rx=".3" fill="#222b26" stroke="#a7afa0" stroke-width=".55"/>
+                <rect x="26.2" y="22.5" width="12.6" height="2.8" rx=".2" fill="#74784b"/>
+                <path d="M28 35c-9-5-10 4-5 6l6 1M39 35c5-1 5 5 2 6l-4 1" stroke="#bfc6b3" stroke-width="1.4"/>
+                <path d="M19 21c-1-6 4-6 5-3l4 13" stroke="#b9574e" stroke-width=".8"/>
+                <path d="M23 21c-5-12 10-3 15-5 4-1 5 15 4 17l-4 3" stroke="#a8463e" stroke-width=".85"/>
+                <path d="M30 20c-1-9 7-3 10 1s3 13 1 15l-3 1" stroke="#292e29" stroke-width="1.1"/>
+                <path d="M35 20c-3-9 5-7 7 7s0 10-4 12" stroke="#c2b856" stroke-width=".8"/>
+                <path d="M27 30h13v13.3H27z" fill="#3d614d" stroke="#88a18c" stroke-width=".45"/>
+                <path d="M28 31.8h11v10.4H28z" fill="#292e2a" stroke="#939b86" stroke-width=".5"/>
+                <g fill="#d3d4ba" stroke="#424b3d" stroke-width=".2">
+                  <rect x="29" y="32.6" width="2.1" height="1.8" rx=".2"/><rect x="32.4" y="32.6" width="2.1" height="1.8" rx=".2"/><rect x="35.8" y="32.6" width="2.1" height="1.8" rx=".2"/>
+                  <rect x="29" y="35" width="2.1" height="1.8" rx=".2"/><rect x="32.4" y="35" width="2.1" height="1.8" rx=".2"/><rect x="35.8" y="35" width="2.1" height="1.8" rx=".2"/>
+                  <rect x="29" y="37.4" width="2.1" height="1.8" rx=".2"/><rect x="32.4" y="37.4" width="2.1" height="1.8" rx=".2"/><rect x="35.8" y="37.4" width="2.1" height="1.8" rx=".2"/>
+                  <rect x="29" y="39.8" width="2.1" height="1.8" rx=".2"/><rect x="32.4" y="39.8" width="2.1" height="1.8" rx=".2"/><rect x="35.8" y="39.8" width="2.1" height="1.8" rx=".2"/>
+                </g>
+                <g fill="#bbc8ab"><circle cx="35" cy="30.9" r=".65"/><circle cx="37" cy="30.9" r=".65"/><circle cx="39" cy="30.9" r=".65"/></g>
+              </g>
+              <g class="c4-led-v2" fill="currentColor"><circle cx="32.2" cy="30.9" r=".7"/><circle cx="32.2" cy="30.9" r="2" opacity=".18"/></g>
+              <g class="c4-signal-v2" stroke="currentColor" stroke-width=".9" stroke-linecap="round"><path d="M14 28l-2-2m2 7h-3M49 28l2-2m-2 7h3"/></g>
+            </g></g></g>
+          </svg>

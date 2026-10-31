@@ -66,7 +66,7 @@ export default function CredentialPanel({
           style={{ backgroundColor: "#2eb86a", boxShadow: "0 0 8px #2eb86a80" }}
         />
         <div className="flex-1 text-[13px]">
-          <span className="font-semibold text-[#2eb86a]">{t("match.credConfigured")}</span>
+          <span className="font-semibold text-cs2-emerald-on-surface">{t("match.credConfigured")}</span>
           {maskedKey && (
             <span className="ml-2 font-mono text-[12px] text-cs2-text-secondary">
               Key: {maskedKey}
@@ -92,7 +92,7 @@ export default function CredentialPanel({
   }
 
   return (
-    <div className="rounded-[10px] border border-cs2-border bg-[#16161a] px-6 py-5">
+    <div className="rounded-[10px] border border-cs2-border bg-cs2-bg-card px-6 py-5">
       <div className="grid grid-cols-2 gap-x-5 gap-y-4">
         {/* API Key */}
         <div>
@@ -202,7 +202,7 @@ export default function CredentialPanel({
       </div>
 
       {testResult && (
-        <div className="mt-3 flex items-center gap-2 text-[12.5px] text-[#2eb86a]">
+        <div className="mt-3 flex items-center gap-2 text-[12.5px] text-cs2-emerald-on-surface">
           <CircleCheck className="h-4 w-4" />
           {t("match.credConnectSuccess", { name: testResult.name })}
         </div>

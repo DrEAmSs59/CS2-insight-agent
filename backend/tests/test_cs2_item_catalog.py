@@ -560,7 +560,7 @@ def test_player_pawn_glove_paint_props_recover_finish_like_demotracer():
     assert glove["ownership_evidence"] == "player_pawn_econ_item_id"
 
 
-def test_cosmetic_inventory_omits_agent_from_controller_evidence():
+def test_cosmetic_inventory_includes_agent_from_its_owner_controller():
     owner = "76561198000000001"
 
     class FakeParser:
@@ -576,10 +576,16 @@ def test_cosmetic_inventory_omits_agent_from_controller_evidence():
                 "CCSPlayerController.m_nPawnCharacterDefIndex": [4736],
             }
 
-    assert build_player_cosmetic_inventory(FakeParser(), sample_ticks=[42]) == {}
+    agent = build_player_cosmetic_inventory(FakeParser(), sample_ticks=[42])[owner][0]
+    assert agent["type"] == "agent"
+    assert agent["def_index"] == 4736
+    assert agent["observed_teams"] == ["t"]
+    assert agent["owner_steamid64"] == owner
+    assert agent["ownership_evidence"] == "demo_player_controller_agent"
+    assert agent["image_url"]
 
 
-def test_cosmetic_inventory_omits_music_kit_from_player_controller_evidence():
+def test_cosmetic_inventory_includes_equipped_music_from_its_owner_controller():
     class FakeParser:
         def parse_skins(self):
             return {
@@ -601,14 +607,52 @@ def test_cosmetic_inventory_omits_music_kit_from_player_controller_evidence():
                 "active_weapon_original_owner": ["0"],
                 "weapon_stickers": [[]],
                 "team_num": [3],
-                "m_iMusicKitID": [3],
-                "m_unMusicID": [0],
+                "m_iMusicKitID": [0],
+                "m_unMusicID": [3],
             }
 
-    assert build_player_cosmetic_inventory(FakeParser(), sample_ticks=[42]) == {}
+    music = build_player_cosmetic_inventory(FakeParser(), sample_ticks=[42])["76561198000000001"][0]
+    assert music["type"] == "musickit"
+    assert music["paint_index"] == 3
+    assert music["observed_teams"] == ["ct"]
+    assert music["ownership_evidence"] == "demo_player_controller_music_kit"
+    assert music["image_url"]
 
 
-def test_live_music_field_minus_one_does_not_fall_back_to_default_inventory_music():
+def test_player_loadout_evidence_keeps_agents_on_observed_sides_and_merges_music():
+    owner = "76561198000000001"
+
+    class FakeParser:
+        def parse_skins(self):
+            return {}
+
+        def parse_ticks(self, _wanted, *, ticks):
+            return {
+                "steamid": [owner, owner, owner],
+                "tick": [42, 43, 44],
+                "team_num": [2, 2, 3],
+                "CCSPlayerController.m_nPawnCharacterDefIndex": [4736, 4736, 4619],
+                "m_iMusicKitID": [3, 3, 3],
+            }
+
+    rows = build_player_cosmetic_inventory(FakeParser(), sample_ticks=[42, 43, 44])[owner]
+    agents = {row["def_index"]: row for row in rows if row["type"] == "agent"}
+    assert agents[4736]["observed_teams"] == ["t"]
+    assert agents[4619]["observed_teams"] == ["ct"]
+    assert agents[4736]["evidence_observations"] == 2
+    music = [row for row in rows if row["type"] == "musickit"]
+    assert len(music) == 1
+    assert music[0]["observed_teams"] == ["t", "ct"]
+
+@pytest.mark.parametrize(("playback", "inventory", "expected"), [
+    (-1, 1, 1),  # Default music remains equipped when playback is inactive.
+    (0, 64, 64),  # A kit must appear before that player receives an MVP.
+    (69, 64, 64),  # Equipped inventory is authoritative over playback state.
+    (3, None, 3),  # Older demos may only expose the playback field.
+    (-1, None, None),
+    (3, 0, None),  # An explicit empty loadout must not reuse stale playback.
+])
+def test_cosmetic_inventory_uses_equipped_music_before_mvp(playback, inventory, expected):
     class FakeParser:
         def parse_skins(self):
             return {}
@@ -618,11 +662,19 @@ def test_live_music_field_minus_one_does_not_fall_back_to_default_inventory_musi
             return {
                 "steamid": ["76561198000000001"],
                 "team_num": [3],
-                "CCSPlayerController.m_iMusicKitID": [-1],
-                "CCSPlayerController.CCSPlayerController_InventoryServices.m_unMusicID": [1],
+                "CCSPlayerController.m_iMusicKitID": [playback],
+                "CCSPlayerController.CCSPlayerController_InventoryServices.m_unMusicID": [inventory],
             }
 
-    assert build_player_cosmetic_inventory(FakeParser(), sample_ticks=[42]) == {}
+    result = build_player_cosmetic_inventory(FakeParser(), sample_ticks=[42])
+    if expected is None:
+        assert result == {}
+    else:
+        music = result["76561198000000001"][0]
+        assert music["type"] == "musickit"
+        assert music["paint_index"] == expected
+        assert music["observed_teams"] == ["ct"]
+        assert music["image_url"]
 
 
 def test_vanilla_owned_weapon_appears_with_observed_team():
@@ -1394,3 +1446,30 @@ def test_direct_drop_never_active_uses_purchase_side_only_for_unique_asset(asset
         assert len(awps) == asset_count
         assert all(row['observed_teams'] == (['ct'] if asset_count == 1 else []) for row in awps)
         assert all(row['ownership_evidence'] == 'demo_skin_table' for row in awps)
+
+
+@pytest.mark.parametrize(("playback", "inventory", "expected"), [
+    (-1, 1, 1),  # Default music remains equipped when playback is inactive.
+    (0, 64, 64),  # A kit must appear before that player receives an MVP.
+    (69, 64, 64),  # Equipped inventory is authoritative over playback state.
+    (3, None, 3),  # Older demos may only expose the playback field.
+    (-1, None, None),
+    (3, 0, None),  # An explicit empty loadout must not reuse stale playback.
+])
+def test_music_kit_prefers_equipped_inventory_over_playback(playback, inventory, expected):
+    class FakeParser:
+        def parse_skins(self):
+            return {}
+
+        def parse_ticks(self, _wanted, *, ticks):
+            assert ticks == [42]
+            return {
+                "steamid": ["76561198000000001"],
+                "team_num": [3],
+                "CCSPlayerController.m_iMusicKitID": [playback],
+                "CCSPlayerController.CCSPlayerController_InventoryServices.m_unMusicID": [inventory],
+            }
+
+    from app.features.demo_analysis.cs2_item_catalog import _sample_player_context
+    context = _sample_player_context(FakeParser(), [42])
+    assert context["music_kits"].get("76561198000000001") == ({expected} if expected else None)

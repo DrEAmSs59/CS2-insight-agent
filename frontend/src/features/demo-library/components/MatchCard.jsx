@@ -153,7 +153,7 @@ export function MatchListRow({
           type="checkbox"
           checked={isSelected}
           onChange={(e) => onSelect(demo.id, e.target.checked)}
-          className="h-4 w-4 rounded border-white/40 bg-cs2-bg-input/70 text-cs2-accent focus:ring-offset-0"
+          className="h-4 w-4 rounded border-cs2-border bg-cs2-bg-input/70 text-cs2-accent focus:ring-offset-0"
         />
       </div>
 
@@ -385,11 +385,11 @@ export default function MatchCard({
   const gridStatusLabel = t(gridStatus.labelKey, gridStatus.labelParams);
   const gridStatusBadgeClass =
     {
-      done: "bg-cs2-emerald-surface text-cs2-emerald-on-surface border-cs2-emerald-surface",
-      error: "bg-cs2-red-surface text-cs2-red-on-surface border-cs2-red-surface",
+      done: "bg-cs2-emerald-surface text-cs2-emerald-on-surface border-cs2-emerald-border",
+      error: "bg-cs2-red-surface text-cs2-red-on-surface border-cs2-red-border",
       parsing: "bg-cs2-accent/10 text-cs2-accent border-cs2-accent/25",
-      loaded: "bg-cs2-cyan-surface text-cs2-cyan-on-surface border-cs2-cyan-surface",
-      pending: "bg-cs2-amber-surface text-cs2-amber-on-surface border-cs2-amber-surface",
+      loaded: "bg-cs2-cyan-surface text-cs2-cyan-on-surface border-cs2-cyan-border",
+      pending: "bg-cs2-amber-surface text-cs2-amber-on-surface border-cs2-amber-border",
       meta_missing: "bg-cs2-bg-input text-cs2-text-secondary border-cs2-border-subtle",
       unknown: "bg-cs2-bg-hover text-cs2-text-secondary border-cs2-border",
     }[gridStatus.kind] || "bg-cs2-bg-hover text-cs2-text-secondary border-cs2-border";
@@ -429,7 +429,7 @@ export default function MatchCard({
                 type="checkbox"
                 checked={isSelected}
                 onChange={(e) => onSelect(demo.id, e.target.checked)}
-                className="h-4 w-4 shrink-0 rounded border-white/40 bg-cs2-bg-input/70 text-cs2-accent focus:ring-offset-0"
+                className="h-4 w-4 shrink-0 rounded border-cs2-border bg-cs2-bg-input/70 text-cs2-accent focus:ring-offset-0"
               />
               <span className="min-w-0 truncate text-lg font-black text-cs2-text-primary uppercase italic tracking-tighter drop-shadow-md pr-[0.28em]">
                 {mapName.replace('de_', '').replace('cs_', '')}
@@ -441,7 +441,7 @@ export default function MatchCard({
               <span className="text-right text-xl font-black text-cs2-accent tabular-nums drop-shadow-md">
                 {matchMeta.team_a_score ?? 0}
               </span>
-              <Trophy className="h-5 w-5 mx-1.5 text-yellow-400 drop-shadow" />
+              <Trophy className="h-5 w-5 mx-1.5 text-cs2-amber-on-surface drop-shadow" />
               <span className="text-left text-xl font-black text-cs2-accent tabular-nums drop-shadow-md">
                 {matchMeta.team_b_score ?? 0}
               </span>

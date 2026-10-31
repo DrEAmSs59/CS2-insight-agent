@@ -486,4 +486,5 @@ export default {
   "montage.poolCardVictimPovBadge": "受害者视角 ×{n}",
   "montage.poolCardSpectatorPerspective": "观战视角",
   "montage.poolCardAiScore": "AI 评分 {n} 分",
+  "montage.pickerNoSelectionShort": "先勾选要录制的回合",
 };

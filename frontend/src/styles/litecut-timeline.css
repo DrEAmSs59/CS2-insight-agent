@@ -176,26 +176,23 @@
   color: #652236;
 }
 
-.light .litecut-timeline-lane--selected,
-.light .litecut-timeline-track-header--selected {
-  background: #f1ebe5;
-}
-
+/* Light chrome follows the shared light palette; clip/track tints stay explicit. */
 .light .litecut-timeline-track-header,
 .light .litecut-timeline-toolbar,
 .light .litecut-timeline-ruler {
-  background: #f5f5f5;
-  color: #292825;
+  background: var(--cs2-bg-sidebar);
+  color: var(--cs2-text-primary);
 }
 
 .light .litecut-timeline-root {
-  background: #ebebeb;
+  background: var(--cs2-surface-3);
 }
 
 .light .litecut-timeline-lane {
-  background: #f0f0ef;
+  background: var(--cs2-bg-page);
 }
 
+/* Must follow the header rule above: the sticky selected header shares both classes. */
 .light .litecut-timeline-lane--selected,
 .light .litecut-timeline-track-header--selected {
   background: #f1e8df;
@@ -206,9 +203,9 @@
 }
 
 .light .litecut-timeline-track-icon {
-  border-color: #c8c7c4;
-  background: #ebebea;
-  color: #66645f;
+  border-color: var(--cs2-border);
+  background: var(--cs2-bg-active);
+  color: var(--cs2-text-muted);
 }
 
 .light .litecut-timeline-track-icon--selected {
@@ -304,6 +301,15 @@
   border-color: color-mix(in srgb, rgb(var(--litecut-clip-rgb)) 62%, white);
   background-color: color-mix(in srgb, rgb(var(--litecut-clip-rgb)) 22%, white);
   box-shadow: none;
+}
+
+/* White hatching disappears on the pale light-mode strip; hatch with the clip tint instead. */
+.light .litecut-transition-marker--in {
+  background-image: repeating-linear-gradient(135deg, rgba(var(--litecut-clip-rgb), 0.2) 0 2px, transparent 2px 5px);
+}
+
+.light .litecut-transition-marker--out {
+  background-image: repeating-linear-gradient(45deg, rgba(var(--litecut-clip-rgb), 0.2) 0 2px, transparent 2px 5px);
 }
 
 .light .litecut-transition-marker__label,

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import API from "../api/api";
+import ExperimentalPovRows from "./ExperimentalPovRows.jsx";
 import { useSkyboxResources } from "../api/skyboxResources";
 import { useT } from "../i18n/useT.js";
 import {
@@ -63,6 +64,7 @@ export default function ExperimentalPovSection({
   omitEyebrow = false,
   omitDisclaimer = false,
   embedded = false,
+  layout = "card",
   className,
 }) {
   const t = useT();
@@ -133,6 +135,43 @@ export default function ExperimentalPovSection({
     void loadPovStatus();
   }, [visible, experimentalPovEnabled, loadPovStatus]);
 
+  const restorePov = useCallback(async () => {
+    setPovRestoreBusy(true);
+    setPovRestoreResult(null);
+    try {
+      const { data } = await API.post("experimental/pov/restore");
+      const restore = data?.restore && typeof data.restore === "object"
+        ? data.restore
+        : {};
+      if (data?.ok !== true || restore.verified !== true) {
+        throw new Error(restore.error || t("pov.restoreUnverified"));
+      }
+      const mode = String(restore.verification_mode || "none").toLowerCase();
+      const messageKey = mode === "strict"
+        ? "pov.restoreStrictSuccess"
+        : mode === "semantic"
+          ? "pov.restoreSemanticSuccess"
+          : "pov.restoreNoneSuccess";
+      setPovRestoreResult({ tone: "success", messageKey });
+      setPovStatus((current) => ({
+        ...(current || {}),
+        state: "clean",
+        needs_restore: false,
+        installed: false,
+        gameinfo_patched: false,
+        manifest_exists: false,
+        backup_exists: false,
+      }));
+    } catch (error) {
+      setPovRestoreResult({
+        tone: "error",
+        message: error?.response?.data?.detail || error?.message || t("common.requestFail"),
+      });
+    } finally {
+      setPovRestoreBusy(false);
+    }
+  }, [t]);
+
   const povNeedsRestore = Boolean(povStatus?.needs_restore);
   const restoreState = String(povStatus?.state || "managed").toLowerCase();
   const restoreNeededKey = restoreState === "orphaned"
@@ -142,6 +181,45 @@ export default function ExperimentalPovSection({
       : "pov.restoreManaged";
 
   const rootClass = className ?? "min-w-0";
+
+  if (layout === "rows") {
+    return (
+      <ExperimentalPovRows
+        t={t}
+        experimentalPovEnabled={experimentalPovEnabled}
+        onExperimentalPovChange={onExperimentalPovChange}
+        checkboxDisabled={checkboxDisabled}
+        povTeamcounterNumeric={povTeamcounterNumeric}
+        onPovTeamcounterNumericChange={onPovTeamcounterNumericChange}
+        povVoiceMode={povVoiceMode}
+        onPovVoiceModeChange={onPovVoiceModeChange}
+        inputHudSelection={inputHudSelection}
+        onInputHudEnabledChange={onInputHudEnabledChange}
+        onInputHudDisplayModeChange={onInputHudDisplayModeChange}
+        onInputHudPositionChange={onInputHudPositionChange}
+        canChangeMapAppearance={canChangeMapAppearance}
+        selectedMapAppearance={selectedMapAppearance}
+        waxedSelected={waxedSelected}
+        rainSelected={rainSelected}
+        onRecordingMapMaterialChange={onRecordingMapMaterialChange}
+        onRecordingWeatherEffectChange={onRecordingWeatherEffectChange}
+        recordingSkybox={recordingSkybox}
+        skyboxResources={skyboxResources}
+        skyboxResourcesError={skyboxResourcesError}
+        onRecordingSkyboxChange={onRecordingSkyboxChange}
+        contentAfterVoice={contentAfterVoice}
+        povStatusError={povStatusError}
+        povStatusLoading={povStatusLoading}
+        loadPovStatus={loadPovStatus}
+        povNeedsRestore={povNeedsRestore}
+        povStatus={povStatus}
+        restoreNeededKey={restoreNeededKey}
+        povRestoreResult={povRestoreResult}
+        povRestoreBusy={povRestoreBusy}
+        restorePov={restorePov}
+      />
+    );
+  }
 
   return (
     <div className={rootClass}>
@@ -170,7 +248,7 @@ export default function ExperimentalPovSection({
       </label>
       {experimentalPovEnabled ? (
         <p className="mt-2 text-[11px] leading-relaxed text-cs2-amber-on-surface">
-          {t("pov.enabledNote")}
+          {t("record.hudPovConflict")}
         </p>
       ) : null}
 
@@ -231,42 +309,7 @@ export default function ExperimentalPovSection({
           <button
             type="button"
             disabled={povRestoreBusy}
-            onClick={async () => {
-              setPovRestoreBusy(true);
-              setPovRestoreResult(null);
-              try {
-                const { data } = await API.post("experimental/pov/restore");
-                const restore = data?.restore && typeof data.restore === "object"
-                  ? data.restore
-                  : {};
-                if (data?.ok !== true || restore.verified !== true) {
-                  throw new Error(restore.error || t("pov.restoreUnverified"));
-                }
-                const mode = String(restore.verification_mode || "none").toLowerCase();
-                const messageKey = mode === "strict"
-                  ? "pov.restoreStrictSuccess"
-                  : mode === "semantic"
-                    ? "pov.restoreSemanticSuccess"
-                    : "pov.restoreNoneSuccess";
-                setPovRestoreResult({ tone: "success", messageKey });
-                setPovStatus((current) => ({
-                  ...(current || {}),
-                  state: "clean",
-                  needs_restore: false,
-                  installed: false,
-                  gameinfo_patched: false,
-                  manifest_exists: false,
-                  backup_exists: false,
-                }));
-              } catch (error) {
-                setPovRestoreResult({
-                  tone: "error",
-                  message: error?.response?.data?.detail || error?.message || t("common.requestFail"),
-                });
-              } finally {
-                setPovRestoreBusy(false);
-              }
-            }}
+            onClick={() => void restorePov()}
             className="mt-2 rounded border border-rose-400/40 px-2 py-1 text-[11px] font-semibold text-rose-100 hover:bg-cs2-rose-surface disabled:opacity-40"
           >
             {povRestoreBusy ? t("pov.restoringBtn") : t("pov.restoreBtn")}

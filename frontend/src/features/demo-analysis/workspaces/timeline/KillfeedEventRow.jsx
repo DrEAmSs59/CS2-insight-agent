@@ -1,5 +1,5 @@
-import { X } from "lucide-react";
 import KillfeedIconStrip from "./killfeed/KillfeedIconStrip";
+import QueueAddButton from "../../../../components/QueueAddButton";
 import { useT } from "../../../../i18n/useT.js";
 import { useLocaleStore } from "../../../../i18n/localeStore.js";
 import { weaponDisplayName } from "../../../../i18n/weaponNames.js";
@@ -107,8 +107,7 @@ export default function KillfeedEventRow({
             ? "border-rose-400/55 bg-gradient-to-r from-cs2-rose-surface to-cs2-bg-card"
             : "border-rose-500/28 bg-gradient-to-r from-cs2-rose-surface to-cs2-bg-card"
           : "border-cs2-border bg-[rgb(8,8,8)]/88",
-    clickable ? "cursor-pointer hover:brightness-110" : "",
-    queued ? "ring-1 ring-cs2-accent/45" : "",
+    queued ? "ring-1 ring-cs2-emerald-on-surface/40" : "",
   ].join(" ");
 
   const badgeRow =
@@ -140,23 +139,20 @@ export default function KillfeedEventRow({
     );
   }
 
+  const queueAction = queued || clickable ? (
+    <QueueAddButton
+      size="sm"
+      className="ml-auto"
+      queued={queued}
+      label={t("analysis.queueAddShort")}
+      queuedLabel={t("analysis.queued")}
+      onAdd={clickable ? onRowClick : undefined}
+      onRemove={onRowRemove}
+    />
+  ) : null;
+
   return (
-    <div
-      role={clickable ? "button" : undefined}
-      tabIndex={clickable ? 0 : undefined}
-      onClick={clickable ? onRowClick : undefined}
-      onKeyDown={
-        clickable
-          ? (e) => {
-              if (e.key === "Enter" || e.key === " ") {
-                e.preventDefault();
-                onRowClick?.();
-              }
-            }
-          : undefined
-      }
-      className={rowClass}
-    >
+    <div className={rowClass}>
       <div className={spacious
         ? "flex flex-wrap items-center gap-x-2.5 gap-y-1.5 text-[13px] leading-tight"
         : "flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[13px] leading-tight"}
@@ -187,26 +183,7 @@ export default function KillfeedEventRow({
         >
           {vic}
         </span>
-        {queued ? (
-          onRowRemove ? (
-            <button
-              type="button"
-              aria-label={t("analysis.ariaRemoveFromQueue")}
-              onClick={(e) => { e.stopPropagation(); onRowRemove(); }}
-              className="ml-auto shrink-0 flex items-center gap-0.5 rounded border border-cs2-accent/35 px-1.5 py-0.5 text-[10px] font-semibold text-cs2-accent transition-colors hover:border-rose-400/55 hover:text-rose-400"
-            >
-              {t("analysis.queued")}<X className="h-2.5 w-2.5" />
-            </button>
-          ) : (
-            <span className="ml-auto shrink-0 rounded border border-cs2-accent/35 px-1.5 py-0.5 text-[10px] font-semibold text-cs2-accent">
-              {t("analysis.queued")}
-            </span>
-          )
-        ) : showAddAction && clickable ? (
-          <span className="ml-auto shrink-0 rounded border border-emerald-500/35 bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-semibold text-cs2-emerald-on-surface">
-            {t("analysis.addSingleKill")}
-          </span>
-        ) : null}
+        {queueAction}
       </div>
       {flashAssistLine ? (
         <p className="mt-1 pl-0.5 text-[12px] leading-snug text-cs2-text-secondary">

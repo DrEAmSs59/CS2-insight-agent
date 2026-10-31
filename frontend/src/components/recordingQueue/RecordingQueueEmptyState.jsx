@@ -5,7 +5,7 @@ import { useT } from "../../i18n/useT.js";
 export default function RecordingQueueEmptyState() {
   const t = useT();
   return (
-    <div className="flex min-h-[240px] flex-col items-center justify-center rounded-xl border border-dashed border-cs2-border bg-cs2-bg-input/30 px-6 py-12 text-center">
+    <div className="flex min-h-[240px] flex-col items-center justify-center rounded-xl border border-dashed border-cs2-border bg-cs2-bg-card/90 px-6 backdrop-blur-md py-12 text-center">
       <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-2xl border border-cs2-accent bg-transparent text-cs2-accent">
         <Clapperboard className="h-8 w-8" aria-hidden />
       </div>

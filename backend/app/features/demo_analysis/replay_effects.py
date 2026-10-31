@@ -400,27 +400,29 @@ def build_smoke_tracks_from_rows(
                     "declared": declared_i,
                     "update": update_i,
                     "row": row,
-                    "frames": [(seq, update_i) for seq in _geometry_frame_seqs(journal)],
                 }
-                if current_segment is None:
-                    current_segment = candidate
-                elif journal.startswith(current_segment["journal"]):
+                if current_segment is not None and journal.startswith(current_segment["journal"]):
                     # Keep only the final cumulative buffer. Rust decodes the
                     # complete journal once instead of rebuilding every prefix.
+                    # Scan and append only new headers; earlier availability
+                    # anchors belong to this same segment and stay unchanged.
                     old_size = len(current_segment["journal"])
-                    candidate["frames"] = [
-                        *current_segment["frames"],
-                        *(
-                            (seq, update_i)
-                            for seq in _geometry_frame_seqs(journal, old_size)
-                        ),
-                    ]
+                    frames = current_segment["frames"]
+                    frames.extend(
+                        (seq, update_i)
+                        for seq in _geometry_frame_seqs(journal, old_size)
+                    )
+                    candidate["frames"] = frames
                     current_segment = candidate
-                elif current_segment["journal"].startswith(journal):
+                elif current_segment is not None and current_segment["journal"].startswith(journal):
                     # Ignore a stale shorter snapshot observed after a longer one.
                     pass
                 else:
-                    journal_segments.append(current_segment)
+                    candidate["frames"] = [
+                        (seq, update_i) for seq in _geometry_frame_seqs(journal)
+                    ]
+                    if current_segment is not None:
+                        journal_segments.append(current_segment)
                     current_segment = candidate
                 prev_update = update_i
 

@@ -90,7 +90,8 @@ def test_multiple_upload_returns_verified_original_path(monkeypatch, tmp_path: P
     item = response["uploads"][0]
     assert item["id"] == 73
     assert item["path"] == str(original.resolve())
-    assert item["uploaded_path"] == str(upload_dir / "match.dem")
+    assert Path(item["uploaded_path"]).name == "match.dem"
+    assert Path(item["uploaded_path"]).parent.parent == upload_dir
     assert Path(item["uploaded_path"]).read_bytes() == original.read_bytes()
     assert registered == [original.resolve()]
     assert ensure_options == [True]
@@ -116,7 +117,8 @@ def test_multiple_upload_without_electron_path_uses_cache(monkeypatch, tmp_path:
 
     item = response["uploads"][0]
     assert item["id"] == 73
-    assert item["path"] == str(tmp_path / "browser.dem")
+    assert Path(item["path"]).name == "browser.dem"
+    assert Path(item["path"]).parent.parent == tmp_path
     assert item["uploaded_path"] == item["path"]
     assert ensure_options == [True]
 
@@ -179,6 +181,7 @@ def test_upload_demo_saves_file_off_the_event_loop_thread(monkeypatch, tmp_path:
 
     def fake_save(file, destination: Path) -> str:
         save_threads.append(threading.get_ident())
+        destination.parent.mkdir(parents=True, exist_ok=True)
         destination.write_bytes(file.file.read())
         return hashlib.md5(b"demo").hexdigest()
 
@@ -198,7 +201,8 @@ def test_upload_demo_saves_file_off_the_event_loop_thread(monkeypatch, tmp_path:
     response = asyncio.run(demo_analysis_api.upload_demo(upload))
 
     assert response["id"] == 73
-    assert response["path"] == str(tmp_path / "threaded.dem")
+    assert Path(response["path"]).name == "threaded.dem"
+    assert Path(response["path"]).parent.parent == tmp_path
     assert save_threads and save_threads[0] != caller_thread
     assert ensure_threads and ensure_threads[0] != caller_thread
 
@@ -281,3 +285,34 @@ def test_analysis_demo_registration_creates_and_reuses_stable_id(monkeypatch, tm
     assert fake_db.add_calls[0][1]["status"] == "pending"
     assert fake_db.add_calls[0][1]["file_size"] == len(b"analysis-demo")
     assert notifications == ["enqueue"]
+
+
+def test_same_name_browser_uploads_keep_distinct_rows_and_working_copies(monkeypatch, tmp_path):
+    from app.demo_db import DemoDB
+    from app import demo_cache
+    from unittest.mock import AsyncMock
+
+    async def scenario():
+        db = DemoDB(tmp_path / "demo.sqlite")
+        await db.init_db()
+        monkeypatch.setattr(demo_analysis_api, "demo_db", db)
+        monkeypatch.setattr(demo_analysis_api, "UPLOAD_DIR", tmp_path / "uploads")
+        monkeypatch.setattr(demo_analysis_api, "demo_library_hub", SimpleNamespace(notify=AsyncMock()))
+        monkeypatch.setattr(demo_analysis_api, "safe_upload_demo_meta", AsyncMock(return_value=([], {}, None)))
+        monkeypatch.setattr(demo_analysis_api, "_player_keyboard_input_for_open", AsyncMock(return_value=None))
+        monkeypatch.setattr(demo_analysis_api, "ensure_demo_compatible", lambda *a, **k: _compat_result())
+        monkeypatch.setattr(demo_cache, "resolve_demo_cache_root", lambda cfg=None: tmp_path / "cache")
+
+        first = await demo_analysis_api.upload_demo(
+            demo_analysis_api.UploadFile(filename="match.dem", file=io.BytesIO(b"match-A")))
+        cached_a = await demo_cache.ensure_row_cached(db, await db.get_demo_by_id(first["id"]))
+        # Both upload endpoints must preserve the first file and its analysis cache.
+        second = (await demo_analysis_api.upload_demos([
+            demo_analysis_api.UploadFile(filename="match.dem", file=io.BytesIO(b"match-B"))
+        ]))["uploads"][0]
+        cached_b = await demo_cache.ensure_row_cached(db, await db.get_demo_by_id(second["id"]))
+        assert first["id"] != second["id"]
+        assert cached_a != cached_b
+        assert cached_a.read_bytes() == Path(first["path"]).read_bytes() == b"match-A"
+        assert cached_b.read_bytes() == Path(second["path"]).read_bytes() == b"match-B"
+    asyncio.run(scenario())

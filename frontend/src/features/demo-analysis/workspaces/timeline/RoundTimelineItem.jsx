@@ -26,6 +26,8 @@ export default function RoundTimelineItem({
   focusedPlayer,
   mapName = "",
   demoFilename = "",
+  demoPath = "",
+  targetSteamId = "",
   queuedUids,
   onAddEvent,
   onAddRound,
@@ -44,8 +46,6 @@ export default function RoundTimelineItem({
   const ta = Number(pstats?.assists ?? sum.assists) || 0;
   const ths = Number(pstats?.headshots) || 0;
   const res = roundRow?.result;
-  const st = roundRow?.start_tick;
-  const en = roundRow?.end_tick;
   const scoreText = String(roundRow?.score_text || "—");
   const side = roundRow?.side ? String(roundRow.side) : "";
 
@@ -79,7 +79,9 @@ export default function RoundTimelineItem({
     );
   };
 
-  const roundUid = `tl_round:${demoFilename}:${Number.isFinite(rn) ? rn : "x"}`;
+  const roundUid = buildTimelineRoundClipData({
+    roundRow, demoFilename, demoPath, targetSteamId, targetPlayer: focusedPlayer,
+  }).client_clip_uid;
   const roundQueued =
     queuedUids &&
     queuedUids.has(
@@ -115,9 +117,9 @@ export default function RoundTimelineItem({
             <span
               className={
                 res === "win"
-                  ? "rounded border border-emerald-500/35 bg-emerald-500/10 px-1.5 py-0 text-[10px] font-semibold text-emerald-400"
+                  ? "rounded border border-cs2-emerald-border bg-cs2-emerald-surface px-1.5 py-0 text-[10px] font-semibold text-cs2-emerald-on-surface"
                   : res === "loss"
-                    ? "rounded border border-rose-500/35 bg-rose-500/10 px-1.5 py-0 text-[10px] font-semibold text-rose-400"
+                    ? "rounded border border-cs2-rose-border bg-cs2-rose-surface px-1.5 py-0 text-[10px] font-semibold text-cs2-rose-on-surface"
                     : "rounded border border-cs2-border px-1.5 py-0 text-[10px] font-semibold text-cs2-text-muted"
               }
             >
@@ -126,11 +128,6 @@ export default function RoundTimelineItem({
             {side ? <span className="font-mono text-[10px] text-cs2-text-muted">{side}</span> : null}
             <span className="font-mono text-[10px] text-cs2-text-secondary">{scoreText}</span>
           </div>
-          {st != null && en != null ? (
-            <span className="shrink-0 font-mono text-[10px] text-cs2-text-muted">
-              tick {st} → {en}
-            </span>
-          ) : null}
         </div>
 
         <div className="flex flex-col gap-1">

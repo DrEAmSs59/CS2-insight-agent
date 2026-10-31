@@ -39,7 +39,7 @@ _KILL_NUMERALS = {2: "双", 3: "三", 4: "四", 5: "五"}
 
 # Bump this together with DEMO_ANALYSIS_WORKSPACE_ALGORITHM_VERSION so cached
 # analysis results are rebuilt (keyboard carrier probe, clip/workspace changes).
-MATCH_WORKSPACE_ALGORITHM_VERSION = "match-workspace-2026.09.19-keyboard-input-v2"
+MATCH_WORKSPACE_ALGORITHM_VERSION = "match-workspace-2026.10.31-loadout-evidence-v3"
 
 
 def _clean_name(value: object) -> str:

@@ -4,6 +4,7 @@ import {
   Flame,
   Footprints,
   Layers3,
+  ListChecks,
   Loader2,
   RefreshCw,
   Skull,
@@ -25,6 +26,7 @@ import { resolveReplayTransform } from "./replayRadarTransform";
 import { playerDisplayName, playerIdentityKey } from "../../../utils/playerIdentity.js";
 import ReplayCameraControls from "./ReplayCameraControls";
 import ReplayHeatmapCanvas from "./ReplayHeatmapCanvas";
+import { AccentButton, IconTile, Segmented, StatTile } from "../AnalysisUi.jsx";
 
 const HEATMAP_FPS = 32;
 const REQUEST_CONCURRENCY = 4;
@@ -121,16 +123,6 @@ async function loadRoundFrames(job) {
   }
   if (entry?.status === "loading" && entry.promise) return entry.promise;
   return requestReplayFrames(job.requestBody);
-}
-
-function StatCard({ label, value, detail }) {
-  return (
-    <div className="rounded-lg border border-cs2-border bg-cs2-bg-input/35 p-3">
-      <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-cs2-text-muted">{label}</p>
-      <p className="mt-1 font-mono text-xl font-black text-cs2-text-primary">{value}</p>
-      <p className="mt-0.5 text-[10px] text-cs2-text-muted">{detail}</p>
-    </div>
-  );
 }
 
 export default function DemoHeatmapView({
@@ -411,54 +403,58 @@ export default function DemoHeatmapView({
     event.currentTarget.releasePointerCapture?.(event.pointerId);
   };
 
+  const modeCounts = { combat: combatEvents, kills: killEvents, deaths: deathEvents };
+  const sideTone = selectedSide === "CT" ? "ct" : selectedSide === "T" ? "t" : "";
+
   return (
-    <section className="analysis-heatmap-panel overflow-hidden border border-cs2-border bg-cs2-bg-card xl:flex xl:h-full xl:min-h-0 xl:flex-col">
-      <header className="flex flex-wrap items-center justify-between gap-3 border-b border-cs2-border px-4 py-3">
-        <div>
-          <h2 className="mt-0.5 text-[14px] font-black text-cs2-text-primary">{t("analysis.heatmap.title")}</h2>
+    <section className="analysis-heatmap-panel analysis-card overflow-hidden xl:flex xl:h-full xl:min-h-0 xl:flex-col">
+      <header className="space-y-3 border-b border-cs2-border-subtle p-3">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex min-w-0 items-center gap-2.5">
+            <IconTile icon={Flame} tone="rose" />
+            <div className="min-w-0">
+              <h2 className="text-[13px] font-semibold text-cs2-text-primary">{t("analysis.heatmap.title")}</h2>
+              <p className="truncate text-[11.5px] text-cs2-text-muted">
+                {focusedPlayer || t("analysis.heatmap.notSelected")} · {selectedSide === "all" ? t("analysis.heatmap.allSides") : selectedSide} · {t(activeMode.labelKey)}
+              </p>
+            </div>
+          </div>
+          <Segmented
+            ariaLabel={t("analysis.heatmap.sideGroup")}
+            value={selectedSide}
+            onChange={setSelectedSide}
+            options={HEATMAP_SIDES.map(({ key, labelKey }) => ({
+              value: key,
+              label: labelKey ? t(labelKey) : key,
+              tone: key === "CT" ? "ct" : key === "T" ? "t" : undefined,
+            }))}
+          />
         </div>
-        <div className="flex flex-wrap items-center justify-end gap-2">
-          <div role="group" aria-label={t("analysis.heatmap.sideGroup")} className="flex rounded-lg border border-cs2-border bg-cs2-bg-input p-0.5">
-            {HEATMAP_SIDES.map(({ key, labelKey }) => (
+        <div role="group" aria-label={t("analysis.heatmap.typeGroup")} className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+          {HEATMAP_MODES.map(({ key, labelKey, icon: Icon }) => {
+            const active = mode === key;
+            return (
               <button
                 key={key}
                 type="button"
-                aria-pressed={selectedSide === key}
-                onClick={() => setSelectedSide(key)}
-                className={`rounded-md px-2.5 py-1.5 text-[10px] font-black transition-colors ${
-                  selectedSide === key
-                    ? key === "CT"
-                      ? "bg-sky-400 text-sky-950"
-                      : key === "T"
-                        ? "bg-amber-300 text-amber-950"
-                        : "bg-cs2-accent text-cs2-text-on-accent"
-                    : "text-cs2-text-muted hover:text-cs2-text-primary"
-                }`}
-              >
-                {labelKey ? t(labelKey) : key}
-              </button>
-            ))}
-          </div>
-          <div role="group" aria-label={t("analysis.heatmap.typeGroup")} className="flex rounded-lg border border-cs2-border bg-cs2-bg-input p-0.5">
-            {HEATMAP_MODES.map(({ key, labelKey, icon: Icon }) => (
-              <button
-                key={key}
-                type="button"
-                aria-pressed={mode === key}
+                aria-pressed={active}
+                aria-label={t(labelKey)}
+                data-active={active ? "true" : "false"}
                 onClick={() => setMode(key)}
-                className={`inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-[10px] font-bold transition-colors ${
-                  mode === key ? "bg-cs2-accent text-cs2-text-on-accent" : "text-cs2-text-muted hover:text-cs2-text-primary"
-                }`}
+                className="analysis-mode-card !min-h-[46px] !py-1.5"
               >
-                <Icon className="h-3.5 w-3.5" />
-                {t(labelKey)}
+                <span className="analysis-mode-card__icon" aria-hidden><Icon className="h-4 w-4" /></span>
+                <span className="min-w-0 truncate text-left text-[13px] font-semibold">{t(labelKey)}</span>
+                {modeCounts[key] != null && loadState.status === "ready" ? (
+                  <span className="font-mono text-xs text-cs2-text-secondary">{modeCounts[key]}</span>
+                ) : null}
               </button>
-            ))}
-          </div>
+            );
+          })}
         </div>
       </header>
 
-      <div className="grid gap-4 p-4 xl:min-h-0 xl:flex-1 xl:grid-cols-[minmax(0,1fr)_240px]">
+      <div className="grid gap-3 p-3 xl:min-h-0 xl:flex-1 xl:grid-cols-[minmax(0,1fr)_248px]">
         <div
           ref={mapSurfaceRef}
           data-testid="heatmap-map-surface"
@@ -469,7 +465,7 @@ export default function DemoHeatmapView({
           onPointerMove={handleMapPointerMove}
           onPointerUp={finishMapDrag}
           onPointerCancel={finishMapDrag}
-          className={`heatmap-map-surface relative mx-auto aspect-[3/2] w-full max-w-[1290px] overflow-hidden border border-cs2-border xl:h-full xl:max-h-full xl:max-w-full xl:w-auto ${
+          className={`heatmap-map-surface relative mx-auto aspect-[3/2] w-full max-w-[1290px] overflow-hidden border border-cs2-border-subtle xl:h-full xl:max-h-full xl:max-w-full xl:w-auto ${
             Math.abs(mapCamera.zoom - 1) >= 0.001 ? "cursor-grab active:cursor-grabbing" : ""
           }`}
           style={{ touchAction: "none" }}
@@ -503,31 +499,24 @@ export default function DemoHeatmapView({
             className="right-3 top-3"
           />
           {hasMapLayers && (
-            <div role="group" aria-label={t("analysis.heatmap.floorGroup")} className="absolute left-3 top-3 z-10 flex rounded-md border border-white/15 bg-black/75 p-0.5 backdrop-blur-sm">
-              {[
-                ["upper", "analysis.heatmap.upperFloor"],
-                ["lower", "analysis.heatmap.lowerFloor"],
-              ].map(([key, labelKey]) => (
-                <button
-                  key={key}
-                  type="button"
-                  aria-pressed={mapLayer === key}
-                  onClick={() => setMapLayer(key)}
-                  className={`rounded px-2.5 py-1 text-[10px] font-bold ${
-                    mapLayer === key ? "bg-cs2-accent text-cs2-text-on-accent" : "text-white/55"
-                  }`}
-                >
-                  {t(labelKey)}
-                </button>
-              ))}
-            </div>
+            <Segmented
+              size="sm"
+              ariaLabel={t("analysis.heatmap.floorGroup")}
+              className="absolute left-3 top-3 z-10 !bg-cs2-bg-card/95 backdrop-blur-sm"
+              value={mapLayer}
+              onChange={setMapLayer}
+              options={[
+                { value: "upper", label: t("analysis.heatmap.upperFloor") },
+                { value: "lower", label: t("analysis.heatmap.lowerFloor") },
+              ]}
+            />
           )}
           {loadState.status === "loading" && (
             <div className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-3 bg-black/65 text-center backdrop-blur-[2px]">
               <Loader2 className="h-7 w-7 animate-spin text-cs2-accent" />
               <div>
-                <p className="text-[11px] font-bold text-white">{t("analysis.heatmap.aggregating")}</p>
-                <p className="mt-1 font-mono text-[10px] text-white/60">{t("analysis.heatmap.roundProgress", { done: loadState.completed, total: loadState.total })}</p>
+                <p className="text-[13px] font-semibold text-white">{t("analysis.heatmap.aggregating")}</p>
+                <p className="mt-1 font-mono text-[11px] text-white/60">{t("analysis.heatmap.roundProgress", { done: loadState.completed, total: loadState.total })}</p>
               </div>
             </div>
           )}
@@ -535,21 +524,17 @@ export default function DemoHeatmapView({
             <div className="absolute inset-0 z-20 flex items-center justify-center bg-black/70 p-8 text-center">
               <div>
                 <Flame className="mx-auto h-7 w-7 text-rose-400" />
-                <p className="mt-3 max-w-md text-[10px] leading-relaxed text-white/75">{loadState.error}</p>
-                <button
-                  type="button"
-                  onClick={() => setReloadEpoch((value) => value + 1)}
-                  className="mt-4 inline-flex items-center gap-1.5 rounded-md border border-white/20 px-3 py-1.5 text-[10px] font-bold text-white"
-                >
-                  <RefreshCw className="h-3 w-3" />
+                <p className="mt-3 max-w-md text-xs leading-relaxed text-white/75">{loadState.error}</p>
+                <AccentButton className="mt-4" onClick={() => setReloadEpoch((value) => value + 1)}>
+                  <RefreshCw className="h-3.5 w-3.5" aria-hidden />
                   {t("analysis.heatmap.retry")}
-                </button>
+                </AccentButton>
               </div>
             </div>
           )}
           {loadState.status === "ready" && activeEventCount === 0 && (
             <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center bg-black/20 p-8 text-center">
-              <p className="rounded-md border border-white/10 bg-black/65 px-4 py-2 text-[10px] font-semibold text-white/70">
+              <p className="rounded-lg border border-white/10 bg-black/65 px-4 py-2 text-xs font-medium text-white/75">
                 {t("analysis.heatmap.noModeData", {
                   player: focusedPlayer || t("analysis.heatmap.selectedPlayerFallback"),
                   side: selectedSide === "all" ? "" : t("analysis.heatmap.sideContext", { side: selectedSide }),
@@ -560,40 +545,46 @@ export default function DemoHeatmapView({
           )}
         </div>
 
-        <aside className="space-y-3">
-          <div className="rounded-lg border border-cs2-border bg-cs2-bg-input/35 p-3">
-            <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-cs2-text-muted">{t("analysis.heatmap.currentPlayer")}</p>
+        <aside className="space-y-2.5">
+          <div className="analysis-card p-3">
+            <p className="text-xs text-cs2-text-muted">{t("analysis.heatmap.currentPlayer")}</p>
             <div className="mt-1 flex items-center gap-2">
-              <p data-testid="heatmap-focused-player" className="min-w-0 flex-1 truncate text-[13px] font-black text-cs2-accent">{focusedPlayer || t("analysis.heatmap.notSelected")}</p>
-              <span className={`rounded px-1.5 py-0.5 font-mono text-[10px] font-black ${
-                selectedSide === "CT"
-                  ? "bg-sky-400/15 text-sky-400"
-                  : selectedSide === "T"
-                    ? "bg-amber-300/15 text-amber-300"
+              <p
+                data-testid="heatmap-focused-player"
+                className={`min-w-0 flex-1 truncate text-[15px] font-bold ${selectedPlayerOption?.team_key === "b" ? "text-cs2-team-amber" : "text-cs2-team-blue"}`}
+              >
+                {focusedPlayer || t("analysis.heatmap.notSelected")}
+              </p>
+              <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${
+                sideTone === "ct"
+                  ? "bg-cs2-cyan-surface text-cs2-cyan-on-surface"
+                  : sideTone === "t"
+                    ? "bg-cs2-amber-surface text-cs2-amber-on-surface"
                     : "bg-cs2-accent-soft text-cs2-accent"
               }`}>{selectedSide === "all" ? t("analysis.heatmap.allSides") : selectedSide}</span>
             </div>
           </div>
           <div className="grid grid-cols-2 gap-2 xl:grid-cols-1">
-            <StatCard
+            <StatTile
+              icon={ListChecks}
               label={t("analysis.heatmap.statRounds")}
               value={activeRoundCount}
               detail={selectedSide === "all" ? t("analysis.heatmap.statRoundsAll") : t("analysis.heatmap.statRoundsSide", { side: selectedSide })}
             />
-            <StatCard label={t("analysis.heatmap.statCombat")} value={combatEvents.toLocaleString("en-US")} detail={t("analysis.heatmap.statCombatDetail")} />
-            <StatCard label={t("analysis.heatmap.statKillsDeaths")} value={`${killEvents} / ${deathEvents}`} detail={t("analysis.heatmap.statFloorDetail")} />
+            <StatTile icon={Swords} tone="amber" label={t("analysis.heatmap.statCombat")} value={combatEvents.toLocaleString("en-US")} detail={t("analysis.heatmap.statCombatDetail")} />
+            <StatTile icon={Crosshair} tone="rose" label={t("analysis.heatmap.statKillsDeaths")} value={`${killEvents} / ${deathEvents}`} detail={t("analysis.heatmap.statFloorDetail")} />
           </div>
-          <div className="rounded-lg border border-cs2-border bg-cs2-bg-input/25 p-3">
+          <div className="analysis-card p-3">
             <div className="flex items-center gap-2">
-              <Layers3 className="h-3.5 w-3.5 text-cs2-accent" />
-              <h3 className="text-[10px] font-bold text-cs2-text-primary">{t("analysis.heatmap.legend")}</h3>
+              <Layers3 className="h-3.5 w-3.5 text-cs2-text-muted" aria-hidden />
+              <h3 className="text-[13px] font-semibold text-cs2-text-primary">{t("analysis.heatmap.legend")}</h3>
             </div>
             <div className="mt-3 h-2.5 rounded-full bg-gradient-to-r from-transparent via-cyan-400 via-45% to-rose-600" />
-            <div className="mt-1 flex justify-between text-[10px] font-semibold text-cs2-text-muted">
+            <div className="mt-1 flex justify-between text-[11px] text-cs2-text-muted">
               <span>{t("analysis.heatmap.legendLow")}</span>
               <span>{t("analysis.heatmap.legendHigh")}</span>
             </div>
-            <p className="mt-3 text-[10px] leading-relaxed text-cs2-text-muted">
+            <p className="mt-3 text-[11.5px] leading-relaxed text-cs2-text-muted">
               {t(MODE_DESCRIPTIONS[mode] || MODE_DESCRIPTIONS.movement)}
             </p>
           </div>

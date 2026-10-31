@@ -138,7 +138,7 @@ function KeyframeEditorBar({
             title={`删除当前${label}`}
             disabled={!active}
             onClick={onRemove}
-            className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-transparent text-cs2-text-muted hover:border-cs2-border hover:bg-white/5 hover:text-white disabled:cursor-not-allowed disabled:opacity-30"
+            className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-transparent text-cs2-text-muted hover:border-cs2-border hover:bg-cs2-bg-hover hover:text-cs2-text-primary disabled:cursor-not-allowed disabled:opacity-30"
           >
             <DiamondMinus className="h-3.5 w-3.5" />
           </button>
@@ -598,7 +598,7 @@ export function TextPane({
           onChange={(e) => void handleSubtitleFile(e.target.files?.[0])}
         />
         {subtitleError ? (
-          <p className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-2 py-1.5 text-[10px] text-amber-200">{subtitleError}</p>
+          <p className="rounded-lg border border-cs2-amber-border bg-cs2-amber-surface px-2 py-1.5 text-[10px] text-cs2-amber-on-surface">{subtitleError}</p>
         ) : null}
         <button
           type="button"
@@ -762,7 +762,7 @@ export function TextPane({
             className={`overflow-hidden rounded-xl border text-left transition-all ${textStyleId === card.id ? "border-cs2-accent ring-2 ring-cs2-accent/30" : "border-cs2-border/50"}`}
           >
             <div className={`flex h-[4.5rem] items-center justify-center px-2 ${card.cardClass}`} style={card.cardStyle}><span className={card.className} style={card.previewStyle}>{card.preview}</span></div>
-            <p className="border-t border-white/5 bg-cs2-surface-1/80 px-2 py-1 text-[10px] text-cs2-text-muted">{card.label}</p>
+            <p className="border-t border-cs2-border-subtle bg-cs2-surface-1/80 px-2 py-1 text-[10px] text-cs2-text-muted">{card.label}</p>
           </button>)}
         </div>
       </PaneSection>
@@ -1251,7 +1251,7 @@ export function CanvasPane({
       </PaneSection>
 
       {resolutionError ? (
-        <p id="litecut-canvas-resolution-error" role="alert" className="text-[11px] text-rose-300">
+        <p id="litecut-canvas-resolution-error" role="alert" className="text-[11px] text-cs2-rose-on-surface">
           {messageFromApiCode(resolutionError.code, t, resolutionError.params)}
         </p>
       ) : null}
@@ -1497,7 +1497,7 @@ export function ExportPane({
           </label>
         </div>
         {resolutionError ? (
-          <p id="litecut-export-resolution-error" role="alert" className="text-[11px] text-rose-300">
+          <p id="litecut-export-resolution-error" role="alert" className="text-[11px] text-cs2-rose-on-surface">
             {messageFromApiCode(resolutionError.code, t, resolutionError.params)}
           </p>
         ) : null}
@@ -1525,7 +1525,7 @@ export function ExportPane({
             </button>
           </div>
           {!framemeldAvailable ? (
-            <p className="mt-2 text-[10px] leading-relaxed text-amber-300/90">{framemeldBlockedReason}</p>
+            <p className="mt-2 text-[10px] leading-relaxed text-cs2-amber-on-surface/90">{framemeldBlockedReason}</p>
           ) : framemeldActive ? (
             <p className="mt-2 text-[10px] leading-relaxed text-cs2-text-muted">{t("liteCut.frameMeldLockedPlan")}</p>
           ) : null}
@@ -1569,15 +1569,15 @@ export function ExportPane({
             type="button"
             onClick={() => void detectEncoders()}
             disabled={encoderDetecting}
-            className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-cs2-border px-3 text-[10px] font-semibold text-cs2-text-secondary hover:border-amber-500/60 hover:text-amber-200 disabled:opacity-50"
+            className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-cs2-border px-3 text-[10px] font-semibold text-cs2-text-secondary hover:border-cs2-amber-border hover:text-cs2-amber-on-surface disabled:opacity-50"
           >
             {encoderDetecting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Zap className="h-3.5 w-3.5" />}
             {encoderDetecting ? "检测中" : "检测"}
           </button>
         </div>
-        {encoderDetection?.error ? <p className="text-[10px] text-rose-300">{encoderDetection.error}</p> : null}
+        {encoderDetection?.error ? <p className="text-[10px] text-cs2-rose-on-surface">{encoderDetection.error}</p> : null}
         {encoderDetection && !encoderDetection.error ? <div className="space-y-1 text-[10px] text-cs2-text-muted">
-          <p>自动选择：<span className="font-semibold text-emerald-300">{{ h264_nvenc: "NVIDIA NVENC", h264_qsv: "Intel QSV", h264_amf: "AMD AMF", libx264: "x264 CPU", none: "无可用编码器" }[encoderDetection.selected] || encoderDetection.selected}</span></p>
+          <p>自动选择：<span className="font-semibold text-cs2-emerald-on-surface">{{ h264_nvenc: "NVIDIA NVENC", h264_qsv: "Intel QSV", h264_amf: "AMD AMF", libx264: "x264 CPU", none: "无可用编码器" }[encoderDetection.selected] || encoderDetection.selected}</span></p>
           <p>{(encoderDetection.hw || []).map((item) => `${item.codec.replace("h264_", "").toUpperCase()} ${item.probe_ok ? "✓" : "×"}`).join(" · ")} · x264 {encoderDetection.libx264_available ? "✓" : "×"}</p>
         </div> : <p className="text-[10px] text-cs2-text-muted">硬件编码能显著降低导出时的 CPU 占用；点击检测确认本机可用项。</p>}
       </PaneSection>
@@ -1672,7 +1672,7 @@ export function ExportPane({
                 type="button"
                 title="选择导出文件夹"
                 onClick={() => void chooseOutputDir()}
-                className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-cs2-border text-cs2-text-muted hover:bg-white/5 hover:text-cs2-text-primary"
+                className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-cs2-border text-cs2-text-muted hover:bg-cs2-bg-hover hover:text-cs2-text-primary"
               >
                 <FolderOpen className="h-3.5 w-3.5" />
               </button>
@@ -1698,7 +1698,7 @@ export function ExportPane({
         视频主轨、裁切、转场、叠加层、音频与调色将统一导出为 MP4。
       </p>
       {exportError ? (
-        <p className="rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-[11px] text-rose-300">{exportError}</p>
+        <p className="rounded-lg border border-cs2-rose-border bg-cs2-rose-surface px-3 py-2 text-[11px] text-cs2-rose-on-surface">{exportError}</p>
       ) : null}
       <button
         type="button"
@@ -1709,7 +1709,7 @@ export function ExportPane({
         {exporting ? "导出中…" : "使用 FFmpeg 导出"}
       </button>
       {clipCount === 0 ? (
-        <p className="text-center text-[10px] text-amber-400/90">请先在视频轨添加片段</p>
+        <p className="text-center text-[10px] text-cs2-amber-on-surface/90">请先在视频轨添加片段</p>
       ) : null}
       <PaneSection title="最近导出" defaultOpen={false}>
         <div className="flex items-center justify-between">
@@ -1717,7 +1717,7 @@ export function ExportPane({
           <button
             type="button"
             onClick={() => onRefreshExportHistory?.()}
-            className="rounded p-1 text-cs2-text-muted hover:bg-white/5 hover:text-cs2-text-primary"
+            className="rounded p-1 text-cs2-text-muted hover:bg-cs2-bg-hover hover:text-cs2-text-primary"
             title="刷新导出历史"
           >
             <RotateCcw className="h-3.5 w-3.5" />
@@ -1754,7 +1754,7 @@ export function ExportPane({
                           type="button"
                           title="在文件夹中显示"
                           onClick={() => void revealExportPath(item.output_path)}
-                          className="inline-flex h-5 w-5 items-center justify-center rounded text-cs2-text-muted hover:bg-white/5 hover:text-cs2-text-primary"
+                          className="inline-flex h-5 w-5 items-center justify-center rounded text-cs2-text-muted hover:bg-cs2-bg-hover hover:text-cs2-text-primary"
                         >
                           <FolderOpen className="h-3 w-3" />
                         </button>

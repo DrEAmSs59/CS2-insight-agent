@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import os
+import shutil
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -90,19 +93,68 @@ class ProjectAssetStorage:
 
 
 class ProjectService:
-    def __init__(self, projects: ProjectRepository, storage: ProjectAssetStorage):
+    def __init__(self, projects: ProjectRepository, storage: ProjectAssetStorage, assets: AssetRepository | None = None):
         self.projects = projects
         self.storage = storage
+        self.assets = assets
 
     async def list(self, *, limit: int, offset: int) -> dict[str, Any]:
         return {"items": await self.projects.list(limit=limit, offset=offset), "limit": limit, "offset": offset}
 
-    async def create(self, *, name: str, body: dict[str, Any] | None) -> dict[str, Any]:
-        project_id = await self.projects.create(name=name.strip(), body=_normalized_project(body))
+    async def create(self, *, name: str, body: dict[str, Any] | None, duplicate_from: int | None = None) -> dict[str, Any]:
+        normalized = _normalized_project(body)
+        if duplicate_from is not None:
+            await self.get(duplicate_from)
+        project_id = await self.projects.create(name=name.strip(), body=normalized)
+        if duplicate_from is not None:
+            try:
+                normalized = await self._copy_project_assets(duplicate_from, project_id, name, normalized)
+                await self.projects.update(project_id, body=normalized)
+            except Exception:
+                await self.delete(project_id)
+                raise
         item = await self.projects.get(project_id)
         if not item:
             raise LiteCutServiceError(500, "LITECUT_PROJECT_SAVE_FAILED")
         return item
+
+    async def _copy_project_assets(self, source_id: int, project_id: int, name: str, body: dict[str, Any]) -> dict[str, Any]:
+        from .assets import stable_project_asset_directory
+
+        assets = await self.projects.list_assets(source_id)
+        directory = stable_project_asset_directory(project_id, name)
+        ids, paths = {}, {}
+        copied = []
+        try:
+            for asset in assets:
+                values = {key: value for key, value in asset.items() if key not in {"id", "project_id", "created_at"}}
+                if asset.get("storage_mode") != "link":
+                    source = Path(asset.get("managed_path") or asset["file_path"])
+                    dest = directory / f"{uuid.uuid4().hex}_{source.name}"
+                    copied.append(dest)
+                    await asyncio.to_thread(shutil.copy2, source, dest)
+                    values.update(file_path=str(dest), managed_path=str(dest))
+                    for key in ("file_path", "managed_path"):
+                        if asset.get(key):
+                            paths[os.path.normcase(str(Path(asset[key]).resolve()))] = str(dest)
+                ids[int(asset["id"])] = await self.assets.create(project_id=project_id, **values)
+        except Exception:
+            for path in copied:
+                path.unlink(missing_ok=True)
+            raise
+
+        def rebind(value, key=""):
+            if isinstance(value, dict):
+                return {child_key: rebind(child, child_key) for child_key, child in value.items()}
+            if isinstance(value, list):
+                return [rebind(child) for child in value]
+            if key == "asset_id" and value is not None:
+                return ids.get(int(value), value)
+            if key in {"file_path", "asset_path", "font_file", "font_file_path", "path"} and isinstance(value, str) and value:
+                return paths.get(os.path.normcase(str(Path(value).resolve())), value)
+            return value
+
+        return rebind(body)
 
     async def get(self, project_id: int) -> dict[str, Any]:
         item = await self.projects.get(project_id)

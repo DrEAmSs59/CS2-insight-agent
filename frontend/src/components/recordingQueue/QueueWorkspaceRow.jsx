@@ -1,6 +1,5 @@
 import {
   AlertTriangle,
-  ChevronRight,
   Crosshair,
   Ghost,
   GripVertical,
@@ -13,8 +12,9 @@ import {
 import { useT } from "../../i18n/useT.js";
 import { estimateItemRecordSeconds } from "../../utils/recordingQueueDerive";
 import { friendlyClipTitleForQueue, isTimelineSourceClip } from "../../utils/montageUtils";
-import { freezeToDeathQueueRoundBadgeText, isFreezeToDeathCompilation } from "../../utils/freezeToDeathRoundFilter";
+import { isFreezeToDeathCompilation } from "../../utils/freezeToDeathRoundFilter";
 import { useRoundCompilationPlan } from "../../recording/useRoundCompilationPlans";
+import { queueItemHasPacingOverride, queueItemRoundLabel } from "./QueueInspectorPanel";
 
 const CAT_ICON = {
   highlight: Sparkles,
@@ -24,25 +24,19 @@ const CAT_ICON = {
 };
 
 function iconClass(timeline, category) {
-  const base = "flex h-9 w-9 shrink-0 items-center justify-center rounded-md border ";
-  if (timeline) return base + "border-cs2-cyan-surface bg-cs2-cyan-surface text-cs2-cyan-on-surface";
-  if (category === "highlight") return base + "border-cs2-highlight/30 bg-cs2-highlight/10 text-cs2-highlight";
-  if (category === "fail") return base + "border-cs2-fail/30 bg-cs2-fail/10 text-cs2-fail";
-  if (category === "meme_death") return base + "border-fuchsia-500/30 bg-cs2-fuchsia-surface text-cs2-fuchsia-on-surface";
-  if (category === "compilation") return base + "border-cs2-compilation/30 bg-cs2-compilation/10 text-cs2-compilation";
-  return base + "border-cs2-border bg-cs2-bg-input text-cs2-text-secondary";
+  const base = "flex h-[34px] w-[34px] shrink-0 items-center justify-center rounded-lg ";
+  if (timeline) return base + "bg-cs2-cyan-surface text-cs2-cyan-on-surface";
+  if (category === "highlight") return base + "bg-cs2-emerald-surface text-cs2-emerald-on-surface";
+  if (category === "fail") return base + "bg-cs2-rose-surface text-cs2-rose-on-surface";
+  if (category === "meme_death") return base + "bg-cs2-fuchsia-surface text-cs2-fuchsia-on-surface";
+  if (category === "compilation") return base + "bg-cs2-amber-surface text-cs2-amber-on-surface";
+  return base + "bg-cs2-bg-input text-cs2-text-secondary";
 }
 
-function categoryClass(timeline, category) {
-  const base = "rounded border px-1.5 py-0.5 text-[9px] font-semibold ";
-  if (timeline) return base + "border-cyan-500/30 bg-cyan-500/10 text-cs2-cyan-on-surface";
-  if (category === "highlight") return base + "border-cs2-highlight/30 bg-cs2-highlight/10 text-cs2-highlight";
-  if (category === "fail") return base + "border-cs2-fail/30 bg-cs2-fail/10 text-cs2-fail";
-  if (category === "meme_death") return base + "border-fuchsia-500/30 bg-fuchsia-500/10 text-cs2-fuchsia-on-surface";
-  if (category === "compilation") return base + "border-cs2-compilation/30 bg-cs2-compilation/10 text-cs2-compilation";
-  return base + "border-cs2-border bg-cs2-bg-hover text-cs2-text-secondary";
-}
-
+/**
+ * One compact queue entry: what it is, where it comes from and how long it records.
+ * The full parameters live in the editor next to the list.
+ */
 export default function QueueWorkspaceRow({
   item,
   priorityIndex,
@@ -61,33 +55,25 @@ export default function QueueWorkspaceRow({
   const category = clip.category || "";
   const timeline = isTimelineSourceClip(clip);
   const Icon = timeline ? History : CAT_ICON[category] || Crosshair;
-  const demoLabel = String(item.demoFilename || item.demoPath || "").trim() || "—";
-  const playerLabel = String(item.targetPlayer || clip.player_name || "").trim() || "—";
-  const mapName = String(clip.map_name || clip.map || "").trim() || "—";
-  const roundLabel = isFreezeToDeathCompilation(clip)
-    ? freezeToDeathQueueRoundBadgeText(item, clip, t) || "—"
-    : clip.round != null
-      ? clip.score_own != null && clip.score_opp != null
-        ? `R${clip.round} · ${clip.score_own}:${clip.score_opp}`
-        : `R${clip.round}`
-      : "—";
+  const playerLabel = String(item.targetPlayer || clip.player_name || "").trim();
+  const mapName = String(clip.map_name || clip.map || "").trim();
+  const meta = [playerLabel, mapName, queueItemRoundLabel(item, clip, t)].filter(Boolean).join(" · ");
   const estimate = estimateItemRecordSeconds(item, globalPacing, roundPlan);
-  const categoryKey = timeline
-    ? "queue.rowCatTimeline"
-    : ({
-        highlight: "queue.rowCatHighlight",
-        fail: "queue.rowCatFail",
-        meme_death: "queue.rowCatMemeDeath",
-        compilation: "queue.rowCatCompilation",
-      })[category] || "queue.rowCatDefault";
+  const po = item.pacing_override || {};
+  const hasPov = Boolean(po.victim_pov || po.killer_pov);
+  const edited = queueItemHasPacingOverride(item);
+  const inputMissing = item.demoHasPlayerKeyboardInput === false;
+  const demoLabel = String(item.demoFilename || item.demoPath || "").trim();
 
   return (
-    <div className={[
-      "group flex w-full items-stretch rounded-lg border px-1.5 py-2 transition-colors",
-      selected
-        ? "border-cs2-accent/55 bg-cs2-accent/[0.07] shadow-[inset_0_0_0_1px_rgba(225,116,57,0.12)]"
-        : "border-cs2-border bg-cs2-bg-input/30 hover:bg-cs2-bg-hover",
-    ].join(" ")}>
+    <div
+      className={[
+        "group flex w-full items-center gap-1 rounded-lg border py-2 pl-1 pr-2 transition-colors",
+        selected
+          ? "border-cs2-accent/45 bg-cs2-accent-soft"
+          : "border-transparent hover:bg-cs2-bg-hover",
+      ].join(" ")}
+    >
       {dragReorderEnabled ? (
         <div
           draggable
@@ -99,65 +85,57 @@ export default function QueueWorkspaceRow({
           }}
           onDragEnd={() => onReorderDragEnd?.()}
           onClick={(event) => event.stopPropagation()}
-          className="flex w-6 shrink-0 cursor-grab items-center justify-center rounded text-cs2-text-muted active:cursor-grabbing hover:bg-cs2-bg-hover hover:text-cs2-text-secondary"
+          className="flex h-8 w-5 shrink-0 cursor-grab items-center justify-center rounded text-cs2-text-muted opacity-60 active:cursor-grabbing hover:bg-cs2-bg-hover hover:opacity-100"
           title={t("queue.rowDragTitle")}
           aria-label={t("queue.rowDragAriaLabel")}
         >
-          <GripVertical className="h-4 w-4" />
+          <GripVertical className="h-3.5 w-3.5" />
         </div>
-      ) : null}
+      ) : (
+        <span className="w-5 shrink-0 text-center font-mono text-[10px] tabular-nums text-cs2-text-muted">{priorityIndex}</span>
+      )}
 
-      <div
-        role="button"
-        tabIndex={0}
+      <button
+        type="button"
         onClick={onSelect}
-        onKeyDown={(event) => {
-          if (event.key === "Enter" || event.key === " ") {
-            event.preventDefault();
-            onSelect();
-          }
-        }}
-        className="flex min-w-0 flex-1 items-start gap-2 outline-none focus-visible:ring-2 focus-visible:ring-cs2-accent/45"
+        aria-current={selected ? "true" : undefined}
+        title={demoLabel || undefined}
+        className="flex min-w-0 flex-1 items-center gap-2.5 rounded-md text-left outline-none focus-visible:ring-2 focus-visible:ring-cs2-accent/45"
       >
-        <div className={iconClass(timeline, category)}><Icon className="h-4 w-4" /></div>
-        <div className="min-w-0 flex-1">
-          <div className="flex min-w-0 items-center gap-2">
-            <span className="shrink-0 font-mono text-[10px] tabular-nums text-cs2-text-muted">#{priorityIndex}</span>
-            <span className="min-w-0 flex-1 truncate text-[12px] font-semibold text-cs2-text-primary">{friendlyClipTitleForQueue(clip, t)}</span>
-            <span className={categoryClass(timeline, category)}>{t(categoryKey)}</span>
-            <ChevronRight className="h-3 w-3 shrink-0 text-cs2-text-muted opacity-0 transition-opacity group-hover:opacity-100" />
-          </div>
-          <p className="mt-1 truncate text-[11px] text-cs2-text-secondary" title={`${playerLabel} · ${demoLabel}`}>
-            <span className="font-semibold text-cs2-text-primary">{playerLabel}</span>
-            <span className="mx-1.5 text-cs2-text-muted">·</span>
-            <span className="font-mono">{demoLabel}</span>
-          </p>
-          <div className="mt-1 flex flex-wrap gap-x-3 font-mono text-[10px] tabular-nums text-cs2-text-muted">
-            <span>{mapName}</span>
-            <span>{roundLabel}</span>
-            <span>{Number.isFinite(estimate) ? `~${isFreezeToDeathCompilation(clip) ? estimate.toFixed(1) : estimate}s` : "—"}</span>
-            {isFreezeToDeathCompilation(clip) && <span className={roundPlan?.status === "error" ? "text-cs2-text-error" : ""}>
-              {roundPlan?.status === "ready" ? t("clip.segments", { n: roundPlan.plan.active_segments.length })
-                : t(roundPlan?.errorKey || "ftd.planLoading")}
-            </span>}
-          </div>
-        </div>
-      </div>
-
-      {item.demoHasPlayerKeyboardInput === false ? (
-        <div
-          data-testid="queue-input-hud-warning"
-          className="mx-2 flex w-fit max-w-[290px] shrink-0 items-start gap-2 rounded-md border border-cs2-accent/35 bg-cs2-amber-surface px-3 py-2 text-cs2-amber-on-surface"
-          role="status"
-        >
-          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
-          <div className="min-w-0 text-[11px] leading-4">
-            <p className="font-semibold">{t("queue.inputHudMissingTitle")}</p>
-            <p className="text-cs2-text-secondary">{t("queue.inputHudMissingBody")}</p>
-            <p className="text-cs2-text-secondary">{t("queue.inputHudMissingHint")}</p>
-          </div>
-        </div>
-      ) : null}
+        <span className={iconClass(timeline, category)}><Icon className="h-4 w-4" aria-hidden /></span>
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-[13px] font-semibold text-cs2-text-primary">{friendlyClipTitleForQueue(clip, t)}</span>
+          <span className="mt-0.5 block truncate text-[11.5px] text-cs2-text-muted">{meta || "—"}</span>
+        </span>
+        <span className="flex shrink-0 flex-col items-end gap-1">
+          <span className="font-mono text-[11.5px] tabular-nums text-cs2-text-secondary">
+            {Number.isFinite(estimate) ? `~${isFreezeToDeathCompilation(clip) ? estimate.toFixed(1) : Math.round(estimate)}s` : "—"}
+          </span>
+          <span className="flex gap-1">
+            {inputMissing ? (
+              <span
+                data-testid="queue-input-hud-warning"
+                role="img"
+                aria-label={t("queue.inputHudMissingTitle")}
+                title={`${t("queue.inputHudMissingTitle")} · ${t("queue.inputHudMissingBody")}`}
+                className="inline-flex h-[17px] items-center rounded px-1 text-cs2-amber-on-surface"
+              >
+                <AlertTriangle className="h-3 w-3" aria-hidden />
+              </span>
+            ) : null}
+            {hasPov ? (
+              <span className="inline-flex h-[17px] items-center rounded bg-cs2-cyan-surface px-1.5 text-[10px] font-semibold text-cs2-cyan-on-surface">
+                {t("queue.rowMarkPov")}
+              </span>
+            ) : null}
+            {edited ? (
+              <span className="inline-flex h-[17px] items-center rounded bg-cs2-accent-soft px-1.5 text-[10px] font-semibold text-cs2-accent">
+                {t("queue.rowMarkEdited")}
+              </span>
+            ) : null}
+          </span>
+        </span>
+      </button>
 
       <button
         type="button"
@@ -165,7 +143,7 @@ export default function QueueWorkspaceRow({
           event.stopPropagation();
           onRemove();
         }}
-        className="ml-1 self-start rounded p-1 text-cs2-text-muted opacity-60 transition-opacity hover:bg-cs2-rose-surface hover:text-cs2-rose-on-surface group-hover:opacity-100"
+        className="rounded p-1 text-cs2-text-muted opacity-0 transition-opacity hover:bg-cs2-rose-surface hover:text-cs2-rose-on-surface focus-visible:opacity-100 group-hover:opacity-100"
         aria-label={t("queue.rowRemoveAriaLabel")}
       >
         <Trash2 className="h-3.5 w-3.5" />

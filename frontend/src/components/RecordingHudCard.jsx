@@ -3,34 +3,32 @@ import { useT } from "../i18n/useT.js";
 /** i18n key for POV HUD conflict message (CommonParamsModal and RecordWarmupModal). */
 export const POV_CONFLICT_HUD = "record.hudPovConflict";
 
-/** 录制画面效果：名称 / 指令 / 开关 / 说明 / 启用后的成片预期 */
 export function RecordingHudCard({
   title,
-  code,
   description,
   checked,
   onChange,
-  outcomeOn,
   disabled = false,
   disabledReason,
 }) {
   const t = useT();
   const disabledMsg = disabledReason ? t(disabledReason) : undefined;
   return (
-    <div
-      title={disabled ? disabledMsg : undefined}
-      className={`flex flex-col rounded-lg border border-cs2-border bg-cs2-bg-input p-4 ${
-        disabled ? "opacity-45" : ""
+    <label
+      className={`flex flex-col justify-center rounded-lg border px-3 py-2.5 transition-colors ${
+        checked && !disabled ? "border-cs2-accent/30 bg-cs2-accent-soft" : "border-cs2-border bg-cs2-bg-input"
+      } ${
+        disabled ? "cursor-not-allowed opacity-60" : "cursor-pointer hover:border-cs2-accent/50"
       }`}
     >
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <p className="text-[13px] font-semibold text-cs2-text-primary">{title}</p>
-          <code className="mt-0.5 block font-mono text-[10px] text-cs2-accent/90">{code}</code>
-          <p className="mt-1.5 text-[11px] leading-relaxed text-cs2-text-muted">{description}</p>
+          {description ? <p className="mt-1 text-[11px] leading-relaxed text-cs2-text-muted">{description}</p> : null}
         </div>
         <input
           type="checkbox"
+          aria-label={title}
           checked={checked}
           disabled={disabled}
           onChange={(e) => {
@@ -40,14 +38,9 @@ export function RecordingHudCard({
           className="mt-1 h-4 w-4 shrink-0 rounded border-cs2-border accent-cs2-accent disabled:opacity-50"
         />
       </div>
-      {checked && !disabled && outcomeOn ? (
-        <p className="mt-3 border-t border-cs2-border pt-2.5 text-[11px] leading-relaxed text-cs2-emerald-on-surface">
-          {t("record.outcomePrefix")}{outcomeOn}
-        </p>
-      ) : null}
       {disabled ? (
         <p className="mt-2 text-[11px] leading-relaxed text-cs2-amber-on-surface">{disabledMsg}</p>
       ) : null}
-    </div>
+    </label>
   );
 }

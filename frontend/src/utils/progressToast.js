@@ -4,9 +4,11 @@
  */
 export function progressToastShowsBusy(
   text,
-  { parsing = false, loading = false } = {},
+  { parsing = false, loading } = {},
 ) {
-  if (parsing || loading) return true;
+  if (parsing) return true;
+  // Explicit lifecycle state wins over legacy text heuristics, including false.
+  if (typeof loading === "boolean") return loading;
   const t = String(text || "").trim();
   if (!t) return false;
   // 进行中文案统一以省略号结尾（中英一致约定）；中文关键词作兜底。

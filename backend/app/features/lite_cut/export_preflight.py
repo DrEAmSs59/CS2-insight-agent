@@ -58,7 +58,7 @@ def project_file_paths(project_body: dict[str, Any], recorded_paths: Iterable[Pa
             for child in value:
                 visit(child, key)
             return
-        if key not in {"file_path", "font_file", "font_file_path", "path"} or not isinstance(value, str) or not value.strip():
+        if key not in {"file_path", "asset_path", "font_file", "font_file_path", "path"} or not isinstance(value, str) or not value.strip():
             return
         path = Path(value).expanduser().resolve(strict=False)
         found[os.path.normcase(str(path))] = path

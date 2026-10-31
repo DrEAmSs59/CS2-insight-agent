@@ -40,7 +40,8 @@ def _escape_drawtext_value(value: str) -> str:
         str(value or "")
         .replace("\\", "\\\\")
         .replace(":", "\\:")
-        .replace("'", "\\'")
+        # Leave the graph quote, escape through both parsers, then reopen it.
+        .replace("'", r"'\\\''")
         .replace("%", "\\%")
     )
 

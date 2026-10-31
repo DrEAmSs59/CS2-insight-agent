@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import API from "../api/api";
@@ -26,7 +26,7 @@ describe("RecordWarmupModal skybox override", () => {
     render(<RecordWarmupModal open onClose={() => {}} onConfirm={onConfirm} experimentalPovEnabled={!pov} />);
     fireEvent.change(screen.getByRole("combobox", { name: "录制地图材质" }), { target: { value: appearance } });
     fireEvent.change(screen.getByRole("combobox", { name: "录制天空盒" }), { target: { value: skybox } });
-    fireEvent.change(screen.getByRole("combobox", { name: "语音控制" }), { target: { value: "mute" } });
+    fireEvent.click(within(screen.getByRole("radiogroup", { name: "语音控制" })).getByRole("radio", { name: "全部关闭" }));
     fireEvent.change(screen.getByRole("combobox", { name: "按键显示方式" }), { target: { value: "hidden" } });
     fireEvent.click(screen.getByTestId("experimental-pov-card").querySelector("input[type=checkbox]"));
     fireEvent.click(screen.getByRole("button", { name: "开始录制" }));
@@ -58,11 +58,11 @@ describe("RecordWarmupModal skybox override", () => {
     expect(screen.queryByText(/默认已预填 5 条性能\/预测 cvar/)).toBeNull();
     expect(screen.queryByText(/首片段预热/)).toBeNull();
     expect(screen.queryByText("启用虚拟键盘 Overlay")).toBeNull();
-    expect(screen.getByText("内置按键 + 键鼠可视化")).toBeTruthy();
+    expect(screen.getByTestId("experimental-input-hud-card")).toBeTruthy();
     const inputModeSelector = screen.getByRole("combobox", { name: "按键显示方式" });
-    const voiceSelector = screen.getByRole("combobox", { name: "语音控制" });
+    const voiceSelector = screen.getByRole("radiogroup", { name: "语音控制" });
     expect(inputModeSelector.disabled).toBe(false);
-    expect(voiceSelector.disabled).toBe(false);
+    expect(within(voiceSelector).getAllByRole("radio").every(input => !input.disabled)).toBe(true);
     expect(inputModeSelector.value).toBe("bottom_center");
     expect(Array.from(inputModeSelector.options).map(({ value }) => value))
       .toEqual(["hidden", "bottom_center", "minimap_below", "weapon_right"]);
@@ -80,8 +80,8 @@ describe("RecordWarmupModal skybox override", () => {
       { value: "rain", label: "下雨（武器带水滴）" },
     ]);
     expect(screen.queryByRole("combobox", { name: "录制天气效果" })).toBeNull();
-    expect(screen.getByTestId("experimental-feature-card").contains(selector)).toBe(true);
-    expect(screen.getByTestId("experimental-feature-card").contains(inputModeSelector)).toBe(true);
+    expect(screen.getByTestId("recording-session-experimental").contains(selector)).toBe(true);
+    expect(screen.getByTestId("recording-session-experimental").contains(inputModeSelector)).toBe(true);
     expect(screen.getByTestId("player-aliases-section")).toBeTruthy();
     expect(
       screen.getByTestId("experimental-voice-card").compareDocumentPosition(
@@ -95,7 +95,7 @@ describe("RecordWarmupModal skybox override", () => {
     ).toBeTruthy();
     fireEvent.change(selector, { target: { value: "cartoon3" } });
     fireEvent.change(materialSelector, { target: { value: "default" } });
-    fireEvent.change(voiceSelector, { target: { value: "enemy" } });
+    fireEvent.click(within(voiceSelector).getByRole("radio", { name: "敌方" }));
     fireEvent.click(screen.getByRole("button", { name: "开始录制" }));
 
     expect(onConfirm).toHaveBeenCalledWith(
@@ -188,11 +188,11 @@ describe("RecordWarmupModal skybox override", () => {
       />,
     );
 
-    const voiceSelect = screen.getByRole("combobox", { name: "语音控制" });
+    const voiceSelect = screen.getByRole("radiogroup", { name: "语音控制" });
     const inputModeSelect = screen.getByRole("combobox", { name: "按键显示方式" });
     fireEvent.change(inputModeSelect, { target: { value: "hidden" } });
     expect(screen.queryByRole("checkbox", { name: "实时 KDA / 伤害" })).toBeNull();
-    fireEvent.change(voiceSelect, { target: { value: "enemy" } });
+    fireEvent.click(within(voiceSelect).getByRole("radio", { name: "敌方" }));
     fireEvent.click(screen.getByRole("button", { name: "开始录制" }));
 
     expect(onConfirm).toHaveBeenCalledWith(

@@ -105,7 +105,7 @@ export function MontagePlayerAssetsPanel({
         <div
           className={`rounded-xl border p-3 transition-all ${
             hasAnyAvatar
-              ? "border-violet-500/40 bg-violet-500/[0.08]"
+              ? "border-cs2-violet-border bg-cs2-violet-surface"
               : "border-dashed border-cs2-border-subtle bg-cs2-surface-1/40"
           }`}
         >
@@ -143,7 +143,7 @@ export function MontagePlayerAssetsPanel({
                         {player.display_name}
                       </span>
                       {player.no_steamid && (
-                        <span className="rounded bg-orange-500/20 px-1.5 py-0.5 text-[10px] font-medium text-orange-400">
+                        <span className="rounded bg-cs2-amber-surface px-1.5 py-0.5 text-[10px] font-medium text-cs2-amber-on-surface">
                           {t("montage.playerAssetsNoSteamId")}
                         </span>
                       )}
@@ -191,7 +191,7 @@ export function MontagePlayerAssetsPanel({
                       )}
                     </button>
                     {uploadError && (
-                      <p className="mt-1 text-xs text-rose-400">{uploadError}</p>
+                      <p className="mt-1 text-xs text-cs2-rose-on-surface">{uploadError}</p>
                     )}
                   </div>
                 </div>

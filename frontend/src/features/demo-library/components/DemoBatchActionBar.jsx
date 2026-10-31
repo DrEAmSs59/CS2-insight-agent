@@ -14,7 +14,7 @@ export default function DemoBatchActionBar({
     "rounded-md border border-cs2-border px-2.5 py-1.5 text-[12px] font-semibold text-cs2-text-secondary transition-colors hover:border-cs2-accent/40 hover:text-cs2-text-primary";
 
   const btnDanger =
-    "rounded-md border border-red-500/35 bg-red-500/10 px-2.5 py-1.5 text-[12px] font-semibold text-cs2-red-on-surface hover:border-red-500/55";
+    "rounded-md border border-cs2-rose-border bg-cs2-rose-surface px-2.5 py-1.5 text-[12px] font-semibold text-cs2-red-on-surface hover:border-cs2-rose-border";
 
   return (
     <div

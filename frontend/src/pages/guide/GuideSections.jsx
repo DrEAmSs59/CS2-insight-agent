@@ -25,7 +25,7 @@ import {
 } from "lucide-react";
 
 function StatusDot({ ok, loading }) {
-  if (loading) return <Loader2 className="h-4 w-4 animate-spin text-zinc-500" />;
+  if (loading) return <Loader2 className="h-4 w-4 animate-spin text-cs2-text-muted" />;
   if (ok) return <CheckCircle2 className="h-4 w-4 text-cs2-emerald-on-surface" />;
   return <XCircle className="h-4 w-4 text-cs2-red-on-surface" />;
 }
@@ -140,13 +140,13 @@ function SetupChecklist() {
   return (
     <section>
       <div className="mb-3 flex items-center justify-between">
-        <h2 className="text-[13px] font-bold uppercase tracking-widest text-zinc-500">
+        <h2 className="text-[13px] font-bold uppercase tracking-widest text-cs2-text-muted">
           {t("guide.checklistTitle")}
         </h2>
         <button
           onClick={handleRefresh}
           disabled={refreshing}
-          className="flex items-center gap-1 rounded px-2 py-1 text-[11px] text-zinc-500 hover:bg-white/5 hover:text-dynamic-zinc-300 disabled:opacity-50"
+          className="flex items-center gap-1 rounded px-2 py-1 text-[11px] text-cs2-text-muted hover:bg-cs2-bg-hover hover:text-cs2-text-primary disabled:opacity-50"
         >
           <RefreshCw className={`h-3 w-3 ${refreshing ? "animate-spin" : ""}`} />
           {t("guide.checklistRefresh")}
@@ -154,7 +154,7 @@ function SetupChecklist() {
       </div>
 
       {allRequired && !loading && (
-        <div className="mb-3 flex items-center gap-2 rounded-lg border border-cs2-emerald-surface bg-cs2-emerald-surface px-3 py-2 text-[12px] text-cs2-emerald-on-surface">
+        <div className="mb-3 flex items-center gap-2 rounded-lg border border-cs2-emerald-border bg-cs2-emerald-surface px-3 py-2 text-[12px] text-cs2-emerald-on-surface">
           <CheckCircle2 className="h-4 w-4 shrink-0" />
           {t("guide.checklistAllReady")}
         </div>
@@ -170,12 +170,12 @@ function SetupChecklist() {
               key={key}
               className={`rounded-xl border px-4 py-3 transition-colors ${
                 pending
-                  ? "border-white/8 bg-cs2-bg-card"
+                  ? "border-cs2-border-subtle bg-cs2-bg-card"
                   : ok
-                  ? "border-cs2-emerald-surface bg-cs2-emerald-surface"
+                  ? "border-cs2-emerald-border bg-cs2-emerald-surface"
                   : required
-                  ? "border-cs2-red-surface bg-cs2-red-surface"
-                  : "border-white/8 bg-cs2-bg-card"
+                  ? "border-cs2-red-border bg-cs2-red-surface"
+                  : "border-cs2-border-subtle bg-cs2-bg-card"
               }`}
             >
               <div className="flex items-start gap-3">
@@ -184,7 +184,7 @@ function SetupChecklist() {
                 </div>
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-center gap-2">
-                    <span className="text-[13px] font-semibold text-dynamic-white">{label}</span>
+                    <span className="text-[13px] font-semibold text-cs2-text-primary">{label}</span>
                     <span
                       className={`rounded px-1.5 py-0.5 font-mono text-[10px] ${
                         required
@@ -195,7 +195,7 @@ function SetupChecklist() {
                       {required ? t("guide.tagRequired") : t("guide.tagOptional")}
                     </span>
                   </div>
-                  <p className="mt-1 text-[11px] leading-relaxed text-zinc-500">{desc}</p>
+                  <p className="mt-1 text-[11px] leading-relaxed text-cs2-text-muted">{desc}</p>
                   {!ok && (
                     <Link
                       to={to}
@@ -209,8 +209,8 @@ function SetupChecklist() {
                   {isObs && ok && obsConfigHasIssuesState !== null && (
                     <div className={`mt-2 flex items-start gap-2 rounded-lg border px-2.5 py-2 text-[11px] ${
                       obsConfigHasIssuesState
-                        ? "border-amber-500/25 bg-amber-500/8 text-amber-300"
-                        : "border-emerald-500/20 bg-emerald-500/5 text-cs2-emerald-on-surface"
+                        ? "border-cs2-amber-border bg-cs2-amber-surface text-cs2-amber-on-surface"
+                        : "border-cs2-emerald-border bg-cs2-emerald-surface text-cs2-emerald-on-surface"
                     }`}>
                       {obsConfigHasIssuesState
                         ? <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
@@ -220,7 +220,7 @@ function SetupChecklist() {
                         <span className="font-semibold">
                           {obsConfigHasIssuesState ? t("guide.obsConfigIssues") : t("guide.obsConfigOk")}
                         </span>
-                        <span className="ml-1 text-zinc-500">
+                        <span className="ml-1 text-cs2-text-muted">
                           {obsConfigHasIssuesState
                             ? t("guide.obsConfigIssuesDetail")
                             : t("guide.obsConfigOkDetail")
@@ -261,7 +261,7 @@ function QuickStart() {
 
   return (
     <section>
-      <h2 className="mb-3 text-[13px] font-bold uppercase tracking-widest text-zinc-500">
+      <h2 className="mb-3 text-[13px] font-bold uppercase tracking-widest text-cs2-text-muted">
         {t("guide.quickStartTitle")}
       </h2>
       <div className="flex flex-wrap gap-2">
@@ -270,9 +270,9 @@ function QuickStart() {
             <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-cs2-accent font-mono text-[11px] font-bold text-white">
               {step}
             </div>
-            <span className="text-[12px] text-dynamic-zinc-300">{text}</span>
+            <span className="text-[12px] text-cs2-text-primary">{text}</span>
             {i < STEPS.length - 1 && (
-              <ArrowRight className="h-3.5 w-3.5 shrink-0 text-zinc-600" />
+              <ArrowRight className="h-3.5 w-3.5 shrink-0 text-cs2-text-muted" />
             )}
           </div>
         ))}
@@ -298,7 +298,7 @@ function FeatureCards() {
 
   return (
     <section>
-      <h2 className="mb-3 text-[13px] font-bold uppercase tracking-widest text-zinc-500">
+      <h2 className="mb-3 text-[13px] font-bold uppercase tracking-widest text-cs2-text-muted">
         {t("guide.featureCardsTitle")}
       </h2>
       <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
@@ -306,14 +306,14 @@ function FeatureCards() {
           <Link
             key={to}
             to={to}
-            className="group flex items-center gap-3 rounded-xl border border-white/8 bg-cs2-bg-card px-3 py-3 transition-colors hover:border-cs2-orange/30"
+            className="group flex items-center gap-3 rounded-xl border border-cs2-border-subtle bg-cs2-bg-card px-3 py-3 transition-colors hover:border-cs2-orange/30"
           >
             <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-cs2-accent text-white">
               <Icon className="h-4 w-4" />
             </div>
             <div className="min-w-0">
-              <p className="text-[12px] font-bold text-dynamic-white">{label}</p>
-              <p className="truncate text-[11px] text-zinc-500">{desc}</p>
+              <p className="text-[12px] font-bold text-cs2-text-primary">{label}</p>
+              <p className="truncate text-[11px] text-cs2-text-muted">{desc}</p>
             </div>
           </Link>
         ))}
@@ -354,28 +354,28 @@ function FaqAccordion() {
 
   return (
     <section>
-      <h2 className="mb-3 text-[13px] font-bold uppercase tracking-widest text-zinc-500">
+      <h2 className="mb-3 text-[13px] font-bold uppercase tracking-widest text-cs2-text-muted">
         {t("guide.faqTitle")}
       </h2>
-      <div className="divide-y divide-white/8 rounded-xl border border-white/8 bg-cs2-bg-card">
+      <div className="divide-y divide-cs2-border-subtle rounded-xl border border-cs2-border-subtle bg-cs2-bg-card">
         {FAQ_ITEMS.map(({ q, a }, i) => {
           const open = openIdx === i;
           return (
             <div key={i}>
               <button
-                className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left hover:bg-white/[0.03]"
+                className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left hover:bg-cs2-bg-hover"
                 onClick={() => setOpenIdx(open ? null : i)}
               >
-                <span className="text-[12px] font-semibold text-dynamic-zinc-200">{q}</span>
+                <span className="text-[12px] font-semibold text-cs2-text-primary">{q}</span>
                 {open ? (
-                  <ChevronUp className="h-3.5 w-3.5 shrink-0 text-zinc-500" />
+                  <ChevronUp className="h-3.5 w-3.5 shrink-0 text-cs2-text-muted" />
                 ) : (
-                  <ChevronDown className="h-3.5 w-3.5 shrink-0 text-zinc-500" />
+                  <ChevronDown className="h-3.5 w-3.5 shrink-0 text-cs2-text-muted" />
                 )}
               </button>
               {open && (
-                <div className="border-t border-white/6 px-4 py-3">
-                  <p className="text-[12px] leading-relaxed text-dynamic-zinc-400">{a}</p>
+                <div className="border-t border-cs2-border-subtle px-4 py-3">
+                  <p className="text-[12px] leading-relaxed text-cs2-text-secondary">{a}</p>
                 </div>
               )}
             </div>

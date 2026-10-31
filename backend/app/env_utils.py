@@ -25,6 +25,7 @@ except ImportError:
     winreg = None  # non-Windows
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+from .recording_limits import limit_event_preroll_seconds
 
 logger = logging.getLogger(__name__)
 
@@ -452,6 +453,16 @@ class AppConfig(BaseModel):
     steam_cdn_assets_enabled: bool = True
     match_mode: str = "premier"   # premier / competitive
     match_count: int = 20         # 20 / 50 / 100
+
+    @field_validator("recording_global_pacing")
+    @classmethod
+    def limit_legacy_recording_pacing(cls, value):
+        pacing = dict(value)
+        if "pre_first_sec" in pacing:
+            pacing["pre_first_sec"] = limit_event_preroll_seconds(pacing["pre_first_sec"])
+        return pacing
+
+
 def _normalize_config_defaults(cfg: AppConfig, raw: Optional[dict[str, Any]] = None) -> bool:
     changed = False
     fullscreen_re = re.compile(r"(?<!\S)-fullscreen(?!\S)", re.IGNORECASE)

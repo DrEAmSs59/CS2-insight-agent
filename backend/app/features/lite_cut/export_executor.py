@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any
+from typing import Any, AsyncIterator
 
 from fastapi import HTTPException
 
@@ -20,13 +21,16 @@ from .export_preflight import (
     ensure_output_space,
     estimate_required_space,
     project_file_paths,
-    remove_partial_output,
     unique_output_path,
 )
 from .runtime import normalize_project_body
 from .timeline import _timeline_overlap_pair
 
 
+_reserved_output_paths: set[str] = set()
+
+
+@asynccontextmanager
 async def prepare_export(
     body,
     *,
@@ -34,7 +38,7 @@ async def prepare_export(
     montage_db,
     active_jobs,
     resolve_encoder,
-) -> dict[str, Any]:
+) -> AsyncIterator[dict[str, Any]]:
     project_body: dict[str, Any] | None = None
     if body.project_id is not None:
         project = await projects.get(int(body.project_id))
@@ -86,30 +90,42 @@ async def prepare_export(
         for job in active_jobs.values()
         if job.status in {"queued", "running", "cancelling"} and job.output_path
     ]
+    # No await between choosing and reserving: concurrent requests must see it
+    # before either preflight yields. Registered background jobs retain ownership.
     try:
-        output_path = await asyncio.to_thread(unique_output_path, body.output_path, reserved=reserved_paths)
-        await asyncio.to_thread(ensure_ffmpeg_runnable, ffmpeg_bin)
-        source_paths = project_file_paths(project_body, clip_paths.values())
-        source_bytes = await asyncio.to_thread(ensure_files_readable, source_paths)
-        await asyncio.to_thread(
-            ensure_lite_cut_audio_command_length,
-            ffmpeg_bin=ffmpeg_bin,
-            export_plan=export_plan,
-            clip_path_by_id=clip_paths,
-            output_path=output_path,
-        )
-        required_bytes = estimate_required_space(project_body, source_bytes)
-        await asyncio.to_thread(ensure_output_space, output_path, required_bytes)
+        output_path = unique_output_path(body.output_path, reserved=[*reserved_paths, *_reserved_output_paths])
     except MontageComposerError as exc:
         raise HTTPException(400, montage_detail_from_exception(exc)) from exc
+    _reserved_output_paths.add(str(output_path))
+    try:
+        try:
+            await asyncio.to_thread(ensure_ffmpeg_runnable, ffmpeg_bin)
+            source_paths = project_file_paths({"clips": [
+                *export_plan.base_clips, *export_plan.video_layers,
+                *export_plan.transition_layers, *export_plan.audio_events,
+            ]}, clip_paths.values())
+            source_bytes = await asyncio.to_thread(ensure_files_readable, source_paths)
+            await asyncio.to_thread(
+                ensure_lite_cut_audio_command_length,
+                ffmpeg_bin=ffmpeg_bin,
+                export_plan=export_plan,
+                clip_path_by_id=clip_paths,
+                output_path=output_path,
+            )
+            required_bytes = estimate_required_space(project_body, source_bytes)
+            await asyncio.to_thread(ensure_output_space, output_path, required_bytes)
+        except MontageComposerError as exc:
+            raise HTTPException(400, montage_detail_from_exception(exc)) from exc
 
-    return {
-        "ffmpeg_bin": ffmpeg_bin,
-        "project_body": project_body,
-        "clip_paths": clip_paths,
-        "output_path": str(output_path),
-        "montage_encoder": requested_encoder,
-    }
+        yield {
+            "ffmpeg_bin": ffmpeg_bin,
+            "project_body": project_body,
+            "clip_paths": clip_paths,
+            "output_path": str(output_path),
+            "montage_encoder": requested_encoder,
+        }
+    finally:
+        _reserved_output_paths.remove(str(output_path))
 
 
 async def execute_prepared_export(
@@ -130,7 +146,3 @@ async def execute_prepared_export(
         progress_callback=progress_callback,
         cancel_event=cancel_event,
     )
-
-
-async def remove_partial_export(output_path: str) -> None:
-    await asyncio.to_thread(remove_partial_output, output_path)

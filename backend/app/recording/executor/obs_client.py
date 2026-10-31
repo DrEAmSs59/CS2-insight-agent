@@ -104,6 +104,8 @@ class OBSClient:
         self._require_connected()
         try:
             response = self._ws.call(obs_requests.StartRecord())
+            if not response.status:
+                raise OBSRecordError("StartRecord rejected by OBS")
             logger.debug("OBSClient: StartRecord response: %s", response)
         except obs_ws_exceptions.MessageTimeout as exc:
             raise OBSRecordError(f"StartRecord timed out: {exc}") from exc
@@ -137,6 +139,8 @@ class OBSClient:
         self._require_connected()
         try:
             response = self._ws.call(obs_requests.StopRecord())
+            if not response.status:
+                raise OBSRecordError("StopRecord rejected by OBS")
             logger.debug("OBSClient: StopRecord response: %s", response)
             # Try to extract outputPath from the response
             output_path: Optional[str] = None
@@ -157,6 +161,8 @@ class OBSClient:
         self._require_connected()
         try:
             response = self._ws.call(obs_requests.GetRecordStatus())
+            if not response.status:
+                raise OBSRecordError("GetRecordStatus rejected by OBS")
             data = response.datain or {}
             return {
                 "outputActive": data.get("outputActive", False),

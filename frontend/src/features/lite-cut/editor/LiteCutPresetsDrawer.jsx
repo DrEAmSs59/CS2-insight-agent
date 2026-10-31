@@ -107,7 +107,7 @@ export default function LiteCutPresetsDrawer({
           <p className="text-sm font-bold text-cs2-text-primary">{t("liteCut.preset.title")}</p>
           <p className="text-[10px] text-cs2-text-muted">{t("liteCut.preset.subtitle")}</p>
         </div>
-        <button type="button" onClick={onClose} className="rounded-lg p-1.5 text-cs2-text-muted hover:bg-white/5">
+        <button type="button" onClick={onClose} className="rounded-lg p-1.5 text-cs2-text-muted hover:bg-cs2-bg-hover">
           <X className="h-4 w-4" />
         </button>
       </header>
@@ -147,9 +147,9 @@ export default function LiteCutPresetsDrawer({
           </button>
         </section>
 
-        {error ? <p className="text-xs text-rose-400">{error}</p> : null}
+        {error ? <p className="text-xs text-cs2-rose-on-surface">{error}</p> : null}
         {applyWarnings.length ? (
-          <div className="space-y-1 rounded-lg border border-amber-400/30 bg-amber-400/10 px-3 py-2 text-[10px] text-amber-100">
+          <div className="space-y-1 rounded-lg border border-cs2-amber-border bg-cs2-amber-surface px-3 py-2 text-[10px] text-cs2-amber-on-surface">
             {applyWarnings.map((warning) => <p key={`${warning.kind}:${warning.path}`}>{warning.message}</p>)}
           </div>
         ) : null}
@@ -192,7 +192,7 @@ export default function LiteCutPresetsDrawer({
                     type="button"
                     title={t("liteCut.preset.delete")}
                     onClick={() => void handleDelete(p)}
-                    className="rounded-lg p-2 text-cs2-text-muted hover:bg-rose-500/10 hover:text-rose-400"
+                    className="rounded-lg p-2 text-cs2-text-muted hover:bg-cs2-rose-surface hover:text-cs2-rose-on-surface"
                   >
                     <Trash2 className="h-3.5 w-3.5" />
                   </button>

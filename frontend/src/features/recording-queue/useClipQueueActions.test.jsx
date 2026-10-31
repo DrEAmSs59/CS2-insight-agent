@@ -5,6 +5,39 @@ import { describe, expect, it, vi } from "vitest";
 import { useClipQueueActions } from "./useClipQueueActions.js";
 
 describe("useClipQueueActions player fail batching", () => {
+  it("queues and removes whole rounds independently across players and same-named demos", () => {
+    let queue = [];
+    const addToQueue = (item) => { queue = [...queue, item]; };
+    const removeByClientClipUid = (uid) => { queue = queue.filter((item) => item.clientClipUid !== uid); };
+    const { result, rerender } = renderHook(({ player, path }) => {
+      const parsed = { demo_filename: "match.dem", demo_path: path, players: {
+        A: { match_meta: { target_player: "A", target_steam_id: "111" } },
+        B: { match_meta: { target_player: "B", target_steam_id: "222" } },
+      } };
+      return useClipQueueActions({
+        t: (key) => key, locale: "zh", setProgressText: vi.fn(), queue, addToQueue, removeByClientClipUid,
+        uploadedDemos: [{ filename: "match.dem", path }], parsedMatches: [parsed], currentMatchIndex: 0,
+        currentParsed: parsed, currentActivePlayer: player, matchMeta: {}, activePlayerTabs: [player],
+        selectedPlayers: [[player]], clips: [], freezeToDeathDraft: { picked: [] },
+        selectedClientClipUids: new Set(), setSelectedClientClipUids: vi.fn(), currentDemoFilename: "match.dem",
+      });
+    }, { initialProps: { player: "A", path: "D:/first/match.dem" } });
+    const round = { round_number: 1, start_tick: 100, end_tick: 3000 };
+    act(() => result.current.handleAddTimelineRoundToQueue(round));
+    rerender({ player: "B", path: "D:/first/match.dem" });
+    act(() => result.current.handleAddTimelineRoundToQueue(round));
+    rerender({ player: "B", path: "D:/second/match.dem" });
+    act(() => result.current.handleAddTimelineRoundToQueue(round));
+    expect(queue).toHaveLength(3);
+    rerender({ player: "B", path: "D:/second/match.dem" });
+    act(() => result.current.handleAddTimelineRoundToQueue(round));
+    expect(queue).toHaveLength(3);
+    act(() => result.current.handleRemoveTimelineRoundFromQueue(round));
+    expect(queue.map((item) => [item.demoPath, item.targetSteamId])).toEqual([
+      ["D:/first/match.dem", "111"], ["D:/first/match.dem", "222"],
+    ]);
+  });
+
   it("keeps raw round neighbours and the selected player's match metadata when queuing", () => {
     const clip = { clip_id: "round", client_clip_uid: "round", category: "compilation", compilation_kind: "freeze_to_death",
       round_facts: [
@@ -87,5 +120,31 @@ describe("useClipQueueActions player fail batching", () => {
       "app.enqueuePlayerFailsDone",
       { autoDismissMs: 2000, queueLink: true },
     );
+  });
+
+  it("adds one clip straight from its card and refuses an empty round compilation", () => {
+    const highlight = { clip_id: "h1", client_clip_uid: "h1", category: "highlight" };
+    const rounds = { clip_id: "r", client_clip_uid: "r", category: "compilation", compilation_kind: "freeze_to_death", round_facts: [] };
+    const parsed = { demo_filename: "match.dem", players: { player: { clips: [highlight, rounds], match_meta: {} } } };
+    const addToQueue = vi.fn();
+    const setProgressText = vi.fn();
+    const setSelectedClientClipUids = vi.fn();
+    const { result } = renderHook(() => useClipQueueActions({
+      t: (key) => key, locale: "zh", setProgressText, queue: [], addToQueue, removeByClientClipUid: vi.fn(),
+      uploadedDemos: [{ filename: "match.dem" }], parsedMatches: [parsed], currentMatchIndex: 0,
+      currentParsed: parsed, currentActivePlayer: "player", matchMeta: {},
+      activePlayerTabs: ["player"], selectedPlayers: [["player"]], clips: [highlight, rounds],
+      freezeToDeathDraft: { picked: [] }, selectedClientClipUids: new Set(["h1"]),
+      setSelectedClientClipUids, currentDemoFilename: "match.dem",
+    }));
+
+    act(() => result.current.handleAddClipToQueue("h1"));
+    expect(addToQueue).toHaveBeenCalledTimes(1);
+    expect(addToQueue.mock.calls[0][0][0]).toMatchObject({ clientClipUid: "h1", demoFilename: "match.dem" });
+    expect(setSelectedClientClipUids).toHaveBeenCalled();
+
+    act(() => result.current.handleAddClipToQueue("r"));
+    expect(addToQueue).toHaveBeenCalledTimes(1);
+    expect(setProgressText).toHaveBeenLastCalledWith("ftd.errorNeedsRound");
   });
 });

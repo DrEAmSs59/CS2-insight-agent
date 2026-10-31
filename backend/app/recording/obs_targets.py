@@ -1,9 +1,11 @@
 """Resolve OBS targets from the playback source, never from platform offsets."""
 from collections import defaultdict
 from pathlib import Path
+from types import SimpleNamespace
 
 from ..demo_player_entities import live_player_entities, network_entity_index
 from .models import RecordingPlan, RecordingSegment
+from .demo_body_timeline import read_takeover_entities, takeover_timeline
 
 OBS_PREPARE_PREROLL_SECONDS = 5.0
 
@@ -28,7 +30,7 @@ def _columns(value):
     return value.to_dict(orient="list") if hasattr(value, "to_dict") else value
 
 
-def resolve_obs_targets(demo_path: str, targets: list[dict], *, parser=None) -> list[dict]:
+def resolve_obs_targets(demo_path: str, targets: list[dict], *, parser=None, takeover_reader=None) -> list[dict]:
     """Worker entry point: batch both prepare/start snapshots for one Demo."""
     from demoparser2 import DemoParser, WantedPropState
 
@@ -64,6 +66,7 @@ def resolve_obs_targets(demo_path: str, targets: list[dict], *, parser=None) -> 
         return row, body
 
     resolved = []
+    report = None
     for target in targets:
         label = target["name"] or target["steamid64"]
         start_tick, seek_tick = target["start_tick"], target["seek_tick"]
@@ -76,7 +79,25 @@ def resolve_obs_targets(demo_path: str, targets: list[dict], *, parser=None) -> 
             for row in bot_rows
         )
         if takeover:
-            raise ValueError(f"OBS 片段包含玩家 {label} 接管 BOT，暂不支持；请拆分片段后重试。")
+            if report is None:
+                report = (takeover_reader or read_takeover_entities)(
+                    Path(demo_path), min(t["seek_tick"] for t in targets), max(t["end_tick"] for t in targets))
+            steamid = target["steamid64"] or str((start_row or {}).get("steamid") or "")
+            if not steamid.isdigit() or not steamid.startswith("7656") or len(steamid) != 17:
+                raise ValueError(f"OBS 玩家 {label} 缺少可核验的 SteamID")
+            # OBS settles at the cut start before it starts capturing. A body
+            # timeline must cover the whole cut, including later takeover/death.
+            segment = SimpleNamespace(label=label, target_xuid=steamid,
+                                      start_tick=start_tick, end_tick=target["end_tick"])
+            timeline = takeover_timeline(report, segment, start_tick, strict_identity=True)
+            if not timeline or not timeline[0]["pawn"]:
+                raise ValueError(f"OBS tick {start_tick} 玩家 {label} 没有可核验的存活身体")
+            first = timeline[0]
+            if start is not None and not first["takeover"] and start != (first["slot"], first["pawn"]):
+                raise ValueError(f"OBS tick {start_tick} 玩家控制器与身体时间线不一致")
+            resolved.append({"slot": first["slot"], "pawn": first["pawn"], "steamid64": steamid,
+                             "seek_tick": start_tick, "timeline": timeline})
+            continue
         if start is None:
             raise ValueError(f"OBS 无法在 tick {start_tick} 确认玩家 {label} 的控制器：目标缺失、重名、已死亡或实体关系不一致。")
         steamid = str(start_row.get("steamid") or "")
@@ -110,8 +131,12 @@ def prepare_obs_plan_targets(plans: list[RecordingPlan], demo_path: Path, *, res
                 or not 0 <= seek <= segment.start_tick or not target.get("steamid64")):
             raise ValueError("OBS 玩家控制器解析结果无效")
         segment.metadata = {key: value for key, value in segment.metadata.items()
-                            if key != "obs_spec_slot_offset"}
+                            if key not in {"obs_spec_slot_offset", "obs_body_timeline"}}
         segment.metadata.update({"obs_controller_slot": slot, "obs_controller_pawn": target["pawn"],
                                  "obs_prepare_tick": seek})
+        if target.get("timeline"):
+            from .obs_observer import validate_timeline
+            segment.metadata["obs_body_timeline"] = validate_timeline(
+                target["timeline"], segment.start_tick, segment.end_tick, slot, target["pawn"])
         segment.target_steamid64 = target["steamid64"]
     return copies
