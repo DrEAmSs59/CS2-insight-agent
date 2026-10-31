@@ -1345,8 +1345,34 @@ export default function CosmeticsView({
         {!onlineAssetsEnabled ? <div className="flex items-center gap-2 rounded-lg bg-cs2-bg-input/60 px-3 py-2 text-xs text-cs2-text-muted"><WifiOff className="h-3.5 w-3.5 shrink-0" />{t("analysis.cosmetics.onlineAssetsOff")}</div> : null}
       </div>
 
-      <PlayerLoadoutEditor key={planScope} value={playerLoadout} onChange={setPlayerLoadout} editable={!browseMode && !saving} locale={locale} onlineAssetsEnabled={onlineAssetsEnabled} /><div className="space-y-[18px]" data-testid="cosmetics-team-stack">
-        {[["ct", ctItems], ["t", tItems]].map(([team, items]) => <CosmeticsTeamRow key={team} team={team} items={items} locale={locale} onlineAssetsEnabled={onlineAssetsEnabled} customMode={!browseMode} localReplacements={localReplacements} originalBySlot={originalBySlot} onOpen={openCard} onHoverStart={openHover} onHoverEnd={() => setHoverCard(null)} onClearReplacement={browseMode ? null : clearReplacement} />)}
+      <div className="space-y-[18px]" data-testid="cosmetics-team-stack">
+        {[
+          ["ct", ctItems],
+          ["t", tItems],
+        ].map(([team, items]) => (
+          <CosmeticsTeamRow
+            key={team}
+            team={team}
+            items={items}
+            locale={locale}
+            onlineAssetsEnabled={onlineAssetsEnabled}
+            customMode={!browseMode}
+            localReplacements={localReplacements}
+            originalBySlot={originalBySlot}
+            onOpen={openCard}
+            onHoverStart={openHover}
+            onHoverEnd={() => setHoverCard(null)}
+            onClearReplacement={browseMode ? null : clearReplacement}
+            loadoutEditor={<PlayerLoadoutEditor key={`${planScope}:${team}`} team={team} value={playerLoadout} onChange={setPlayerLoadout}
+              editable={!browseMode && !saving} locale={locale} onlineAssetsEnabled={onlineAssetsEnabled}
+              evidence={itemsForTeam(loadoutInventory, team)}
+              renderItem={({ item, field, key, onSelect }) => <CosmeticCard key={key} item={item} locale={locale}
+                onlineAssetsEnabled={onlineAssetsEnabled} customMode={!browseMode} customizable={!saving}
+                buttonProps={{ "data-loadout-slot": field }}
+                onOpen={browseMode ? () => openItemDetail(item) : onSelect}
+                onHoverStart={event => openHover(event, item)} onHoverEnd={() => setHoverCard(null)} />} />}
+          />
+        ))}
       </div>
 
       {hoverCard ? <HoverDetails item={hoverCard.item} locale={locale} position={hoverCard.position} /> : null}

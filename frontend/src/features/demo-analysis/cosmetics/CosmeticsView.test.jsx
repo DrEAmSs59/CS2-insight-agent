@@ -47,7 +47,64 @@ function cosmetic(overrides = {}) {
   };
 }
 
+function loadoutCosmetic(item, teams) {
+  return cosmetic({ catalog_id: item.id, item_id: undefined, type: item.type, model: item.model,
+    def_index: item.def, paint_index: item.index || 0, paint_wear: undefined, paint_seed: undefined,
+    name_zh: item.nameZh, name_en: item.nameEn, image_url: `https://cdn.cstrike.app${item.image}`,
+    rarity: item.rarity, observed_teams: teams });
+}
+
 describe("CosmeticsView", () => {
+  test("each team keeps its agent and music kit at the end of the same item grid", () => {
+    const agentT = loadoutCosmetic(loadoutCandidates("agent_t")[0], ["t"]);
+    const agentCt = loadoutCosmetic(loadoutCandidates("agent_ct")[0], ["ct"]);
+    const music = loadoutCosmetic(loadoutCandidates("music_kit")[0], ["t", "ct"]);
+    render(<CosmeticsView selectedPlayer={{ name: "JW", steamid: STEAM_ID }} locale="zh"
+      onlineAssetsEnabled workspace={{ cosmetics: { players: { [STEAM_ID]: [agentT, music, cosmetic({ item_id: 10, type: "weapon", model: "ak47", def_index: 7, name_zh: "AK 原皮" }), agentCt] } } }} />);
+    expect(screen.queryByRole("heading", { name: "探员与音乐盒" })).toBeNull();
+    expect(screen.queryByTestId("player-loadout-editor")).toBeNull();
+    const checkOrder = () => {
+      for (const team of ["ct", "t"]) {
+        const row = screen.getByTestId(`cosmetics-row-${team}`);
+        const cards = [...row.querySelectorAll("[data-cosmetic-card], [data-loadout-slot]")];
+        expect(cards.slice(-2).map(card => card.getAttribute("data-loadout-slot"))).toEqual([`agent_${team}`, "music_kit"]);
+        expect(within(cards.at(-2)).getByRole("img").getAttribute("src")).toContain((team === "ct" ? agentCt : agentT).image_url);
+        expect(within(cards.at(-1)).getByRole("img").getAttribute("src")).toContain(music.image_url);
+        expect(cards.at(-1).querySelector("[data-cosmetic-rarity-rail]")).toBeTruthy();
+        expect(row.textContent).not.toContain("沿用 Demo 原设置");
+        expect(within(row).queryByRole("button", { name: team === "ct" ? "T 探员" : "CT 探员" })).toBeNull();
+        expect(cards.at(-1).parentElement.closest(".grid")).toBe(cards[0].parentElement.closest(".grid"));
+      }
+    };
+    checkOrder();
+    fireEvent.click(screen.getByTestId("cosmetics-customize"));
+    checkOrder();
+    const ct = screen.getByTestId("cosmetics-row-ct");
+    const replacement = loadoutCandidates("agent_ct")[1];
+    fireEvent.click(ct.querySelector('[data-loadout-slot="agent_ct"]'));
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: replacement.nameZh }));
+    expect(within(ct.querySelector('[data-loadout-slot="agent_ct"]')).getByRole("img").getAttribute("src")).toContain(replacement.image);
+    fireEvent.click(ct.querySelector('[data-loadout-slot="agent_ct"]'));
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "沿用 Demo 原设置" }));
+    checkOrder();
+  });
+
+  test("selecting a music kit in either team updates both rows and saves one shared setting", async () => {
+    vi.mocked(loadCustomSkinPlan).mockResolvedValueOnce({ ok: true, plan: null });
+    vi.mocked(saveCustomSkinPlan).mockClear();
+    vi.mocked(saveCustomSkinPlan).mockResolvedValueOnce({ ok: true, plan: { player_loadout: { music_kit: 3 }, items: [] }, succeeded: [], failed: [] });
+    render(<CosmeticsView demoId={42} selectedPlayer={{ name: "JW", steamid: STEAM_ID }} locale="zh" workspace={{ cosmetics: { players: {} } }} />);
+    fireEvent.click(screen.getByTestId("cosmetics-customize"));
+    const ct = screen.getByTestId("cosmetics-row-ct"), t = screen.getByTestId("cosmetics-row-t");
+    fireEvent.click(within(ct).getByRole("button", { name: "音乐盒" }));
+    const chosen = loadoutCandidates("music_kit").find(item => item.index === 3);
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: chosen.nameZh }));
+    expect(ct.querySelector('[data-loadout-slot="music_kit"]').getAttribute("aria-label")).toContain(chosen.nameZh.split("|").at(-1).trim());
+    expect(t.querySelector('[data-loadout-slot="music_kit"]').getAttribute("aria-label")).toContain(chosen.nameZh.split("|").at(-1).trim());
+    fireEvent.click(screen.getByTestId("cosmetics-save-plan"));
+    await waitFor(() => expect(saveCustomSkinPlan).toHaveBeenLastCalledWith(expect.objectContaining({ playerLoadout: { music_kit: 3 }, replacements: {} })));
+  });
+
   test("shows only the selected player's evidence-owned inventory in CT/T team rows", () => {
     const { container } = render(
       <CosmeticsView
@@ -471,7 +528,7 @@ describe("CosmeticsView", () => {
     expect(screen.queryByText("错误归属的刀")).toBeNull();
   });
 
-  test("omits agent, music-kit, and C4 rows", () => {
+  test("shows original agent and music-kit records in their team rows and omits C4", () => {
     const { container } = render(
       <CosmeticsView
         selectedPlayer={{ name: "JW", steamid64: STEAM_ID }}
@@ -489,16 +546,16 @@ describe("CosmeticsView", () => {
       />,
     );
 
-    expect(screen.queryByText("探员")).toBeNull();
-    expect(screen.queryByText("血腥达里尔爵士（沉默）")).toBeNull();
-    expect(screen.getByTestId("player-loadout-editor")).toBeTruthy();
-    expect(screen.queryByText("Under Bright Lights")).toBeNull();
+    expect(screen.getAllByRole("button", { name: /血腥达里尔爵士（沉默）/ })).toHaveLength(2);
+    expect(screen.queryByTestId("player-loadout-editor")).toBeNull();
+    expect(screen.getByTestId("player-loadout-slots-ct")).toBeTruthy();
+    expect(screen.getByTestId("player-loadout-slots-t")).toBeTruthy();
+    expect(screen.getAllByRole("button", { name: /Under Bright Lights/ })).toHaveLength(2);
     expect(screen.queryByText("C4 炸弹")).toBeNull();
-    // Each team only shows the natural knife/glove placeholders.
-    expect(container.querySelectorAll("[data-cosmetic-card]").length).toBe(4);
+    expect(container.querySelectorAll("[data-cosmetic-card]").length).toBe(8);
   });
 
-  test("custom mode opens picker for weapons while agents remain hidden", async () => {
+  test("custom mode retains original agents while opening the weapon picker", async () => {
     render(
       <CosmeticsView
         selectedPlayer={{ name: "JW", steamid: STEAM_ID }}
@@ -518,7 +575,7 @@ describe("CosmeticsView", () => {
     fireEvent.click(screen.getByRole("button", { name: /自定义饰品|Customize skins/i }));
     expect(screen.getByRole("button", { name: /保存自定义皮肤方案|Save custom skin plan/i })).toBeTruthy();
 
-    expect(screen.queryByRole("button", { name: "探员甲" })).toBeNull();
+    expect(screen.getByRole("button", { name: "探员甲" })).toBeTruthy();
 
     fireEvent.click(screen.getByRole("button", { name: /AK原皮/ }));
     expect(screen.getByPlaceholderText(/搜索皮肤|Search skins/i)).toBeTruthy();
@@ -1770,22 +1827,22 @@ test("loadout-only customization saves, reloads and restores without weapon edit
   const props = { demoId: 42, selectedPlayer: { name: "JW", steamid: STEAM_ID }, workspace: { cosmetics: { players: {} } } };
   const view = render(<CosmeticsView {...props} />);
   const music = loadoutCandidates("music_kit").find(row => row.index === 3);
-  await waitFor(() => expect(screen.getByText(music.nameZh)).toBeTruthy());
+  await waitFor(() => expect(screen.getAllByRole("button", { name: new RegExp(music.nameZh.split("|").at(-1).trim()) })).toHaveLength(2));
   fireEvent.click(screen.getByTestId("cosmetics-customize"));
   fireEvent.click(screen.getByRole("button", { name: "T 探员" }));
   fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: chosen.nameZh }));
   fireEvent.click(screen.getByTestId("cosmetics-save-plan"));
   await waitFor(() => expect(saveCustomSkinPlan).toHaveBeenLastCalledWith(expect.objectContaining({ playerLoadout: loadout, replacements: {} })));
-  await waitFor(() => expect(screen.getByRole("button", { name: "T 探员" }).disabled).toBe(true));
+  await waitFor(() => expect(screen.getByTestId("cosmetics-customize")).toBeTruthy());
   view.unmount();
   vi.mocked(loadCustomSkinPlan).mockResolvedValueOnce({ ok: true, plan: { player_loadout: loadout, items: [] } });
   vi.mocked(saveCustomSkinPlan).mockResolvedValueOnce({ ok: true, plan: { player_loadout: { music_kit: 3 }, items: [] }, succeeded: [], failed: [] });
   render(<CosmeticsView {...props} />);
-  await waitFor(() => expect(screen.getByText(chosen.nameZh)).toBeTruthy());
+  await waitFor(() => expect(screen.getByTestId("cosmetics-row-t").querySelector('[data-loadout-slot="agent_t"]')).toBeTruthy());
   fireEvent.click(screen.getByTestId("cosmetics-customize"));
-  fireEvent.click(screen.getByRole("button", { name: "T 探员" }));
+  fireEvent.click(screen.getByTestId("cosmetics-row-t").querySelector('[data-loadout-slot="agent_t"]'));
   fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "沿用 Demo 原设置" }));
   fireEvent.click(screen.getByTestId("cosmetics-save-plan"));
   await waitFor(() => expect(saveCustomSkinPlan).toHaveBeenLastCalledWith(expect.objectContaining({ playerLoadout: { music_kit: 3 }, replacements: {} })));
-  await waitFor(() => expect(screen.getByRole("button", { name: "T 探员" }).disabled).toBe(true));
+  await waitFor(() => expect(screen.getByTestId("cosmetics-customize")).toBeTruthy());
 });
