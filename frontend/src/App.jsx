@@ -12,6 +12,7 @@ import ProgressBar from "./components/ProgressBar";
 import BatchLoadErrorModal from "./components/BatchLoadErrorModal";
 import DemoLoadingCopy from "./components/DemoLoadingCopy";
 import Cs2LoadingAnimation from "./components/Cs2LoadingAnimation.jsx";
+import StartupLoadingOverlay from "./components/StartupLoadingOverlay.jsx";
 import { useRecordingQueue } from "./stores/recordingQueueStore";
 import { useLocaleStore } from "./i18n/localeStore";
 import { useT } from "./i18n/useT.js";
@@ -43,8 +44,7 @@ import { shouldCheckAppUpdates } from "./utils/shouldCheckAppUpdates";
 import { createDesktopUpdateCheck } from "./utils/desktopUpdater";
 import { desktopBridge } from "./desktop/desktopBridge.js";
 import { displayVersion } from "./utils/appVersion.js";
-import { Loader2 } from "lucide-react";
-import API, { BACKEND_CONNECT_LABEL } from "./api/api";
+import API from "./api/api";
 
 import CustomTitleBar from "./components/CustomTitleBar";
 import SidebarNav from "./components/SidebarNav";
@@ -1460,43 +1460,10 @@ export default function App() {
             </div>
           )}
           <main id="app-workspace" className="flex min-w-0 flex-1 flex-col overflow-hidden relative">
-            {!isStandalonePreview && (!backendReady ? (
-              <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-cs2-bg-dark/80 backdrop-blur-sm">
-                <div className="flex flex-col items-center gap-6 p-8 rounded-2xl border border-cs2-border-subtle bg-cs2-bg-card shadow-2xl">
-                  <div className="relative">
-                    <Loader2 className="h-12 w-12 animate-spin text-cs2-orange" />
-                    <div className="absolute inset-0 animate-ping rounded-full bg-cs2-orange/20" />
-                  </div>
-                  <div className="flex flex-col items-center gap-2">
-                    <h2 className="text-xl font-bold tracking-tight text-cs2-text-primary">{t("app.backendConnecting")}</h2>
-                    <p className="text-sm text-cs2-text-secondary">{t("app.backendStarting")}</p>
-                  </div>
-                  <div className="flex items-center gap-2 rounded-full border border-cs2-border bg-cs2-bg-input px-3 py-1.5">
-                    <div className="h-1.5 w-1.5 animate-pulse rounded-full bg-cs2-accent" />
-                    <span className="font-mono text-[10px] uppercase tracking-widest text-cs2-text-secondary">
-                      Attempting to connect: {BACKEND_CONNECT_LABEL}
-                    </span>
-                  </div>
-                </div>
-              </div>
-            ) : !startupInitDone ? (
-              <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-cs2-bg-dark/80 backdrop-blur-sm">
-                <div className="flex flex-col items-center gap-6 p-8 rounded-2xl border border-cs2-border-subtle bg-cs2-bg-card shadow-2xl">
-                  <Loader2 className="h-12 w-12 animate-spin text-cs2-orange" />
-                  <div className="flex flex-col items-center gap-2">
-                    <h2 className="text-xl font-bold tracking-tight text-cs2-text-primary">
-                      {startupInitPhase === "config"
-                        ? t("app.startupCheckingConfig")
-                        : t("app.startupCheckingUpdate")}
-                    </h2>
-                    <p className="text-sm text-cs2-text-secondary">{t("app.startupPleaseWait")}</p>
-                  </div>
-                </div>
-              </div>
-            ) : null)}
+            {!isStandalonePreview && <StartupLoadingOverlay phase={!backendReady ? "backend" : !startupInitDone ? startupInitPhase || "update" : null} />}
 
             <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-              <Suspense fallback={<div className="flex min-h-0 flex-1 items-center justify-center" aria-label={t("app.loadingPage")}><Loader2 className="h-7 w-7 animate-spin text-cs2-orange" /></div>}>
+              <Suspense fallback={<div role="status" className="flex min-h-0 flex-1 items-center justify-center" aria-label={t("app.loadingPage")}><Cs2LoadingAnimation /></div>}>
               <Routes>
                 <Route path="/" element={<GuidePage />} />
                 <Route path="/library" element={<DemoLibraryPage />} />
