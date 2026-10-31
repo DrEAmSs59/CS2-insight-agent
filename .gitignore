@@ -32,6 +32,8 @@ Thumbs.db
 
 # Temp
 /tmp/
+/tmp.txt
+/tmp_*.txt
 *.tmp
 *.log
 .empty-git-hooks/
