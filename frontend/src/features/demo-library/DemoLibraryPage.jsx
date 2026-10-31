@@ -20,6 +20,9 @@ import {
 import { useDemoPlaybackDialog } from "../../hooks/useDemoPlaybackDialog.jsx";
 import { useT } from "../../i18n/useT.js";
 import { desktopBridge } from "../../desktop/desktopBridge.js";
+import { useLocaleStore } from "../../i18n/localeStore.js";
+import LucasWorkshopBackground from "../cosmetics-workshop/LucasWorkshopBackground.jsx";
+import "../cosmetics-workshop/lucasWorkshop.css";
 
 const INITIAL_ADV_FILTERS = {
   mapName: "",
@@ -40,6 +43,7 @@ const INITIAL_ADV_FILTERS = {
 
 export default function DemoLibraryPage() {
   const t = useT();
+  const locale = useLocaleStore((state) => state.effectiveLocale);
   const s = useAppShell();
 
   const [viewMode, setViewMode] = useState("grid"); // "grid" | "list"
@@ -253,7 +257,11 @@ export default function DemoLibraryPage() {
   }, [s]);
 
   return (
+    <div className="lucas-page-backdrop h-full min-h-0 w-full bg-cs2-bg-page">
+    <LucasWorkshopBackground locale={locale} />
     <PageContainer className="demo-library-page flex h-full min-h-0 w-full flex-col gap-2 overflow-hidden">
+      {/* A translucent panel keeps the controls readable over the page background. */}
+      <div className="flex shrink-0 flex-col gap-2 rounded-lg border border-cs2-border-subtle bg-cs2-bg-card/90 backdrop-blur-md p-3">
       <DemoLibraryToolbar
         onOpenWatchPaths={() => setWatchPathsModalOpen(true)}
         onScan={s.handleScanDemos}
@@ -292,6 +300,7 @@ export default function DemoLibraryPage() {
       {advancedOpen ? (
         <DemoAdvancedFilters libraryAdvFilters={s.libraryAdvFilters} setLibraryAdvFilters={s.setLibraryAdvFilters} />
       ) : null}
+      </div>
 
       <section className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border border-cs2-border bg-cs2-bg-card">
         <div className="demo-library-results min-h-0 flex-1 overflow-x-hidden overflow-y-auto p-4 custom-scrollbar">
@@ -499,5 +508,6 @@ export default function DemoLibraryPage() {
         onIngest={handleBatchIngest}
       />
     </PageContainer>
+    </div>
   );
 }

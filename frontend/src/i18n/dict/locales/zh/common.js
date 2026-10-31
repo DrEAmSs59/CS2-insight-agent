@@ -47,7 +47,8 @@ export default {
   "test.greet": "你好 {name}",
   "test.items": "{n} 项",
   "nav.brand": "CS2 洞察",
-  "nav.getPro": "获取 Pro 版本",
+  "nav.getPro": "获取 Pro 版",
+  "nav.proAccount": "Pro 授权与账户",
   "nav.mainNav": "主导航",
   "nav.sectionWorkflow": "工作流",
   "nav.guide": "上手指南",
@@ -107,4 +108,6 @@ export default {
   "ingest.sourceMatchmaking": "官匹",
   "common.requestFail": "请求失败",
   "common.localeCode": "zh",
+  "actionbar.selectedSummary": "已选 {n} / {total} 个片段",
+  "actionbar.addSelectedCount": "加入队列（{n}）",
 };

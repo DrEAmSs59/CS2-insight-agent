@@ -118,14 +118,14 @@ export default function LiteCutExportProgressDialog({
           ) : (
             <p className="font-mono text-[11px] text-cs2-text-muted">请稍候，导出正在后台执行…</p>
           )}
-          {onCancel ? <button type="button" onClick={onCancel} className="w-full rounded-lg border border-cs2-border py-2 text-xs font-semibold text-cs2-text-secondary hover:border-rose-400/60 hover:text-rose-300">取消导出</button> : null}
+          {onCancel ? <button type="button" onClick={onCancel} className="w-full rounded-lg border border-cs2-border py-2 text-xs font-semibold text-cs2-text-secondary hover:border-cs2-rose-border hover:text-cs2-rose-on-surface">取消导出</button> : null}
           {encoderWarning ? (
-            <div className="flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2.5 text-amber-200" role="status">
+            <div className="flex items-start gap-2 rounded-lg border border-cs2-amber-border bg-cs2-amber-surface px-3 py-2.5 text-cs2-amber-on-surface" role="status">
               <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0" />
               <div className="min-w-0 text-[11px] leading-relaxed">
                 <p className="font-semibold">检测到 NVIDIA 驱动版本过低，已自动切换至 CPU 编码。导出速度会明显变慢，建议更新驱动后重试。</p>
                 {nvencApiDetail || minimumDriverDetail ? (
-                  <p className="mt-1 text-amber-200/80">{nvencApiDetail}{nvencApiDetail && minimumDriverDetail ? " " : ""}{minimumDriverDetail}</p>
+                  <p className="mt-1 text-cs2-amber-on-surface/80">{nvencApiDetail}{nvencApiDetail && minimumDriverDetail ? " " : ""}{minimumDriverDetail}</p>
                 ) : null}
               </div>
             </div>
@@ -133,16 +133,16 @@ export default function LiteCutExportProgressDialog({
         </div> : null}
 
         {phase === "done" ? <div className="mt-5 space-y-4">
-          <div className="flex items-center gap-2 rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-3 text-emerald-200"><CheckCircle2 className="h-5 w-5 shrink-0" /><div className="min-w-0"><p className="text-xs font-bold">{fileName || "export.mp4"}</p><p className="mt-0.5 truncate font-mono text-[10px] opacity-80">{outputPath}</p></div></div>
+          <div className="flex items-center gap-2 rounded-xl border border-cs2-emerald-border bg-cs2-emerald-surface p-3 text-cs2-emerald-on-surface"><CheckCircle2 className="h-5 w-5 shrink-0" /><div className="min-w-0"><p className="text-xs font-bold">{fileName || "export.mp4"}</p><p className="mt-0.5 truncate font-mono text-[10px] opacity-80">{outputPath}</p></div></div>
           <div className="grid grid-cols-2 gap-2">
             <button type="button" disabled={!outputPath} onClick={() => void revealOutput()} className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-cs2-border py-2 text-xs font-semibold text-cs2-text-secondary disabled:opacity-40"><FolderOpen className="h-3.5 w-3.5" />打开文件夹</button>
             <button type="button" disabled={!outputPath} onClick={() => void copyPath()} className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-cs2-border py-2 text-xs font-semibold text-cs2-text-secondary disabled:opacity-40"><Copy className="h-3.5 w-3.5" />复制路径</button>
           </div>
-          <button type="button" onClick={onClose} className="w-full rounded-lg bg-cs2-accent py-2.5 text-center text-xs font-bold text-dynamic-white">{doneButtonLabel}</button>
+          <button type="button" onClick={onClose} className="w-full rounded-lg bg-cs2-accent py-2.5 text-center text-xs font-bold text-cs2-text-on-accent">{doneButtonLabel}</button>
         </div> : null}
 
         {phase === "cancelled" || phase === "error" ? <div className="mt-5 space-y-3">
-          <p className={`rounded-lg border px-3 py-2 text-xs ${phase === "error" ? "border-rose-500/30 bg-rose-500/10 text-rose-300" : "border-amber-500/30 bg-amber-500/10 text-amber-200"}`}>{phase === "error" ? (error || "导出失败") : "导出任务已停止，未生成新的成片。"}</p>
+          <p className={`rounded-lg border px-3 py-2 text-xs ${phase === "error" ? "border-cs2-rose-border bg-cs2-rose-surface text-cs2-rose-on-surface" : "border-cs2-amber-border bg-cs2-amber-surface text-cs2-amber-on-surface"}`}>{phase === "error" ? (error || "导出失败") : "导出任务已停止，未生成新的成片。"}</p>
           <button type="button" onClick={onClose} className="w-full rounded-lg border border-cs2-border py-2 text-xs font-semibold text-cs2-text-secondary">关闭</button>
         </div> : null}
       </div>

@@ -232,7 +232,7 @@ export default function DemoWatchPathsModal({
           </div>
 
           {scanResult ? (
-            <div className="mt-4 flex items-center gap-2 rounded-lg border border-cs2-emerald-surface bg-cs2-emerald-surface px-3 py-2 text-[11px] text-cs2-text-secondary">
+            <div className="mt-4 flex items-center gap-2 rounded-lg border border-cs2-emerald-border bg-cs2-emerald-surface px-3 py-2 text-[11px] text-cs2-text-secondary">
               <CheckCircle2 className="h-4 w-4 shrink-0 text-cs2-emerald-on-surface" />
               <span className="flex-1">{t("library.watchPathsScanResult", { scanned: scanResult.scanned || 0, pending: scanResult.discovered_count || 0 })}</span>
               {(scanResult.discovered_count || 0) > 0 ? <button type="button" className="font-semibold text-cs2-accent hover:underline" onClick={onOpenIngest}>{t("library.watchPathsReviewPending")}</button> : null}

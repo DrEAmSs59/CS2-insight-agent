@@ -1,48 +1,24 @@
+import RecordingSettingsSections from "./RecordingSettingsSections.jsx";
+import { RECORD_WARMUP_DEFAULT_OPTIONS, RECORD_WARMUP_DEFAULT_OBS_TRANSITION } from "./recordingQueue/recordingWarmupDefaults.js";
+import { RECORDING_SESSION_SECTIONS } from "../pages/settings/recordingPresetSections.js";
+import RecordingSectionMenu, { useRecordingSectionNavigation } from "./recordingQueue/RecordingSectionMenu.jsx";
 import { useCallback, useEffect, useState } from "react";
 import { X } from "lucide-react";
-import {
-  aspectExportHint,
-  aspectHint,
-  effectiveSpectatorFlashbangOpacity,
-  formatResolutionSummary,
-  SPECTATOR_FLASHBANG_OPACITY_DEFAULT,
-  validateWarmupResolution,
-} from "../utils/warmupDefaults";
-import ExperimentalPovSection from "./ExperimentalPovSection";
+import { effectiveSpectatorFlashbangOpacity, validateWarmupResolution, warmupUiOptsToPersisted } from "../utils/warmupDefaults";
 import PlayerAliasesSection from "./PlayerAliasesSection.jsx";
-import {
-  DEFAULT_INPUT_HUD_POSITION,
-  normalizeInputHudPosition,
-} from "../utils/inputHudPlacement.js";
-import {
-  hasInvalidPlayerAliases,
-  PLAYER_ALIAS_ENTRY_VISIBLE,
-  playerAliasMaps,
-} from "../utils/playerAliases.js";
-import Cs2LaunchConsoleFields from "./Cs2LaunchConsoleFields";
-import { POV_CONFLICT_HUD, RecordingHudCard } from "./RecordingHudCard";
+import { DEFAULT_INPUT_HUD_POSITION, normalizeInputHudPosition } from "../utils/inputHudPlacement.js";
+import { hasInvalidPlayerAliases, PLAYER_ALIAS_ENTRY_VISIBLE, playerAliasMaps } from "../utils/playerAliases.js";
 import { useT } from "../i18n/useT.js";
 import { normalizeRecordingSkyboxId } from "../utils/recordingSkybox.js";
-import {
-  DEFAULT_RECORDING_MAP_MATERIAL,
-  normalizeRecordingMapMaterialId,
-} from "../utils/recordingMapMaterial.js";
-import {
-  DEFAULT_RECORDING_WEATHER_EFFECT,
-  normalizeRecordingWeatherEffectId,
-} from "../utils/recordingWeatherEffect.js";
-import { DEFAULT_POV_VOICE_MODE, normalizePovVoiceMode } from "../utils/povVoiceMode.js";
-
+import { DEFAULT_RECORDING_MAP_MATERIAL, normalizeRecordingMapMaterialId } from "../utils/recordingMapMaterial.js";
+import { DEFAULT_RECORDING_WEATHER_EFFECT, normalizeRecordingWeatherEffectId } from "../utils/recordingWeatherEffect.js";
+import { normalizePovVoiceMode } from "../utils/povVoiceMode.js";
 /** 拼装随观战选项变化的 cvar（顺序与后端一致）；固定 cvar 见 record_inject_console_lines 配置 */
 export function buildWarmupConsoleCommands(o) {
   // 固定性能/预测 cvar 已迁至配置 record_inject_console_lines（可在「附加预热控制台」增删），
   // 不再随 console_cmds 注入；此处仅拼装随观战选项变化的 cvar。
   const lines = [];
-  lines.push(
-    o.cl_draw_only_deathnotices
-      ? "cl_draw_only_deathnotices true"
-      : "cl_draw_only_deathnotices false"
-  );
+  lines.push(o.cl_draw_only_deathnotices ? "cl_draw_only_deathnotices true" : "cl_draw_only_deathnotices false");
   // GOTV demos replay the recorded mp_forcecamera=1 NetSetConVar. The local
   // controller stays on spectator team, so 1 hides teammates on the native
   // radar; 0 lets CCSGO_HudRadar follow the observed player's relationship.
@@ -63,22 +39,9 @@ export function buildWarmupConsoleCommands(o) {
     lines.push("viewmodel_fov 68");
   }
   if (o.third_person_camera) {
-    lines.push(
-      "cam_command 1",
-      "cam_idealdist 30",
-      "cam_idealyaw 0",
-      "cam_idealpitch 0",
-      "c_thirdpersonshoulder 1",
-      "c_thirdpersonshoulderaimdist 300",
-      "c_thirdpersonshoulderdist 40",
-      "c_thirdpersonshoulderheight 2",
-      "c_thirdpersonshoulderoffset 20",
-    );
+    lines.push("cam_command 1", "cam_idealdist 30", "cam_idealyaw 0", "cam_idealpitch 0", "c_thirdpersonshoulder 1", "c_thirdpersonshoulderaimdist 300", "c_thirdpersonshoulderdist 40", "c_thirdpersonshoulderheight 2", "c_thirdpersonshoulderoffset 20");
   }
-  const flashOpacity = effectiveSpectatorFlashbangOpacity(
-    o,
-    !!(o.pov_hud_enabled || o.experimental_pov_enabled),
-  );
+  const flashOpacity = effectiveSpectatorFlashbangOpacity(o, !!(o.pov_hud_enabled || o.experimental_pov_enabled));
   if (flashOpacity != null) {
     lines.push(`r_spectator_flashbang_opacity ${flashOpacity}`);
   }
@@ -89,99 +52,12 @@ export function buildWarmupConsoleCommands(o) {
   }
   return lines;
 }
-
-export const RECORD_WARMUP_DEFAULT_OPTIONS = {
-  cl_draw_only_deathnotices: true,
-  hud_showtargetid_hide: true,
-  hide_clan_tags: true,
-  persistent_killfeed: false,
-  tv_nochat: true,
-  spec_show_xray: false,
-  apply_fov: false,
-  fov_cs_debug: 90,
-  viewmodel_fov_68: false,
-  third_person_camera: false,
-  apply_spectator_flashbang_opacity: false,
-  spectator_flashbang_opacity: SPECTATOR_FLASHBANG_OPACITY_DEFAULT,
-  hide_demo_playback_ui: true,
-  hide_grenade_trajectory_pip: true,
-  aspect_ratio: "",
-  resolution_width: "",
-  resolution_height: "",
-  /** POV 雷达不再提供录制选项，成片固定显示。 */
-  pov_radar_mode: 0,
-  /** POV：true 正上方显示存活人数；false 显示双方十人头像（默认关存活人数条） */
-  pov_teamcounter_numeric: false,
-  /** POV：语音播放与左下角说话标识使用同一受众范围。 */
-  pov_voice_mode: DEFAULT_POV_VOICE_MODE,
-  /** Whether to render the authoritative in-game keyboard/mouse HUD. */
-  input_hud_enabled: true,
-  /** OBS overlay-compatible on-screen anchor for the in-game keyboard/mouse HUD. */
-  input_hud_position: DEFAULT_INPUT_HUD_POSITION,
-  /** Visibility policy for the in-game keyboard/mouse HUD. */
-  input_hud_display_mode: "hybrid",
-  /** Preserved while its editor is temporarily hidden; default off. */
-  input_audio_enabled: false,
-  /** Whether to show the per-Pawn K/D/A and damage block in the recording VPK. */
-  combat_stats_hud_enabled: true,
-};
-
-/** 录制预热弹窗每次打开时的 OBS 转场推荐默认值；勾选关闭则提交 null 沿用服务器全局配置 */
-export const RECORD_WARMUP_DEFAULT_OBS_TRANSITION = {
-  enabled: true,
-  name: "Fade",
-  durationMs: 200,
-};
-
-export function SectionHeader({ en, zh }) {
-  return (
-    <div className="mb-2 flex items-end gap-2 px-0.5">
-      <div className="min-w-0">
-        <p className="text-[10px] font-black uppercase tracking-[0.22em] text-cs2-text-muted">{en}</p>
-        <p className="text-[11px] font-semibold text-cs2-text-secondary">{zh}</p>
-      </div>
-      <div className="mb-1 h-px min-w-[2rem] flex-1 bg-gradient-to-r from-white/[0.12] via-white/[0.06] to-transparent" />
-    </div>
-  );
-}
-
-export function OptionRow({ checked, onChange, title, code, disabled = false, disabledReason }) {
-  const t = useT();
-  return (
-    <label
-      title={disabled && disabledReason ? t(disabledReason) : undefined}
-      className={`flex items-start gap-3 rounded-lg border border-cs2-border bg-cs2-bg-input px-3 py-2.5 transition-colors ${
-        disabled
-          ? "cursor-not-allowed opacity-45"
-          : "cursor-pointer hover:border-cs2-accent/25"
-      }`}
-    >
-      <input
-        type="checkbox"
-        checked={checked}
-        disabled={disabled}
-        onChange={(e) => {
-          if (disabled) return;
-          onChange(e.target.checked);
-        }}
-        className="mt-0.5 h-4 w-4 shrink-0 rounded border-cs2-border accent-cs2-orange disabled:opacity-50"
-      />
-      <span className="min-w-0 text-sm leading-snug text-cs2-text-primary">
-        {title}{" "}
-        <code className="whitespace-pre-wrap break-all text-[11px] text-cs2-accent/90">{code}</code>
-      </span>
-    </label>
-  );
-}
-
-/**
- * 一键录制前：分组观战 / 摄像机 / 音频与启动项；提交时生成 console_cmds 供后端注入。
- * 初始值来自常用参数（配置文件）；本次修改仅随 onConfirm 提交，不写入 JSON。
- */
+export { RECORD_WARMUP_DEFAULT_OPTIONS, RECORD_WARMUP_DEFAULT_OBS_TRANSITION } from "./recordingQueue/recordingWarmupDefaults.js";
 export default function RecordWarmupModal({
   open,
   onClose,
   onConfirm,
+  onSaveSettings,
   aliasDemos = [],
   defaultOverrides,
   experimentalPovEnabled = false,
@@ -192,17 +68,20 @@ export default function RecordWarmupModal({
   recordInjectConsoleLines = "",
   initObsTransEnabled = false,
   initObsTransName = "Fade",
-  initObsTransDurationMs = 200,
+  initObsTransDurationMs = 200
 }) {
   const t = useT();
   const [opts, setOpts] = useState(RECORD_WARMUP_DEFAULT_OPTIONS);
   const [resolutionError, setResolutionError] = useState("");
-  const [aliasEditor, setAliasEditor] = useState({ enabled: false, drafts: {} });
+  const [saving, setSaving] = useState(false);
+  const [saveMessage, setSaveMessage] = useState("");
+  const [aliasEditor, setAliasEditor] = useState({
+    enabled: false,
+    drafts: {}
+  });
   const [aliasesReady, setAliasesReady] = useState(false);
-  const aliasesBlocked = PLAYER_ALIAS_ENTRY_VISIBLE
-    && aliasEditor.enabled
-    && (!aliasesReady || hasInvalidPlayerAliases(aliasEditor));
-  const [obsTransEnabled, setObsTransEnabled] = useState(null);  // null = use global
+  const aliasesBlocked = PLAYER_ALIAS_ENTRY_VISIBLE && aliasEditor.enabled && (!aliasesReady || hasInvalidPlayerAliases(aliasEditor));
+  const [obsTransEnabled, setObsTransEnabled] = useState(null); // null = use global
   const [obsTransName, setObsTransName] = useState(null);
   const [obsTransDurationMs, setObsTransDurationMs] = useState(null);
   const [sessionPovEnabled, setSessionPovEnabled] = useState(false);
@@ -213,17 +92,25 @@ export default function RecordWarmupModal({
   const [sessionCombatStatsHudEnabled, setSessionCombatStatsHudEnabled] = useState(true);
   const [sessionSkybox, setSessionSkybox] = useState("default");
   const [sessionMapMaterial, setSessionMapMaterial] = useState(DEFAULT_RECORDING_MAP_MATERIAL);
-  const [sessionWeatherEffect, setSessionWeatherEffect] = useState(
-    DEFAULT_RECORDING_WEATHER_EFFECT,
-  );
+  const [sessionWeatherEffect, setSessionWeatherEffect] = useState(DEFAULT_RECORDING_WEATHER_EFFECT);
   const [sessionCs2ExtraLaunchArgs, setSessionCs2ExtraLaunchArgs] = useState("");
   const [sessionRecordInjectConsoleLines, setSessionRecordInjectConsoleLines] = useState("");
-
+  const povEnabled = sessionPovEnabled;
+  const {
+    scrollRef,
+    activeSection,
+    jumpToSection
+  } = useRecordingSectionNavigation(RECORDING_SESSION_SECTIONS, open);
   useEffect(() => {
-    setAliasEditor({ enabled: false, drafts: {} });
+    setAliasEditor({
+      enabled: false,
+      drafts: {}
+    });
     setAliasesReady(false);
     if (!open) return;
-    const base = { ...RECORD_WARMUP_DEFAULT_OPTIONS };
+    const base = {
+      ...RECORD_WARMUP_DEFAULT_OPTIONS
+    };
     const o = defaultOverrides;
     if (o && typeof o === "object" && !Array.isArray(o)) {
       for (const k of Object.keys(RECORD_WARMUP_DEFAULT_OPTIONS)) {
@@ -236,10 +123,7 @@ export default function RecordWarmupModal({
         }
       }
     }
-    base.pov_voice_mode = normalizePovVoiceMode(
-      o?.pov_voice_mode,
-      o?.pov_voice_disabled === true,
-    );
+    base.pov_voice_mode = normalizePovVoiceMode(o?.pov_voice_mode, o?.pov_voice_disabled === true);
     base.pov_radar_mode = 0;
     setOpts(base);
     setResolutionError("");
@@ -257,20 +141,7 @@ export default function RecordWarmupModal({
     setSessionWeatherEffect(normalizeRecordingWeatherEffectId(recordingWeatherEffect));
     setSessionCs2ExtraLaunchArgs(cs2ExtraLaunchArgs);
     setSessionRecordInjectConsoleLines(recordInjectConsoleLines);
-  }, [
-    open,
-    defaultOverrides,
-    initObsTransEnabled,
-    initObsTransName,
-    initObsTransDurationMs,
-    experimentalPovEnabled,
-    recordingSkybox,
-    recordingMapMaterial,
-    recordingWeatherEffect,
-    cs2ExtraLaunchArgs,
-    recordInjectConsoleLines,
-  ]);
-
+  }, [open, defaultOverrides, initObsTransEnabled, initObsTransName, initObsTransDurationMs, experimentalPovEnabled, recordingSkybox, recordingMapMaterial, recordingWeatherEffect, cs2ExtraLaunchArgs, recordInjectConsoleLines]);
   useEffect(() => {
     if (!open) return;
     const timer = setTimeout(() => {
@@ -279,40 +150,74 @@ export default function RecordWarmupModal({
     }, 400);
     return () => clearTimeout(timer);
   }, [open, opts.aspect_ratio, opts.resolution_width, opts.resolution_height, t]);
-
-  const set = useCallback((patch) => {
-    setOpts((prev) => ({ ...prev, ...patch }));
+  const set = useCallback(patch => {
+    setOpts(prev => ({
+      ...prev,
+      ...patch
+    }));
   }, []);
-
-  const handleSubmit = () => {
-    if (aliasesBlocked) return;
+  const savePreferences = async () => {
+    const error = "";
+    const resolution = validateWarmupResolution(opts);
+    if (!resolution.ok) {
+      setSaveMessage(t(resolution.messageKey, resolution.messageParams));
+      return false;
+    }
+    setSaving(true);
+    try {
+      const result = await onSaveSettings({
+        default_record_warmup: warmupUiOptsToPersisted({
+          ...opts,
+          input_hud_enabled: sessionInputHudEnabled,
+          input_hud_position: sessionInputHudPosition,
+          input_hud_display_mode: sessionInputHudDisplayMode,
+          input_audio_enabled: sessionInputAudioEnabled,
+          combat_stats_hud_enabled: sessionCombatStatsHudEnabled
+        }),
+        experimental_pov_enabled: sessionPovEnabled,
+        recording_skybox: sessionSkybox,
+        recording_map_material: sessionMapMaterial,
+        recording_weather_effect: sessionWeatherEffect,
+        cs2_extra_launch_args: sessionCs2ExtraLaunchArgs,
+        record_inject_console_lines: sessionRecordInjectConsoleLines,
+        obs_transition_enabled: obsTransEnabled,
+        obs_transition_name: obsTransName,
+        obs_transition_duration_ms: obsTransDurationMs
+      });
+      setSaveMessage(result?.ok ? t("record.settingsRemembered") : result?.error || t("app.saveFailed"));
+      return result?.ok === true;
+    } catch (error) {
+      setSaveMessage(error.message || t("app.saveFailed"));
+      return false;
+    } finally {
+      setSaving(false);
+    }
+  };
+  const handleSubmit = async () => {
+    if (aliasesBlocked || false || saving || false) return;
     const vr = validateWarmupResolution(opts);
     if (!vr.ok) {
       setResolutionError(t(vr.messageKey, vr.messageParams));
       return;
     }
-
     const arRaw = String(opts.aspect_ratio || "").trim();
     /** @type {"" | "4:3" | "16:9" | "16:10"} */
-    const ar =
-      arRaw === "4:3" || arRaw === "16:9" || arRaw === "16:10" ? arRaw : "";
-
+    const ar = arRaw === "4:3" || arRaw === "16:9" || arRaw === "16:10" ? arRaw : "";
     const w = String(opts.resolution_width || "").trim();
     const h = String(opts.resolution_height || "").trim();
     const rw = w ? parseInt(w, 10) : null;
     const rh = h ? parseInt(h, 10) : null;
-
     const apiShape = {
       cl_draw_only_deathnotices: opts.cl_draw_only_deathnotices,
       hud_showtargetid_hide: opts.hud_showtargetid_hide,
       hide_clan_tags: opts.hide_clan_tags,
-      persistent_killfeed: !!opts.persistent_killfeed,
+      persistent_killfeed: opts.persistent_killfeed,
       tv_nochat: opts.tv_nochat,
       spec_show_xray: opts.spec_show_xray ? 1 : 0,
       fov_cs_debug: opts.apply_fov ? Number(opts.fov_cs_debug) || 90 : null,
       viewmodel_fov_68: opts.viewmodel_fov_68,
       third_person_camera: opts.third_person_camera,
-      spectator_flashbang_opacity: effectiveSpectatorFlashbangOpacity(opts, sessionPovEnabled),
+      spectator_flashbang_opacity: effectiveSpectatorFlashbangOpacity(opts, povEnabled),
       hide_demo_playback_ui: opts.hide_demo_playback_ui,
       hide_grenade_trajectory_pip: opts.hide_grenade_trajectory_pip,
       resolution_width: rw,
@@ -320,532 +225,98 @@ export default function RecordWarmupModal({
       aspect_ratio: ar || null,
       pov_radar_mode: 0,
       pov_teamcounter_numeric: !!opts.pov_teamcounter_numeric,
-      pov_voice_mode: normalizePovVoiceMode(opts.pov_voice_mode),
+      pov_voice_mode: normalizePovVoiceMode(opts.pov_voice_mode)
     };
     const console_cmds = buildWarmupConsoleCommands({
       ...opts,
       spec_show_xray: !!opts.spec_show_xray,
-      experimental_pov_enabled: sessionPovEnabled,
+      experimental_pov_enabled: povEnabled
     });
-
-    onConfirm({
-        player_aliases_by_demo: PLAYER_ALIAS_ENTRY_VISIBLE ? playerAliasMaps(aliasEditor) : {},
-        ...apiShape,
-        console_cmds,
-        obs_transition_enabled: obsTransEnabled,
-        obs_transition_name: obsTransName,
-        obs_transition_duration_ms: obsTransDurationMs,
-        input_hud_enabled: sessionInputHudEnabled,
-        input_hud_position: sessionInputHudPosition,
-        input_hud_display_mode: sessionInputHudDisplayMode,
-        input_audio_enabled: sessionInputAudioEnabled,
-        combat_stats_hud_enabled: sessionCombatStatsHudEnabled,
-        experimental_pov_enabled: sessionPovEnabled,
-        recording_skybox: normalizeRecordingSkyboxId(sessionSkybox),
-        recording_map_material: normalizeRecordingMapMaterialId(sessionMapMaterial),
-        recording_weather_effect: normalizeRecordingWeatherEffectId(sessionWeatherEffect),
-        session_cs2_extra_launch_args: sessionCs2ExtraLaunchArgs,
-        session_record_inject_console_lines: sessionRecordInjectConsoleLines,
-      });
+    const payload = {
+      player_aliases_by_demo: PLAYER_ALIAS_ENTRY_VISIBLE ? playerAliasMaps(aliasEditor) : {},
+      ...apiShape,
+      console_cmds,
+      obs_transition_enabled: obsTransEnabled,
+      obs_transition_name: obsTransName,
+      obs_transition_duration_ms: obsTransDurationMs,
+      input_hud_enabled: sessionInputHudEnabled,
+      input_hud_position: sessionInputHudPosition,
+      input_hud_display_mode: sessionInputHudDisplayMode,
+      input_audio_enabled: sessionInputAudioEnabled,
+      combat_stats_hud_enabled: sessionCombatStatsHudEnabled,
+      experimental_pov_enabled: povEnabled,
+      recording_skybox: normalizeRecordingSkyboxId(sessionSkybox),
+      recording_map_material: normalizeRecordingMapMaterialId(sessionMapMaterial),
+      recording_weather_effect: normalizeRecordingWeatherEffectId(sessionWeatherEffect),
+      session_cs2_extra_launch_args: sessionCs2ExtraLaunchArgs,
+      session_record_inject_console_lines: sessionRecordInjectConsoleLines
+    };
+    if (onSaveSettings && !(await savePreferences())) return;
+    onConfirm(payload);
   };
-
   if (!open) return null;
-
-  const resSummaryRaw = formatResolutionSummary(
-    opts.aspect_ratio,
-    opts.resolution_width,
-    opts.resolution_height,
-  );
-  // formatResolutionSummary returns a "record.*" key when no actual resolution is set
-  const resSummaryDisplay = resSummaryRaw.startsWith("record.") ? t(resSummaryRaw) : resSummaryRaw;
-
-  const AR_TAGS = [
-    { ar: "4:3",   sample: "1920×1440", tagKey: "record.arTag43" },
-    { ar: "16:9",  sample: "1920×1080", tagKey: "record.arTag169" },
-    { ar: "16:10", sample: "1920×1200", tagKey: "record.arTag1610" },
-  ];
-
-  return (
-    <div
-      className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="record-warmup-title"
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
-    >
-      <div className="relative flex max-h-[min(96vh,1080px)] w-full max-w-[min(92vw,1400px)] flex-col overflow-hidden rounded-xl border border-cs2-border-subtle bg-cs2-bg-card shadow-2xl">
-        <button
-          type="button"
-          onClick={onClose}
-          className="absolute right-3 top-3 z-10 rounded-md p-1.5 text-cs2-text-muted hover:bg-cs2-bg-input/50 hover:text-cs2-text-secondary"
-          aria-label={t("record.warmupArClose")}
-        >
-          <X className="h-4 w-4" />
-        </button>
-
-        <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden p-6 pb-4 @container/params">
-        <h2 id="record-warmup-title" className="mb-1 pr-8 text-lg font-bold tracking-tight text-cs2-text-primary">
-          {t("record.warmupTitle")}
-        </h2>
-        <p className="mb-5 text-xs leading-relaxed text-cs2-text-muted">
-          <span className="block text-cs2-text-muted">
-            {t("record.warmupIntroPersistNote")}
-          </span>
-        </p>
-
-        <div className="grid gap-4 lg:grid-cols-2 lg:items-start">
-          <div className="min-w-0 space-y-4">
-          <section aria-labelledby="sec-obs-fade">
-            <SectionHeader en="OBS Transition" zh={t("record.warmupSecObs")} />
-            <div id="sec-obs-fade" className="rounded-lg border border-cs2-border bg-cs2-bg-input/40 px-3 py-2.5">
-              <label className="flex cursor-pointer items-center gap-3">
-                <input
-                  type="checkbox"
-                  checked={obsTransEnabled === true}
-                  onChange={(e) => {
-                    const checked = e.target.checked;
-                    if (!checked) {
-                      setObsTransEnabled(null);
-                      return;
-                    }
-                    setObsTransEnabled(true);
-                    if (obsTransDurationMs == null || obsTransDurationMs === "") {
-                      setObsTransDurationMs(RECORD_WARMUP_DEFAULT_OBS_TRANSITION.durationMs);
-                    }
-                    if (!obsTransName) setObsTransName(RECORD_WARMUP_DEFAULT_OBS_TRANSITION.name);
-                  }}
-                  className="h-4 w-4 shrink-0 rounded border-cs2-border accent-cs2-orange"
-                />
-                <span className="text-sm text-cs2-text-primary">{t("record.warmupObsEnable")}</span>
-              </label>
-              <p className="mt-2 pl-7 text-xs leading-relaxed text-cs2-text-muted">
-                {t("record.warmupObsDesc")}
-              </p>
-              <div className="mt-2 flex flex-wrap items-center gap-2 pl-7">
-                <select
-                  value={obsTransName ?? ""}
-                  onChange={(e) => setObsTransName(e.target.value || null)}
-                  disabled={obsTransEnabled !== true}
-                  className="rounded border border-cs2-border bg-cs2-bg-input px-2 py-1.5 text-sm text-cs2-text-primary disabled:opacity-40"
-                >
-                  <option value="Fade">{t("record.warmupObsFade")}</option>
-                  <option value="Cut">{t("record.warmupObsCut")}</option>
-                  <option value="Swipe">{t("record.warmupObsSwipe")}</option>
-                </select>
-                <input
-                  type="number"
-                  min={0}
-                  max={2000}
-                  step={50}
-                  placeholder="200"
-                  value={obsTransDurationMs ?? ""}
-                  onChange={(e) => {
-                    const v = e.target.value;
-                    setObsTransDurationMs(v === "" ? null : Number(v));
-                  }}
-                  disabled={obsTransEnabled !== true}
-                  className="w-24 rounded border border-cs2-border bg-cs2-bg-input px-2 py-1.5 font-mono text-sm text-cs2-text-primary disabled:opacity-40"
-                />
-              </div>
+  const sessionWarmup = {
+    ...opts,
+    input_hud_enabled: sessionInputHudEnabled,
+    input_hud_position: sessionInputHudPosition,
+    input_hud_display_mode: sessionInputHudDisplayMode,
+    combat_stats_hud_enabled: sessionCombatStatsHudEnabled
+  };
+  const patchSessionWarmup = patch => {
+    set(patch);
+    const setters = {
+      input_hud_enabled: setSessionInputHudEnabled,
+      input_hud_position: setSessionInputHudPosition,
+      input_hud_display_mode: setSessionInputHudDisplayMode,
+      combat_stats_hud_enabled: setSessionCombatStatsHudEnabled
+    };
+    for (const [key, setter] of Object.entries(setters)) {
+      if (Object.hasOwn(patch, key)) setter(patch[key]);
+    }
+  };
+  return <div className="fixed inset-0 z-[100] flex items-center justify-center bg-cs2-bg-overlay p-4 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="record-warmup-title" onClick={event => {
+    if (!saving && event.target === event.currentTarget) onClose();
+  }}>
+      <div className="flex h-[min(92vh,1000px)] w-full max-w-[min(92vw,1400px)] flex-col overflow-hidden rounded-xl border border-cs2-border-subtle bg-cs2-bg-card shadow-2xl">
+        <header className="flex shrink-0 items-center justify-between border-b border-cs2-border-subtle px-6 py-4">
+          <h2 id="record-warmup-title" className="text-lg font-bold tracking-tight text-cs2-text-primary">{t("record.warmupTitle")}</h2>
+          <button type="button" onClick={onClose} disabled={saving} className="rounded-md p-1.5 text-cs2-text-muted hover:bg-cs2-bg-hover hover:text-cs2-text-primary" aria-label={t("record.warmupArClose")}><X className="h-4 w-4" /></button>
+        </header>
+        <p className="shrink-0 border-b border-cs2-border-subtle px-6 py-2 text-xs text-cs2-text-muted">{t("record.warmupSessionHint")}</p>
+        <fieldset disabled={saving} className="flex min-h-0 flex-1 flex-col sm:flex-row">
+          <nav aria-label={t("record.settingsNavLabel")} className="shrink-0 border-b border-cs2-border-subtle bg-cs2-bg-sidebar px-4 py-5 sm:w-48 sm:overflow-y-auto sm:border-b-0 sm:border-r">
+            <p className="mb-3 text-[13px] font-semibold text-cs2-text-primary">{t("record.warmupTitle")}</p>
+            <RecordingSectionMenu sections={RECORDING_SESSION_SECTIONS} activeSection={activeSection} onSelect={jumpToSection} className="ml-2 max-sm:flex-row max-sm:flex-wrap" />
+          </nav>
+          <div ref={scrollRef} data-testid="recording-session-scroll" className="min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-hidden @container/params" style={{
+          scrollbarGutter: "stable"
+        }}>
+            <div className="mx-auto w-full max-w-[1040px] px-5 pb-6 pt-5 sm:px-7" data-testid="recording-session-content">
+              {null}
+              <RecordingSettingsSections idPrefix="rw" visible={open} batchRecording={saving} saveDisabled={saving} warmupOpts={sessionWarmup} patchWarmup={patchSessionWarmup} warmupResolutionError={resolutionError} povEnabled={povEnabled} setPovEnabled={setSessionPovEnabled} skyboxId={sessionSkybox} setSkyboxId={setSessionSkybox} mapMaterialId={sessionMapMaterial} setMapMaterialId={setSessionMapMaterial} weatherEffectId={sessionWeatherEffect} setWeatherEffectId={setSessionWeatherEffect} obsTransEnabled={obsTransEnabled === true} setObsTransEnabled={enabled => {
+              setObsTransEnabled(enabled ? true : null);
+              if (enabled && obsTransDurationMs == null) setObsTransDurationMs(RECORD_WARMUP_DEFAULT_OBS_TRANSITION.durationMs);
+              if (enabled && !obsTransName) setObsTransName(RECORD_WARMUP_DEFAULT_OBS_TRANSITION.name);
+            }} obsTransName={obsTransName} setObsTransName={setObsTransName} obsTransDurationMs={obsTransDurationMs} setObsTransDurationMs={setObsTransDurationMs} obsTransitionDefaultDuration={RECORD_WARMUP_DEFAULT_OBS_TRANSITION.durationMs} localCs2ExtraLaunchArgs={sessionCs2ExtraLaunchArgs} setLocalCs2ExtraLaunchArgs={setSessionCs2ExtraLaunchArgs} localRecordInjectLines={sessionRecordInjectConsoleLines} setLocalRecordInjectLines={setSessionRecordInjectConsoleLines} experimentalContent={PLAYER_ALIAS_ENTRY_VISIBLE ? <PlayerAliasesSection demos={aliasDemos} value={aliasEditor} onChange={setAliasEditor} onReadyChange={setAliasesReady} disabled={saving} layout="rows" /> : null} />
+              {null}
             </div>
-          </section>
-
-          <section aria-labelledby="sec-visuals">
-            <SectionHeader en="Visuals & HUD" zh={t("record.warmupSecVisuals")} />
-            <p className="mb-3 text-[10px] font-semibold uppercase tracking-wider text-cs2-text-muted">{t("record.warmupVisualsSection")}</p>
-            <div id="sec-visuals" className="grid gap-3 sm:grid-cols-2">
-              <RecordingHudCard
-                title={t("record.hudSimplifyTitle")}
-                code="cl_draw_only_deathnotices true"
-                description={t("record.hudSimplifyDesc")}
-                checked={opts.cl_draw_only_deathnotices}
-                onChange={(v) => set({ cl_draw_only_deathnotices: v })}
-                outcomeOn={t("record.hudSimplifyOutcome")}
-                disabled={!!sessionPovEnabled}
-                disabledReason={POV_CONFLICT_HUD}
-              />
-              <RecordingHudCard
-                title={t("record.hudHideTargetTitle")}
-                code="hud_showtargetid 0"
-                description={t("record.hudHideTargetDesc")}
-                checked={opts.hud_showtargetid_hide}
-                onChange={(v) => set({ hud_showtargetid_hide: v })}
-                outcomeOn={t("record.hudHideTargetOutcome")}
-              />
-              <RecordingHudCard
-                title={t("record.hudHideClanTagsTitle")}
-                code="cl_show_clan_in_death_notice 0"
-                description={t("record.hudHideClanTagsDesc")}
-                checked={opts.hide_clan_tags}
-                onChange={(v) => set({ hide_clan_tags: v })}
-                outcomeOn={t("record.hudHideClanTagsOutcome")}
-              />
-              <RecordingHudCard
-                title={t("record.hudPersistentKillfeedTitle")}
-                description={t("record.hudPersistentKillfeedDesc")}
-                checked={opts.persistent_killfeed}
-                onChange={(v) => set({ persistent_killfeed: v })}
-              />
-              <RecordingHudCard
-                title={t("record.hudNoChatTitle")}
-                code="tv_nochat 1"
-                description={t("record.hudNoChatDesc")}
-                checked={opts.tv_nochat}
-                onChange={(v) => set({ tv_nochat: v })}
-                outcomeOn={t("record.hudNoChatOutcome")}
-              />
-              <RecordingHudCard
-                title={t("record.hudHideGrenadeTitle")}
-                code="sv_grenade_trajectory 0; …"
-                description={t("record.hudHideGrenadeDesc")}
-                checked={opts.hide_grenade_trajectory_pip}
-                onChange={(v) => set({ hide_grenade_trajectory_pip: v })}
-                outcomeOn={t("record.hudHideGrenadeOutcome")}
-              />
-            </div>
-
-            <div className="my-4 border-t border-cs2-border" />
-            <p className="mb-3 text-[10px] font-semibold uppercase tracking-wider text-cs2-text-muted">{t("record.warmupDemoSection")}</p>
-            <div className="space-y-4">
-              <RecordingHudCard
-                title={t("record.hudHideDemoUiTitle")}
-                code="sv_cheats 1 → demoui false"
-                description={t("record.hudHideDemoUiDesc")}
-                checked={opts.hide_demo_playback_ui}
-                onChange={(v) => set({ hide_demo_playback_ui: v })}
-                outcomeOn={t("record.hudHideDemoUiOutcome")}
-              />
-              <RecordingHudCard
-                title={t("record.hudXrayTitle")}
-                code="spec_show_xray 1 / 0"
-                description={t("record.hudXrayDesc")}
-                checked={opts.spec_show_xray}
-                onChange={(v) => set({ spec_show_xray: v })}
-                outcomeOn={t("record.hudXrayOutcome")}
-              />
-            </div>
-          </section>
-
-          <section aria-labelledby="sec-camera">
-            <SectionHeader en="Camera & Viewmodel" zh={t("record.warmupSecCamera")} />
-            <div id="sec-camera" className="space-y-4">
-              <div className="rounded-lg border border-cs2-border bg-cs2-bg-input/40 px-3 py-2.5">
-                <label className="flex cursor-pointer items-center gap-3">
-                  <input
-                    type="checkbox"
-                    checked={opts.apply_fov}
-                    onChange={(e) => set({ apply_fov: e.target.checked })}
-                    className="h-4 w-4 shrink-0 rounded border-cs2-border accent-cs2-orange"
-                  />
-                  <span className="text-sm text-cs2-text-primary">
-                    {t("record.warmupFovLabel")}
-                  </span>
-                </label>
-                <div className="mt-2 flex items-center gap-2 pl-7">
-                  <input
-                    type="number"
-                    min={60}
-                    max={120}
-                    step={1}
-                    value={opts.fov_cs_debug}
-                    onChange={(e) => {
-                      if (e.target.value === "") return;
-                      const n = parseInt(e.target.value, 10);
-                      set({ fov_cs_debug: Number.isNaN(n) ? 90 : Math.min(120, Math.max(60, n)) });
-                    }}
-                    disabled={!opts.apply_fov}
-                    className="w-24 rounded border border-cs2-border bg-cs2-bg-input px-2 py-1.5 font-mono text-sm text-cs2-text-primary disabled:opacity-40"
-                  />
-                  <span className="text-xs text-cs2-text-muted">{t("record.warmupFovDefault")}</span>
-                </div>
-                {opts.apply_fov ? (
-                  <p className="mt-2 border-t border-cs2-border pt-2 pl-7 text-[11px] leading-relaxed text-cs2-emerald-on-surface">
-                    {t("record.warmupFovOutcome")}
-                  </p>
-                ) : null}
-              </div>
-              <OptionRow
-                checked={opts.viewmodel_fov_68}
-                onChange={(v) => set({ viewmodel_fov_68: v })}
-                title={t("record.warmupViewmodelTitle")}
-                code="viewmodel_fov 68"
-              />
-              {opts.viewmodel_fov_68 ? (
-                <p className="-mt-1 ml-1 text-[11px] leading-relaxed text-emerald-400/85">
-                  {t("record.warmupViewmodelOutcome")}
-                </p>
-              ) : null}
-              <OptionRow
-                checked={opts.third_person_camera}
-                onChange={(v) => set({ third_person_camera: v })}
-                title={t("record.warmupThirdPersonTitle")}
-                code="cam_command 1; cam_idealdist 30; c_thirdpersonshoulder 1"
-              />
-              {opts.third_person_camera ? (
-                <p className="-mt-1 ml-1 text-[11px] leading-relaxed text-emerald-400/85">
-                  {t("record.commonThirdPersonOutcome")}
-                </p>
-              ) : null}
-              <div className="rounded-lg border border-cs2-border bg-cs2-bg-input/40 px-3 py-2.5">
-                <label
-                  className={`flex items-center gap-3 ${
-                    sessionPovEnabled ? "cursor-not-allowed opacity-60" : "cursor-pointer"
-                  }`}
-                >
-                  <input
-                    type="checkbox"
-                    checked={sessionPovEnabled || opts.apply_spectator_flashbang_opacity}
-                    disabled={sessionPovEnabled}
-                    onChange={(e) => set({ apply_spectator_flashbang_opacity: e.target.checked })}
-                    className="h-4 w-4 shrink-0 rounded border-cs2-border accent-cs2-orange disabled:opacity-50"
-                  />
-                  <span className="text-sm text-cs2-text-primary">
-                    {t("record.warmupFlashLabel")}
-                  </span>
-                </label>
-                <div className="mt-2 flex items-center gap-2 pl-7">
-                  <input
-                    type="number"
-                    min={0.2}
-                    max={1}
-                    step={0.1}
-                    value={sessionPovEnabled ? 1 : opts.spectator_flashbang_opacity}
-                    onChange={(e) => {
-                      if (e.target.value === "") return;
-                      const n = parseFloat(e.target.value, 10);
-                      set({
-                        spectator_flashbang_opacity: Number.isNaN(n)
-                          ? SPECTATOR_FLASHBANG_OPACITY_DEFAULT
-                          : Math.min(1, Math.max(0.2, n)),
-                      });
-                    }}
-                    disabled={sessionPovEnabled || !opts.apply_spectator_flashbang_opacity}
-                    className="w-24 rounded border border-cs2-border bg-cs2-bg-input px-2 py-1.5 font-mono text-sm text-cs2-text-primary disabled:opacity-40"
-                  />
-                  <span className="text-xs text-cs2-text-muted">{t("record.warmupFlashRange")}</span>
-                </div>
-                {sessionPovEnabled ? (
-                  <p className="mt-2 border-t border-cs2-border pt-2 pl-7 text-[11px] leading-relaxed text-cs2-amber-on-surface">
-                    {t("record.warmupFlashPovActive")}
-                  </p>
-                ) : opts.apply_spectator_flashbang_opacity ? (
-                  <p className="mt-2 border-t border-cs2-border pt-2 pl-7 text-[11px] leading-relaxed text-cs2-emerald-on-surface">
-                    {t("record.warmupFlashOutcome")}
-                  </p>
-                ) : null}
-              </div>
-            </div>
-          </section>
-
-          <section aria-labelledby="sec-launch">
-            <SectionHeader en="Launch & console" zh={t("record.warmupSecLaunch")} />
-            <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-cs2-text-muted">
-              {t("record.warmupCmdLabel")}
-            </p>
-            <Cs2LaunchConsoleFields
-              cs2ExtraLaunchArgs={sessionCs2ExtraLaunchArgs}
-              onCs2ExtraLaunchArgsChange={setSessionCs2ExtraLaunchArgs}
-              recordInjectConsoleLines={sessionRecordInjectConsoleLines}
-              onRecordInjectConsoleLinesChange={setSessionRecordInjectConsoleLines}
-              omitConsoleHint
-            />
-          </section>
           </div>
-
-          <div className="min-w-0 space-y-4">
-          <ExperimentalPovSection
-            visible={open}
-            experimentalPovEnabled={sessionPovEnabled}
-            onExperimentalPovChange={setSessionPovEnabled}
-            povTeamcounterNumeric={opts.pov_teamcounter_numeric}
-            onPovTeamcounterNumericChange={(v) => set({ pov_teamcounter_numeric: v })}
-            povVoiceMode={opts.pov_voice_mode}
-            onPovVoiceModeChange={(v) => set({ pov_voice_mode: v })}
-            inputHudEnabled={sessionInputHudEnabled}
-            inputHudPosition={sessionInputHudPosition}
-            inputHudDisplayMode={sessionInputHudDisplayMode}
-            onInputHudEnabledChange={setSessionInputHudEnabled}
-            onInputHudPositionChange={setSessionInputHudPosition}
-            onInputHudDisplayModeChange={setSessionInputHudDisplayMode}
-            recordingSkybox={sessionSkybox}
-            onRecordingSkyboxChange={setSessionSkybox}
-            recordingMapMaterial={sessionMapMaterial}
-            onRecordingMapMaterialChange={setSessionMapMaterial}
-            recordingWeatherEffect={sessionWeatherEffect}
-            onRecordingWeatherEffectChange={setSessionWeatherEffect}
-            contentAfterVoice={PLAYER_ALIAS_ENTRY_VISIBLE ? (
-              <PlayerAliasesSection
-                demos={aliasDemos}
-                value={aliasEditor}
-                onChange={setAliasEditor}
-                onReadyChange={setAliasesReady}
-                compact
-              />
-            ) : null}
-            omitDisclaimer
-          />
-
-          {/* Live KDA / damage is temporarily hidden while the VPK presentation is revised.
-          <section aria-labelledby="sec-combat-stats">
-            <SectionHeader en="In-game stats" zh={t("record.warmupSecCombatStats")} />
-            <div
-              id="sec-combat-stats"
-              data-testid="record-combat-stats-option"
-              className={`rounded-lg border border-cs2-border bg-cs2-bg-input/40 px-3 py-3 ${sessionPovEnabled ? "" : "opacity-55"}`}
-            >
-              <label className={`flex items-start gap-2 ${sessionPovEnabled ? "cursor-pointer" : "cursor-not-allowed opacity-45"}`}>
-                <input
-                  type="checkbox"
-                  aria-label={t("record.warmupCombatStatsEnable")}
-                  checked={sessionCombatStatsHudEnabled}
-                  disabled={!sessionPovEnabled}
-                  onChange={(event) => setSessionCombatStatsHudEnabled(event.target.checked)}
-                  className="mt-0.5 h-3.5 w-3.5 rounded border-cs2-border accent-cs2-orange disabled:opacity-50"
-                />
-                <span className="min-w-0">
-                  <span className="block text-xs font-semibold text-cs2-text-primary">
-                    {t("record.warmupCombatStatsEnable")}
-                  </span>
-                  <span className="mt-0.5 block text-[10px] leading-relaxed text-cs2-text-muted">
-                    {t("record.warmupCombatStatsDesc")}
-                  </span>
-                </span>
-              </label>
-            </div>
-          </section>
-          */}
-
-          <section aria-labelledby="sec-audio">
-            <SectionHeader en="Recording canvas" zh={t("record.warmupSecAudio")} />
-            <div id="sec-audio" className="space-y-2">
-              <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-cs2-text-muted">
-                {t("record.warmupResSection")}
-              </p>
-              <div
-                className={`rounded-xl border px-4 py-4 ${
-                  resolutionError
-                    ? "border-rose-500/45 bg-cs2-rose-surface"
-                    : "border-cs2-border bg-cs2-bg-input/50"
-                }`}
-              >
-                <div className="mb-4 grid gap-3 sm:grid-cols-3">
-                  {AR_TAGS.map(({ ar, sample, tagKey }) => {
-                    const selected = opts.aspect_ratio === ar;
-                    return (
-                      <button
-                        key={ar}
-                        type="button"
-                        onClick={() => set({ aspect_ratio: ar })}
-                        className={`rounded-lg border px-3 py-2.5 text-left transition-colors ${
-                          selected
-                            ? "border-cs2-accent/60 bg-cs2-accent/10"
-                            : "border-cs2-border bg-cs2-bg-input/40 hover:border-cs2-border"
-                        }`}
-                      >
-                        <p className="font-mono text-lg font-bold text-cs2-text-primary">{ar}</p>
-                        <p className="mt-1 font-mono text-[11px] text-cs2-text-secondary">{sample}</p>
-                        <p className="mt-1 text-[10px] text-cs2-text-muted">{t(tagKey)}</p>
-                      </button>
-                    );
-                  })}
-                </div>
-
-                <label className="mb-3 block">
-                  <span className="mb-1 block text-[11px] text-cs2-text-muted">
-                    {t("record.warmupResAspectLabel")}
-                  </span>
-                  <select
-                    value={opts.aspect_ratio}
-                    onChange={(e) => set({ aspect_ratio: e.target.value })}
-                    className="w-full max-w-md rounded border border-cs2-border bg-cs2-bg-input px-2 py-1.5 font-mono text-sm text-cs2-text-primary outline-none focus:border-cs2-accent/50"
-                  >
-                    <option value="">{t("record.warmupResAspectNone")}</option>
-                    <option value="4:3">4 : 3</option>
-                    <option value="16:9">16 : 9</option>
-                    <option value="16:10">16 : 10</option>
-                  </select>
-                </label>
-
-                <div className="mb-3 rounded-lg border border-cs2-border bg-cs2-bg-input/40 px-3 py-2.5">
-                  <p className="text-[10px] uppercase tracking-wide text-cs2-text-muted">{t("record.warmupResCurrentLabel")}</p>
-                  <p className="mt-1 text-sm text-cs2-text-primary">
-                    {t("record.warmupResAspectPrefix")}{" "}
-                    <span className="font-mono text-cs2-accent">
-                      {opts.aspect_ratio || t("record.warmupResAspectUnset")}
-                    </span>
-                    {" · "}
-                    {t("record.warmupResValuePrefix")}{" "}
-                    <span className="font-mono text-cs2-text-secondary">
-                      {resSummaryDisplay}
-                    </span>
-                  </p>
-                  <p className="mt-1 text-[11px] leading-relaxed text-cs2-text-muted">
-                    {t(aspectHint(opts.aspect_ratio))}
-                  </p>
-                  <p className="mt-1 text-[11px] leading-relaxed text-cs2-text-muted">
-                    {t("record.warmupResExportPrefix")}{t(aspectExportHint(opts.aspect_ratio))}
-                  </p>
-                </div>
-
-                <p className="mb-2 text-[11px] text-cs2-text-secondary">
-                  {t("record.warmupResLaunchParamsHint")}
-                </p>
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="font-mono text-xs text-cs2-text-muted">-w</span>
-                  <input
-                    type="text"
-                    inputMode="numeric"
-                    value={opts.resolution_width}
-                    onChange={(e) => set({ resolution_width: e.target.value })}
-                    className="w-24 rounded border border-cs2-border bg-cs2-bg-input px-2 py-1.5 font-mono text-sm text-cs2-text-primary placeholder:text-cs2-text-muted"
-                  />
-                  <span className="font-mono text-xs text-cs2-text-muted">-h</span>
-                  <input
-                    type="text"
-                    inputMode="numeric"
-                    value={opts.resolution_height}
-                    onChange={(e) => set({ resolution_height: e.target.value })}
-                    className="w-24 rounded border border-cs2-border bg-cs2-bg-input px-2 py-1.5 font-mono text-sm text-cs2-text-primary placeholder:text-cs2-text-muted"
-                  />
-                </div>
-                {resolutionError ? (
-                  <p className="mt-2 text-[11px] leading-snug text-rose-400">{resolutionError}</p>
-                ) : (
-                  <p className="mt-2 text-[12px] leading-relaxed text-cs2-text-muted">
-                    {t("record.warmupResLeaveBlankHint")}
-                  </p>
-                )}
-              </div>
-            </div>
-          </section>
-
-          </div>
-        </div>
-
-        </div>
+        </fieldset>
 
         <div className="flex shrink-0 flex-col gap-2 border-t border-cs2-border bg-cs2-bg-input/60 px-6 py-4 sm:flex-row sm:items-center sm:justify-end">
+          {saveMessage ? <p role="status" className="text-xs text-cs2-text-secondary">{saveMessage}</p> : null}
           <div className="flex justify-end gap-2">
-            <button
-              type="button"
-              onClick={onClose}
-              className="rounded-lg border border-cs2-border px-4 py-2 text-sm font-semibold text-cs2-text-secondary hover:bg-cs2-bg-input/50"
-            >
+            {onSaveSettings ? <button type="button" onClick={savePreferences} disabled={saving} className="rounded-lg border border-cs2-border px-4 py-2 text-sm font-semibold text-cs2-text-secondary disabled:opacity-45">
+              {t(saving ? "record.settingsSaving" : "record.saveSettings")}
+            </button> : null}
+            <button type="button" onClick={onClose} disabled={saving} className="rounded-lg border border-cs2-border px-4 py-2 text-sm font-semibold text-cs2-text-secondary hover:bg-cs2-bg-input/50">
               {t("record.warmupBtnCancel")}
             </button>
-            <button
-              type="button"
-              onClick={handleSubmit}
-              disabled={Boolean(resolutionError) || aliasesBlocked}
-              className="rounded-lg bg-cs2-accent px-4 py-2 text-sm font-extrabold text-cs2-text-on-accent hover:bg-cs2-accent-light disabled:cursor-not-allowed disabled:opacity-45"
-            >
+            <button type="button" onClick={handleSubmit} disabled={saving || Boolean(resolutionError) || aliasesBlocked || false} className="rounded-lg bg-cs2-accent px-4 py-2 text-sm font-extrabold text-cs2-text-on-accent hover:bg-cs2-accent-light disabled:cursor-not-allowed disabled:opacity-45">
               {t("record.warmupBtnStart")}
             </button>
           </div>
         </div>
       </div>
-    </div>
-  );
+    </div>;
 }

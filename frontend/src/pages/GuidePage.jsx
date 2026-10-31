@@ -15,12 +15,12 @@ export default function GuidePage() {
     <div className="flex h-full min-h-0 w-full flex-col overflow-y-auto px-4 py-4 sm:px-5">
       <AnnouncementBanner items={announcements} />
       {/* header */}
-      <div className="mb-5 shrink-0 border-b border-white/10 pb-4">
+      <div className="mb-5 shrink-0 border-b border-cs2-border-subtle pb-4">
         <div className="flex items-center gap-2">
           <BookOpen className="h-5 w-5 text-cs2-orange" />
-          <h1 className="text-xl font-bold text-dynamic-white">{t("guide.pageTitle")}</h1>
+          <h1 className="text-xl font-bold text-cs2-text-primary">{t("guide.pageTitle")}</h1>
         </div>
-        <p className="mt-1.5 max-w-2xl text-[12px] leading-relaxed text-zinc-500">
+        <p className="mt-1.5 max-w-2xl text-[12px] leading-relaxed text-cs2-text-muted">
           {t("guide.pageSubtitle")}
         </p>
       </div>

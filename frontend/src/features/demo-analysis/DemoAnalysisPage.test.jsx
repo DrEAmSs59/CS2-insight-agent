@@ -1,4 +1,5 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { useState } from "react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import { AppShellProvider } from "../../context/AppShellContext";
@@ -6,6 +7,13 @@ import DemoAnalysisPage from "./DemoAnalysisPage";
 import API from "../../api/api";
 import { useLocaleStore } from "../../i18n/localeStore.js";
 import { useReplayStore } from "./replay/replayStore";
+
+const cosmeticsModuleGate = vi.hoisted(() => ({ ready: Promise.resolve() }));
+
+vi.mock("./cosmetics/CosmeticsView", async (importOriginal) => {
+  await cosmeticsModuleGate.ready;
+  return importOriginal();
+});
 
 vi.mock("../../api/api", () => ({
   getDemoRadarMapUrl: vi.fn((mapName, layer = "") => `http://127.0.0.1:19871/api/demo/radar-map/${mapName}${layer ? `?layer=${layer}` : ""}`),
@@ -978,30 +986,43 @@ describe("DemoAnalysisPage Insight Agent flow", () => {
     }));
 
     expect(screen.getByText("已按设置中的 AI 洞察模式，为 ZywOo 生成锐评。")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "回合时间线" }));
+    fireEvent.click(screen.getByRole("button", { name: /^回合时间线/ }));
     expect(screen.queryByText("已按设置中的 AI 洞察模式，为 ZywOo 生成锐评。")).toBeNull();
   });
 
-  test("uses large highlight choices and keeps tags collapsed by default", () => {
+  test("uses large highlight choices and keeps extra tags collapsed by default", () => {
     useLocaleStore.getState().hydrate("en");
+    const tags = ["双杀", "三杀", "四杀", "首杀", "爆头", "盲狙", "穿墙杀", "混烟", "1v1 斗牛", "ECO翻盘"];
+    const clips = tags.map((tag, index) => ({
+      client_clip_uid: `clip-${index}`,
+      category: "highlight",
+      round: index + 1,
+      start_tick: 100,
+      end_tick: 400,
+      context_tags: [tag],
+    }));
     renderPage(buildShell({
       currentActivePlayer: "ZywOo",
-      currentParsed: { players: { ZywOo: { clips: [], match_meta: {} } } },
+      currentParsed: { players: { ZywOo: { clips, match_meta: {} } } },
       parsedPlayerNames: ["ZywOo"],
+      clips,
     }));
 
-    expect(screen.queryByText("Highlight view")).toBeNull();
+    const modes = screen.getByTestId("analysis-highlight-modes");
+    expect(within(modes).getAllByRole("button")).toHaveLength(3);
+    expect(within(modes).getByRole("button", { name: /^Clips/ }).getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getByTestId("analysis-queue-tip")).toBeTruthy();
     const tagToggle = screen.getByRole("button", { name: "Expand Tags" });
     expect(tagToggle.getAttribute("aria-expanded")).toBe("false");
     expect(screen.queryByTestId("highlight-tag-options")).toBeNull();
     fireEvent.click(tagToggle);
-    expect(screen.getByTestId("highlight-tag-options")).toBeTruthy();
+    expect(within(screen.getByTestId("highlight-tag-options")).getAllByRole("button")).toHaveLength(2);
     expect(screen.getByRole("button", { name: "Collapse Tags" }).getAttribute("aria-expanded")).toBe("true");
-    fireEvent.click(screen.getByRole("button", { name: "Round timeline" }));
+    fireEvent.click(within(modes).getByRole("button", { name: /^Round timeline/ }));
     expect(screen.queryByTestId("highlight-tag-options")).toBeNull();
   });
 
-  test("pins full-match compilation tags outside the collapsed tag list", () => {
+  test("lists full-match compilations as cards with explicit queue buttons", () => {
     const clips = [
       {
         client_clip_uid: "regular-highlight",
@@ -1018,7 +1039,7 @@ describe("DemoAnalysisPage Insight Agent flow", () => {
         start_tick: 100,
         end_tick: 900,
         source_ticks: [[100, 200], [500, 600]],
-        context_tags: ["🎬 全部击杀"],
+        context_tags: ["🎬 全部击杀", "🎯 ZywOo × 25"],
       },
       {
         client_clip_uid: "all-deaths",
@@ -1045,22 +1066,53 @@ describe("DemoAnalysisPage Insight Agent flow", () => {
       currentParsed: { players: { ZywOo: { clips, match_meta: {} } } },
       parsedPlayerNames: ["ZywOo"],
       clips,
-      freezeToDeathDraft: { picked: [1, 2] },
+      freezeToDeathDraft: { picked: [] },
+      queuedClientClipUidsForCurrentDemo: new Set(["all-deaths"]),
+      handleAddClipToQueue: vi.fn(),
     });
     const view = renderPage(shell);
 
-    const pinnedTags = screen.getByTestId("analysis-pinned-compilation-tags");
-    expect(within(pinnedTags).getByRole("button", { name: /全部击杀/ })).toBeTruthy();
-    expect(within(pinnedTags).getByRole("button", { name: /全部死亡/ })).toBeTruthy();
-    expect(within(pinnedTags).getByRole("button", { name: /回合合集/ })).toBeTruthy();
-    expect(screen.queryByText("快捷合集")).toBeNull();
+    const packs = screen.getByTestId("analysis-compilation-packs");
+    const quickQueue = screen.getByRole("region", { name: "快速入队" });
+    expect(quickQueue.compareDocumentPosition(packs) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(within(packs).getByText("全部击杀")).toBeTruthy();
+    expect(within(packs).getByText("ZywOo × 25")).toBeTruthy();
+    fireEvent.click(within(packs).getAllByRole("button", { name: "加入队列" })[0]);
+    expect(shell.handleAddClipToQueue).toHaveBeenCalledWith("all-kills");
+    fireEvent.click(within(packs).getByRole("button", { name: /已加入，点击移出录制队列/ }));
+    expect(shell.handleDequeueClip).toHaveBeenCalledWith("all-deaths");
 
-    fireEvent.click(within(pinnedTags).getByRole("button", { name: /全部击杀/ }));
-    expect(view.container.querySelectorAll(".analysis-list-surface [data-category='compilation']")).toHaveLength(1);
-    expect(view.container.querySelectorAll(".analysis-list-surface [data-category='highlight']")).toHaveLength(0);
+    expect(view.container.querySelectorAll(".analysis-list-surface [data-category='compilation']")).toHaveLength(0);
+    expect(view.container.querySelectorAll(".analysis-list-surface [data-category='highlight']")).toHaveLength(1);
+    expect(within(screen.getByTestId("analysis-tag-filters")).queryByRole("button", { name: /全部击杀/ })).toBeNull();
 
-    fireEvent.click(within(pinnedTags).getByRole("button", { name: /回合合集/ }));
-    expect(screen.getByTitle("第 1 回合")).toBeTruthy();
+    fireEvent.click(within(packs).getByRole("button", { name: /选择回合/ }));
+    const picker = screen.getByTestId("analysis-round-picker");
+    expect(within(picker).getByRole("button", { name: /加入队列（0 个回合）/ }).disabled).toBe(true);
+    fireEvent.click(within(picker).getByTitle("第 1 回合"));
+    expect(shell.setFreezeToDeathDraft).toHaveBeenCalledWith({ picked: [1] });
+  });
+
+  test("adds a single clip from its card and filters by a clicked tag", () => {
+    const clips = [
+      { client_clip_uid: "a", category: "highlight", round: 1, start_tick: 1, end_tick: 2, context_tags: ["首杀"] },
+      { client_clip_uid: "b", category: "highlight", round: 2, start_tick: 1, end_tick: 2, context_tags: ["爆头"] },
+    ];
+    const shell = buildShell({
+      currentActivePlayer: "ZywOo",
+      currentParsed: { players: { ZywOo: { clips, match_meta: {} } } },
+      parsedPlayerNames: ["ZywOo"],
+      clips,
+      handleAddClipToQueue: vi.fn(),
+    });
+    const view = renderPage(shell);
+    const list = view.container.querySelector(".analysis-list-surface");
+    fireEvent.click(within(list).getAllByRole("button", { name: "加入队列" })[1]);
+    expect(shell.handleAddClipToQueue).toHaveBeenCalledWith("b");
+
+    fireEvent.click(within(list).getByRole("button", { name: "首杀" }));
+    expect(view.container.querySelectorAll(".analysis-list-surface [data-category='highlight']")).toHaveLength(1);
+    expect(screen.getByText("「首杀」1 个")).toBeTruthy();
   });
 
   test("keeps analysis content expanded without nested collapse controls", () => {
@@ -1077,7 +1129,7 @@ describe("DemoAnalysisPage Insight Agent flow", () => {
       }],
     }));
 
-    fireEvent.click(screen.getByRole("button", { name: "Round timeline" }));
+    fireEvent.click(screen.getByRole("button", { name: /^Round timeline/ }));
     expect(screen.getByTestId("round-timeline-item")).toBeTruthy();
     expect(screen.queryByText("Click to expand")).toBeNull();
     expect(screen.queryByText("Collapse round")).toBeNull();
@@ -1109,8 +1161,10 @@ describe("DemoAnalysisPage Insight Agent flow", () => {
     expect(screen.queryByRole("heading", { name: /第 2 回合/ })).toBeNull();
   });
 
-  test("keeps the complete clip action bar inside the main analysis view", () => {
-    renderPage(buildShell({
+  test("keeps selection actions docked and moves bulk queue actions into quick queue", () => {
+    const shell = buildShell({
+      currentParsed: { players: { ZywOo: { clips: [], match_meta: {} } } },
+      parsedPlayerNames: ["ZywOo"],
       clips: [{
         client_clip_uid: "clip-1",
         category: "highlight",
@@ -1124,7 +1178,8 @@ describe("DemoAnalysisPage Insight Agent flow", () => {
       regularSelectableTotal: 1,
       canAddCurrentPlayerHighlights: true,
       canAddCurrentPlayerFails: true,
-    }));
+    });
+    const view = renderPage(shell);
 
     const dockedActionBar = screen.getByTestId("clip-selection-action-bar");
     expect(dockedActionBar.getAttribute("data-compact")).toBe("false");
@@ -1137,12 +1192,24 @@ describe("DemoAnalysisPage Insight Agent flow", () => {
     expect(selectAll.closest('[data-testid="analysis-main-panel"]')).toBeTruthy();
     expect(deselectAll.closest('[data-testid="analysis-main-panel"]')).toBeTruthy();
     expect(screen.queryByTestId("analysis-right-panel")).toBeNull();
-    expect(addPlayerHighlights.className).toContain("bg-cs2-accent");
-    expect(addPlayerFails.className).toContain("bg-rose-500/10");
     expect(addPlayerHighlights.compareDocumentPosition(addPlayerFails) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    const quickQueue = screen.getByRole("region", { name: "快速入队" });
+    expect(within(quickQueue).getByText("全部高光")).toBeTruthy();
+    expect(within(quickQueue).getByText("全部下饭")).toBeTruthy();
+    expect(quickQueue.contains(addPlayerHighlights)).toBe(true);
+    expect(quickQueue.contains(addPlayerFails)).toBe(true);
+    expect(dockedActionBar.contains(addPlayerHighlights)).toBe(false);
+    expect(dockedActionBar.contains(addPlayerFails)).toBe(false);
+    fireEvent.click(addPlayerHighlights);
+    fireEvent.click(addPlayerFails);
+    expect(shell.handleAddCurrentPlayerHighlights).toHaveBeenCalledTimes(1);
+    expect(shell.handleAddCurrentPlayerFails).toHaveBeenCalledTimes(1);
+    view.rerender(<MemoryRouter><AppShellProvider value={{ ...shell, batchRecording: true }}><DemoAnalysisPage /></AppShellProvider></MemoryRouter>);
+    expect(addPlayerHighlights.disabled).toBe(true);
+    expect(addPlayerFails.disabled).toBe(true);
   });
 
-  test("uses the roster nickname in the action bar for SteamID-backed player keys", async () => {
+  test("uses the roster nickname in quick queue for SteamID-backed player keys", async () => {
     const steamId = "76561198981861845";
     const playerKey = `steamid:${steamId}`;
     const clip = {
@@ -1173,10 +1240,63 @@ describe("DemoAnalysisPage Insight Agent flow", () => {
     await waitFor(() => expect(API.get).toHaveBeenCalledWith("/steam/player-avatars", {
       params: { steam_ids: steamId },
     }));
-    const actionBar = screen.getByTestId("clip-selection-action-bar");
-    expect(actionBar.textContent).toContain("Hhippo");
-    expect(actionBar.textContent).not.toContain("steamid:");
-    expect(actionBar.textContent).not.toContain(steamId);
+    const quickQueue = screen.getByRole("region", { name: "快速入队" });
+    expect(quickQueue.textContent).toContain("Hhippo");
+    expect(quickQueue.textContent).not.toContain("steamid:");
+    expect(quickQueue.textContent).not.toContain(steamId);
+  });
+
+  test("keeps restored cosmetics loading local while navigation and player data change", async () => {
+    let release;
+    cosmeticsModuleGate.ready = new Promise((resolve) => { release = resolve; });
+    sessionStorage.setItem("cs2-session-demo-analysis:C%3A%2Fdemos%2Fone.dem:tab", JSON.stringify("cosmetics"));
+    const shell = buildShell();
+    shell.players = shell.players.map((player, index) => ({ ...player, steam_id64: `7656119800000000${index + 1}` }));
+    function InteractivePage({ value }) {
+      const [activePlayers, setActivePlayers] = useState({});
+      return <MemoryRouter initialEntries={["/analysis"]}><AppShellProvider value={{ ...value, currentActivePlayer: activePlayers[value.currentMatchIndex] || "", setActivePlayerTabs: setActivePlayers }}><DemoAnalysisPage /></AppShellProvider></MemoryRouter>;
+    }
+    const view = render(<InteractivePage value={shell} />);
+    const contentCard = screen.getByTestId("analysis-view-content-card");
+    try {
+      expect(contentCard.contains(screen.getByLabelText("正在加载页面"))).toBe(true);
+      expect(screen.getByRole("button", { name: "饰品" }).getAttribute("aria-current")).toBe("page");
+
+      fireEvent.click(screen.getByRole("button", { name: "选择 flameZ" }));
+      fireEvent.click(screen.getByRole("button", { name: "概览" }));
+      expect(screen.getByLabelText("选择 flameZ").getAttribute("data-active")).toBe("true");
+      expect(screen.queryByLabelText("正在加载页面")).toBeNull();
+      const latestShell = { ...shell, analysisWorkspace: { ...shell.analysisWorkspace, players: shell.players, cosmetics: { players: {
+        [shell.players[1].steam_id64]: [{ catalog_id: 2002, def_index: 9, paint_index: 180, type: "weapon", name_zh: "AWP | 更新后的皮肤", name_en: "AWP | Updated finish", observed_teams: ["ct", "t"], catalog_exact: true, ownership_evidence: "demo_skin_table" }],
+      } } } };
+      view.rerender(<InteractivePage value={latestShell} />);
+    } finally {
+      await act(async () => {
+        release();
+        await vi.dynamicImportSettled();
+      });
+    }
+
+    expect(screen.getByRole("button", { name: "概览" }).getAttribute("aria-current")).toBe("page");
+    expect(screen.queryByTestId("cosmetics-view")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "饰品" }));
+    expect(within(await screen.findByTestId("cosmetics-view", {}, { timeout: 15000 })).getByRole("heading", { name: "flameZ" })).toBeTruthy();
+    expect(screen.getAllByText("更新后的皮肤").length).toBeGreaterThan(0);
+    expect(screen.getByTestId("analysis-view-content-card")).toBe(contentCard);
+    expect(API.get).toHaveBeenCalledWith("/demos/7/cosmetics/custom-plan", { params: { steamid: shell.players[1].steam_id64 } });
+  });
+
+  test("restores cosmetics with the first roster player and unmounts customization on tab changes", async () => {
+    sessionStorage.setItem("cs2-session-demo-analysis:C%3A%2Fdemos%2Fone.dem:tab", JSON.stringify("cosmetics"));
+    const shell = buildShell();
+    shell.players = shell.players.map((player, index) => ({ ...player, steam_id64: `7656119800000000${index + 1}` }));
+    renderPage(shell);
+    expect(within(await screen.findByTestId("cosmetics-view", {}, { timeout: 15000 })).getByRole("heading", { name: "ZywOo" })).toBeTruthy();
+    fireEvent.click(screen.getByTestId("cosmetics-customize"));
+    expect(screen.queryByTestId("cosmetics-customize")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "概览" }));
+    fireEvent.click(screen.getByRole("button", { name: "饰品" }));
+    expect(await screen.findByTestId("cosmetics-customize")).toBeTruthy();
   });
 
   test("renders the analysis entry and navigation in English", () => {

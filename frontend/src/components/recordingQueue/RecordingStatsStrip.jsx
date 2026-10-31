@@ -50,7 +50,7 @@ export default function RecordingStatsStrip({
       </div>
       {sep}
       <div className="flex items-baseline gap-1.5">
-        <span className="font-mono text-[18px] tabular-nums leading-none text-sky-300">{povSegmentCount}</span>
+        <span className="font-mono text-[18px] tabular-nums leading-none text-cs2-cyan-on-surface">{povSegmentCount}</span>
         <span className="text-[11px] leading-none text-cs2-text-muted">{t("queue.statPlayback")}</span>
       </div>
       {sep}
@@ -72,7 +72,7 @@ export default function RecordingStatsStrip({
       </span>
       {obsConfigured && obsConfigHasIssues === true && (
         <Link to="/obs-config-center">
-          <span className="rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-[11px] font-medium leading-none text-amber-300 hover:bg-amber-500/20 transition-colors">
+          <span className="rounded-full border border-cs2-amber-border bg-cs2-amber-surface px-2 py-0.5 text-[11px] font-medium leading-none text-cs2-amber-on-surface hover:bg-cs2-amber-surface transition-colors">
             {t("queue.obsNeedsFixing")}
           </span>
         </Link>

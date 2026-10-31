@@ -13,7 +13,7 @@ import {
 } from "./recordingWeatherEffect.js";
 import { isPovVoiceMode, normalizePovVoiceMode } from "./povVoiceMode.js";
 import { isInputHudPosition, normalizeInputHudPosition } from "./inputHudPlacement.js";
-import { limitRecordingPacing } from "./recordingPacing.js";
+import { limitRecordingPacing, MAX_RECORDING_MERGE_GAP_SECONDS } from "./recordingPacing.js";
 
 export const RECORDING_PRESET_FORMAT = "cs2-insight-recording-preset";
 export const RECORDING_PRESET_VERSION = 7;
@@ -24,7 +24,7 @@ const isObject = (value) => value !== null && typeof value === "object" && !Arra
 const PACING_NUMBER_RANGES = {
   pre_first_sec: [0, 20], // Accept legacy shares, then apply the current padding cap.
   post_last_sec: [0, 10],
-  max_gap_sec: [2, 70],
+  max_gap_sec: [2, MAX_RECORDING_MERGE_GAP_SECONDS],
   victim_pov_pre_sec: [0, 5],
   victim_pov_post_sec: [0, 5],
   killer_pov_pre_sec: [0, 5],

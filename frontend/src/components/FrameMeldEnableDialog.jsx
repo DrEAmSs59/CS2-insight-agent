@@ -123,7 +123,7 @@ function FrameMeldEnableDialogContent({ onConfirm, onCancel }) {
       open
       onClose={onCancel}
       title={t("frameMeld.enableDialog.title")}
-      icon={<AlertTriangle className="h-5 w-5 text-amber-400" aria-hidden="true" />}
+      icon={<AlertTriangle className="h-5 w-5 text-cs2-amber-on-surface" aria-hidden="true" />}
       maxWidth="max-w-2xl"
       maxHeight="max-h-[88vh]"
       fillHeight={false}
@@ -163,7 +163,7 @@ function FrameMeldEnableDialogContent({ onConfirm, onCancel }) {
           <span className="shrink-0 font-semibold text-cs2-text-primary">2.</span>
           <span>
             {t("frameMeld.enableDialog.item2Prefix")}
-            <strong className="font-bold text-red-400">{t("frameMeld.enableDialog.item2Emphasis")}</strong>
+            <strong className="font-bold text-cs2-rose-on-surface">{t("frameMeld.enableDialog.item2Emphasis")}</strong>
           </span>
         </li>
         {[3, 4, 5, 6].map((number) => (
@@ -172,7 +172,7 @@ function FrameMeldEnableDialogContent({ onConfirm, onCancel }) {
             <span>{t(`frameMeld.enableDialog.item${number}`)}</span>
           </li>
         ))}
-        <li className="flex gap-2 font-bold text-red-400">
+        <li className="flex gap-2 font-bold text-cs2-rose-on-surface">
           <span className="shrink-0">7.</span>
           <span>{t("frameMeld.enableDialog.item7")}</span>
         </li>
@@ -211,8 +211,8 @@ function FrameMeldEnableDialogContent({ onConfirm, onCancel }) {
         )
         : null}
 
-      <div className="mt-5 rounded-lg border border-red-500/25 bg-red-500/5 p-3.5">
-        <p className="text-xs font-bold text-red-400">{t("frameMeld.enableDialog.benchmarkTitle")}</p>
+      <div className="mt-5 rounded-lg border border-cs2-rose-border bg-cs2-rose-surface p-3.5">
+        <p className="text-xs font-bold text-cs2-rose-on-surface">{t("frameMeld.enableDialog.benchmarkTitle")}</p>
         <ul className="mt-2 space-y-1.5 text-[11px] leading-relaxed text-cs2-text-muted">
           {BENCHMARK_KEYS.map((key) => (
             <li key={key}>• {t(key)}</li>

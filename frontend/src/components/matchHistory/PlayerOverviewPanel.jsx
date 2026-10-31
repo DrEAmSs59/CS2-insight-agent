@@ -18,7 +18,7 @@ function StatCol({ label, value, sub }) {
     <div className="flex flex-col items-center gap-0.5 border-r border-cs2-border last:border-r-0 px-3 py-4">
       <div className="font-mono text-[22px] font-bold text-cs2-text-primary">{value}</div>
       {sub && (
-        <div className={`font-mono text-[11px] ${sub.startsWith("↑") ? "text-[#2eb86a]" : sub.startsWith("↓") ? "text-[#e0556a]" : "text-cs2-text-muted"}`}>
+        <div className={`font-mono text-[11px] ${sub.startsWith("↑") ? "text-cs2-emerald-on-surface" : sub.startsWith("↓") ? "text-cs2-rose-on-surface" : "text-cs2-text-muted"}`}>
           {sub}
         </div>
       )}
@@ -59,12 +59,12 @@ export default function PlayerOverviewPanel({ player, stats }) {
           {player.cs_rating > 0 && (
             <div
               className="mt-1 inline-flex items-center gap-1.5 rounded-[4px] border px-2 py-0.5 font-mono text-[11px] font-bold"
-              style={{ color: ratingColor, borderColor: ratingColor + "40", background: ratingColor + "18" }}
+              style={{ color: `color-mix(in srgb, ${ratingColor} var(--cs2-ink-mix), #000)`, borderColor: ratingColor + "40", background: ratingColor + "18" }}
             >
               CS RATING &nbsp;
               {player.cs_rating.toLocaleString()}
               {player.cs_rating_delta != null && (
-                <span style={{ color: player.cs_rating_delta >= 0 ? "#2eb86a" : "#e0556a" }}>
+                <span style={{ color: player.cs_rating_delta >= 0 ? "var(--cs2-emerald-on-surface)" : "var(--cs2-rose-on-surface)" }}>
                   {player.cs_rating_delta >= 0 ? " ▲" : " ▼"} {Math.abs(player.cs_rating_delta)}
                 </span>
               )}

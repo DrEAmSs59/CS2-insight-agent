@@ -602,7 +602,7 @@ export function MontageOrchestrationTimeline({
               <button
                 type="button"
                 onClick={onBulkRemove}
-                className="rounded-lg border border-rose-500/30 bg-rose-500 px-3 py-1.5 text-xs font-bold text-dynamic-white hover:bg-rose-600 transition-all shadow-sm"
+                className="rounded-lg border border-cs2-rose-border bg-rose-500 px-3 py-1.5 text-xs font-bold text-white hover:bg-rose-600 transition-all shadow-sm"
               >
                 {t("montage.orchBulkRemoveBtn", { n: multiCount })}
               </button>
@@ -723,7 +723,7 @@ export function MontageOrchestrationTimeline({
                       className={`relative flex cursor-grab gap-2.5 rounded-xl border p-3.5 text-left transition-all active:cursor-grabbing ${
                         inMulti
                           ? "border-cs2-accent bg-cs2-surface-2 shadow-glow-accent"
-                          : "border-rose-500/25 bg-rose-500/10 hover:border-rose-400/40"
+                          : "border-cs2-rose-border bg-cs2-rose-surface hover:border-cs2-rose-border"
                       } ${active ? "ring-2 ring-cs2-accent" : ""} ${dragging ? "opacity-40 scale-[0.99]" : ""}`}
                     >
                       <div className="absolute left-0 top-3 bottom-3 w-1.5 rounded-r-md bg-rose-400" />
@@ -731,7 +731,7 @@ export function MontageOrchestrationTimeline({
                       <div className="min-w-0 flex-1 pl-1">
                         <div className="flex items-center gap-2 flex-wrap">
                           <span className="font-mono text-xs font-semibold text-cs2-text-muted shrink-0">#{rowIndex}</span>
-                          <span className="inline-flex items-center gap-1 rounded-md bg-rose-500/20 px-2 py-0.5 text-xs font-bold uppercase tracking-wider text-rose-200">
+                          <span className="inline-flex items-center gap-1 rounded-md bg-cs2-rose-surface px-2 py-0.5 text-xs font-bold uppercase tracking-wider text-cs2-rose-on-surface">
                             <BarChart3 className="h-3 w-3" />
                             {t("radar.timelineChipLabel")}
                           </span>
@@ -739,7 +739,7 @@ export function MontageOrchestrationTimeline({
                             {radar?.playerName || t("radar.unknownPlayer")}
                           </span>
                           {radar?.orphan ? (
-                            <span className="rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-bold text-amber-200">
+                            <span className="rounded bg-cs2-amber-surface px-1.5 py-0.5 text-[10px] font-bold text-cs2-amber-on-surface">
                               {t("radar.timelineOrphan")}
                             </span>
                           ) : null}
@@ -767,7 +767,7 @@ export function MontageOrchestrationTimeline({
                           ev.stopPropagation();
                           onRemoveOne(id);
                         }}
-                        className="shrink-0 self-start rounded-lg p-2 text-cs2-text-muted hover:bg-rose-500/15 hover:text-rose-400 transition-colors"
+                        className="shrink-0 self-start rounded-lg p-2 text-cs2-text-muted hover:bg-cs2-rose-surface hover:text-cs2-rose-on-surface transition-colors"
                         aria-label={t("radar.segmentRemove")}
                       >
                         <Trash2 className="h-4 w-4" />
@@ -928,7 +928,7 @@ export function MontageOrchestrationTimeline({
                         ev.stopPropagation();
                         onRemoveOne(id);
                       }}
-                      className="shrink-0 self-start rounded-lg p-2 text-cs2-text-muted hover:bg-rose-500/15 hover:text-rose-400 transition-colors"
+                      className="shrink-0 self-start rounded-lg p-2 text-cs2-text-muted hover:bg-cs2-rose-surface hover:text-cs2-rose-on-surface transition-colors"
                       aria-label={t("montage.orchRemoveAriaLabel")}
                     >
                       <Trash2 className="h-4 w-4" />
@@ -1080,7 +1080,7 @@ export function MontageMaterialPoolCard({
                   e.stopPropagation();
                   onDelete(clip);
                 }}
-                className="rounded-lg p-1.5 text-cs2-text-muted opacity-0 transition-opacity hover:bg-rose-500/15 hover:text-rose-400 group-hover:opacity-100"
+                className="rounded-lg p-1.5 text-cs2-text-muted opacity-0 transition-opacity hover:bg-cs2-rose-surface hover:text-cs2-rose-on-surface group-hover:opacity-100"
               >
                 <Trash2 className="h-4 w-4" />
               </button>

@@ -170,7 +170,7 @@ export default function ExperimentalPovSection({
       </label>
       {experimentalPovEnabled ? (
         <p className="mt-2 text-[11px] leading-relaxed text-cs2-amber-on-surface">
-          {t("pov.enabledNote")}
+          {t("record.hudPovConflict")}
         </p>
       ) : null}
 

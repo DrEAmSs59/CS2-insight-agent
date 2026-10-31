@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import API from "../../../api/api";
 import { useT } from "../../../i18n/useT.js";
+import Cs2LoadingAnimation from "../../../components/Cs2LoadingAnimation.jsx";
 import {
   X,
   Search,
@@ -184,8 +185,8 @@ export default function IngestModal({ isOpen, onClose, onIngest }) {
             aria-busy="true"
             aria-label={t("dialog.ingestIngesting")}
           >
-            <div className="flex max-w-md items-center gap-3 rounded-lg border border-cs2-border bg-cs2-bg-elevated px-4 py-3 shadow-md">
-              <Loader2 className="h-5 w-5 shrink-0 animate-spin text-cs2-accent" />
+            <div className="flex max-w-md flex-col items-center gap-3 rounded-lg border border-cs2-border bg-cs2-bg-elevated px-6 py-5 text-center shadow-md">
+              <Cs2LoadingAnimation />
               <p className="text-[12px] font-semibold leading-relaxed text-cs2-text-primary">
                 {t("dialog.ingestIngestingMsg", { count: selectedIds.size })}
               </p>
@@ -252,7 +253,7 @@ export default function IngestModal({ isOpen, onClose, onIngest }) {
         <div className="flex-1 overflow-y-auto p-2">
           {listLoading ? (
             <div className="flex h-32 items-center justify-center">
-              <Loader2 className="h-6 w-6 animate-spin text-cs2-text-muted" />
+              <Cs2LoadingAnimation />
             </div>
           ) : listError ? (
             <div className="flex h-32 flex-col items-center justify-center gap-3 text-cs2-text-muted">

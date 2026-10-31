@@ -1,5 +1,6 @@
-import { Flame, Skull, Check, Clapperboard, Film, X } from "lucide-react";
+import { Flame, Skull, Check, Clapperboard, Film } from "lucide-react";
 import RoundMontageRoundPicker from "./RoundMontageRoundPicker";
+import QueueAddButton from "./QueueAddButton";
 import { describeTag, labelTag } from "../utils/tagDescriptions";
 import { isFreezeToDeathCompilation } from "../utils/freezeToDeathRoundFilter";
 import { isTimelineSourceClip } from "../utils/montageUtils";
@@ -26,7 +27,7 @@ export const CLIP_CATEGORY_CONFIG = {
     icon: Clapperboard,
     color: "text-cs2-fuchsia-on-surface",
     bgColor: "bg-cs2-fuchsia-surface",
-    borderColor: "border-cs2-fuchsia-surface",
+    borderColor: "border-cs2-fuchsia-border",
     labelKey: "clip.catMemeDeath",
   },
   compilation: {
@@ -55,7 +56,7 @@ export function AiScoreBadge({ score }) {
   if (n > 85) {
     return (
       <div
-        className="pointer-events-none select-none border-l-2 border-amber-400 bg-amber-500/10 px-2 py-1"
+        className="pointer-events-none select-none border-l-2 border-amber-400 bg-cs2-amber-surface px-2 py-1"
         aria-label={t("clip.aiScoreLabel", { n: rounded })}
       >
         <span className="whitespace-nowrap text-[10px] font-black tracking-tight text-cs2-amber-on-surface">
@@ -98,6 +99,9 @@ export default function ClipCard({
   aiMode = false,
   inQueue = false,
   onDequeue,
+  onEnqueue,
+  onTagClick,
+  activeTag = "",
   matchTotalRounds = 24,
   freezeToDeathDraft = { picked: [] },
   onFreezeToDeathDraftChange,
@@ -143,6 +147,8 @@ export default function ClipCard({
   const KILL_COUNT_TAGS = new Set(["双杀", "三杀", "四杀", "五杀 (ACE)"]);
   const killCountInTags = clip.context_tags?.some((tag) => KILL_COUNT_TAGS.has(tag)) ?? false;
 
+  const selectable = !inQueue && !ftdEnqueueBlocked && Boolean(clip.client_clip_uid);
+
   return (
     <article
       data-category={clip.category || "highlight"}
@@ -150,69 +156,42 @@ export default function ClipCard({
       data-disabled={inQueue || ftdEnqueueBlocked ? "true" : "false"}
       onClick={(event) => {
         if (event.target.closest("button, input, select, textarea, [role='button']")) return;
-        if (inQueue || ftdEnqueueBlocked || !clip.client_clip_uid) return;
+        if (!selectable) return;
         onToggle(clip.client_clip_uid);
       }}
-      className={`analysis-clip-row group ${
-        inQueue
-          ? "cursor-not-allowed opacity-[0.72]"
-          : ftdEnqueueBlocked
-            ? "cursor-not-allowed opacity-[0.85]"
-            : "cursor-pointer"
-      }`}
+      className={`analysis-clip-row group ${selectable ? "cursor-pointer" : ""}`}
     >
-      {showAiUi && hasAiScore && (
-        <div className="absolute right-11 top-3 z-10 max-w-[calc(100%-5.5rem)] sm:right-12">
-          <AiScoreBadge score={clip.ai_score} />
-        </div>
-      )}
-
-      {/* Selection / 队列状态 */}
-      {inQueue && onDequeue ? (
+      <div className="grid grid-cols-[24px_40px_minmax(0,1fr)] items-center gap-x-3 gap-y-2 px-3.5 py-3 sm:grid-cols-[24px_40px_minmax(0,1fr)_auto]">
         <button
           type="button"
-          aria-label={t("clip.dequeue")}
-          onClick={(e) => { e.stopPropagation(); onDequeue(); }}
-          className="absolute right-3 top-3 z-10 flex min-h-6 items-center gap-1 rounded-[4px] border border-cs2-border bg-cs2-bg-elevated px-2 text-[9px] font-bold uppercase tracking-wide text-cs2-text-secondary transition-colors hover:border-rose-500/60 hover:text-rose-400"
-        >
-          {t("clip.inQueue")}<X className="h-2.5 w-2.5" />
-        </button>
-      ) : (
-        <button
-          type="button"
-          disabled={inQueue || ftdEnqueueBlocked || !clip.client_clip_uid}
-          aria-label={inQueue ? t("clip.inQueue") : selected ? t("clip.deselect") : t("clip.select")}
-          aria-pressed={inQueue || selected}
+          role="checkbox"
+          disabled={!selectable}
+          aria-checked={inQueue || selected}
+          aria-label={selected ? t("clip.deselect") : t("clip.select")}
           onClick={(event) => {
             event.stopPropagation();
-            if (!inQueue && !ftdEnqueueBlocked && clip.client_clip_uid) onToggle(clip.client_clip_uid);
+            if (selectable) onToggle(clip.client_clip_uid);
           }}
-          className={`absolute right-3 top-3 z-10 flex h-6 w-6 items-center justify-center rounded-[4px] border transition-colors ${selected ? "border-cs2-accent bg-cs2-accent text-cs2-text-on-accent" : "border-cs2-border bg-cs2-bg-input text-cs2-text-muted hover:border-cs2-accent/55"}`}
+          className={`flex h-5 w-5 items-center justify-center rounded-[5px] border-[1.5px] transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
+            selected ? "border-cs2-accent bg-cs2-accent text-black" : "border-cs2-border bg-transparent hover:border-cs2-accent/60"
+          }`}
         >
-          {inQueue ? (
-            <Check className="h-3 w-3" />
-          ) : ftdEnqueueBlocked ? (
-            <span className="px-0.5 text-[8px] font-bold leading-none text-cs2-amber-on-surface/90">—</span>
-          ) : selected ? (
-            <Check className="h-3 w-3" />
-          ) : null}
+          {selected ? <Check className="h-3 w-3" strokeWidth={3} /> : null}
         </button>
-      )}
 
-      <div className="grid grid-cols-[48px_minmax(0,1fr)] gap-3 px-4 py-3.5">
-        <div className="flex flex-col items-center gap-1 border-r border-cs2-border-subtle pr-3 pt-0.5">
-          <Icon className={`h-4.5 w-4.5 ${cat.color}`} />
-          <span className={`text-[8px] font-bold tracking-[0.12em] ${cat.color}`}>{t(cat.labelKey)}</span>
+        <div className={`flex h-10 w-10 flex-col items-center justify-center gap-0.5 rounded-[9px] ${cat.bgColor} ${cat.color}`}>
+          <Icon className="h-4 w-4" aria-hidden />
+          <span className="text-[10px] font-semibold leading-none">{t(cat.labelKey)}</span>
         </div>
 
-        <div className="min-w-0 pr-7 sm:pr-9">
-          <div className="mb-1.5 flex flex-wrap items-center gap-x-2 gap-y-1">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
             {clip.category !== "compilation" && (
               <>
-                <span className="font-mono text-xs font-bold text-cs2-accent">{t("clip.roundLabel", { n: clip.round })}</span>
+                <span className="text-[13px] font-bold text-cs2-text-primary">{t("clip.roundLabel", { n: clip.round })}</span>
                 {clip.round_won != null && (
                   <span
-                    className={`text-[9px] font-black uppercase tracking-wide ${clip.round_won ? "text-cs2-emerald-on-surface" : "text-cs2-rose-on-surface"}`}
+                    className={`text-[11.5px] font-semibold ${clip.round_won ? "text-cs2-emerald-on-surface" : "text-cs2-rose-on-surface"}`}
                     title={clip.round_won ? t("clip.roundWonTitle") : t("clip.roundLostTitle")}
                   >
                     {clip.round_won ? t("clip.roundWon") : t("clip.roundLost")}
@@ -220,7 +199,7 @@ export default function ClipCard({
                 )}
                 {hasScore && (
                   <span
-                    className="inline-flex items-center gap-0.5 font-mono text-[10px] font-semibold tabular-nums"
+                    className="inline-flex items-center gap-0.5 font-mono text-[11px] font-semibold tabular-nums"
                     title={t("clip.scoreTitle")}
                   >
                     <span className="text-cs2-emerald-on-surface">{clip.score_own}</span>
@@ -232,11 +211,11 @@ export default function ClipCard({
             )}
             {clip.category === "compilation" && (
               <>
-                {isRoundMontage ? <span className="text-[10px] text-cs2-text-primary">
+                {isRoundMontage ? <span className="text-[12px] text-cs2-text-primary">
                   {t("ftd.selectedRounds", { n: ftdPicked.length })}
                 </span> : Array.isArray(clip.source_ticks) && clip.source_ticks.length > 0 && (
                   <span
-                    className="font-mono text-[10px] font-bold text-cs2-text-primary"
+                    className="font-mono text-[11px] font-bold text-cs2-text-primary"
                     title={t("clip.segmentsTitle")}
                   >
                     {t("clip.segments", { n: clip.source_ticks.length })}
@@ -247,30 +226,45 @@ export default function ClipCard({
             {weaponTokens.map((weapon) => (
               <span
                 key={weapon}
-                className="inline-flex items-center rounded border border-cs2-accent/35 bg-cs2-accent/[0.07] px-1.5 py-0.5 font-mono text-[10px] font-bold text-cs2-text-primary"
+                className="inline-flex items-center rounded border border-cs2-accent/35 bg-cs2-accent/[0.07] px-1.5 py-0.5 font-mono text-[10.5px] font-semibold text-cs2-text-primary"
               >
                 {weapon}
               </span>
             ))}
             {clip.kill_count > 0 && (clip.category === "compilation" || !killCountInTags) && (
-              <span className="text-[10px] font-bold text-cs2-text-secondary">
+              <span className="text-[11px] font-semibold text-cs2-text-secondary">
                 {t("clip.kills", { n: clip.kill_count })}
               </span>
             )}
           </div>
 
           {hasSecondaryMeta ? (
-            <div className="mb-1.5 flex flex-wrap items-center gap-x-2.5 gap-y-1">
+            <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
               {clip.context_tags?.map((tag, ti) => {
                 const desc = describeTag(tag, locale);
                 const flashNames = tag === "🤝 好闪配好人" && clip.flash_assisters?.length
                   ? t("clip.flashAssisters", { names: clip.flash_assisters.join("、") })
                   : null;
-                const title = [desc, flashNames].filter(Boolean).join("\n") || undefined;
-                return (
+                const title = [desc, flashNames].filter(Boolean).join("\n");
+                return onTagClick ? (
+                  <button
+                    key={`${ti}-${tag}`}
+                    type="button"
+                    aria-pressed={activeTag === tag}
+                    data-active={activeTag === tag ? "true" : "false"}
+                    title={[title, t("analysis.tagFilterHint", { tag: labelTag(tag, locale) })].filter(Boolean).join("\n")}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      onTagClick(tag);
+                    }}
+                    className="analysis-tag-chip analysis-tag-chip--mini"
+                  >
+                    {labelTag(tag, locale)}
+                  </button>
+                ) : (
                   <span
                     key={`${ti}-${tag}`}
-                    title={title}
+                    title={title || undefined}
                     className={`analysis-meta-token ${cat.color} ${title ? "cursor-help" : ""}`}
                   >
                     {labelTag(tag, locale)}
@@ -278,21 +272,17 @@ export default function ClipCard({
                 );
               })}
               {showKillerBadge && (
-                <span className="analysis-meta-token text-cs2-rose-on-surface">
-                  {t("clip.killerBadge", { name: clip.killer_name })}
+                <span className="text-[11.5px] text-cs2-text-muted">
+                  {t("clip.killerLine")} <span className="font-medium text-[#e8c56a]">{clip.killer_name}</span>
                 </span>
               )}
               {showVictimsBadge && (
-                <span className="analysis-meta-token text-cs2-emerald-on-surface">
-                  {t("clip.victimsBadge", { names: victimsList.join(", ") })}
+                <span className="text-[11.5px] text-cs2-text-muted">
+                  {t("clip.victimsLine")} <span className="font-medium text-[#b8d9f6]">{victimsList.join("、")}</span>
                 </span>
               )}
             </div>
           ) : null}
-
-          <div className="font-mono text-[9px] text-cs2-text-muted">
-            tick {clip.start_tick.toLocaleString()} → {clip.end_tick.toLocaleString()}
-          </div>
 
           {isRoundMontage && typeof onFreezeToDeathDraftChange === "function" && (
             <div
@@ -311,13 +301,24 @@ export default function ClipCard({
           )}
 
           {showAiUi && aiCommentary ? (
-            <div className="mt-3 border-l-2 border-cs2-accent/55 bg-cs2-bg-elevated/55 px-3 py-2">
-              <p className="min-w-0 break-words text-[11px] leading-relaxed text-cs2-text-primary">
-                <span className="mr-1.5 select-none" aria-hidden>🎙️</span>
+            <div className="mt-2.5 border-l-2 border-cs2-accent/55 bg-cs2-bg-elevated/55 px-3 py-2">
+              <p className="min-w-0 break-words text-[11.5px] leading-relaxed text-cs2-text-primary">
                 <span className="font-semibold text-cs2-text-muted">{t("clip.aiCommentaryLabel")}</span>
                 <span className="italic text-cs2-text-primary/95">{aiCommentary}</span>
               </p>
             </div>
+          ) : null}
+        </div>
+
+        <div className="col-start-3 flex flex-wrap items-center gap-2 sm:col-start-auto sm:flex-col sm:items-end">
+          {showAiUi && hasAiScore ? <AiScoreBadge score={clip.ai_score} /> : null}
+          {onEnqueue || inQueue ? (
+            <QueueAddButton
+              queued={inQueue}
+              disabled={ftdEnqueueBlocked || !clip.client_clip_uid}
+              onAdd={onEnqueue && clip.client_clip_uid ? () => onEnqueue(clip.client_clip_uid) : undefined}
+              onRemove={onDequeue}
+            />
           ) : null}
         </div>
       </div>

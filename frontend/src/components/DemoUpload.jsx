@@ -1,8 +1,9 @@
 import { useState, useCallback, useRef } from "react";
-import { Upload, FileCode2, Loader2, AlertCircle } from "lucide-react";
+import { Upload, FileCode2, AlertCircle } from "lucide-react";
 import { useT } from "../i18n/useT.js";
 import { desktopBridge } from "../desktop/desktopBridge.js";
 import DemoLoadingCopy from "./DemoLoadingCopy.jsx";
+import Cs2LoadingAnimation from "./Cs2LoadingAnimation.jsx";
 
 function entryName(entry) {
   const raw = typeof entry === "string" ? entry : entry?.name;
@@ -91,7 +92,7 @@ export default function DemoUpload({ onUpload, loading = false, loadingText = ""
       tabIndex={loading ? -1 : 0}
       className={`relative flex flex-col items-center justify-center rounded-xl border-2 border-dashed py-14 transition-all duration-200 sm:py-16 ${loading ? "cursor-wait" : "cursor-pointer"} ${
         validationError
-          ? "border-red-500/60 bg-cs2-red-surface shadow-[0_0_30px_rgba(239,68,68,0.08)]"
+          ? "border-cs2-rose-border bg-cs2-red-surface shadow-[0_0_30px_rgba(239,68,68,0.08)]"
           : dragOver
           ? "border-cs2-accent bg-cs2-accent/5 shadow-[0_0_30px_rgba(224,127,10,0.1)]"
           : "border-cs2-border hover:border-cs2-accent/40 bg-cs2-bg-card"
@@ -109,11 +110,11 @@ export default function DemoUpload({ onUpload, loading = false, loadingText = ""
 
       <div
         className={`mb-4 flex h-16 w-16 items-center justify-center rounded-xl transition-colors ${
-          dragOver ? "bg-cs2-accent/20" : "bg-cs2-bg-input"
+          loading ? "bg-transparent" : dragOver ? "bg-cs2-accent/20" : "bg-cs2-bg-input"
         }`}
       >
         {loading ? (
-          <Loader2 className="h-8 w-8 animate-spin text-cs2-accent" aria-hidden />
+          <Cs2LoadingAnimation />
         ) : dragOver ? (
           <FileCode2 className="h-8 w-8 text-cs2-accent" />
         ) : (
@@ -150,7 +151,7 @@ export default function DemoUpload({ onUpload, loading = false, loadingText = ""
       {!loading && validationError ? (
         <div
           role="alert"
-          className="mx-6 mt-4 flex max-w-2xl items-start gap-2 rounded border border-red-500/45 bg-cs2-red-surface px-3 py-2 text-left text-xs leading-5 text-cs2-red-on-surface"
+          className="mx-6 mt-4 flex max-w-2xl items-start gap-2 rounded border border-cs2-rose-border bg-cs2-red-surface px-3 py-2 text-left text-xs leading-5 text-cs2-red-on-surface"
           onClick={(event) => event.stopPropagation()}
         >
           <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />

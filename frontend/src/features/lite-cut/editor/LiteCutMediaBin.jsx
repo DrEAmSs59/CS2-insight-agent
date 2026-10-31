@@ -133,9 +133,9 @@ function insightAssetToRecordedItem(asset) {
 function RecordedClipListRow({ item, active, onAddToTimeline, onReplace, onDurationChange, onRelinkAsset }) {
   const t = useT();
   const categoryClasses = {
-    highlight: "bg-emerald-500/20 text-emerald-300",
-    fail: "bg-rose-500/20 text-rose-300",
-    compilation: "bg-amber-500/20 text-amber-300",
+    highlight: "bg-cs2-emerald-surface text-cs2-emerald-on-surface",
+    fail: "bg-cs2-rose-surface text-cs2-rose-on-surface",
+    compilation: "bg-cs2-amber-surface text-cs2-amber-on-surface",
     timeline: "bg-cs2-accent-soft text-cs2-accent",
     meme_death: "bg-cs2-bg-input text-cs2-text-secondary",
   };
@@ -199,7 +199,7 @@ function RecordedClipListRow({ item, active, onAddToTimeline, onReplace, onDurat
             {(item.tags || []).slice(0, 4).map((tag) => (
               <span
                 key={tag}
-                className="max-w-[5rem] truncate rounded bg-white/5 px-1.5 py-0.5 text-[8px] font-medium text-cs2-text-muted"
+                className="max-w-[5rem] truncate rounded bg-cs2-bg-input px-1.5 py-0.5 text-[8px] font-medium text-cs2-text-muted"
                 title={tag}
               >
                 {tag}
@@ -211,7 +211,7 @@ function RecordedClipListRow({ item, active, onAddToTimeline, onReplace, onDurat
           {item.ai ? (
             <p className="mt-0.5 line-clamp-1 text-[9px] leading-relaxed text-cs2-text-secondary/80">{item.ai}</p>
           ) : null}
-          {sourceMissing ? <button type="button" onClick={(event) => { event.preventDefault(); event.stopPropagation(); onRelinkAsset?.(item); }} className="mt-1.5 inline-flex items-center gap-1 rounded border border-amber-300/40 px-2 py-1 text-[9px] font-semibold text-amber-200 hover:bg-amber-300 hover:text-black"><Link2 className="h-3 w-3" />{t("liteCut.media.relink")}</button> : null}
+          {sourceMissing ? <button type="button" onClick={(event) => { event.preventDefault(); event.stopPropagation(); onRelinkAsset?.(item); }} className="mt-1.5 inline-flex items-center gap-1 rounded border border-cs2-amber-border px-2 py-1 text-[9px] font-semibold text-cs2-amber-on-surface hover:bg-amber-300 hover:text-black"><Link2 className="h-3 w-3" />{t("liteCut.media.relink")}</button> : null}
         </div>
       </div>
       {onReplace && !sourceMissing ? (
@@ -305,7 +305,7 @@ export function LocalAssetCard({
                 type="button"
                 onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
                 onClick={(e) => { e.preventDefault(); e.stopPropagation(); onRelinkAsset?.(item); }}
-                className="rounded-md border border-amber-300/50 bg-cs2-bg-card px-2 py-1 text-amber-200 hover:bg-amber-300 hover:text-black"
+                className="rounded-md border border-cs2-amber-border bg-cs2-bg-card px-2 py-1 text-cs2-amber-on-surface hover:bg-amber-300 hover:text-black"
               >
                 {t("liteCut.media.relink")}
               </button>
@@ -791,30 +791,30 @@ export default function LiteCutMediaBin({
         </div>
 
         {assetWarnings.length ? (
-          <div className="mt-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-2 py-1.5">
-            <div className="flex items-center gap-1.5 text-[10px] font-semibold text-amber-200">
+          <div className="mt-2 rounded-md border border-cs2-amber-border bg-cs2-amber-surface px-2 py-1.5">
+            <div className="flex items-center gap-1.5 text-[10px] font-semibold text-cs2-amber-on-surface">
               <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
               <span className="min-w-0 flex-1 truncate">{t("liteCut.media.unavailableAssets", { count: assetWarnings.length })}</span>
               <button
                 type="button"
                 title={t("liteCut.media.recheckAssets")}
                 onClick={() => void loadAssetWarnings()}
-                className="inline-flex h-5 w-5 items-center justify-center rounded text-amber-200 hover:bg-amber-500/15"
+                className="inline-flex h-5 w-5 items-center justify-center rounded text-cs2-amber-on-surface hover:bg-cs2-amber-surface"
               >
                 <RefreshCw className={`h-3 w-3 ${assetWarningsLoading ? "animate-spin" : ""}`} />
               </button>
             </div>
             <div className="mt-1.5 max-h-28 space-y-1 overflow-y-auto pr-0.5">
               {assetWarnings.map((warning, index) => (
-                <div key={`${warning.kind}:${warning.path || warning.source_id || index}`} className="flex min-w-0 items-center gap-1.5 rounded border border-amber-400/15 bg-black/15 px-1.5 py-1">
-                  <p className="min-w-0 flex-1 truncate font-mono text-[9px] text-amber-100/80" title={warning.path || warning.name}>
+                <div key={`${warning.kind}:${warning.path || warning.source_id || index}`} className="flex min-w-0 items-center gap-1.5 rounded border border-cs2-amber-border bg-cs2-bg-input px-1.5 py-1">
+                  <p className="min-w-0 flex-1 truncate font-mono text-[9px] text-cs2-amber-on-surface/80" title={warning.path || warning.name}>
                     {warning.name || t("liteCut.media.missingAssetPath")}
                   </p>
                   <button
                     type="button"
                     disabled={assetWarningsLoading}
                     onClick={() => void chooseReplacement(warning)}
-                    className="inline-flex h-5 shrink-0 items-center gap-1 rounded border border-amber-400/25 px-1.5 text-[8px] font-semibold text-amber-100 hover:bg-amber-400/15 disabled:opacity-40"
+                    className="inline-flex h-5 shrink-0 items-center gap-1 rounded border border-cs2-amber-border px-1.5 text-[8px] font-semibold text-cs2-amber-on-surface hover:bg-cs2-amber-surface disabled:opacity-40"
                   >
                     {assetWarningsLoading ? <Loader2 className="h-3 w-3 animate-spin" /> : <FileSearch className="h-3 w-3" />}
                     {t("liteCut.media.relink")}
@@ -891,17 +891,17 @@ export default function LiteCutMediaBin({
                     type="button"
                     title={t("liteCut.media.cancelUpload")}
                     onClick={cancelUpload}
-                    className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded text-cs2-text-muted hover:bg-rose-500/20 hover:text-rose-300"
+                    className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded text-cs2-text-muted hover:bg-cs2-rose-surface hover:text-cs2-rose-on-surface"
                   >
                     <X className="h-3.5 w-3.5" />
                   </button>
                 </div>
-                <div className="mt-1.5 h-1 overflow-hidden rounded-full bg-white/8">
+                <div className="mt-1.5 h-1 overflow-hidden rounded-full bg-cs2-bg-active">
                   <div className="h-full bg-cs2-accent transition-[width]" style={{ width: `${uploadProgress?.percent ?? 0}%` }} />
                 </div>
               </div>
             ) : null}
-            {uploadError ? <p className="px-1 text-[10px] text-rose-300">{uploadError}</p> : null}
+            {uploadError ? <p className="px-1 text-[10px] text-cs2-rose-on-surface">{uploadError}</p> : null}
             {filteredAssets.length === 0 && !uploading ? (
               <p className="py-6 text-center text-xs text-cs2-text-muted">{t("liteCut.media.noLocalAssets")}</p>
             ) : (
@@ -932,7 +932,7 @@ export default function LiteCutMediaBin({
               {t("liteCut.media.loadingRecordings")}
             </div>
           ) : loadError ? (
-            <p className="py-6 text-center text-xs text-rose-400">{t("liteCut.media.loadRecordingsFailed")}</p>
+            <p className="py-6 text-center text-xs text-cs2-rose-on-surface">{t("liteCut.media.loadRecordingsFailed")}</p>
           ) : filteredRecorded.length === 0 ? (
             <p className="py-6 text-center text-xs text-cs2-text-muted">{t("liteCut.media.noRecordedClips")}</p>
           ) : (

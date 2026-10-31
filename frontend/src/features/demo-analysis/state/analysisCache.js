@@ -4,7 +4,17 @@ function normalizedName(value) {
   return String(value || "").trim().toLocaleLowerCase();
 }
 
+// Keep in sync with MATCH_WORKSPACE_ALGORITHM_VERSION in match_workspace.py.
+// Keep this cache check aligned with the Free backend workspace version.
 export const DEMO_ANALYSIS_WORKSPACE_ALGORITHM_VERSION = "match-workspace-2026.09.19-keyboard-input-v2";
+
+export function hasCurrentDemoAnalysisVersion(result) {
+  const workspace = result?.analysis_workspace;
+  return Boolean(
+    workspace?.version
+    && workspace.algorithm_version === DEMO_ANALYSIS_WORKSPACE_ALGORITHM_VERSION,
+  );
+}
 
 export function demoAnalysisRoster(demo) {
   const seen = new Set();
@@ -32,8 +42,7 @@ export function hasCompleteCachedDemoAnalysis(demo) {
     || Array.isArray(cachedPlayers)
     || !workspace
     || typeof workspace !== "object"
-    || !workspace.version
-    || workspace.algorithm_version !== DEMO_ANALYSIS_WORKSPACE_ALGORITHM_VERSION
+    || !hasCurrentDemoAnalysisVersion(result)
     || !Array.isArray(workspace.rounds)
     || !workspace.rounds.length
   ) {

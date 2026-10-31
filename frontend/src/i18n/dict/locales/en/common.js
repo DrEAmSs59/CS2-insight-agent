@@ -47,6 +47,7 @@ export default {
   "test.items": "{n} {n, plural, one=item, other=items}",
   "nav.brand": "CS2 Insight",
   "nav.getPro": "Get Pro",
+  "nav.proAccount": "Pro account & license",
   "nav.mainNav": "Main navigation",
   "nav.sectionWorkflow": "Workflow",
   "nav.guide": "Getting Started",
@@ -106,4 +107,6 @@ export default {
   "ingest.sourceMatchmaking": "Official MM",
   "common.requestFail": "Request failed",
   "common.localeCode": "en",
+  "actionbar.selectedSummary": "{n} of {total} clips selected",
+  "actionbar.addSelectedCount": "Add to queue ({n})",
 };

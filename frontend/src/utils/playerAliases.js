@@ -3,7 +3,7 @@
  *  Licensed under the PolyForm Noncommercial License 1.0.0. See LICENSE in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-// Playback and OBS recording rename only their temporary demo copies.
+// Playback, OBS and HLAE use session-owned demo copies for player nicknames.
 export const PLAYER_ALIAS_ENTRY_VISIBLE = true;
 
 export function playerAliasError(name) {
@@ -31,10 +31,22 @@ export function hasInvalidPlayerAliases(editor) {
   try { playerAliasMaps(editor); return false; } catch { return true; }
 }
 
-export function recordingAliasDemoTargets(requests) {
-  return [...new Map(requests.map(({ demo }) => {
+export function recordingAliasDemoTargets(requests, queue = []) {
+  const items = new Map(queue.map(item => [item.id, item]));
+  return [...new Map(requests.map(({ demo, source_ref }) => {
     const key = demo.demo_path || demo.demo_filename;
-    return [key, { key, path: key, label: demo.demo_filename || key }];
+    const meta = items.get(source_ref?.queue_item_id)?.matchMeta;
+    const target = { key, path: key, label: demo.demo_filename || key };
+    if (meta) {
+      // Display-only metadata stays out of recording DTOs and alias mappings.
+      target.teamNames = { 2: meta.team_a_name, 3: meta.team_b_name };
+      target.playerTeams = Object.fromEntries((meta.all_players || []).flatMap(player => {
+        const id = String(player.steamid64 || "");
+        const team = Number(player.team_num);
+        return id && [2, 3].includes(team) ? [[id, team]] : [];
+      }));
+    }
+    return [key, target];
   })).values()];
 }
 

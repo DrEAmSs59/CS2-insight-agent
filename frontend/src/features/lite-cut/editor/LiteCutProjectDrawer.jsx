@@ -211,7 +211,7 @@ export default function LiteCutProjectDrawer({
             </button>
             <input ref={importInputRef} type="file" accept=".litecut,application/vnd.litecut.project+json" className="hidden" onChange={handleImport} />
           </div>
-          {projectFileError ? <p className="mt-2 rounded-lg border border-rose-400/25 bg-rose-500/10 px-3 py-2 text-[10px] text-rose-200">{projectFileError}</p> : null}
+          {projectFileError ? <p className="mt-2 rounded-lg border border-cs2-rose-border bg-cs2-rose-surface px-3 py-2 text-[10px] text-cs2-rose-on-surface">{projectFileError}</p> : null}
 
           <section className="mt-5">
             <div className="mb-2 flex items-center justify-between gap-2">

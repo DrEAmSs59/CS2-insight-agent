@@ -37,7 +37,7 @@ export default function MatchScoreboard({ matchMeta, onPlay }) {
         <button
           type="button"
           onClick={onPlay}
-          className="absolute left-2 top-3 z-10 flex h-8 w-8 items-center justify-center rounded-md border border-cs2-emerald-surface bg-cs2-bg-overlay text-cs2-emerald-on-surface transition-all hover:bg-cs2-emerald-surface hover:text-cs2-text-primary sm:left-3 sm:top-3.5"
+          className="absolute left-2 top-3 z-10 flex h-8 w-8 items-center justify-center rounded-md border border-cs2-emerald-border bg-cs2-bg-overlay text-cs2-emerald-on-surface transition-all hover:bg-cs2-emerald-surface hover:text-cs2-text-primary sm:left-3 sm:top-3.5"
           title={t("match.btnPlayCs2")}
           aria-label={t("match.btnPlayCs2")}
         >
@@ -58,9 +58,9 @@ export default function MatchScoreboard({ matchMeta, onPlay }) {
           <div className="flex min-w-0 flex-col items-end text-right sm:pr-2">
             <div className="mb-0.5 flex items-center gap-1">
               {winner === "left" && (
-                <Trophy className="h-3.5 w-3.5 shrink-0 text-sky-400 drop-shadow-[0_0_8px_rgba(56,189,248,0.6)]" />
+                <Trophy className="h-3.5 w-3.5 shrink-0 text-cs2-cyan-on-surface drop-shadow-[0_0_8px_rgba(56,189,248,0.6)]" />
               )}
-              <span className="truncate text-[11px] font-bold uppercase tracking-wider text-sky-300/90 drop-shadow-[0_0_12px_rgba(125,211,252,0.25)]">
+              <span className="truncate text-[11px] font-bold uppercase tracking-wider text-cs2-cyan-on-surface/90 drop-shadow-[0_0_12px_rgba(125,211,252,0.25)]">
                 {t("match.teamA")}
               </span>
             </div>
@@ -71,7 +71,7 @@ export default function MatchScoreboard({ matchMeta, onPlay }) {
             <span
               className={[
                 "select-none text-4xl font-black tabular-nums leading-none tracking-tight sm:text-5xl",
-                "bg-gradient-to-b from-sky-100 via-sky-300 to-sky-600 bg-clip-text text-transparent",
+                "bg-gradient-to-b from-sky-100 via-sky-300 to-sky-600 bg-clip-text text-transparent light:bg-none light:text-cs2-team-blue",
                 "drop-shadow-[0_0_20px_rgba(56,189,248,0.35)]",
               ].join(" ")}
             >
@@ -88,7 +88,7 @@ export default function MatchScoreboard({ matchMeta, onPlay }) {
             <span
               className={[
                 "select-none text-4xl font-black tabular-nums leading-none tracking-tight sm:text-5xl",
-                "bg-gradient-to-b from-amber-100 via-amber-400 to-orange-600 bg-clip-text text-transparent",
+                "bg-gradient-to-b from-amber-100 via-amber-400 to-orange-600 bg-clip-text text-transparent light:bg-none light:text-cs2-team-amber",
                 "drop-shadow-[0_0_20px_rgba(251,191,36,0.35)]",
               ].join(" ")}
             >
@@ -99,11 +99,11 @@ export default function MatchScoreboard({ matchMeta, onPlay }) {
           {/* 右队 B — 暖橙 */}
           <div className="flex min-w-0 flex-col items-start text-left sm:pl-2">
             <div className="mb-0.5 flex items-center gap-1">
-              <span className="truncate text-[11px] font-bold uppercase tracking-wider text-amber-300/90 drop-shadow-[0_0_12px_rgba(251,191,36,0.25)]">
+              <span className="truncate text-[11px] font-bold uppercase tracking-wider text-cs2-amber-on-surface/90 drop-shadow-[0_0_12px_rgba(251,191,36,0.25)]">
                 {t("match.teamB")}
               </span>
               {winner === "right" && (
-                <Trophy className="h-3.5 w-3.5 shrink-0 text-amber-400 drop-shadow-[0_0_8px_rgba(251,191,36,0.6)]" />
+                <Trophy className="h-3.5 w-3.5 shrink-0 text-cs2-amber-on-surface drop-shadow-[0_0_8px_rgba(251,191,36,0.6)]" />
               )}
             </div>
           </div>

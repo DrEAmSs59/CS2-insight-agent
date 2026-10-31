@@ -26,7 +26,7 @@ export default function SharpenControl({ t, available = false, legacy = false, e
           className="cs2-data-slider w-full disabled:cursor-not-allowed disabled:opacity-40" />
         <span className="mt-1 flex justify-between text-[10px] text-cs2-text-muted"><span>0.10</span><span>0.30</span></span>
       </label>
-      {!available && <p className="mt-2 rounded-lg border border-amber-500/25 bg-amber-500/10 px-3 py-2 text-[11px] leading-relaxed text-cs2-amber-on-surface">{t(legacy ? "montage.sharpenLegacy" : "montage.sharpenUnavailable")}</p>}
+      {!available && <p className="mt-2 rounded-lg border border-cs2-amber-border bg-cs2-amber-surface px-3 py-2 text-[11px] leading-relaxed text-cs2-amber-on-surface">{t(legacy ? "montage.sharpenLegacy" : "montage.sharpenUnavailable")}</p>}
     </div>
   );
 }

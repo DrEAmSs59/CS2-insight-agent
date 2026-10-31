@@ -51,7 +51,7 @@ export default function DemoDownloadCell({
       <div className="flex flex-col items-center gap-1">
         <button
           onClick={onGoToLibrary}
-          className="flex items-center gap-1.5 rounded-[7px] border border-[#2eb86a]/40 bg-[#2eb86a]/10 px-3 py-1.5 text-[12px] font-semibold text-[#2eb86a] transition-colors hover:bg-[#2eb86a]/20"
+          className="flex items-center gap-1.5 rounded-[7px] border border-[#2eb86a]/40 bg-[#2eb86a]/10 px-3 py-1.5 text-[12px] font-semibold text-cs2-emerald-on-surface transition-colors hover:bg-[#2eb86a]/20"
         >
           <Check className="h-3.5 w-3.5" />
           {t("match.demoInLibrary")}

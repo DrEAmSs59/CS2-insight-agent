@@ -23,8 +23,8 @@ describe("recording aliases entry", () => {
     const onConfirm = vi.fn();
     const props = { onConfirm, onClose: vi.fn(), aliasDemos: [{ key: "a.dem", path: "a.dem", label: "a.dem" }] };
     render(<RecordWarmupModal open {...props} />);
-    expect(screen.getByText("自定义玩家昵称")).toBeTruthy();
-    expect(screen.getByRole("checkbox", { name: "启用改名" }).checked).toBe(false);
+    expect(screen.getByTestId("player-aliases-section")).toBeTruthy();
+    expect(screen.getByRole("switch", { name: "启用改名" }).checked).toBe(false);
     fireEvent.click(screen.getByRole("button", { name: "开始录制" }));
     expect(onConfirm).toHaveBeenCalledWith(expect.objectContaining({
       experimental_pov_enabled: false,

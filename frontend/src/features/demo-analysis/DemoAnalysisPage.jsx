@@ -1,14 +1,15 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { BarChart3, Library, Play, RefreshCw, Users } from "lucide-react";
+import { ArrowRight, BarChart3, Library, Loader2, Play, RefreshCw, Users } from "lucide-react";
 import ActionBar from "../../components/ActionBar";
 import ClipList from "../../components/ClipList";
+import CompilationPacks from "./CompilationPacks";
+import QuickQueueActions from "./QuickQueueActions";
 import DemoUpload from "../../components/DemoUpload";
 import RoundTimelineView from "./workspaces/timeline/RoundTimelineView";
 import WeaponKillsView from "./workspaces/WeaponKillsView";
 import Demo2DReplayPreview from "./replay/Demo2DReplayPreview";
 import DemoHeatmapView from "./replay/DemoHeatmapView";
-import CosmeticsView from "./cosmetics/CosmeticsView";
 import PlayerIdentityAvatar from "./cosmetics/PlayerIdentityAvatar";
 import { useReplayStore } from "./replay/replayStore";
 import {
@@ -19,6 +20,8 @@ import {
   useWorkspaceData,
 } from "./workspaces/DemoAnalysisWorkspaceViews";
 import Button from "../../components/ui/Button";
+import LucasWorkshopBackground from "../cosmetics-workshop/LucasWorkshopBackground.jsx";
+import "../cosmetics-workshop/lucasWorkshop.css";
 import { useAppShell } from "../../context/AppShellContext";
 import { useDemoPlaybackDialog } from "../../hooks/useDemoPlaybackDialog.jsx";
 import { useSteamPlayerAvatars } from "../../hooks/useSteamPlayerAvatars.js";
@@ -31,7 +34,7 @@ import { playerAppearance, steamIdForPlayer } from "../../utils/playerAppearance
 import { playerIdentityKey } from "../../utils/playerIdentity.js";
 import { ALL_TAG, AnalysisViewNavigation, DemoSelector, EmptyResult, HighlightWorkspaceToolbar, MatchRailSummary, PAGE_CONTAINER_CLASS, PlayerPicker, firstTeamName, playerName, splitTeams } from "./DemoAnalysisScaffold.jsx";
 
-const PINNED_COMPILATION_ORDER = ["all_kills", "all_deaths", "freeze_to_death"];
+const CosmeticsView = lazy(() => import("./cosmetics/CosmeticsView"));
 
 export default function DemoAnalysisPage() {
   const t = useT();
@@ -95,6 +98,7 @@ export default function DemoAnalysisPage() {
   const activePlayer = s.currentActivePlayer || playerIdentityKey(s.players?.[0]) || "";
   const selectedPlayer = (s.players || []).find((player) => playerIdentityKey(player) === activePlayer) || null;
   const activePlayerLabel = playerName(selectedPlayer) || activePlayer;
+  const selectedAvatarUrl = selectedPlayer ? steamAvatars?.[steamIdForPlayer(selectedPlayer)] || "" : "";
   const activeAnalysisPlayer = (workspace.players || []).find((player) => (
     playerIdentityKey(player) === activePlayer
   ))?.name || activePlayerLabel;
@@ -104,22 +108,23 @@ export default function DemoAnalysisPage() {
   ));
   const playerAiReviewing = Boolean(s.aiReviewingPlayers?.[`${s.currentMatchIndex}:${activePlayer}`]);
   const regularClips = (s.clips || []).filter((clip) => clip.category !== "meme_death");
-  const pinnedCompilationTags = PINNED_COMPILATION_ORDER.flatMap((kind) => {
-    const clip = regularClips.find((candidate) => (
-      candidate.category === "compilation" && candidate.compilation_kind === kind
-    ));
-    const tag = clip?.context_tags?.[0];
-    return tag ? [{ kind, tag }] : [];
-  });
+  const compilationClips = regularClips.filter((clip) => clip.category === "compilation");
+  const singleClips = regularClips.filter((clip) => clip.category !== "compilation");
   const tagCounts = useMemo(() => {
-    const counts = new Map([[ALL_TAG, regularClips.length]]);
-    regularClips.forEach((clip) => (clip.context_tags || []).forEach((tag) => counts.set(tag, (counts.get(tag) || 0) + 1)));
+    const counts = new Map([[ALL_TAG, singleClips.length]]);
+    singleClips.forEach((clip) => (clip.context_tags || []).forEach((tag) => counts.set(tag, (counts.get(tag) || 0) + 1)));
     return [...counts.entries()];
-  }, [regularClips]);
-  const visibleClips = selectedTag === ALL_TAG
-    ? regularClips
-    : regularClips.filter((clip) => (clip.context_tags || []).includes(selectedTag));
+  }, [singleClips]);
+  const activeTag = selectedTag !== ALL_TAG && tagCounts.some(([tag]) => tag === selectedTag) ? selectedTag : ALL_TAG;
+  const visibleClips = activeTag === ALL_TAG
+    ? singleClips
+    : singleClips.filter((clip) => (clip.context_tags || []).includes(activeTag));
   const weaponSummary = summarizeWeaponKills(s.roundTimeline);
+  const modeCounts = {
+    clips: singleClips.length,
+    rounds: Array.isArray(s.roundTimeline) ? s.roundTimeline.length : 0,
+    weapons: weaponSummary.groupCount,
+  };
   const canAnalyze = Boolean(s.hasDemos && selectedCount && !parsingCurrent && !s.batchRecording);
   const showDockedActionBar = activeTab === "highlights"
     && activeHighlightView === "clips"
@@ -171,9 +176,10 @@ export default function DemoAnalysisPage() {
 
   if (!s.hasDemos) {
     return (
-      <div className="flex h-full min-h-0 flex-col overflow-y-auto bg-cs2-bg-page p-5 sm:p-6">
+      <div className="relative isolate flex h-full min-h-0 flex-col overflow-y-auto bg-cs2-bg-page p-5 sm:p-6">
+        <LucasWorkshopBackground locale={locale} />
         <div className="mx-auto w-full max-w-5xl space-y-4">
-          <div className="flex items-center justify-between gap-3"><div><h1 className="text-lg font-black text-cs2-text-primary">{t("analysis.workspace.title")}</h1><p className="mt-1 text-[11px] text-cs2-text-muted">{t("analysis.workspace.uploadHint")}</p></div><Link to="/library" className="inline-flex items-center gap-1.5 rounded-md border border-cs2-border bg-cs2-bg-input px-3 py-2 text-[11px] font-semibold text-cs2-text-secondary hover:border-cs2-accent/45 hover:text-cs2-text-primary"><Library className="h-3.5 w-3.5" />{t("analysis.workspace.openLibrary")}</Link></div>
+          <div className="flex items-center justify-between gap-3 rounded-xl border border-cs2-border-subtle bg-cs2-bg-card/90 px-4 py-3 backdrop-blur-md"><div><h1 className="text-lg font-black text-cs2-text-primary">{t("analysis.workspace.title")}</h1><p className="mt-1 text-[11px] text-cs2-text-muted">{t("analysis.workspace.uploadHint")}</p></div><Link to="/library" className="inline-flex items-center gap-1.5 rounded-md border border-cs2-border bg-cs2-bg-input px-3 py-2 text-[11px] font-semibold text-cs2-text-secondary hover:border-cs2-accent/45 hover:text-cs2-text-primary"><Library className="h-3.5 w-3.5" />{t("analysis.workspace.openLibrary")}</Link></div>
           <DemoUpload onUpload={s.handleUpload} loading={Boolean(s.parsing)} loadingText={s.progressText} aiEnabled={Boolean(s.aiMode)} />
         </div>
       </div>
@@ -182,9 +188,10 @@ export default function DemoAnalysisPage() {
 
   if (!allDemosParsed || analysisGateActive) {
     return (
-      <div className="flex h-full min-h-0 flex-col overflow-y-auto bg-cs2-bg-page p-5 sm:p-6">
+      <div className="relative isolate flex h-full min-h-0 flex-col overflow-y-auto bg-cs2-bg-page p-5 sm:p-6">
+        <LucasWorkshopBackground locale={locale} />
         <div className="mx-auto w-full max-w-5xl space-y-4">
-          <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center justify-between gap-3 rounded-xl border border-cs2-border-subtle bg-cs2-bg-card/90 px-4 py-3 backdrop-blur-md">
             <div>
               <h1 className="text-lg font-black text-cs2-text-primary">{t("analysis.workspace.title")}</h1>
               <p className="mt-1 text-[11px] text-cs2-text-muted">{t("analysis.workspace.waitForAll")}</p>
@@ -200,14 +207,23 @@ export default function DemoAnalysisPage() {
   }
 
   return (
-    <div className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-cs2-bg-page text-cs2-text-primary">
+    <div className="relative isolate flex h-full min-h-0 w-full flex-col overflow-hidden bg-cs2-bg-page text-cs2-text-primary">
+      <LucasWorkshopBackground locale={locale} />
       <header className="relative z-[60] shrink-0 overflow-visible border-b border-cs2-border-subtle bg-cs2-bg-card/92 py-2 backdrop-blur-md">
         <div className={`${PAGE_CONTAINER_CLASS} flex flex-wrap items-center justify-between gap-3`} data-testid="demo-analysis-header-container">
           <div className="flex min-w-0 items-center gap-3">
             <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-cs2-accent-soft text-cs2-accent"><BarChart3 className="h-4 w-4" /></div>
             <div className="min-w-0"><h1 className="text-[14px] font-black tracking-wide">{t("analysis.workspace.title")}</h1><p className="truncate font-mono text-[9px] text-cs2-text-muted">{s.currentFilename} · {s.currentMatchIndex + 1}/{matches.length}</p></div>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <Link
+              to="/queue"
+              data-testid="analysis-queue-link"
+              className="inline-flex h-7 items-center gap-1.5 rounded-full bg-cs2-accent-soft px-3 text-[11px] font-semibold text-cs2-accent transition-colors hover:brightness-110"
+            >
+              {t("analysis.workspace.queueLink", { n: s.queue?.length ?? 0 })}
+              <ArrowRight className="h-3 w-3" aria-hidden />
+            </Link>
             <Button variant="secondary" size="sm" disabled={!currentUpload?.id && !currentUpload?.path} onClick={playCurrentDemo}>
               <Play className="h-3.5 w-3.5 fill-current" />
               {t("analysis.workspace.playDemo")}
@@ -256,16 +272,51 @@ export default function DemoAnalysisPage() {
                         playerAiReviewed={playerAiReviewed}
                         aiMode={s.aiMode}
                         tagCounts={tagCounts}
-                        selectedTag={selectedTag}
+                        selectedTag={activeTag}
                         setSelectedTag={setSelectedTag}
                         locale={locale}
                         avatars={steamAvatars}
-                        pinnedCompilationTags={pinnedCompilationTags}
+                        modeCounts={modeCounts}
                       />
                       {activeHighlightView === "clips" && (
-                        <ClipList clips={visibleClips} targetPlayer={activePlayer} selectedIds={s.selectedClientClipUids} onToggle={s.handleToggleClip} aiMode={s.aiMode} queuedClientClipUids={s.queuedClientClipUidsForCurrentDemo} onDequeue={s.handleDequeueClip} parsedPlayers={parsedPlayers} matchTotalRounds={s.roundMontageMaxRounds} freezeToDeathDraft={s.freezeToDeathDraft} onFreezeToDeathDraftChange={s.setFreezeToDeathDraft} roundMontagePickerDisabled={parsingCurrent || s.batchRecording} suppressSummaryHeader />
+                        <>
+                          <div className="grid gap-4 lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
+                            <QuickQueueActions
+                              currentPlayer={activePlayerLabel}
+                              onAddHighlights={s.handleAddCurrentPlayerHighlights}
+                              onAddFails={s.handleAddCurrentPlayerFails}
+                              canAddHighlights={s.canAddCurrentPlayerHighlights}
+                              canAddFails={s.canAddCurrentPlayerFails}
+                              disabled={parsingCurrent || s.batchRecording}
+                            />
+                            <div className="min-w-0 flex-1">
+                              <CompilationPacks
+                                clips={compilationClips}
+                                locale={locale}
+                                queuedClientClipUids={s.queuedClientClipUidsForCurrentDemo}
+                                onAdd={s.handleAddClipToQueue}
+                                onRemove={s.handleDequeueClip}
+                                freezeToDeathDraft={s.freezeToDeathDraft}
+                                onFreezeToDeathDraftChange={s.setFreezeToDeathDraft}
+                                matchTotalRounds={s.roundMontageMaxRounds}
+                                disabled={parsingCurrent || s.batchRecording}
+                              />
+                            </div>
+                          </div>
+                          {singleClips.length ? (
+                            <div className="flex flex-wrap items-baseline justify-between gap-2 pt-1">
+                              <h3 className="text-[13px] font-semibold text-cs2-text-primary">{t("analysis.clipsTitle")}</h3>
+                              <span className="text-xs text-cs2-text-muted">
+                                {activeTag === ALL_TAG
+                                  ? t("analysis.clipsCount", { n: visibleClips.length })
+                                  : t("analysis.clipsFilteredCount", { tag: labelTag(activeTag, locale), n: visibleClips.length })}
+                              </span>
+                            </div>
+                          ) : null}
+                          <ClipList clips={visibleClips} targetPlayer={activePlayer} selectedIds={s.selectedClientClipUids} onToggle={s.handleToggleClip} aiMode={s.aiMode} queuedClientClipUids={s.queuedClientClipUidsForCurrentDemo} onDequeue={s.handleDequeueClip} onEnqueue={s.handleAddClipToQueue} onTagClick={(tag) => setSelectedTag(activeTag === tag ? ALL_TAG : tag)} activeTag={activeTag} parsedPlayers={parsedPlayers} matchTotalRounds={s.roundMontageMaxRounds} freezeToDeathDraft={s.freezeToDeathDraft} onFreezeToDeathDraftChange={s.setFreezeToDeathDraft} roundMontagePickerDisabled={parsingCurrent || s.batchRecording} suppressSummaryHeader />
+                        </>
                       )}
-                      {activeHighlightView === "rounds" && <RoundTimelineView roundTimeline={s.roundTimeline} focusedPlayer={activeAnalysisPlayer} demoFilename={s.currentFilename} mapName={s.matchMeta?.map_name || ""} queuedClientClipUids={s.queuedClientClipUidsForCurrentDemo} onAddEvent={s.handleAddTimelineEventToQueue} onAddRound={s.handleAddTimelineRoundToQueue} onAddEventsBatch={s.handleAddTimelineEventsBatchToQueue} onRemoveEvent={s.handleRemoveTimelineEventFromQueue} onRemoveRound={s.handleRemoveTimelineRoundFromQueue} suppressSummaryHeader />}
+                      {activeHighlightView === "rounds" && <RoundTimelineView demoPath={currentUpload?.path} targetSteamId={s.matchMeta?.target_steam_id} roundTimeline={s.roundTimeline} focusedPlayer={activeAnalysisPlayer} demoFilename={s.currentFilename} mapName={s.matchMeta?.map_name || ""} queuedClientClipUids={s.queuedClientClipUidsForCurrentDemo} onAddEvent={s.handleAddTimelineEventToQueue} onAddRound={s.handleAddTimelineRoundToQueue} onAddEventsBatch={s.handleAddTimelineEventsBatchToQueue} onRemoveEvent={s.handleRemoveTimelineEventFromQueue} onRemoveRound={s.handleRemoveTimelineRoundFromQueue} suppressSummaryHeader />}
                       {activeHighlightView === "weapons" && <WeaponKillsView roundTimeline={s.roundTimeline} focusedPlayer={activeAnalysisPlayer} demoFilename={s.currentFilename} mapName={s.matchMeta?.map_name || ""} queuedClientClipUids={s.queuedClientClipUidsForCurrentDemo} onAdd={s.handleAddWeaponKillsToQueue} onRemove={s.handleDequeueClip} onAddEvent={s.handleAddTimelineEventToQueue} onRemoveEvent={s.handleRemoveTimelineEventFromQueue} suppressSummaryHeader />}
                     </>
                   )}
@@ -318,19 +369,24 @@ export default function DemoAnalysisPage() {
                 <PlayersView
                   data={workspace}
                   selectedPlayer={activePlayer}
+                  rosterPlayer={selectedPlayer}
+                  avatarUrl={selectedAvatarUrl}
                   onBackToOverview={() => setActiveTab("overview")}
                 />
               )}
 
               {activeTab === "cosmetics" && (
-                <CosmeticsView
-                  key={`${currentUpload?.id ?? "no-id"}:${currentUpload?.path || s.currentMatchIndex}`}
-                  workspace={workspace}
-                  selectedPlayer={selectedPlayer || workspace.players?.find((player) => playerIdentityKey(player) === activePlayer)}
-                  locale={locale}
-                  onlineAssetsEnabled={onlineAssetsEnabled}
-                  demoId={currentUpload?.id}
-                />
+                <Suspense fallback={<div className="flex min-h-full items-center justify-center" aria-label={t("app.loadingPage")}><Loader2 className="h-7 w-7 animate-spin text-cs2-orange" /></div>}>
+                  <CosmeticsView
+                    key={`${currentUpload?.id ?? "no-id"}:${currentUpload?.path || s.currentMatchIndex}`}
+                    workspace={workspace}
+                    selectedPlayer={selectedPlayer || workspace.players?.find((player) => playerIdentityKey(player) === activePlayer)}
+                    locale={locale}
+                    onlineAssetsEnabled={onlineAssetsEnabled}
+                    demoId={currentUpload?.id}
+                    avatarUrl={selectedAvatarUrl}
+                  />
+                </Suspense>
               )}
 
               {activeTab === "economy" && <EconomyView data={workspace} onOpenRound={openRound} />}
@@ -343,13 +399,7 @@ export default function DemoAnalysisPage() {
                   onSelectAll={s.handleSelectAll}
                   onDeselectAll={s.handleDeselectAll}
                   onAddSelectedToQueue={s.handleAddSelectedToQueue}
-                  onAddCurrentPlayerHighlights={s.handleAddCurrentPlayerHighlights}
-                  onAddCurrentPlayerFails={s.handleAddCurrentPlayerFails}
-                  currentPlayer={activePlayerLabel}
-                  queueLength={s.queue.length}
                   batchRecording={s.batchRecording}
-                  canAddCurrentPlayerHighlights={s.canAddCurrentPlayerHighlights}
-                  canAddCurrentPlayerFails={s.canAddCurrentPlayerFails}
                 />
               ) : null}
             </div>

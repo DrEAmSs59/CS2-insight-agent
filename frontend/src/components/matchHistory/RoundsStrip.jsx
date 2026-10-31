@@ -14,7 +14,7 @@ export default function RoundsStrip({ rounds = [] }) {
             className="rounded-[1px]"
             style={{
               backgroundColor:
-                won === true ? "#2eb86a" : won === false ? "#e0556a" : "#25252c",
+                won === true ? "#2eb86a" : won === false ? "#e0556a" : "var(--cs2-bg-active)",
             }}
           />
         ))}

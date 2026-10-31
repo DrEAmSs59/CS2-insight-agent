@@ -868,7 +868,7 @@ def _sample_player_context(
                 if agent_entry and tick is not None:
                     agent_entry.setdefault("_observation_ticks", set()).add(tick)
 
-        equipped_music = _safe_int(_row_value(
+        playback_music = _safe_int(_row_value(
             row,
             "CCSPlayerController.m_iMusicKitID",
             "m_iMusicKitID",
@@ -878,9 +878,9 @@ def _sample_player_context(
             "CCSPlayerController.CCSPlayerController_InventoryServices.m_unMusicID",
             "m_unMusicID",
         ))
-        # A present live field with -1 means no equipped kit. Inventory service
-        # is only a compatibility fallback for demos that omit the live field.
-        music_id = equipped_music if equipped_music is not None else inventory_music
+        # Equipped inventory remains authoritative before MVP playback begins.
+        # Older demos can fall back to the playback field when inventory is absent.
+        music_id = inventory_music if inventory_music is not None else playback_music
         if music_id is not None and music_id > 0:
             music_kits.setdefault(steamid, set()).add(music_id)
 

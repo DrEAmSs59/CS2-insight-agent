@@ -14,7 +14,6 @@ from .parse_utils import (
     _DEMOPARSER_RE_RAISE,
     PLAYER_CONTROLLER_TEAM_PROP,
     PLAYER_TEAM_PARSE_FIELDS,
-    coalesce_player_team_num,
 )
 from .tag_constants import (
     TICK_RATE,
@@ -290,18 +289,23 @@ def parse_spatial_snapshots(
             )
         else:
             controller_team = pd.Series(float("nan"), index=raw_df.index)
-        controller_only_team = (
-            ~primary_team.isin((2, 3)) & controller_team.isin((2, 3))
-        )
-        df = coalesce_player_team_num(raw_df)
+        primary_valid = primary_team.isin((2, 3))
+        controller_valid = controller_team.isin((2, 3))
+        controller_only_team = ~primary_valid & controller_valid
+        if PLAYER_CONTROLLER_TEAM_PROP in raw_df.columns:
+            df = raw_df.copy()
+            df["team_num"] = primary_team.where(primary_valid).fillna(
+                controller_team.where(controller_valid),
+            )
+        else:
+            df = raw_df
         df["_team_from_controller"] = controller_only_team
+        del raw_df, primary_team, controller_team, primary_valid, controller_valid, controller_only_team
         if df.empty or "tick" not in df.columns:
             return {}, {}
 
-        # Materializing every row through ``iterrows`` creates a pandas Series
-        # per player/tick sample.  A full 10-player analysis can contain well
-        # over 100k samples, so keep the same stable per-tick ordering while
-        # traversing the frame once as plain tuples.
+        # Traverse the native table's columns together, keeping stable tick
+        # order without building an indexed tuple for every player sample.
         df = df.sort_values("tick", kind="mergesort")
         columns = list(df.columns)
         column_index = {column: index for index, column in enumerate(columns)}
@@ -310,7 +314,9 @@ def parse_spatial_snapshots(
 
         cache: dict[int, dict[str, dict]] = {}
         alive_names: dict[int, dict[int, set[str]]] = {}
-        for values in df.itertuples(index=False, name=None):
+        column_values = df.to_dict("list")
+        del df
+        for values in zip(*column_values.values()):
             tick_i = int(values[tick_index])
             tick_dict = cache.setdefault(tick_i, {})
             by_team = alive_names.setdefault(tick_i, {})
@@ -321,8 +327,9 @@ def parse_spatial_snapshots(
 
             row_d = dict(zip(columns, values))
             try:
-                has_pawn_position = all(
-                    math.isfinite(float(row_d[key])) for key in ("X", "Y")
+                has_pawn_position = (
+                    math.isfinite(float(row_d["X"]))
+                    and math.isfinite(float(row_d["Y"]))
                 )
             except (TypeError, ValueError, KeyError):
                 has_pawn_position = False

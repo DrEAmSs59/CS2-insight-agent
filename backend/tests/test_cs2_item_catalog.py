@@ -1394,3 +1394,30 @@ def test_direct_drop_never_active_uses_purchase_side_only_for_unique_asset(asset
         assert len(awps) == asset_count
         assert all(row['observed_teams'] == (['ct'] if asset_count == 1 else []) for row in awps)
         assert all(row['ownership_evidence'] == 'demo_skin_table' for row in awps)
+
+
+@pytest.mark.parametrize(("playback", "inventory", "expected"), [
+    (-1, 1, 1),  # Default music remains equipped when playback is inactive.
+    (0, 64, 64),  # A kit must appear before that player receives an MVP.
+    (69, 64, 64),  # Equipped inventory is authoritative over playback state.
+    (3, None, 3),  # Older demos may only expose the playback field.
+    (-1, None, None),
+    (3, 0, None),  # An explicit empty loadout must not reuse stale playback.
+])
+def test_music_kit_prefers_equipped_inventory_over_playback(playback, inventory, expected):
+    class FakeParser:
+        def parse_skins(self):
+            return {}
+
+        def parse_ticks(self, _wanted, *, ticks):
+            assert ticks == [42]
+            return {
+                "steamid": ["76561198000000001"],
+                "team_num": [3],
+                "CCSPlayerController.m_iMusicKitID": [playback],
+                "CCSPlayerController.CCSPlayerController_InventoryServices.m_unMusicID": [inventory],
+            }
+
+    from app.features.demo_analysis.cs2_item_catalog import _sample_player_context
+    context = _sample_player_context(FakeParser(), [42])
+    assert context["music_kits"].get("76561198000000001") == ({expected} if expected else None)

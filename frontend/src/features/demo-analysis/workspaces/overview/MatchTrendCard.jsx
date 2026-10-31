@@ -17,9 +17,9 @@ const SVG_WIDTH_PX = Math.round(CHART_HEIGHT_PX * (W / H));
 const TEAM_AXIS_GAP_PX = 3;
 
 function leadColor(lead) {
-  if (lead > 0) return "#38bdf8";
-  if (lead < 0) return "#fbbf24";
-  return "#64748b";
+  if (lead > 0) return "var(--cs2-team-blue)";
+  if (lead < 0) return "var(--cs2-team-amber)";
+  return "var(--cs2-text-muted)";
 }
 
 function buildAnnotations(points, phaseMeta) {
@@ -74,7 +74,7 @@ function yAxisTicks(maxAbs) {
 function LeadChart({ points, phaseMeta, teamAName, teamBName }) {
   if (points.length < 2) {
     return (
-      <p className={`flex ${CHART_HEIGHT_CLASS} items-center justify-center text-[11px] text-cs2-text-muted`}>
+      <p className={`flex ${CHART_HEIGHT_CLASS} items-center justify-center text-xs text-cs2-text-muted`}>
         当前解析结果不足以生成比赛走势。
       </p>
     );
@@ -100,12 +100,12 @@ function LeadChart({ points, phaseMeta, teamAName, teamBName }) {
         {/* 队名紧贴纵坐标左侧 3px，上/下半区垂直居中，完整显示 */}
         <div className="flex shrink-0 flex-col">
           <div className="flex flex-1 items-center justify-end">
-            <span className="whitespace-nowrap text-right text-[9px] font-bold leading-none text-sky-400">
+            <span className="whitespace-nowrap text-right text-[11px] font-semibold leading-none text-cs2-team-blue">
               {teamAName}
             </span>
           </div>
           <div className="flex flex-1 items-center justify-end">
-            <span className="whitespace-nowrap text-right text-[9px] font-bold leading-none text-amber-400">
+            <span className="whitespace-nowrap text-right text-[11px] font-semibold leading-none text-cs2-team-amber">
               {teamBName}
             </span>
           </div>
@@ -271,26 +271,24 @@ export default function MatchTrendCard({
   return (
     <InsightCard
       title="比赛走势"
-      icon={<Activity className="h-3.5 w-3.5 text-sky-400" />}
-      compact
+      icon={Activity}
+      tone="blue"
+      summary={underTitle}
       className={className}
     >
-      <p className="mb-1.5 shrink-0 truncate text-[10px] leading-relaxed text-cs2-text-muted">
-        {underTitle}
-      </p>
       <LeadChart
         points={points}
         phaseMeta={phaseMeta}
         teamAName={teamAName}
         teamBName={teamBName}
       />
-      <div className="mt-1.5 flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1 text-[9px] text-cs2-text-muted">
+      <div className="mt-1.5 flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-cs2-text-muted">
         <span className="inline-flex items-center gap-1">
-          <span className="h-1.5 w-1.5 rounded-full bg-sky-400" />
+          <span className="h-2 w-2 rounded-full bg-cs2-team-blue" />
           蓝线 / 上方 = {teamAName} 领先
         </span>
         <span className="inline-flex items-center gap-1">
-          <span className="h-1.5 w-1.5 rounded-full bg-amber-400" />
+          <span className="h-2 w-2 rounded-full bg-cs2-team-amber" />
           黄线 / 下方 = {teamBName} 领先
         </span>
       </div>

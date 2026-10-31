@@ -486,4 +486,5 @@ export default {
   "montage.poolCardVictimPovBadge": "Victim POV ×{n}",
   "montage.poolCardSpectatorPerspective": "Spectator view",
   "montage.poolCardAiScore": "AI score {n}",
+  "montage.pickerNoSelectionShort": "Pick at least one round",
 };

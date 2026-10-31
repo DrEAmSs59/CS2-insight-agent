@@ -8,16 +8,19 @@ import { Pencil, RotateCcw } from "lucide-react";
 import API from "../api/api.js";
 import { useT } from "../i18n/useT.js";
 import { playerAliasError } from "../utils/playerAliases.js";
+import { SETTINGS_INPUT_CLASS, Segmented, SelectInput, SettingsButton, SettingsNote, SettingsRow, SettingsSubhead, Switch } from "../pages/settings/SettingsControls.jsx";
 
 /** Only the per-demo name map leaves this component; identity is never editable. */
-export default function PlayerAliasesSection({ demos = [], value, onChange, onReadyChange, disabled = false, compact = false }) {
+export default function PlayerAliasesSection({ demos = [], value, onChange, onReadyChange, disabled = false, compact = false, layout = "card" }) {
   const t = useT();
   const [rosters, setRosters] = useState({});
   const [loadError, setLoadError] = useState("");
   const [loading, setLoading] = useState(false);
   const [revision, setRevision] = useState(0);
+  const [selectedDemoKey, setSelectedDemoKey] = useState(null);
   const signature = JSON.stringify(demos);
   const enabled = value?.enabled === true;
+  const selectedDemo = demos.find(demo => demo.key === selectedDemoKey) || demos[0];
 
   useEffect(() => {
     if (!enabled) { onReadyChange?.(true); return undefined; }
@@ -51,6 +54,71 @@ export default function PlayerAliasesSection({ demos = [], value, onChange, onRe
     ...value,
     drafts: { ...value.drafts, [demo]: { ...value.drafts?.[demo], [id]: name } },
   });
+
+  if (layout === "rows") return (
+    <div className="divide-y divide-cs2-border-subtle" data-testid="player-aliases-section">
+      <SettingsRow label={t("playerAliases.title")} description={t("playerAliases.recordingHint")}>
+        {enabled ? <SettingsButton variant="ghost" icon={RotateCcw} disabled={disabled} onClick={() => onChange({ ...value, drafts: {} })}>
+          {t("playerAliases.reset")}
+        </SettingsButton> : null}
+        <Switch ariaLabel={t("playerAliases.enable")} checked={enabled} disabled={disabled || !onChange}
+          onChange={enabled => onChange({ ...value, enabled, drafts: value?.drafts || {} })} />
+      </SettingsRow>
+      {enabled ? <>
+        {loading ? <SettingsNote role="status">{t("playerAliases.loading")}</SettingsNote> : null}
+        {loadError ? <SettingsNote tone="rose" role="alert">
+          <p>{loadError}</p>
+          <SettingsButton variant="ghost" disabled={disabled} className="mt-2" onClick={() => setRevision(v => v + 1)}>
+            {t("playerAliases.retry")}
+          </SettingsButton>
+        </SettingsNote> : null}
+        {!loading && !loadError && demos.length > 1 ? (
+          <div className="min-w-0 overflow-x-auto px-4 py-3">
+            {demos.length <= 4 ? <div className="w-max min-w-full">
+              <Segmented ariaLabel={t("playerAliases.demoLabel")} value={selectedDemo?.key}
+                onChange={setSelectedDemoKey} disabled={disabled}
+                options={demos.map(demo => ({ value: demo.key, title: demo.label,
+                  label: <span className="block max-w-[24rem] truncate">{demo.label}</span> }))} />
+            </div> : <SelectInput ariaLabel={t("playerAliases.demoLabel")} value={selectedDemo?.key}
+              onChange={setSelectedDemoKey} disabled={disabled} className="w-full"
+              options={demos.map(demo => ({ value: demo.key, label: demo.label }))} />}
+          </div>
+        ) : null}
+        {!loading && !loadError ? demos.filter(demo => demo.key === selectedDemo?.key).map(demo => <div key={demo.key} className="divide-y divide-cs2-border-subtle">
+          {demos.length === 1 ? <SettingsSubhead><span className="break-all">{demo.label}</span></SettingsSubhead> : null}
+          <div className="grid grid-cols-1 gap-px bg-cs2-border-subtle @min-[40rem]/params:grid-cols-2">
+          {[2, 3, 0].map(team => {
+            const players = (rosters[demo.key] || []).filter(player => {
+              const number = Number(demo.playerTeams?.[player.steamid64] ?? player.team_number);
+              return (number === 2 || number === 3 ? number : 0) === team;
+            });
+            if (!players.length) return null;
+            const teamName = demo.teamNames?.[team] || (team === 3 ? "CT" : team === 2 ? "T" : t("playerAliases.otherPlayers"));
+            return <div key={team} role="group" aria-label={teamName}
+              className={`min-w-0 divide-y divide-cs2-border-subtle bg-cs2-bg-card ${team === 0 ? "@min-[40rem]/params:col-span-2" : ""}`}>
+              <SettingsSubhead><span className={team === 3 ? "text-cs2-cyan-on-surface" : "text-cs2-amber-on-surface"}>
+                {teamName}
+              </span></SettingsSubhead>
+              {players.map(player => {
+                const name = value.drafts?.[demo.key]?.[player.steamid64] || "";
+                const error = playerAliasError(name);
+                return <SettingsRow key={player.steamid64} label={player.name}
+                  tooltip={`${player.name} · ${player.steamid64}`}
+                  footer={error ? <p role="alert" className="text-xs text-cs2-text-error">{t(error)}</p> : null}>
+                  <input type="text" value={name} disabled={disabled} spellCheck={false}
+                    aria-label={t("playerAliases.inputLabel", { name: player.name })} aria-invalid={!!error}
+                    placeholder={t("playerAliases.placeholder")}
+                    onChange={event => edit(demo.key, player.steamid64, event.target.value)}
+                    className={`${error ? SETTINGS_INPUT_CLASS.replace("border-cs2-border", "border-cs2-border-error") : SETTINGS_INPUT_CLASS} w-40 max-w-full`} />
+                </SettingsRow>;
+              })}
+            </div>;
+          })}
+          </div>
+        </div>) : null}
+      </> : null}
+    </div>
+  );
 
   return (
     <section className="rounded-xl border border-cs2-border bg-cs2-bg-card/50 p-4" data-testid="player-aliases-section">

@@ -1,4 +1,5 @@
 export const MAX_EVENT_PREROLL_SECONDS = 10;
+export const MAX_RECORDING_MERGE_GAP_SECONDS = 150;
 
 /** Preserve other pacing fields and cap padding saved by older clients. */
 export function limitRecordingPacing(pacing) {

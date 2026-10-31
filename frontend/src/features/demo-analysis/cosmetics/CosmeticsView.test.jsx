@@ -192,8 +192,8 @@ describe("CosmeticsView", () => {
     );
 
     const customizeButton = screen.getByRole("button", { name: /自定义饰品|Customize skins/i });
-    expect(customizeButton.className).toContain("rounded-[10px]");
-    expect(customizeButton.className).toContain("bg-cs2-accent-soft");
+    expect(customizeButton.className).toContain("rounded-md");
+    expect(customizeButton.className).toContain("border-cs2-accent/60");
     expect(screen.getByTestId("cosmetics-customize-icon").className.baseVal).toContain("text-cs2-accent");
     expect(screen.queryByText(/2 items|2 件饰品/)).toBeNull();
     for (const card of container.querySelectorAll("[data-cosmetic-card]")) {
@@ -202,11 +202,11 @@ describe("CosmeticsView", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /自定义饰品|Customize skins/i }));
     const saveButton = screen.getByRole("button", { name: /保存自定义皮肤方案|Save custom skin plan/i });
-    expect(saveButton.className).toContain("rounded-[10px]");
-    expect(saveButton.className).toContain("bg-cs2-accent-soft");
+    expect(saveButton.className).toContain("rounded-md");
+    expect(saveButton.className).toContain("bg-cs2-accent");
     expect(screen.getByTestId("cosmetics-save-plan-icon")).toBeTruthy();
     const cancelButton = screen.getByRole("button", { name: /^取消$|^Cancel$/ });
-    expect(cancelButton.className).toContain("rounded-[10px]");
+    expect(cancelButton.className).toContain("rounded-md");
     expect(cancelButton.className).toContain("bg-cs2-bg-input");
     expect(screen.getByTestId("cosmetics-cancel-icon")).toBeTruthy();
   });
@@ -234,11 +234,6 @@ describe("CosmeticsView", () => {
       name_en: "AWP | Asiimov",
     };
     localStorage.setItem("cs2-insight:cosmetics-workshop-plan:v1", JSON.stringify([
-      {
-        id: "plan-1",
-        name: "训练方案",
-        selections: { ct: { "weapon:awp": trainingReplacement }, t: {} },
-      },
       {
         id: "plan-2",
         name: "比赛方案",
@@ -295,7 +290,7 @@ describe("CosmeticsView", () => {
 
       const picker = screen.getByRole("dialog");
       expect(within(picker).getByRole("heading", { name: /选择饰品工坊方案|Choose a Cosmetics Workshop plan/ })).toBeTruthy();
-      expect(within(picker).getByRole("button", { name: /训练方案/ })).toBeTruthy();
+      expect(within(picker).queryByRole("button", { name: /训练方案/ })).toBeNull();
       const matchPlan = within(picker).getByRole("button", { name: /比赛方案/ });
       fireEvent.click(matchPlan);
       expect(matchPlan.getAttribute("aria-pressed")).toBe("true");

@@ -1,10 +1,13 @@
+import { IconTile } from "../../AnalysisUi.jsx";
+
 /**
- * Compact shared shell for overview insight panels.
+ * Shared shell for overview insight panels, styled like the highlight cards:
+ * tinted icon tile, 13px title and an optional one-line summary.
  * @param {{
  *   title: string,
- *   icon?: import("react").ReactNode,
+ *   icon?: import("react").ComponentType<{ className?: string }>,
+ *   tone?: "neutral" | "accent" | "blue" | "amber" | "green" | "rose" | "violet",
  *   summary?: string,
- *   compact?: boolean,
  *   className?: string,
  *   children: import("react").ReactNode,
  * }} props
@@ -12,28 +15,22 @@
 export default function InsightCard({
   title,
   icon,
+  tone = "neutral",
   summary,
-  compact = false,
   className = "",
   children,
 }) {
   return (
-    <article
-      className={`flex h-full min-h-0 flex-col overflow-hidden rounded-[10px] border border-cs2-border bg-cs2-bg-card ${
-        compact ? "p-3" : "p-3.5"
-      } ${className}`}
-    >
-      <header className="mb-1.5 flex shrink-0 items-center gap-2">
-        {icon ? (
-          <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-cs2-bg-input/60 text-cs2-text-secondary">
-            {icon}
-          </div>
-        ) : null}
-        <h3 className="text-[12px] font-bold text-cs2-text-primary">{title}</h3>
+    <article className={`analysis-card flex h-full min-h-0 flex-col overflow-hidden p-3 ${className}`}>
+      <header className="mb-2 flex shrink-0 items-center gap-2.5">
+        {icon ? <IconTile icon={icon} tone={tone} /> : null}
+        <div className="min-w-0">
+          <h3 className="truncate text-[13px] font-semibold text-cs2-text-primary">{title}</h3>
+          {summary ? (
+            <p className="truncate text-[11.5px] text-cs2-text-muted" title={summary}>{summary}</p>
+          ) : null}
+        </div>
       </header>
-      {summary ? (
-        <p className="mb-1.5 shrink-0 line-clamp-1 text-[11px] leading-snug text-cs2-text-secondary">{summary}</p>
-      ) : null}
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden">{children}</div>
     </article>
   );

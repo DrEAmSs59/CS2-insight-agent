@@ -129,9 +129,9 @@ function ClipPill({ clip }) {
   const dur = clip.duration_sec ? `${clip.duration_sec.toFixed(1)}s` : null;
   const colorMap = {
     highlight: "bg-cs2-accent/15 text-cs2-accent border-cs2-accent/30",
-    fail: "bg-blue-500/10 text-blue-300 border-blue-500/20",
-    meme_death: "bg-purple-500/10 text-purple-300 border-purple-500/20",
-    compilation: "bg-emerald-500/10 text-emerald-300 border-emerald-500/20",
+    fail: "bg-cs2-cyan-surface text-cs2-cyan-on-surface border-cs2-cyan-border",
+    meme_death: "bg-cs2-violet-surface text-cs2-violet-on-surface border-cs2-violet-border",
+    compilation: "bg-cs2-emerald-surface text-cs2-emerald-on-surface border-cs2-emerald-border",
   };
   const cls = colorMap[category] ?? "bg-cs2-bg-hover text-cs2-text-secondary border-cs2-border";
 
@@ -174,7 +174,7 @@ function ExportRow({ item, selected, onSelect, onOpenFolder, onDelete, onRename 
           : ok
             ? "border-cs2-border bg-cs2-bg-hover hover:border-cs2-border hover:bg-cs2-bg-hover"
             : isErr
-              ? "border-red-500/20 bg-cs2-red-surface"
+              ? "border-cs2-rose-border bg-cs2-red-surface"
               : "border-cs2-border bg-cs2-bg-hover"
       }`}
     >
@@ -194,9 +194,9 @@ function ExportRow({ item, selected, onSelect, onOpenFolder, onDelete, onRename 
           {running ? (
             <Loader2 className="h-4 w-4 animate-spin text-cs2-text-muted" />
           ) : ok ? (
-            <CheckCircle2 className="h-4 w-4 text-emerald-400" />
+            <CheckCircle2 className="h-4 w-4 text-cs2-emerald-on-surface" />
           ) : (
-            <AlertCircle className="h-4 w-4 text-red-400" />
+            <AlertCircle className="h-4 w-4 text-cs2-rose-on-surface" />
           )}
         </div>
 
@@ -235,7 +235,7 @@ function ExportRow({ item, selected, onSelect, onOpenFolder, onDelete, onRename 
               <span>{[hasIntro && t("montage.hasIntroLabel"), hasOutro && t("montage.hasOutroLabel")].filter(Boolean).join("+")}</span>
             )}
             {isErr && item.error_msg && (
-              <span className="text-red-400/80">{humanizeMontageError(item.error_msg, t)}</span>
+              <span className="text-cs2-rose-on-surface/80">{humanizeMontageError(item.error_msg, t)}</span>
             )}
           </div>
           {tSummary && (
@@ -259,7 +259,7 @@ function ExportRow({ item, selected, onSelect, onOpenFolder, onDelete, onRename 
             type="button"
             title={t("montage.historyDeleteTitle")}
             onClick={() => onDelete([item.id])}
-            className="rounded p-1.5 text-cs2-text-muted hover:bg-red-500/10 hover:text-red-400"
+            className="rounded p-1.5 text-cs2-text-muted hover:bg-cs2-rose-surface hover:text-cs2-rose-on-surface"
           >
             <Trash2 className="h-3.5 w-3.5" />
           </button>
@@ -289,7 +289,7 @@ function DeleteConfirmDialog({ count, onConfirm, onCancel }) {
           {t("montage.historyDeleteConfirmBody", { n: count })}
         </p>
         <p className="mb-4 text-[12px] leading-relaxed text-cs2-text-muted">
-          {t("montage.historyDeleteConfirmDiskWarn")}<span className="text-red-400">{t("montage.historyDeleteConfirmIrreversible")}</span>。
+          {t("montage.historyDeleteConfirmDiskWarn")}<span className="text-cs2-rose-on-surface">{t("montage.historyDeleteConfirmIrreversible")}</span>。
         </p>
         <div className="flex gap-3">
           <button
@@ -302,7 +302,7 @@ function DeleteConfirmDialog({ count, onConfirm, onCancel }) {
           <button
             type="button"
             onClick={() => onConfirm(true)}
-            className="flex-1 rounded-lg bg-red-600 py-2 text-[12px] font-semibold text-cs2-text-primary hover:bg-red-500"
+            className="flex-1 rounded-lg bg-red-600 py-2 text-[12px] font-semibold text-white hover:bg-red-500"
           >
             {t("montage.historyDeleteWithFile")}
           </button>
@@ -328,6 +328,7 @@ export default function MontageHistoryPanel({ open, onClose }) {
   const [page, setPage] = useState(0);
   const [selectedIds, setSelectedIds] = useState(new Set());
   const [pendingDelete, setPendingDelete] = useState(null); // null | int[]
+  const [deleteError, setDeleteError] = useState("");
   const PAGE_SIZE = 15;
 
   const load = useCallback(async (pageIdx = 0) => {
@@ -358,6 +359,7 @@ export default function MontageHistoryPanel({ open, onClose }) {
   const confirmDelete = useCallback(async (deleteFiles) => {
     if (!pendingDelete?.length) return;
     setPendingDelete(null);
+    setDeleteError("");
     try {
       if (pendingDelete.length === 1) {
         await API.delete(`/montage/exports/${pendingDelete[0]}`, {
@@ -366,15 +368,18 @@ export default function MontageHistoryPanel({ open, onClose }) {
         setItems((prev) => prev.filter((it) => !pendingDelete.includes(it.id)));
         setTotal((tot) => Math.max(0, tot - 1));
       } else {
-        await API.post("/montage/exports/batch-delete", {
+        const { data } = await API.post("/montage/exports/batch-delete", {
           ids: pendingDelete,
           delete_files: deleteFiles,
         });
-        setItems((prev) => prev.filter((it) => !pendingDelete.includes(it.id)));
-        setTotal((tot) => Math.max(0, tot - pendingDelete.length));
+        setItems((prev) => prev.filter((it) => !data.deleted_ids.includes(it.id)));
+        setTotal((tot) => Math.max(0, tot - data.deleted_ids.length));
+        setDeleteError((data.failed || []).map((item) => item.error).join("\n"));
       }
       setSelectedIds(new Set());
-    } catch { /* 静默 */ }
+    } catch (error) {
+      setDeleteError(error.response?.data?.detail || error.message);
+    }
   }, [pendingDelete]);
 
   const handleRename = useCallback(async (id, name) => {
@@ -460,7 +465,7 @@ export default function MontageHistoryPanel({ open, onClose }) {
               <button
                 type="button"
                 onClick={() => requestDelete([...selectedIds])}
-                className="ml-auto flex items-center gap-1.5 rounded-lg border border-red-500/30 bg-cs2-red-surface px-3 py-1.5 text-[12px] font-semibold text-cs2-red-on-surface hover:bg-red-900/40"
+                className="ml-auto flex items-center gap-1.5 rounded-lg border border-cs2-rose-border bg-cs2-red-surface px-3 py-1.5 text-[12px] font-semibold text-cs2-red-on-surface hover:bg-red-900/40"
               >
                 <Trash2 className="h-3.5 w-3.5" />
                 {t("montage.historyDeleteSelected", { n: selectedIds.size })}
@@ -469,6 +474,7 @@ export default function MontageHistoryPanel({ open, onClose }) {
           </div>
 
           {/* 列表 */}
+          {deleteError && <p role="alert" className="whitespace-pre-line px-6 py-2 text-sm text-cs2-rose-on-surface">{deleteError}</p>}
           <div className="min-h-0 flex-1 overflow-y-auto px-6 py-4">
             {loading && items.length === 0 ? (
               <div className="flex h-40 items-center justify-center text-cs2-text-muted">

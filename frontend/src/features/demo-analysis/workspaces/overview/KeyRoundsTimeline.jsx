@@ -1,4 +1,5 @@
 import { Play } from "lucide-react";
+import { AccentButton, SectionHeader } from "../../AnalysisUi.jsx";
 
 const TONE_STYLES = {
   accent: {
@@ -7,7 +8,7 @@ const TONE_STYLES = {
   },
   amber: {
     badge: "bg-cs2-amber-surface text-cs2-amber-on-surface",
-    dot: "bg-amber-400",
+    dot: "bg-cs2-team-amber",
   },
   violet: {
     badge: "bg-cs2-violet-surface text-cs2-violet-on-surface",
@@ -15,7 +16,7 @@ const TONE_STYLES = {
   },
   blue: {
     badge: "bg-cs2-cyan-surface text-cs2-cyan-on-surface",
-    dot: "bg-sky-400",
+    dot: "bg-cs2-team-blue",
   },
 };
 
@@ -68,11 +69,13 @@ export default function KeyRoundsTimeline({ rounds, onOpenRound, onOpenReplayRou
   if (list.length === 0) return null;
 
   return (
-    <section className="rounded-[10px] border border-cs2-border bg-cs2-bg-card p-3">
-      <div className="mb-2 flex items-center gap-2">
-        <span className="h-3.5 w-1 rounded-full bg-cs2-accent" />
-        <h2 className="text-[12px] font-bold text-cs2-text-primary">关键回合</h2>
-      </div>
+    <section>
+      <SectionHeader
+        level={2}
+        title="关键回合"
+        description={canReplay ? "点击卡片查看回合详情，或直接打开 2D 回放" : "点击卡片查看回合详情"}
+        className="mb-2"
+      />
 
       <div className="overflow-x-auto pb-0.5">
         <div className="flex w-full min-w-0 gap-2.5">
@@ -98,48 +101,49 @@ export default function KeyRoundsTimeline({ rounds, onOpenRound, onOpenReplayRou
                       onOpenRound(roundNumber);
                     }
                   }}
-                  className={`flex h-[88px] flex-col rounded-lg border border-cs2-border bg-cs2-bg-input/30 px-2.5 py-2 text-left transition-colors ${
-                    openEnabled ? "cursor-pointer hover:border-cs2-accent/40" : ""
+                  className={`analysis-card flex min-h-[124px] flex-col p-3 text-left ${
+                    openEnabled ? "analysis-card--interactive cursor-pointer" : ""
                   }`}
                 >
                   <div className="flex items-center gap-1.5">
-                    <span className="whitespace-nowrap font-mono text-[11px] font-bold text-cs2-text-primary">
+                    <span className="whitespace-nowrap font-mono text-[13px] font-bold text-cs2-text-primary">
                       {roundHeading(round)}
                     </span>
                     <span
                       data-overview-tone-tag
-                      className={`inline-flex rounded px-1.5 py-0.5 text-[9px] font-semibold ${styles.badge}`}
+                      className={`inline-flex h-5 items-center rounded-full px-2 text-[11px] font-semibold ${styles.badge}`}
                     >
                       {typeBadgeLabel(round.types)}
                     </span>
-                    <span className="flex-1" />
-                    {replayEnabled ? (
-                      <button
-                        type="button"
-                        title="打开 2D 回放"
-                        className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md border border-cs2-border bg-cs2-bg-card text-cs2-text-secondary hover:border-cs2-accent/45 hover:text-cs2-accent"
+                  </div>
+                  <p className="mt-1.5 truncate text-[13px] font-semibold text-cs2-text-primary">
+                    {round.playerName ? `${round.playerName} · ` : ""}
+                    {round.title || "关键回合"}
+                  </p>
+                  <p className="mt-0.5 line-clamp-2 text-[11.5px] leading-snug text-cs2-text-muted">
+                    {round.description || ""}
+                  </p>
+                  {replayEnabled ? (
+                    <div className="mt-auto pt-2">
+                      <AccentButton
+                        size="sm"
+                        aria-label={`打开 R${roundNumber} 的 2D 回放`}
                         onClick={(e) => {
                           e.stopPropagation();
                           onOpenReplayRound(roundNumber);
                         }}
                       >
-                        <Play className="h-3 w-3" fill="currentColor" />
-                      </button>
-                    ) : null}
-                  </div>
-                  <p className="mt-1 truncate text-[11px] font-semibold text-cs2-text-primary">
-                    {round.playerName ? `${round.playerName} · ` : ""}
-                    {round.title || "关键回合"}
-                  </p>
-                  <p className="mt-0.5 line-clamp-2 text-[10px] leading-snug text-cs2-text-muted">
-                    {round.description || ""}
-                  </p>
+                        <Play className="h-3 w-3" fill="currentColor" aria-hidden />
+                        2D 回放
+                      </AccentButton>
+                    </div>
+                  ) : null}
                 </div>
 
                 <div className="mt-1.5 flex flex-col items-center">
                   <div className="h-2 w-px bg-cs2-border" />
                   <span className={`h-2 w-2 rounded-full ${styles.dot}`} />
-                  <span className="mt-0.5 font-mono text-[9px] text-cs2-text-muted">
+                  <span className="mt-0.5 font-mono text-[11px] text-cs2-text-muted">
                     {round.timestamp || `R${roundNumber}`}
                   </span>
                 </div>

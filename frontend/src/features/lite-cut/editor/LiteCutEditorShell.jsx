@@ -1495,9 +1495,9 @@ export default function LiteCutEditorShell({
     >
       {recoveryCandidate ? (
         <div className="fixed inset-0 z-[160] flex items-center justify-center bg-black/70 p-4" role="dialog" aria-modal="true" aria-label={t("liteCut.recovery.title")}>
-          <div className="w-full max-w-md rounded-2xl border border-amber-400/35 bg-cs2-bg-elevated p-5 shadow-2xl">
+          <div className="w-full max-w-md rounded-2xl border border-cs2-amber-border bg-cs2-bg-elevated p-5 shadow-2xl">
             <div className="flex items-start gap-3">
-              <div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-amber-400/15 text-amber-300">↺</div>
+              <div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-cs2-amber-surface text-cs2-amber-on-surface">↺</div>
               <div className="min-w-0">
                 <h2 className="text-sm font-bold text-cs2-text-primary">{t("liteCut.recovery.title")}</h2>
                 <p className="mt-1 text-[11px] leading-relaxed text-cs2-text-secondary">{t("liteCut.recovery.description")}</p>
@@ -1507,7 +1507,7 @@ export default function LiteCutEditorShell({
               </div>
             </div>
             <div className="mt-5 grid grid-cols-2 gap-2">
-              <button type="button" onClick={discardRecoveryDraft} className="h-9 rounded-lg border border-cs2-border text-[11px] font-semibold text-cs2-text-secondary hover:bg-white/5">{t("liteCut.recovery.discard")}</button>
+              <button type="button" onClick={discardRecoveryDraft} className="h-9 rounded-lg border border-cs2-border text-[11px] font-semibold text-cs2-text-secondary hover:bg-cs2-bg-hover">{t("liteCut.recovery.discard")}</button>
               <button type="button" onClick={restoreRecoveryDraft} className="h-9 rounded-lg border border-cs2-accent/50 bg-cs2-accent text-[11px] font-bold text-black hover:brightness-110">{t("liteCut.recovery.restore")}</button>
             </div>
           </div>

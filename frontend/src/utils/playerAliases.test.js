@@ -28,4 +28,16 @@ describe("player aliases", () => {
     expect(next[1]).not.toHaveProperty("player_aliases");
     expect(requests[0]).not.toHaveProperty("player_aliases");
   });
+  it("adds team names and stable player sides to display targets without changing recording requests", () => {
+    const requests = [{ demo: { demo_path: "/a.dem", demo_filename: "a.dem" }, source_ref: { queue_item_id: "q1" } }];
+    const queue = [{ id: "q1", matchMeta: { team_a_name: "Vitality", team_b_name: "NAVI", all_players: [
+      { steamid64: "76561199032006224", team_num: 2 },
+      { steamid64: "76561199032006225", team_num: 3 },
+    ] } }];
+    const [target] = recordingAliasDemoTargets(requests, queue);
+    expect(target.teamNames).toEqual({ 2: "Vitality", 3: "NAVI" });
+    expect(target.playerTeams).toEqual({ "76561199032006224": 2, "76561199032006225": 3 });
+    expect(requests[0].demo).toEqual({ demo_path: "/a.dem", demo_filename: "a.dem" });
+    expect(recordingAliasDemoTargets(requests)[0]).not.toHaveProperty("teamNames");
+  });
 });

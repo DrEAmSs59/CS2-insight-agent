@@ -191,3 +191,9 @@ describe("recording preset share JSON", () => {
       .default_record_warmup.pov_radar_mode).toBe(0);
   });
 });
+
+
+test("preserves a 150-second merge gap through Free preset export and import", () => {
+  const file = buildRecordingPresetFile({ ...preset, recording_global_pacing: { max_gap_sec: 150 } });
+  expect(parseRecordingPresetFile(file, RECORD_WARMUP_DEFAULT_OPTIONS).recording_global_pacing.max_gap_sec).toBe(150);
+});

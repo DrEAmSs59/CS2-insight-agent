@@ -119,7 +119,6 @@ class RecordingOptions(BaseModel):
     obs_transition_name: Optional[str] = None
     obs_transition_duration_ms: Optional[int] = None
     # LLM 导播大纲：合并击杀簇 + 精选受害者 POV（替代纯规则/全量 K→V）
-    use_ai_director: bool = False
 
     @field_validator("highlight_pre_sec", "timeline_kill_pre_sec", "death_pre_sec",
                      "kill_compilation_pre_sec", "death_compilation_pre_sec", mode="before")

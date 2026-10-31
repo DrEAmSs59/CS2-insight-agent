@@ -8,7 +8,7 @@ export function readWorkshopSchemes() {
   try {
     const parsed = JSON.parse(storage()?.getItem(WORKSHOP_SCHEME_STORAGE_KEY) || "null");
     if (!Array.isArray(parsed)) return [];
-    return parsed.filter((plan) => plan && typeof plan === "object").map((plan) => ({
+    return parsed.filter((plan) => plan && typeof plan === "object").slice(0, 1).map((plan) => ({
       ...plan,
       selections: {
         ct: plan.selections?.ct && typeof plan.selections.ct === "object" ? plan.selections.ct : {},
@@ -55,4 +55,12 @@ export function workshopSchemeSelectionForItem(plan, team, item) {
       && String(candidate.type || "") === "weapon"
       && Number(candidate.def_index) === defIndex
   )) || null;
+}
+
+export function writeWorkshopSchemes(plans) {
+  if (!Array.isArray(plans) || plans.length > 1) return false;
+  try {
+    storage()?.setItem(WORKSHOP_SCHEME_STORAGE_KEY, JSON.stringify(plans));
+    return Boolean(storage());
+  } catch { return false; }
 }

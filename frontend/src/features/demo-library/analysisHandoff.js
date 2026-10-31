@@ -1,6 +1,7 @@
 import { ensureClientClipUidsOnClips } from "../../utils/clipClientUid";
 import { freezeToDeathDraftFromClipFilter } from "../../utils/freezeToDeathRoundFilter";
 import { playerIdentityKey } from "../../utils/playerIdentity.js";
+import { hasCurrentDemoAnalysisVersion } from "../demo-analysis/state/analysisCache.js";
 
 function nullableKeyboardInputFlag(...values) {
   for (const value of values) {
@@ -45,7 +46,9 @@ export function buildLoadedLibraryDemo(item, playersResult) {
 
 function parsedMatchFromDemo(demo) {
   const result = demo.cached_result;
-  if (!result) return null;
+  // Do not expose obsolete slots/clips while automatic reanalysis is pending
+  // (or if it fails). Selection and round-filter preferences are kept separately.
+  if (!hasCurrentDemoAnalysisVersion(result)) return null;
 
   const playerResults = result.players;
   if (playerResults && typeof playerResults === "object" && !Array.isArray(playerResults)) {

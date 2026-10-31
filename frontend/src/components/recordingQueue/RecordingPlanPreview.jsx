@@ -9,7 +9,7 @@ function chipClass(token) {
     return "rounded border border-cs2-accent/40 bg-cs2-accent/15 px-1 py-px text-[9px] font-bold text-cs2-accent";
   }
   if (token === "V") {
-    return "rounded border border-cyan-500/35 bg-cs2-cyan-surface px-1 py-px text-[9px] font-bold text-cs2-cyan-on-surface";
+    return "rounded border border-cs2-cyan-border bg-cs2-cyan-surface px-1 py-px text-[9px] font-bold text-cs2-cyan-on-surface";
   }
   if (token === "→") {
     return "px-0.5 text-[9px] font-bold text-cs2-text-muted";

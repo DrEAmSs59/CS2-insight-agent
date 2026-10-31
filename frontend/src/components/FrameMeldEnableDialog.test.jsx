@@ -51,7 +51,7 @@ describe("FrameMeldEnableDialog", () => {
   it("emphasizes the requested warnings and uses multiplication signs in resolutions", () => {
     render(<FrameMeldEnableDialog open onConfirm={vi.fn()} onCancel={vi.fn()} />);
 
-    expect(screen.getByText("导出速度会有非常明显的下降。").className).toContain("text-red-400");
+    expect(screen.getByText("导出速度会有非常明显的下降。").className).toContain("text-cs2-rose-on-surface");
     expect(screen.getByText("建议先用短片段测试效果和预计耗时。").closest("li").className).toContain("font-bold");
     expect(screen.getByText("推荐使用 FrameMeld_ffmpeg V0.1.3 及以上版本的 ffmpeg。")).toBeTruthy();
     expect(screen.queryByText("300 FPS（×5）")).toBeNull();
@@ -67,7 +67,7 @@ describe("FrameMeldEnableDialog", () => {
     expect(screen.getByText("*Fast 版本 FFmpeg 会添加锐化并使用更低倍数的补帧策略以缩短耗时（提速约 25%）。").className).toContain("font-bold");
     fireEvent.mouseLeave(screen.getByRole("button", { name: "补帧策略" }));
     expect(screen.queryByRole("tooltip")).toBeNull();
-    expect(screen.getByText("*部分显卡性能指标参考：").className).toContain("text-red-400");
+    expect(screen.getByText("*部分显卡性能指标参考：").className).toContain("text-cs2-rose-on-surface");
     expect(screen.getByText(/1920×1080/)).toBeTruthy();
   });
 

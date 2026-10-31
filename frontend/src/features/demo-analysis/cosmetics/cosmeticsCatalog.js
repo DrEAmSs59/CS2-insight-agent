@@ -186,3 +186,8 @@ export function listDefaultLoadout(team) {
       ownership_evidence: "default_loadout",
     }));
 }
+
+export function isVanillaKnife(item) {
+  return item?.type === "melee" && Number(item.paint_index ?? item.index) === 0
+    && CS2_COSMETICS_ITEMS.some(row => row.type === "melee" && row.base && !row.free && Number(row.def) === Number(item.def_index ?? item.def));
+}

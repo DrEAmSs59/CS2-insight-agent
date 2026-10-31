@@ -10,7 +10,8 @@ import {
   OctagonX,
 } from "lucide-react";
 import { useRecordingQueue, BACKEND_DEFAULT_PACING, clipHasNoKillerPovTags, clipKillerPovEnqueueEligible } from "../../stores/recordingQueueStore";
-import { MAX_EVENT_PREROLL_SECONDS } from "../../utils/recordingPacing.js";
+import { MAX_EVENT_PREROLL_SECONDS, MAX_RECORDING_MERGE_GAP_SECONDS } from "../../utils/recordingPacing.js";
+import { NumberInput } from "../../pages/settings/SettingsControls.jsx";
 import {
   formatClipCombatSummaryLine,
   isTimelineSourceClip,
@@ -26,7 +27,6 @@ import {
 } from "../../utils/freezeToDeathRoundFilter";
 import RecordingPlanPreview from "./RecordingPlanPreview";
 import RoundCompilationTiming from "./RoundCompilationTiming";
-import AiDirectorPreview from "./AiDirectorPreview";
 import { estimateItemRecordSeconds } from "../../utils/recordingQueueDerive";
 import { timelineQueueMetaOneLiner } from "../../utils/timelineQueue";
 import { AiScoreBadge } from "../ClipCard";
@@ -97,17 +97,16 @@ function PacingSliderRow({
             "--cs2-range-accent": rangeAccent,
           }}
         />
-        <input
-          type="number"
+        <NumberInput
           step={step}
           min={min}
           max={max}
           value={value}
-          onChange={(e) => {
-            const n = parseFloat(e.target.value);
-            if (Number.isFinite(n)) onChange(clamp(n));
-          }}
-          className={`w-14 shrink-0 rounded border border-cs2-border bg-cs2-bg-input/70 px-1 py-0.5 text-right font-mono text-[11px] font-semibold ${valueTextClass}`}
+          clampOnBlur
+          ariaLabel={label}
+          onChange={onChange}
+          className="shrink-0"
+          inputClassName={`w-14 text-right font-semibold ${valueTextClass}`}
         />
       </div>
       {hint ? (
@@ -166,7 +165,7 @@ export function PacingMicroPanel({ item, updateItemPacing, embedded = false }) {
             label={t("queue.pacingGapSliderLabel")}
             value={gap}
             min={2}
-            max={70}
+            max={MAX_RECORDING_MERGE_GAP_SECONDS}
             step={0.5}
             onChange={(n) => commit({ max_gap_sec: n })}
           />
@@ -188,7 +187,7 @@ export function PovSection({ item, updateItemPacing }) {
   if (isClipPacingAndPovLocked(item.clipData)) {
     const wholeRound = isRoundTimelineRoundClip(item.clipData);
     return (
-      <p className="rounded-lg border border-cs2-amber-surface bg-cs2-amber-surface px-2 py-1.5 text-[10px] leading-relaxed text-cs2-text-muted">
+      <p className="rounded-lg border border-cs2-amber-border bg-cs2-amber-surface px-2 py-1.5 text-[10px] leading-relaxed text-cs2-text-muted">
         {wholeRound ? (
           <>
             {t("queue.povLockedPrefix")}<strong className="font-semibold text-cs2-text-secondary">{t("queue.povLockedTimelineStrong")}</strong>
@@ -234,10 +233,6 @@ export function PovSection({ item, updateItemPacing }) {
   const povEnabled = Boolean(po.victim_pov);
   const killerPovEnabled = Boolean(po.killer_pov);
   const povInterleaved = Boolean(po.pov_interleaved);
-  const aiDirectorEnabled = Boolean(po.ai_director);
-  const killCount = item.clipData?.kill_ticks?.length || 0;
-  const canAiDirector =
-    canVictimPov && killCount >= 3 && (isKillCompilation || (isHighlight && killCount > 1));
   const vicPre = po.victim_pov_pre_sec ?? gNum("victim_pov_pre_sec") ?? 1.5;
   const vicPost = po.victim_pov_post_sec ?? gNum("victim_pov_post_sec") ?? 1.5;
   const killPre = po.killer_pov_pre_sec ?? gNum("killer_pov_pre_sec") ?? vicPre;
@@ -255,11 +250,11 @@ export function PovSection({ item, updateItemPacing }) {
           <button
             type="button"
             title={t("queue.victimPovHint")}
-            onClick={() => commit({ victim_pov: !povEnabled, ai_director: povEnabled ? false : po.ai_director })}
+            onClick={() => commit({ victim_pov: !povEnabled })}
             className={`flex w-full items-center gap-1.5 rounded-lg border px-2 py-1.5 text-[10px] font-semibold transition-colors ${
               povEnabled
-                ? "border-cyan-500/40 bg-cs2-cyan-surface text-cyan-300 hover:bg-cs2-cyan-surface"
-                : "border-cs2-border bg-cs2-bg-hover text-cs2-text-secondary hover:border-cyan-500/30 hover:text-cyan-400"
+                ? "border-cs2-cyan-border bg-cs2-cyan-surface text-cs2-cyan-on-surface hover:bg-cs2-cyan-surface"
+                : "border-cs2-border bg-cs2-bg-hover text-cs2-text-secondary hover:border-cs2-cyan-border hover:text-cs2-cyan-on-surface"
             }`}
           >
             {povEnabled ? <Eye className="h-3 w-3 shrink-0" /> : <EyeOff className="h-3 w-3 shrink-0" />}
@@ -294,8 +289,8 @@ export function PovSection({ item, updateItemPacing }) {
             onClick={() => commit({ killer_pov: !killerPovEnabled })}
             className={`flex w-full items-center gap-1.5 rounded-lg border px-2 py-1.5 text-[10px] font-semibold transition-colors ${
               killerPovEnabled
-                ? "border-cs2-amber-surface bg-cs2-amber-surface text-cs2-amber-on-surface hover:bg-cs2-amber-surface"
-                : "border-cs2-border bg-cs2-bg-hover text-cs2-text-secondary hover:border-cs2-amber-surface hover:text-cs2-amber-on-surface"
+                ? "border-cs2-amber-border bg-cs2-amber-surface text-cs2-amber-on-surface hover:bg-cs2-amber-surface"
+                : "border-cs2-border bg-cs2-bg-hover text-cs2-text-secondary hover:border-cs2-amber-border hover:text-cs2-amber-on-surface"
             }`}
           >
             {killerPovEnabled ? <Eye className="h-3 w-3 shrink-0" /> : <EyeOff className="h-3 w-3 shrink-0" />}
@@ -319,12 +314,12 @@ export function PovSection({ item, updateItemPacing }) {
         )}
       </div>
 
-      {((povEnabled && canVictimPov) || (killerPovEnabled && isDeathCompilation)) && !aiDirectorEnabled && (
+      {((povEnabled && canVictimPov) || (killerPovEnabled && isDeathCompilation)) && (
         <label className="flex cursor-pointer items-start gap-2 rounded-lg border border-cs2-border-subtle bg-cs2-bg-input px-2 py-1.5 text-[10px] text-cs2-text-secondary">
           <input
             type="checkbox"
             checked={povInterleaved}
-            onChange={(e) => commit({ pov_interleaved: e.target.checked, ai_director: false })}
+            onChange={(e) => commit({ pov_interleaved: e.target.checked })}
             className="mt-0.5 h-3.5 w-3.5 shrink-0 rounded border-cs2-border accent-cyan-500"
           />
           <span className="leading-snug">
@@ -338,34 +333,10 @@ export function PovSection({ item, updateItemPacing }) {
         </label>
       )}
 
-      {canAiDirector && (
-        <label className="flex cursor-pointer items-start gap-2 rounded-lg border border-violet-500/20 bg-violet-500/5 px-2 py-1.5 text-[10px] text-cs2-text-secondary">
-          <input
-            type="checkbox"
-            checked={aiDirectorEnabled}
-            onChange={(e) => {
-              const on = e.target.checked;
-              commit(on
-                ? { ai_director: true, victim_pov: true, pov_interleaved: false }
-                : { ai_director: false });
-            }}
-            className="mt-0.5 h-3.5 w-3.5 shrink-0 rounded border-cs2-border accent-violet-500"
-          />
-          <span className="leading-snug">
-            <span className="font-semibold text-violet-300">{t("queue.aiDirectorLabel")}</span>
-            <span className="mt-0.5 block text-[9px] text-cs2-text-muted">{t("queue.aiDirectorHint")}</span>
-          </span>
-        </label>
-      )}
-
-      {aiDirectorEnabled && canAiDirector ? (
-        <AiDirectorPreview item={item} globalPacing={gp} />
-      ) : (
-        <RecordingPlanPreview item={item} globalPacing={gp} />
-      )}
+      <RecordingPlanPreview item={item} globalPacing={gp} />
 
       {povEnabled && canVictimPov && (
-        <div className="space-y-2 rounded-lg border border-cyan-500/10 bg-cs2-cyan-surface p-2">
+        <div className="space-y-2 rounded-lg border border-cs2-cyan-border bg-cs2-cyan-surface p-2">
           <PacingSliderRow
             label={t("queue.victimPovPreLabel")}
             value={vicPre}
@@ -390,7 +361,7 @@ export function PovSection({ item, updateItemPacing }) {
       )}
 
       {killerPovEnabled && canKillerPov && (
-        <div className="space-y-2 rounded-lg border border-cs2-amber-surface bg-cs2-amber-surface p-2">
+        <div className="space-y-2 rounded-lg border border-cs2-amber-border bg-cs2-amber-surface p-2">
           <PacingSliderRow
             label={t("queue.killerPovPreLabel")}
             value={killPre}
@@ -503,7 +474,7 @@ export function GlobalPacingPanel({
           label={t("queue.pacingGapSliderLabel")}
           value={gap}
           min={2}
-          max={70}
+          max={MAX_RECORDING_MERGE_GAP_SECONDS}
           step={0.5}
           onChange={(n) => commit({ max_gap_sec: n })}
         />
@@ -540,9 +511,9 @@ export function GlobalPacingPanel({
                   <span className={[
                     "inline-flex h-6 w-[50px] shrink-0 items-center justify-center whitespace-nowrap rounded border px-1 text-[10px] font-semibold leading-none",
                     status.state === "on"
-                      ? "border-cs2-emerald-surface bg-cs2-emerald-surface text-cs2-emerald-on-surface"
+                      ? "border-cs2-emerald-border bg-cs2-emerald-surface text-cs2-emerald-on-surface"
                       : status.state === "partial"
-                        ? "border-cs2-amber-surface bg-cs2-amber-surface text-cs2-amber-on-surface"
+                        ? "border-cs2-amber-border bg-cs2-amber-surface text-cs2-amber-on-surface"
                         : "border-cs2-border bg-cs2-bg-hover text-cs2-text-muted",
                   ].join(" ")}>{stateLabel}</span>
                 </div>
@@ -671,7 +642,7 @@ function QueueItemCard({
 
       {/* 辅助信息 */}
       {queueSummary ? (
-        <p className="mt-1 line-clamp-3 text-[10px] leading-snug text-cyan-100/85">
+        <p className="mt-1 line-clamp-3 text-[10px] leading-snug text-cs2-cyan-on-surface/85">
           {queueSummary}
         </p>
       ) : null}
@@ -704,7 +675,7 @@ function QueueItemCard({
             <RoundCompilationTiming item={item} updateItemPacing={updateItemPacing} />
           </div>
         ) : isClipPacingAndPovLocked(cd) ? (
-          <p className="mt-2 rounded border border-cs2-amber-surface bg-cs2-amber-surface px-2 py-1.5 text-[10px] text-cs2-amber-on-surface">
+          <p className="mt-2 rounded border border-cs2-amber-border bg-cs2-amber-surface px-2 py-1.5 text-[10px] text-cs2-amber-on-surface">
             {isRoundTimelineRoundClip(cd)
               ? t("queue.pacingLockedTimeline")
               : t("queue.pacingLockedCompilation")}
@@ -742,8 +713,8 @@ function QueueItemCard({
           onClick={onTogglePov}
           className={`flex min-w-0 items-center gap-1 rounded border px-2 py-1 text-[10px] font-semibold transition-colors ${
             povExpanded
-              ? "border-cs2-cyan-surface bg-cs2-cyan-surface text-cs2-cyan-on-surface"
-              : "border-cs2-cyan-surface/50 bg-cs2-cyan-surface/30 text-cs2-cyan-on-surface/90 hover:bg-cs2-cyan-surface"
+              ? "border-cs2-cyan-border bg-cs2-cyan-surface text-cs2-cyan-on-surface"
+              : "border-cs2-cyan-border/50 bg-cs2-cyan-surface/30 text-cs2-cyan-on-surface/90 hover:bg-cs2-cyan-surface"
           }`}
         >
           <Eye className="h-3 w-3 shrink-0" />
@@ -760,7 +731,7 @@ function QueueItemCard({
         <button
           type="button"
           onClick={() => onRemove(item.id)}
-          className="ml-auto flex items-center gap-1 rounded border border-rose-500/30 bg-rose-500/5 px-2 py-1 text-[10px] font-semibold text-cs2-rose-on-surface/90 transition-colors hover:bg-rose-500/15"
+          className="ml-auto flex items-center gap-1 rounded border border-cs2-rose-border bg-cs2-rose-surface px-2 py-1 text-[10px] font-semibold text-cs2-rose-on-surface/90 transition-colors hover:bg-cs2-rose-surface"
           aria-label={t("queue.removeAriaLabel")}
         >
           <Trash2 className="h-3 w-3" />
@@ -831,7 +802,7 @@ export function RecordingQueuePanel({
                     </p>
                     <p className="text-[10px] text-cs2-text-muted">{t("queue.demoClipCount", { n: items.length })}</p>
                   </div>
-                  <ul className="divide-y divide-white/[0.04]">
+                  <ul className="divide-y divide-cs2-border-subtle">
                     {items.map((it) => (
                       <QueueItemCard
                         key={it.id}
@@ -861,7 +832,7 @@ export function RecordingQueuePanel({
             <button
               type="button"
               onClick={onClear}
-              className="w-full rounded-md border border-cs2-border py-2 text-xs font-semibold text-cs2-text-secondary hover:border-cs2-red-surface hover:text-cs2-red-on-surface"
+              className="w-full rounded-md border border-cs2-border py-2 text-xs font-semibold text-cs2-text-secondary hover:border-cs2-red-border hover:text-cs2-red-on-surface"
             >
               {t("queue.btnClearQueue")}
             </button>
@@ -879,7 +850,7 @@ export function RecordingQueuePanel({
             <button
               type="button"
               onClick={() => void onAbortBatch()}
-              className="flex w-full items-center justify-center gap-2 rounded-lg border border-cs2-red-surface bg-cs2-red-surface py-3 text-sm font-bold text-cs2-red-on-surface transition-all hover:border-cs2-red-on-surface/60 hover:bg-cs2-red-surface"
+              className="flex w-full items-center justify-center gap-2 rounded-lg border border-cs2-red-border bg-cs2-red-surface py-3 text-sm font-bold text-cs2-red-on-surface transition-all hover:border-cs2-red-on-surface/60 hover:bg-cs2-red-surface"
             >
               <OctagonX className="h-4 w-4 shrink-0" />
               {t("queue.btnAbort")}

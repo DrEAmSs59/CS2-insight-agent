@@ -1,7 +1,7 @@
 import { useT } from "../i18n/useT.js";
 
 /**
- * 「回合合集」卡片内：勾选回合（仅「全选」「清空」快捷操作 + 数字格）。
+ * 「回合合集」回合勾选：全选 / 清空 + 回合编号按钮。
  * @param {{ maxRounds: number, picked: number[], disabled?: boolean, onChange: (next: { picked: number[] }) => void }} props
  */
 export default function RoundMontageRoundPicker({ maxRounds, picked, disabled = false, onChange }) {
@@ -18,13 +18,13 @@ export default function RoundMontageRoundPicker({ maxRounds, picked, disabled = 
   };
 
   return (
-    <div className="mt-2 rounded border border-cs2-border bg-cs2-bg-input/40 px-2 py-2">
-      <div className="mb-1.5 flex flex-wrap gap-1.5">
+    <div className="space-y-2">
+      <div className="flex flex-wrap items-center gap-1.5">
         <button
           type="button"
           disabled={disabled}
           onClick={() => onChange({ picked: Array.from({ length: n }, (_, i) => i + 1) })}
-          className="rounded border border-cs2-border px-2 py-0.5 text-[10px] font-semibold text-cs2-text-secondary transition-colors hover:border-cs2-accent/35 hover:text-cs2-accent disabled:opacity-40"
+          className="inline-flex h-7 items-center rounded-md border border-cs2-border bg-cs2-bg-input px-2.5 text-xs font-medium text-cs2-text-secondary transition-colors hover:text-cs2-text-primary disabled:opacity-40"
         >
           {t("montage.pickerSelectAll")}
         </button>
@@ -32,38 +32,34 @@ export default function RoundMontageRoundPicker({ maxRounds, picked, disabled = 
           type="button"
           disabled={disabled}
           onClick={() => onChange({ picked: [] })}
-          className="rounded border border-cs2-border px-2 py-0.5 text-[10px] font-semibold text-cs2-text-secondary transition-colors hover:border-rose-500/30 hover:text-cs2-rose-on-surface disabled:opacity-40"
+          className="inline-flex h-7 items-center rounded-md border border-cs2-border bg-cs2-bg-input px-2.5 text-xs font-medium text-cs2-text-secondary transition-colors hover:text-cs2-text-primary disabled:opacity-40"
         >
           {t("montage.pickerClear")}
         </button>
+        {set.size === 0 ? (
+          <span className="text-xs text-cs2-amber-on-surface" title={t("montage.pickerNoSelectionHint")}>
+            {t("montage.pickerNoSelectionShort")}
+          </span>
+        ) : null}
       </div>
-      {picked.length === 0 ? (
-        <p className="mb-1 text-[11px] leading-snug text-amber-400/90">
-          {t("montage.pickerNoSelectionHint")}
-        </p>
-      ) : null}
-      <div className="max-h-24 overflow-y-auto rounded border border-cs2-border bg-cs2-bg-input/60 p-1.5">
-        <div className="flex flex-wrap gap-1">
-          {Array.from({ length: n }, (_, i) => i + 1).map((r) => {
-            const on = set.has(r);
-            return (
-              <button
-                key={r}
-                type="button"
-                disabled={disabled}
-                title={t("montage.pickerRoundTitle", { n: r })}
-                onClick={() => toggle(r)}
-                className={`min-w-[1.75rem] rounded border px-1 py-0.5 font-mono text-[9px] font-semibold tabular-nums transition-colors ${
-                  on
-                    ? "border-cs2-accent/45 bg-cs2-accent/15 text-cs2-accent"
-                    : "border-cs2-border bg-cs2-bg-hover text-cs2-text-muted hover:border-cs2-border"
-                }`}
-              >
-                {r}
-              </button>
-            );
-          })}
-        </div>
+      <div className="flex max-h-32 flex-wrap gap-1.5 overflow-y-auto">
+        {Array.from({ length: n }, (_, i) => i + 1).map((r) => {
+          const on = set.has(r);
+          return (
+            <button
+              key={r}
+              type="button"
+              disabled={disabled}
+              aria-pressed={on}
+              data-active={on ? "true" : "false"}
+              title={t("montage.pickerRoundTitle", { n: r })}
+              onClick={() => toggle(r)}
+              className="analysis-tag-chip analysis-tag-chip--mini min-w-[2.25rem] justify-center font-mono tabular-nums disabled:opacity-40"
+            >
+              {r}
+            </button>
+          );
+        })}
       </div>
     </div>
   );

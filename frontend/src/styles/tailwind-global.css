@@ -1,4 +1,7 @@
 
+/* `light:` targets the light theme class on <html>, for the few spots that need a light-only tweak. */
+@custom-variant light (&:where(.light, .light *));
+
 /* ===== Tailwind 主题注册 ===== */
 @theme {
   /* 背景 */
@@ -52,6 +55,15 @@
   --color-cs2-violet-surface: var(--cs2-violet-surface);
   --color-cs2-red-surface: var(--cs2-red-surface);
 
+  /* 状态色 border */
+  --color-cs2-rose-border: var(--cs2-rose-border);
+  --color-cs2-emerald-border: var(--cs2-emerald-border);
+  --color-cs2-amber-border: var(--cs2-amber-border);
+  --color-cs2-cyan-border: var(--cs2-cyan-border);
+  --color-cs2-fuchsia-border: var(--cs2-fuchsia-border);
+  --color-cs2-violet-border: var(--cs2-violet-border);
+  --color-cs2-red-border: var(--cs2-red-border);
+
   /* 状态色 on-surface */
   --color-cs2-rose-on-surface: var(--cs2-rose-on-surface);
   --color-cs2-emerald-on-surface: var(--cs2-emerald-on-surface);
@@ -60,6 +72,10 @@
   --color-cs2-fuchsia-on-surface: var(--cs2-fuchsia-on-surface);
   --color-cs2-violet-on-surface: var(--cs2-violet-on-surface);
   --color-cs2-red-on-surface: var(--cs2-red-on-surface);
+
+  /* 队伍色 */
+  --color-cs2-team-blue: var(--cs2-team-blue);
+  --color-cs2-team-amber: var(--cs2-team-amber);
 
   /* 阴影 */
   --color-cs2-shadow: var(--cs2-shadow);
@@ -188,6 +204,22 @@ html {
 .litecut-timeline-hbar::-webkit-scrollbar-thumb:hover {
   background: linear-gradient(90deg, rgba(255, 183, 77, 0.75), rgba(224, 127, 10, 0.9));
   background-clip: padding-box;
+}
+
+.light .litecut-timeline-scroll {
+  scrollbar-color: rgba(16, 24, 40, 0.22) transparent;
+}
+
+.light .litecut-timeline-scroll::-webkit-scrollbar-thumb {
+  background: rgba(16, 24, 40, 0.22);
+}
+
+.light .litecut-timeline-hbar {
+  scrollbar-color: rgba(182, 86, 0, 0.55) rgba(16, 24, 40, 0.06);
+}
+
+.light .litecut-timeline-hbar::-webkit-scrollbar-track {
+  background: rgba(16, 24, 40, 0.06);
 }
 
 body {

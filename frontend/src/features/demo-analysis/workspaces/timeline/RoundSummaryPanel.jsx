@@ -1,5 +1,5 @@
-import { X } from "lucide-react";
 import { useT } from "../../../../i18n/useT.js";
+import QueueAddButton from "../../../../components/QueueAddButton";
 
 /**
  * @param {{
@@ -43,11 +43,11 @@ export default function RoundSummaryPanel({
       <div>
         <p className="text-[12px] font-semibold uppercase tracking-wide text-cs2-text-muted">{t("analysis.panelThisRound")}</p>
         <p className="mt-1 text-sm font-bold text-cs2-text-primary">
-          K <span className="text-emerald-400/95">{kills}</span>
+          K <span className="text-cs2-emerald-on-surface/95">{kills}</span>
           <span className="mx-1 text-cs2-text-muted">/</span>D{" "}
-          <span className="text-rose-400/95">{deaths}</span>
+          <span className="text-cs2-rose-on-surface/95">{deaths}</span>
           <span className="mx-1 text-cs2-text-muted">/</span>A{" "}
-          <span className="text-violet-300/95">{assists}</span>
+          <span className="text-cs2-violet-on-surface/95">{assists}</span>
         </p>
         {headshots > 0 ? (
           <p className="mt-1 text-[12px] text-cs2-text-muted">
@@ -79,43 +79,19 @@ export default function RoundSummaryPanel({
       ) : null}
 
       <div className="mt-auto flex w-full flex-col gap-1.5">
-        {roundQueued && onRemoveRound ? (
-          <button
-            type="button"
-            onClick={onRemoveRound}
-            className="flex w-full items-center justify-center gap-1 rounded-md border border-rose-500/40 bg-rose-500/10 py-2 text-[12px] font-semibold text-cs2-rose-on-surface transition-colors hover:border-rose-400/70"
-          >
-            {t("analysis.btnRoundQueued")}<X className="h-3 w-3" />
-          </button>
-        ) : (
-          <button
-            type="button"
-            onClick={onAddRound}
-            disabled={!onAddRound || roundQueued}
-            className="w-full rounded-md border border-cs2-border bg-cs2-bg-input/50 py-2 text-[12px] font-semibold text-cs2-text-primary transition-colors hover:border-cs2-accent/50 hover:text-cs2-text-primary disabled:opacity-35"
-          >
-            {roundQueued ? t("analysis.btnRoundQueued") : t("analysis.btnAddRound")}
-          </button>
-        )}
+        <QueueAddButton
+          className="w-full"
+          queued={roundQueued}
+          label={t("analysis.btnAddRound")}
+          queuedLabel={t("analysis.btnRoundQueued")}
+          onAdd={onAddRound}
+          onRemove={onRemoveRound}
+        />
         {showKillsBtn ? (
-          <button
-            type="button"
-            onClick={onAddKills}
-            disabled={!onAddKills}
-            className="w-full rounded-md border border-emerald-500/30 bg-emerald-500/10 py-2 text-[12px] font-semibold text-emerald-300/95 hover:border-emerald-400/55 disabled:opacity-35"
-          >
-            {t("analysis.btnKillsOnly")}
-          </button>
+          <QueueAddButton className="w-full" label={t("analysis.btnKillsOnly")} onAdd={onAddKills} />
         ) : null}
         {showDeathsBtn ? (
-          <button
-            type="button"
-            onClick={onAddDeaths}
-            disabled={!onAddDeaths}
-            className="w-full rounded-md border border-rose-500/30 bg-rose-500/10 py-2 text-[12px] font-semibold text-cs2-rose-on-surface/95 hover:border-rose-400/55 disabled:opacity-35"
-          >
-            {t("analysis.btnDeathsOnly")}
-          </button>
+          <QueueAddButton className="w-full" label={t("analysis.btnDeathsOnly")} onAdd={onAddDeaths} />
         ) : null}
       </div>
     </aside>

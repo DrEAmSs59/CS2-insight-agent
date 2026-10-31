@@ -34,6 +34,7 @@ from .runtime import (
     get_segment_preview_slots,
     preview_proxy_jobs,
     segment_preview_jobs,
+    storage_migration_jobs,
 )
 
 router = APIRouter(prefix="/api/lite-cut", tags=["lite-cut-proxy"])
@@ -443,3 +444,26 @@ async def cleanup_lite_cut_proxy_cache():
     cfg = load_config()
     resolution = max(360, min(2160, int(getattr(cfg, "lite_cut_proxy_resolution", 720) or 720)))
     return await asyncio.to_thread(cleanup_orphan_preview_files, assets, max_edge=resolution)
+
+
+@router.post("/proxy-cache/clear")
+async def clear_lite_cut_proxy_cache():
+    """Delete every preview derivative; imported media and projects stay untouched."""
+    if any(job.status in {"queued", "running", "cancelling"} for job in storage_migration_jobs.values()):
+        raise HTTPException(409, "LiteCut 素材目录正在迁移，请等待当前任务结束")
+    rows = await _all_asset_rows()
+    removed_files = 0
+    removed_bytes = 0
+    for row in rows:
+        await _stop_preview_proxy_job(int(row["id"]))
+        for remove in (remove_segment_preview_files, remove_asset_preview_files):
+            removed = await asyncio.to_thread(remove, row)
+            removed_files += int(removed.get("removed_files") or 0)
+            removed_bytes += int(removed.get("removed_bytes") or 0)
+    cfg = load_config()
+    resolution = max(360, min(2160, int(getattr(cfg, "lite_cut_proxy_resolution", 720) or 720)))
+    orphans = await asyncio.to_thread(cleanup_orphan_preview_files, rows, max_edge=resolution)
+    return {
+        "removed_files": removed_files + int(orphans.get("removed_files") or 0),
+        "removed_bytes": removed_bytes + int(orphans.get("removed_bytes") or 0),
+    }

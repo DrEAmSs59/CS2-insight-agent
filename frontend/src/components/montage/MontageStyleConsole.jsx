@@ -87,7 +87,7 @@ function MediaVideoSlotCard({
       </div>
       {isImg ? (
         <div className="mt-2.5 flex items-center gap-2">
-          <p className="text-xs text-violet-300 font-medium">{t("montage.consoleMediaSlotImgDuration")}</p>
+          <p className="text-xs text-cs2-violet-on-surface font-medium">{t("montage.consoleMediaSlotImgDuration")}</p>
           <input
             type="number"
             min={1}
@@ -124,7 +124,7 @@ function MediaVideoSlotCard({
           <button
             type="button"
             onClick={onClear}
-            className="inline-flex shrink-0 items-center rounded-lg border border-cs2-border-subtle px-2.5 py-1.5 text-xs text-cs2-text-muted hover:border-rose-500/30 hover:text-rose-400 transition-all"
+            className="inline-flex shrink-0 items-center rounded-lg border border-cs2-border-subtle px-2.5 py-1.5 text-xs text-cs2-text-muted hover:border-cs2-rose-border hover:text-cs2-rose-on-surface transition-all"
           >
             <Trash2 className="h-3.5 w-3.5" />
           </button>
@@ -139,12 +139,12 @@ function ExportCheckRow({ ok, label }) {
   return (
     <div className="flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-xs">
       {ok ? (
-        <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-400" aria-hidden />
+        <CheckCircle2 className="h-4 w-4 shrink-0 text-cs2-emerald-on-surface" aria-hidden />
       ) : (
-        <CircleAlert className="h-4 w-4 shrink-0 text-amber-400" aria-hidden />
+        <CircleAlert className="h-4 w-4 shrink-0 text-cs2-amber-on-surface" aria-hidden />
       )}
       <span className={ok ? "font-medium text-cs2-text-secondary" : "font-medium text-cs2-text-primary"}>{label}</span>
-      <span className={`ml-auto shrink-0 ${ok ? "text-emerald-400" : "text-amber-300"}`}>
+      <span className={`ml-auto shrink-0 ${ok ? "text-cs2-emerald-on-surface" : "text-cs2-amber-on-surface"}`}>
         {ok ? t("montage.exportCheckDone") : t("montage.exportCheckRequiredEmpty")}
       </span>
     </div>
@@ -310,13 +310,13 @@ export function MontageStyleConsole({
       <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
         <div className="space-y-5">
           {exportingBanner ? (
-            <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-xs font-medium text-amber-300">
+            <div className="rounded-xl border border-cs2-amber-border bg-cs2-amber-surface p-3 text-xs font-medium text-cs2-amber-on-surface">
               {t("montage.consoleExportingBanner")}
             </div>
           ) : null}
           {!exportingBanner && exportOk ? (
-            <div className="relative rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-4 text-xs text-emerald-200">
-              <div className="flex items-center gap-2 text-sm font-bold text-emerald-300">
+            <div className="relative rounded-xl border border-cs2-emerald-border bg-cs2-emerald-surface p-4 text-xs text-cs2-emerald-on-surface">
+              <div className="flex items-center gap-2 text-sm font-bold text-cs2-emerald-on-surface">
                 <CheckCircle2 className="h-4 w-4 shrink-0" />
                 {t("montage.consoleExportSuccess")}
               </div>
@@ -334,7 +334,7 @@ export function MontageStyleConsole({
                 <button
                   type="button"
                   onClick={() => void onCopyText(lastExport.output_path)}
-                  className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-500 px-3 py-1.5 text-xs font-bold text-dynamic-white hover:bg-emerald-600 transition-all shadow-sm"
+                  className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-emerald-700 transition-all shadow-sm"
                 >
                   <Copy className="h-3.5 w-3.5" />
                   {t("montage.consoleCopyFilePath")}
@@ -354,7 +354,7 @@ export function MontageStyleConsole({
             </div>
           ) : null}
           {!exportingBanner && lastExport && !lastExport.ok ? (
-            <div className="rounded-xl border border-rose-500/30 bg-rose-500/10 p-3 text-xs font-medium text-rose-300">
+            <div className="rounded-xl border border-cs2-rose-border bg-cs2-rose-surface p-3 text-xs font-medium text-cs2-rose-on-surface">
               {t("montage.consoleExportError")}
               {humanizeMontageError(lastExport.err, t)}
             </div>
@@ -366,7 +366,7 @@ export function MontageStyleConsole({
             defaultOpen
           >
             <div
-              className={`rounded-xl border p-3 transition-all ${bgmPath.trim() ? "border-violet-500/40 bg-violet-500/[0.08]" : "border-dashed border-cs2-border-subtle bg-cs2-surface-1/40"}`}
+              className={`rounded-xl border p-3 transition-all ${bgmPath.trim() ? "border-cs2-violet-border bg-cs2-violet-surface" : "border-dashed border-cs2-border-subtle bg-cs2-surface-1/40"}`}
               onDragOver={(e) => {
                 e.preventDefault();
                 e.stopPropagation();
@@ -447,7 +447,7 @@ export function MontageStyleConsole({
                   <button
                     type="button"
                     onClick={onBgmClear}
-                    className="inline-flex shrink-0 items-center rounded-lg border border-cs2-border-subtle px-2.5 py-1.5 text-xs text-cs2-text-muted hover:border-rose-500/30 hover:text-rose-400 transition-all"
+                    className="inline-flex shrink-0 items-center rounded-lg border border-cs2-border-subtle px-2.5 py-1.5 text-xs text-cs2-text-muted hover:border-cs2-rose-border hover:text-cs2-rose-on-surface transition-all"
                   >
                     <Trash2 className="h-3.5 w-3.5" />
                   </button>
@@ -521,13 +521,13 @@ export function MontageStyleConsole({
             <section
               className={`rounded-xl border p-3.5 ${
                 readyTag
-                  ? "border-emerald-500/30 bg-emerald-500/10"
+                  ? "border-cs2-emerald-border bg-cs2-emerald-surface"
                   : "border-cs2-accent/25 bg-cs2-accent-soft"
               }`}
             >
               <div className="flex items-start gap-2.5">
                 {readyTag ? (
-                  <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-emerald-400" aria-hidden />
+                  <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-cs2-emerald-on-surface" aria-hidden />
                 ) : (
                   <CircleAlert className="mt-0.5 h-5 w-5 shrink-0 text-cs2-accent" aria-hidden />
                 )}
@@ -539,7 +539,7 @@ export function MontageStyleConsole({
                     {t("montage.consoleExportSummary", { clips: Number(clipCount) || 0, duration: durationText })}
                   </p>
                 </div>
-                <span className={`ml-auto shrink-0 rounded-md px-2 py-1 text-[10px] font-bold ${readyTag ? "bg-emerald-500/15 text-emerald-300" : "bg-cs2-accent/15 text-cs2-accent"}`}>
+                <span className={`ml-auto shrink-0 rounded-md px-2 py-1 text-[10px] font-bold ${readyTag ? "bg-cs2-emerald-surface text-cs2-emerald-on-surface" : "bg-cs2-accent/15 text-cs2-accent"}`}>
                   {requiredDone}/{requiredChecks.length}
                 </span>
               </div>
@@ -653,7 +653,7 @@ export function MontageStyleConsole({
                 </button>
               </div>
               {framemeldBlockedReason ? (
-                <p className="mt-3 rounded-lg border border-amber-500/25 bg-amber-500/10 px-3 py-2 text-[11px] leading-relaxed text-cs2-amber-on-surface">
+                <p className="mt-3 rounded-lg border border-cs2-amber-border bg-cs2-amber-surface px-3 py-2 text-[11px] leading-relaxed text-cs2-amber-on-surface">
                   {framemeldBlockedReason}
                 </p>
               ) : framemeldActive ? (
@@ -687,7 +687,7 @@ export function MontageStyleConsole({
                       key={item.id}
                       className={`rounded-md px-2 py-1 text-[10px] font-medium ${
                         item.active
-                          ? "bg-emerald-500/10 text-emerald-300"
+                          ? "bg-cs2-emerald-surface text-cs2-emerald-on-surface"
                           : "bg-cs2-bg-input text-cs2-text-muted"
                       }`}
                     >
@@ -706,7 +706,7 @@ export function MontageStyleConsole({
         {activeTab === "export" ? (
           <div>
             {!readyTag ? (
-              <p className="mb-2.5 text-center text-[11px] font-medium text-amber-300">
+              <p className="mb-2.5 text-center text-[11px] font-medium text-cs2-amber-on-surface">
                 {t("montage.consoleExportBlockedCount", { n: requiredChecks.length - requiredDone })}
               </p>
             ) : null}

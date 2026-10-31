@@ -62,7 +62,22 @@ export function useDemoAnalysisWorkflows({
   const [analysisInlineProgress, setAnalysisInlineProgress] = useState(null);
   const [aiReviewingPlayers, setAiReviewingPlayers] = useState({});
   const currentMatchIndexRef = useRef(currentMatchIndex);
-  const aiReviewInFlightRef = useRef(new Set());
+  const aiReviewInFlightRef = useRef(new Map());
+  const parseRequestsRef = useRef(new Map());
+  const demosRef = useRef(uploadedDemos);
+  const renderedDemosRef = useRef(uploadedDemos);
+  const sessionRef = useRef(0);
+  if (renderedDemosRef.current !== uploadedDemos) {
+    renderedDemosRef.current = uploadedDemos;
+    demosRef.current = uploadedDemos;
+  }
+  useEffect(() => {
+    setParsingByIndex(Object.fromEntries([...parseRequestsRef.current]
+      .filter(([, request]) => request.demos === uploadedDemos).map(([index]) => [index, true])));
+    setAiReviewingPlayers({});
+    setAnalysisInlineProgress(null);
+  }, [uploadedDemos]);
+  useEffect(() => () => { sessionRef.current += 1; }, []);
 
   useEffect(() => {
     currentMatchIndexRef.current = currentMatchIndex;
@@ -162,6 +177,10 @@ export function useDemoAnalysisWorkflows({
     const filename = demos[index]?.filename;
     if (!filename) return undefined;
 
+    const request = { demos, session: sessionRef.current };
+    parseRequestsRef.current.set(index, request);
+    const isCurrent = () => demosRef.current === demos && sessionRef.current === request.session
+      && parseRequestsRef.current.get(index) === request;
     setParsingByIndex((previous) => ({ ...previous, [index]: true }));
     const viewingHere = currentMatchIndexRef.current === index;
     if (viewingHere && !quietProgress) {
@@ -189,6 +208,7 @@ export function useDemoAnalysisWorkflows({
             { timeout: DEMO_ANALYSIS_REQUEST_TIMEOUT_MS },
           );
 
+      if (!isCurrent()) return { stale: true };
       const processedPlayers = {};
       for (const [playerName, playerData] of Object.entries(data.players ?? {})) {
         processedPlayers[playerName] = {
@@ -198,6 +218,7 @@ export function useDemoAnalysisWorkflows({
       }
 
       setParsedMatches((previous) => {
+        if (!isCurrent()) return previous;
         const matches = previous && previous.length === demos.length
           ? [...previous]
           : demos.map(() => null);
@@ -224,12 +245,12 @@ export function useDemoAnalysisWorkflows({
       const compilation = referenceClips.find(
         (clip) => clip.category === "compilation" && clip.compilation_kind === "freeze_to_death",
       );
-      setFreezeToDeathRoundsByMatch((previous) => ({
+      setFreezeToDeathRoundsByMatch((previous) => isCurrent() ? ({
         ...previous,
         [index]: compilation
           ? freezeToDeathDraftFromClipFilter(compilation.freeze_to_death_round_filter, maxRounds)
           : { picked: [] },
-      }));
+      }) : previous);
 
       const rounds = firstMeta?.total_rounds ?? "?";
       const totalRegular = Object.values(processedPlayers).reduce(
@@ -253,24 +274,28 @@ export function useDemoAnalysisWorkflows({
           })
         : t("app.parseDone", { fn: filename, rounds, playerLabel, totalRegular });
       if (!quietProgress) {
-        if (viewingHere) setAnalysisInlineProgress({ active: false, text: doneMessage });
+        if (currentMatchIndexRef.current === index) setAnalysisInlineProgress({ active: false, text: doneMessage });
         else setProgressText((previous) => (previous ? `${previous}\n${doneMessage}` : doneMessage));
       }
       return { ok: true };
     } catch (error) {
+      if (!isCurrent()) return { stale: true };
       const reason = demoBatchFailureMessage(error, t);
       const message = t("app.parseFail", { fn: filename, msg: reason });
       if (!quietProgress) {
-        if (viewingHere) setAnalysisInlineProgress({ active: false, text: message });
+        if (currentMatchIndexRef.current === index) setAnalysisInlineProgress({ active: false, text: message });
         else setProgressText((previous) => (previous ? `${previous}\n${message}` : message));
       }
       return { ok: false, reason };
     } finally {
-      setParsingByIndex((previous) => {
-        const next = { ...previous };
-        delete next[index];
-        return next;
-      });
+      if (isCurrent()) {
+        setParsingByIndex((previous) => {
+          if (!isCurrent()) return previous;
+          const next = { ...previous };
+          delete next[index];
+          return next;
+        });
+      }
     }
   }, [
     freezeToDeathRoundsByMatch,
@@ -294,6 +319,9 @@ export function useDemoAnalysisWorkflows({
     initialFailures = [],
   ) => {
     const demos = Array.isArray(loaded) ? loaded : [];
+    demosRef.current = demos;
+    const session = sessionRef.current;
+    const isCurrent = () => demosRef.current === demos && sessionRef.current === session;
     const specs = buildPendingDemoAnalysisSpecs(demos);
     const inferredFailures = demos
       .map((demo, index) => ({ demo, index }))
@@ -335,6 +363,7 @@ export function useDemoAnalysisWorkflows({
     };
 
     const showRunningProgress = () => {
+      if (!isCurrent()) return;
       setAnalysisInlineProgress({
         active: done < total,
         text: t("app.autoParseProgressDetail", {
@@ -347,10 +376,12 @@ export function useDemoAnalysisWorkflows({
     };
 
     await runAnalysisTasks(LIBRARY_PARSE_CONCURRENCY, specs, async (spec) => {
+      if (!isCurrent()) return;
       const filename = demos[spec.index]?.filename || `Demo ${spec.index + 1}`;
       activeNames.add(filename);
       showRunningProgress();
       const result = await handleParseForIndex(spec.index, spec.players, context);
+      if (!isCurrent()) return;
       activeNames.delete(filename);
       done += 1;
       if (result?.ok) {
@@ -376,7 +407,7 @@ export function useDemoAnalysisWorkflows({
             : t("app.autoParsePartial", { succeeded, failed: failures.length }),
       });
     });
-    if (failures.length) {
+    if (isCurrent() && failures.length) {
       setBatchLoadError({ open: true, failed: failures, mode: "analysis" });
     }
   }, [handleParseForIndex, setBatchLoadError, t]);
@@ -394,8 +425,13 @@ export function useDemoAnalysisWorkflows({
     if (alreadyReviewed) return true;
 
     const requestKey = `${matchIndex}:${name}`;
-    if (aiReviewInFlightRef.current.has(requestKey)) return false;
-    aiReviewInFlightRef.current.add(requestKey);
+    const demos = demosRef.current;
+    const active = aiReviewInFlightRef.current.get(requestKey);
+    if (active?.demos === demos && active?.playerData === playerData && !active.finished) return false;
+    const request = { demos, playerData, session: sessionRef.current };
+    aiReviewInFlightRef.current.set(requestKey, request);
+    const isCurrent = () => demosRef.current === demos && sessionRef.current === request.session
+      && aiReviewInFlightRef.current.get(requestKey) === request;
     setAiReviewingPlayers((previous) => ({ ...previous, [requestKey]: true }));
     try {
       const { data } = await API.post("/demo/review-clips", {
@@ -403,9 +439,10 @@ export function useDemoAnalysisWorkflows({
         match_meta: playerData?.match_meta || {},
         locale: useLocaleStore.getState().locale,
       });
+      if (!isCurrent()) return false;
       const reviewedClips = ensureClientClipUidsOnClips(data?.clips || clipsToReview);
       setParsedMatches((previous) => {
-        if (!Array.isArray(previous) || !previous[matchIndex]?.players?.[name]) return previous;
+        if (!isCurrent() || previous?.[matchIndex]?.players?.[name] !== playerData) return previous;
         const next = [...previous];
         const current = next[matchIndex];
         next[matchIndex] = {
@@ -423,21 +460,27 @@ export function useDemoAnalysisWorkflows({
       });
       return true;
     } catch (error) {
+      if (!isCurrent()) return false;
       setProgressText(t("app.aiReviewFailed", {
         message: error.response?.data?.detail || error.message || t("common.requestFail"),
       }), { isError: true });
       return false;
     } finally {
-      aiReviewInFlightRef.current.delete(requestKey);
-      setAiReviewingPlayers((previous) => {
-        const next = { ...previous };
-        delete next[requestKey];
-        return next;
-      });
+      if (isCurrent()) {
+        setAiReviewingPlayers((previous) => {
+          if (!isCurrent()) return previous;
+          const next = { ...previous };
+          delete next[requestKey];
+          return next;
+        });
+        request.finished = true;
+      }
     }
   }, [aiMode, currentMatchIndex, parsedMatches, setParsedMatches, setProgressText, t]);
 
   const resetAnalysisWorkflow = useCallback(() => {
+    sessionRef.current += 1;
+    parseRequestsRef.current.clear();
     setAiReviewingPlayers({});
     aiReviewInFlightRef.current.clear();
     setAnalysisInlineProgress(null);

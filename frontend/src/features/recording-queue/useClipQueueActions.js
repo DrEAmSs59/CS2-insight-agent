@@ -169,13 +169,10 @@ export function useClipQueueActions({
     setSelectedClientClipUids(new Set());
   }, [setSelectedClientClipUids]);
 
-  const handleAddSelectedToQueue = useCallback(() => {
-    if (!currentParsed || selectedClientClipUids.size === 0) return;
+  /** Build queue items for clips, slicing round compilations to the picked rounds. */
+  const buildClipQueueItems = useCallback((candidates) => {
     const meta = queueItemMetaForIndex(currentMatchIndex);
     const pickedRounds = [...(freezeToDeathDraft?.picked ?? [])].sort((a, b) => a - b);
-    const candidates = clips.filter(
-      (clip) => clip.client_clip_uid && selectedClientClipUids.has(clip.client_clip_uid),
-    );
     const queueItems = [];
     for (const clip of candidates) {
       const baseItem = {
@@ -186,10 +183,7 @@ export function useClipQueueActions({
       };
       if (isFreezeToDeathCompilation(clip)) {
         const sliced = sliceFreezeToDeathClipForEnqueue(clip, pickedRounds);
-        if (!sliced.ok) {
-          setProgressText(t(sliced.errorKey));
-          return;
-        }
+        if (!sliced.ok) return { error: sliced.errorKey, queueItems: [] };
         queueItems.push({
           ...baseItem,
           clientClipUid: sliced.clip.client_clip_uid,
@@ -200,6 +194,19 @@ export function useClipQueueActions({
       } else {
         queueItems.push(baseItem);
       }
+    }
+    return { error: null, queueItems };
+  }, [currentMatchIndex, freezeToDeathDraft, queueItemMetaForIndex]);
+
+  const handleAddSelectedToQueue = useCallback(() => {
+    if (!currentParsed || selectedClientClipUids.size === 0) return;
+    const candidates = clips.filter(
+      (clip) => clip.client_clip_uid && selectedClientClipUids.has(clip.client_clip_uid),
+    );
+    const { error, queueItems } = buildClipQueueItems(candidates);
+    if (error) {
+      setProgressText(t(error));
+      return;
     }
     if (!queueItems.length) return;
     addToQueue(queueItems);
@@ -212,12 +219,43 @@ export function useClipQueueActions({
     });
   }, [
     addToQueue,
+    buildClipQueueItems,
     clips,
-    currentMatchIndex,
     currentParsed,
-    freezeToDeathDraft,
-    queueItemMetaForIndex,
     selectedClientClipUids,
+    setProgressText,
+    setSelectedClientClipUids,
+    t,
+  ]);
+
+  /** Enqueue one clip straight from its card, without going through the selection. */
+  const handleAddClipToQueue = useCallback((clientClipUid) => {
+    if (!currentParsed || !clientClipUid || queuedClientClipUidsForCurrentDemo.has(clientClipUid)) return;
+    const clip = clips.find((candidate) => candidate.client_clip_uid === clientClipUid);
+    if (!clip) return;
+    const { error, queueItems } = buildClipQueueItems([clip]);
+    if (error) {
+      setProgressText(t(error));
+      return;
+    }
+    if (!queueItems.length) return;
+    addToQueue(queueItems);
+    setSelectedClientClipUids((previous) => {
+      if (!previous.has(clientClipUid)) return previous;
+      const next = new Set(previous);
+      next.delete(clientClipUid);
+      return next;
+    });
+    setProgressText(t("app.enqueueAdded", { n: queueItems.length }), {
+      autoDismissMs: 2000,
+      queueLink: true,
+    });
+  }, [
+    addToQueue,
+    buildClipQueueItems,
+    clips,
+    currentParsed,
+    queuedClientClipUidsForCurrentDemo,
     setProgressText,
     setSelectedClientClipUids,
     t,
@@ -338,6 +376,8 @@ export function useClipQueueActions({
       mapName: matchMeta?.map_name || "",
       targetPlayer: meta.targetPlayer,
       demoFilename: meta.demoFilename,
+      demoPath: meta.demoPath,
+      targetSteamId: meta.targetSteamId,
       t,
     });
     if (isAlreadyQueued(clipData, meta)) {
@@ -453,6 +493,8 @@ export function useClipQueueActions({
       mapName: matchMeta?.map_name || "",
       targetPlayer: meta.targetPlayer,
       demoFilename: meta.demoFilename,
+      demoPath: meta.demoPath,
+      targetSteamId: meta.targetSteamId,
       t,
     });
     removeByClientClipUid(clipData.client_clip_uid);
@@ -468,6 +510,7 @@ export function useClipQueueActions({
     handleSelectAll,
     handleDeselectAll,
     handleAddSelectedToQueue,
+    handleAddClipToQueue,
     handleAddCurrentPlayerHighlights,
     handleAddCurrentPlayerFails,
     handleAddTimelineEventToQueue,

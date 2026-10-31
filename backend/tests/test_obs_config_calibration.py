@@ -155,3 +155,58 @@ def test_simple_x264_is_upgraded_when_obs_has_hardware_stream_encoder(monkeypatc
     assert ws.profile[("SimpleOutput", "RecEncoder")] == "nvenc"
     assert ("SimpleOutput", "RecEncoder", "nvenc") in ws.profile_writes
     assert result["restart_obs_required"] is True
+
+
+def test_backup_failure_is_not_published_and_incomplete_backup_cannot_restore(tmp_path, monkeypatch):
+    import pytest
+    root, backups = tmp_path / "obs", tmp_path / "backups"
+    profile = root / "basic" / "profiles" / "test"
+    profile.mkdir(parents=True)
+    (profile / "basic.ini").write_text("good profile")
+    (root / "global.ini").write_text("good global")
+    monkeypatch.setattr(obs_config_center, "_backup_root", lambda: backups)
+    real_copy = obs_config_center.shutil.copytree
+    def fail_copy(src, dst):
+        Path(dst).mkdir(parents=True)
+        raise PermissionError("basic.ini locked")
+    with monkeypatch.context() as patch:
+        patch.setattr(obs_config_center.shutil, "copytree", fail_copy)
+        with pytest.raises(PermissionError):
+            obs_config_center._create_backup(root, reason="test", project_profile="test")
+    assert obs_config_center.list_backups() == []
+    broken = backups / "legacy-broken"
+    broken.mkdir(parents=True)
+    (broken / "manifest.json").write_text('{"project_profile":"test"}')
+    (broken / "global.ini").write_text("old global")
+    assert obs_config_center.list_backups() == []
+    with pytest.raises(ValueError, match="不完整"):
+        obs_config_center._restore_backup_pack(broken, root, "test")
+    assert (profile / "basic.ini").read_text() == "good profile"
+    assert (root / "global.ini").read_text() == "good global"
+
+
+def test_restore_failure_preserves_current_profile_and_can_retry(tmp_path, monkeypatch):
+    import pytest
+    root = tmp_path / "obs"
+    profile = root / "basic" / "profiles" / "test"
+    profile.mkdir(parents=True)
+    (profile / "basic.ini").write_text("before")
+    (root / "global.ini").write_text("global before")
+    monkeypatch.setattr(obs_config_center, "_backup_root", lambda: tmp_path / "backups")
+    _, backup = obs_config_center._create_backup(root, reason="test", project_profile="test")
+    (profile / "basic.ini").write_text("current")
+    (root / "global.ini").write_text("global current")
+    rename = Path.rename
+    def fail_global(src, dst):
+        if src.name == "new-global.ini":
+            raise PermissionError("global locked")
+        return rename(src, dst)
+    with monkeypatch.context() as patch:
+        patch.setattr(Path, "rename", fail_global)
+        with pytest.raises(PermissionError):
+            obs_config_center._restore_backup_pack(backup, root, "test")
+    assert (profile / "basic.ini").read_text() == "current"
+    assert (root / "global.ini").read_text() == "global current"
+    obs_config_center._restore_backup_pack(backup, root, "test")
+    assert (profile / "basic.ini").read_text() == "before"
+    assert (root / "global.ini").read_text() == "global before"

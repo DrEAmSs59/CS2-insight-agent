@@ -1,22 +1,109 @@
 
 .dark { color-scheme: dark; }
 
-/* 浅色主题使用柔和灰色画布，白色只留给需要抬升的内容表面。 */
+/* ===== 浅色主题 =====
+ * A designed light palette, not the dark theme inverted: a cool grey canvas,
+ * white raised surfaces, borders that stay visible on both, and text and
+ * accent colours that keep at least 4.5:1 on every surface they sit on.
+ */
 .light {
   color-scheme: light;
-  --cs2-bg-page: #ebebeb;
-  --cs2-bg-card: #f5f5f5;
-  --cs2-bg-sidebar: #f5f5f5;
-  --cs2-bg-input: var(--sand-3);
-  --cs2-bg-elevated: var(--sand-1);
-  --cs2-bg-hover: var(--sand-4);
-  --cs2-bg-active: var(--sand-5);
-  --cs2-border: var(--sand-7);
-  --cs2-border-subtle: var(--sand-6);
-  --cs2-shadow: rgba(34, 32, 29, 0.12);
-  --cs2-shadow-sm: 0 1px 2px rgba(34, 32, 29, 0.08);
-  --cs2-shadow-md: 0 6px 18px rgba(34, 32, 29, 0.10);
-  --cs2-shadow-lg: 0 12px 36px rgba(34, 32, 29, 0.14);
+
+  /* 背景层次：画布 < 侧栏 < 卡片 / 弹层 */
+  --cs2-bg-page: #eceef1;
+  --cs2-bg-card: #ffffff;
+  --cs2-bg-sidebar: #f7f8fa;
+  --cs2-bg-input: #f0f2f5;
+  --cs2-bg-elevated: #ffffff;
+  --cs2-bg-hover: #e6e9ed;
+  --cs2-bg-active: #dce0e5;
+  --cs2-bg-overlay: rgba(17, 19, 24, 0.45);
+  --cs2-bg-skeleton: #e1e4e8;
+
+  /* 边框：白卡片上 1.7:1 / 1.4:1，保证卡片、分隔线在白底与灰画布上都看得见 */
+  --cs2-border: #c3c8cf;
+  --cs2-border-subtle: #d6dade;
+  --cs2-border-error: #d93036;
+
+  /* 文字：主 17.8:1、次 9.6:1、弱 5.9:1（白底） */
+  --cs2-text-primary: #16181d;
+  --cs2-text-secondary: #41454e;
+  --cs2-text-muted: #5f6470;
+  --cs2-text-on-accent: #ffffff;
+  --cs2-text-inverse: #ffffff;
+  --cs2-text-error: #c62a2f;
+  --cs2-text-success: #1f7a4d;
+
+  /* 品牌色：加深的橙色在白底与浅橙底上都可作文字，也能承载黑/白字 */
+  --cs2-accent: #b65600;
+  --cs2-accent-light: #9c4900;
+  --cs2-accent-soft: #fff5eb;
+  --cs2-team-blue: #1f6fd1;
+  --cs2-team-blue-soft: #e8f1fd;
+  --cs2-team-amber: #a96200;
+  --cs2-team-amber-soft: #fff4dc;
+
+  /* 语义色 */
+  --cs2-highlight: #1f7a4d;
+  --cs2-fail: #c62a2f;
+  --cs2-compilation: #a96200;
+  --cs2-info: #0f7590;
+  --cs2-neutral-tone: #6b7078;
+  --cs2-ink-mix: 58%;
+
+  /* 表面层次 */
+  --cs2-surface-3: #e4e7eb;
+
+  /* 滚动条 */
+  --cs2-scrollbar-track: transparent;
+  --cs2-scrollbar-thumb: color-mix(in srgb, var(--cs2-accent) 45%, #a3a9b3);
+
+  /* 状态色 surface / border / on-surface：浅底与画布同亮度，靠同色系边框分出边界 */
+  --cs2-rose-surface: #fde4e4;
+  --cs2-emerald-surface: #dcf3e5;
+  --cs2-amber-surface: #fdefd0;
+  --cs2-cyan-surface: #dbf1f7;
+  --cs2-fuchsia-surface: #f5e3fa;
+  --cs2-violet-surface: #e9e5fc;
+  --cs2-red-surface: #fde4e4;
+  --cs2-rose-border: #f1b0b3;
+  --cs2-emerald-border: #9fd6b4;
+  --cs2-amber-border: #e8c47a;
+  --cs2-cyan-border: #9dd3e2;
+  --cs2-fuchsia-border: #dcaaea;
+  --cs2-violet-border: #c3b8f0;
+  --cs2-red-border: #f1b0b3;
+  --cs2-rose-on-surface: #b4232a;
+  --cs2-emerald-on-surface: #1b6f45;
+  --cs2-amber-on-surface: #8f5200;
+  --cs2-cyan-on-surface: #0d6b84;
+  --cs2-fuchsia-on-surface: #8e3aa6;
+  --cs2-violet-on-surface: #5b45c0;
+  --cs2-red-on-surface: #b4232a;
+
+  /* 阴影：浅色界面靠细边框 + 轻投影分层 */
+  --cs2-shadow: rgba(16, 24, 40, 0.10);
+  --cs2-shadow-sm: 0 1px 2px rgba(16, 24, 40, 0.08), 0 1px 3px rgba(16, 24, 40, 0.06);
+  --cs2-shadow-md: 0 4px 14px rgba(16, 24, 40, 0.08);
+  --cs2-shadow-lg: 0 12px 32px rgba(16, 24, 40, 0.12);
+  --cs2-shadow-glow-accent: 0 0 0 3px rgba(182, 86, 0, 0.16);
+}
+
+/* A white card inside a white panel needs more than a hairline to read as its own surface. */
+.light .bg-cs2-bg-card .bg-cs2-bg-card:not([class*="shadow"]),
+.light .bg-cs2-bg-card .bg-cs2-bg-elevated:not([class*="shadow"]) {
+  box-shadow: var(--cs2-shadow-sm);
+}
+
+/* Analysis surfaces are styled in workspace-responsive.css; in light mode they take the stronger
+ * border, and cards get a soft lift. Active and hover rules there come later and still win. */
+.light :is(.analysis-side-rail, .analysis-rail-card, .analysis-center-surface, .analysis-panel,
+  .analysis-view-switcher, .analysis-player-team-card, .analysis-mode-card, .analysis-card) {
+  border-color: var(--cs2-border);
+}
+
+.light :is(.analysis-rail-card, .analysis-player-team-card, .analysis-mode-card, .analysis-card) {
+  box-shadow: var(--cs2-shadow-sm);
 }
 
 .app-topbar {

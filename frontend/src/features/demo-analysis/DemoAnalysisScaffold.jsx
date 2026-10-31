@@ -5,15 +5,17 @@ import {
   Check,
   ChevronDown,
   CircleDollarSign,
-  CircleAlert,
   Crosshair,
   Film,
   Flame,
   Gem,
   ListChecks,
   ListFilter,
+  ListOrdered,
   Loader2,
   MapPin,
+  Plus,
+  Sparkles,
   Swords,
   Users,
 } from "lucide-react";
@@ -21,6 +23,7 @@ import ActionBar from "../../components/ActionBar";
 import ClipList from "../../components/ClipList";
 import DemoUpload from "../../components/DemoUpload";
 import PlayerIdentityAvatar from "./cosmetics/PlayerIdentityAvatar";
+import { FocusedPlayerHeader } from "./AnalysisUi.jsx";
 import Button from "../../components/ui/Button";
 import { useDemoPlaybackDialog } from "../../hooks/useDemoPlaybackDialog.jsx";
 import { useSteamPlayerAvatars } from "../../hooks/useSteamPlayerAvatars.js";
@@ -221,7 +224,7 @@ function PlayerPicker({ teams, teamAName, teamBName, activePlayer, playerStats, 
       <header className="flex min-h-8 shrink-0 items-center justify-between gap-2 px-1">
         <h2 className="text-[11px] font-black uppercase tracking-[0.12em] text-cs2-text-primary">{t("analysis.workspace.selectPlayer")}</h2>
         <span className="inline-flex items-center gap-1.5 font-mono text-[10px] text-cs2-text-muted">
-          {parsing ? <Loader2 className="h-3 w-3 animate-spin text-cs2-accent" /> : <Check className="h-3 w-3 text-emerald-400" />}
+          {parsing ? <Loader2 className="h-3 w-3 animate-spin text-cs2-accent" /> : <Check className="h-3 w-3 text-cs2-emerald-on-surface" />}
           {parsing
             ? t("analysis.workspace.parsingFullMatch")
             : t("analysis.workspace.parsedPlayers", { parsed: Object.keys(parsedPlayers || {}).length, total: totalPlayers })}
@@ -286,6 +289,13 @@ function AnalysisViewNavigation({ activeTab, onSelectTab }) {
   );
 }
 
+const HIGHLIGHT_MODES = [
+  { key: "clips", icon: Sparkles, labelKey: "analysis.tabClips", descKey: "analysis.modeClipsDesc" },
+  { key: "rounds", icon: ListOrdered, labelKey: "analysis.tabTimeline", descKey: "analysis.modeRoundsDesc" },
+  { key: "weapons", icon: Crosshair, labelKey: "analysis.tabWeaponKills", descKey: "analysis.modeWeaponsDesc" },
+];
+const VISIBLE_TAG_COUNT = 8;
+
 function HighlightWorkspaceToolbar({
   activeHighlightView,
   setActiveHighlightView,
@@ -300,15 +310,17 @@ function HighlightWorkspaceToolbar({
   setSelectedTag,
   locale,
   avatars,
-  pinnedCompilationTags = [],
+  modeCounts = {},
 }) {
   const t = useT();
   const isBlue = playerTeamNumber(selectedPlayer) === 2;
   const selectedAppearance = playerAppearance(selectedPlayer, isBlue ? "blue" : "amber");
   const selectedAvatarUrl = selectedPlayer ? avatars?.[steamIdForPlayer(selectedPlayer)] || "" : "";
   const [tagsExpanded, setTagsExpanded] = useState(false);
-  const pinnedTagSet = new Set(pinnedCompilationTags.map(({ tag }) => tag));
-  const hiddenTagCount = tagCounts.filter(([tag]) => tag !== ALL_TAG && !pinnedTagSet.has(tag)).length;
+  const tagEntries = tagCounts.filter(([tag]) => tag !== ALL_TAG);
+  const allCount = tagCounts.find(([tag]) => tag === ALL_TAG)?.[1] ?? 0;
+  const visibleTags = tagEntries.slice(0, VISIBLE_TAG_COUNT);
+  const hiddenTags = tagEntries.slice(VISIBLE_TAG_COUNT);
 
   useEffect(() => {
     setTagsExpanded(false);
@@ -316,94 +328,98 @@ function HighlightWorkspaceToolbar({
 
   if (!selectedPlayer) return null;
 
+  const tagButton = ([tag, count]) => (
+    <button
+      key={tag}
+      type="button"
+      aria-pressed={selectedTag === tag}
+      data-active={selectedTag === tag ? "true" : "false"}
+      onClick={() => setSelectedTag(selectedTag === tag ? ALL_TAG : tag)}
+      className="analysis-tag-chip"
+    >
+      {tag === ALL_TAG ? t("analysis.workspace.allTags") : labelTag(tag, locale)}
+      <span className="font-mono text-[10.5px] opacity-70">{count}</span>
+    </button>
+  );
+
   return (
-    <section className="analysis-highlight-toolbar overflow-hidden rounded-lg border border-cs2-border-subtle bg-cs2-bg-input/20">
-      <div className="flex flex-wrap items-center justify-between gap-3 px-3 py-2.5">
-        <div className="flex min-w-0 items-center gap-2.5">
-          <PlayerIdentityAvatar player={selectedPlayer} avatarUrl={selectedAvatarUrl} fallbackTone={isBlue ? "blue" : "amber"} className="h-8 w-8 text-xs" />
-          <div className="min-w-0">
-            <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
-              <h2 className="truncate text-[12px] font-black text-cs2-text-primary">{activePlayer}</h2>
-              <p className="text-[8px] font-bold uppercase tracking-[0.12em]" style={{ color: selectedAppearance.color }}>
-                {t("analysis.workspace.focusedPlayer")}
-              </p>
-            </div>
-            <div className="mt-0.5 flex items-center gap-3 text-[9px] text-cs2-text-muted">
-              {[
-                [t("analysis.workspace.kills"), Number(selectedPlayer.kills || 0)],
-                [t("analysis.workspace.deaths"), Number(selectedPlayer.deaths || 0)],
-                [t("analysis.workspace.clips"), regularClips.length],
-              ].map(([label, value]) => (
-                <span key={label}><strong className="mr-1 font-mono text-[10px] text-cs2-text-primary">{value}</strong>{label}</span>
-              ))}
-            </div>
-          </div>
-        </div>
-        <div className="min-w-[360px] sm:min-w-[420px]">
-          <div className="analysis-subnav">
-            {[["clips", "analysis.tabClips", Film], ["rounds", "analysis.tabTimeline", Activity], ["weapons", "analysis.tabWeaponKills", Crosshair]].map(([key, labelKey, Icon]) => (
-              <button key={key} type="button" aria-pressed={activeHighlightView === key} data-active={activeHighlightView === key ? "true" : "false"} onClick={() => setActiveHighlightView(key)}>
-                <Icon className="h-4 w-4 shrink-0" aria-hidden="true" />
-                <span>{t(labelKey)}</span>
-              </button>
-            ))}
-          </div>
-          <p className="analysis-round-recording-hint">
-            <CircleAlert className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-            <span>{t("analysis.roundRecordingHint")}<strong>{t("analysis.roundRecordingHintStrong")}</strong>{t("analysis.roundRecordingHintSuffix")}</span>
-          </p>
-        </div>
+    <section className="analysis-highlight-toolbar space-y-3">
+      <FocusedPlayerHeader
+        player={selectedPlayer}
+        avatarUrl={selectedAvatarUrl}
+        fallbackTone={isBlue ? "blue" : "amber"}
+        name={activePlayer}
+        caption={t("analysis.workspace.focusedPlayer")}
+        captionColor={selectedAppearance.color}
+        stats={[
+          [t("analysis.workspace.kills"), Number(selectedPlayer.kills || 0)],
+          [t("analysis.workspace.deaths"), Number(selectedPlayer.deaths || 0)],
+          [t("analysis.workspace.clips"), regularClips.length],
+        ]}
+      />
+
+      <div className="grid gap-2 sm:grid-cols-3" role="group" aria-label={t("analysis.modeGroupLabel")} data-testid="analysis-highlight-modes">
+        {HIGHLIGHT_MODES.map(({ key, icon: Icon, labelKey, descKey }) => {
+          const active = activeHighlightView === key;
+          return (
+            <button
+              key={key}
+              type="button"
+              aria-pressed={active}
+              data-active={active ? "true" : "false"}
+              onClick={() => setActiveHighlightView(key)}
+              className="analysis-mode-card"
+            >
+              <span className="analysis-mode-card__icon" aria-hidden><Icon className="h-4 w-4" /></span>
+              <span className="min-w-0 text-left">
+                <span className="block text-[13px] font-semibold">{t(labelKey)}</span>
+                <span className="block truncate text-[11.5px] font-normal text-cs2-text-muted">{t(descKey)}</span>
+              </span>
+              {modeCounts[key] != null ? (
+                <span className="font-mono text-xs text-cs2-text-secondary">{modeCounts[key]}</span>
+              ) : null}
+            </button>
+          );
+        })}
       </div>
+
+      <p className="flex flex-wrap items-center gap-x-1.5 gap-y-1 rounded-lg bg-cs2-bg-input/60 px-3 py-2 text-xs text-cs2-text-secondary" data-testid="analysis-queue-tip">
+        <span className="inline-flex h-5 w-5 items-center justify-center rounded border border-cs2-accent/60 text-cs2-accent" aria-hidden><Plus className="h-3 w-3" /></span>
+        {t(activeHighlightView === "clips" ? "analysis.workspace.queueTipClips" : "analysis.workspace.queueTip")}
+      </p>
+
       {aiMode && activeHighlightView === "clips" && (playerAiReviewing || playerAiReviewed) ? (
-        <div className="flex items-start gap-2 border-t border-violet-500/20 bg-violet-500/8 px-3 py-2 text-[9px] text-violet-300">
+        <div className="flex items-start gap-2 rounded-lg border border-cs2-violet-border bg-cs2-violet-surface px-3 py-2 text-[11px] text-cs2-violet-on-surface">
           {playerAiReviewing ? <Loader2 className="mt-0.5 h-3 w-3 shrink-0 animate-spin" /> : <Bot className="mt-0.5 h-3 w-3 shrink-0" />}
           <span>{playerAiReviewing ? t("analysis.workspace.aiReviewing", { name: activePlayer }) : playerAiReviewed ? t("analysis.workspace.aiReviewed", { name: activePlayer }) : t("analysis.workspace.aiQueued", { name: activePlayer })}</span>
         </div>
       ) : null}
-      {activeHighlightView === "clips" ? (
-        <div className="border-t border-cs2-border-subtle">
-          <div className="flex min-h-10 flex-wrap items-center gap-1.5 px-3 py-1.5 text-[10px] font-bold text-cs2-text-secondary">
-            <ListFilter className="h-3.5 w-3.5 text-cs2-text-muted" />
-            <span className="mr-1 uppercase tracking-[0.14em]">{t("analysis.workspace.tagFilters")}</span>
-            <div className="flex flex-wrap items-center gap-1" data-testid="analysis-pinned-compilation-tags">
+
+      {activeHighlightView === "clips" && tagEntries.length > 0 ? (
+        <div data-testid="analysis-tag-filters">
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="mr-1 inline-flex items-center gap-1.5 text-xs font-semibold text-cs2-text-secondary">
+              <ListFilter className="h-3.5 w-3.5 text-cs2-text-muted" aria-hidden />
+              {t("analysis.workspace.tagFilters")}
+            </span>
+            {tagButton([ALL_TAG, allCount])}
+            {visibleTags.map(tagButton)}
+            {hiddenTags.length ? (
               <button
                 type="button"
-                data-active={selectedTag === ALL_TAG ? "true" : "false"}
-                onClick={() => setSelectedTag(ALL_TAG)}
-                className="analysis-filter-toggle border border-cs2-border-subtle bg-cs2-bg-input/40"
+                aria-expanded={tagsExpanded}
+                aria-label={t(tagsExpanded ? "dock.collapse" : "dock.expand", { panel: t("analysis.workspace.tags") })}
+                onClick={() => setTagsExpanded((expanded) => !expanded)}
+                className="inline-flex h-7 items-center gap-1 rounded-full px-2.5 text-xs font-medium text-cs2-text-muted transition-colors hover:bg-cs2-bg-hover hover:text-cs2-text-primary"
               >
-                {t("analysis.workspace.allTags")}
+                {t(tagsExpanded ? "analysis.workspace.hideTagFilters" : "analysis.workspace.showTagFilters", { n: hiddenTags.length })}
+                <ChevronDown className={`h-3.5 w-3.5 transition-transform ${tagsExpanded ? "rotate-180" : ""}`} aria-hidden />
               </button>
-              {pinnedCompilationTags.map(({ kind, tag }) => (
-                <button
-                  key={kind}
-                  type="button"
-                  data-active={selectedTag === tag ? "true" : "false"}
-                  onClick={() => setSelectedTag(tag)}
-                  className="analysis-filter-toggle border border-cs2-border-subtle bg-cs2-bg-input/40"
-                >
-                  {labelTag(tag, locale)}
-                </button>
-              ))}
-            </div>
-            <button
-              type="button"
-              aria-expanded={tagsExpanded}
-              aria-label={t(tagsExpanded ? "dock.collapse" : "dock.expand", { panel: t("analysis.workspace.tags") })}
-              onClick={() => setTagsExpanded((expanded) => !expanded)}
-              className="ml-auto flex min-h-7 items-center gap-1.5 rounded px-2 text-[9px] font-semibold text-cs2-text-muted transition-colors hover:bg-cs2-bg-hover hover:text-cs2-text-primary"
-            >
-              {t(tagsExpanded ? "analysis.workspace.hideTagFilters" : "analysis.workspace.showTagFilters", { n: hiddenTagCount })}
-              <ChevronDown className={`h-3.5 w-3.5 transition-transform ${tagsExpanded ? "rotate-180" : ""}`} />
-            </button>
+            ) : null}
           </div>
           {tagsExpanded ? (
-            <div data-testid="highlight-tag-options" className="flex flex-wrap gap-1 border-t border-cs2-border-subtle px-3 py-2">
-              {tagCounts.filter(([tag]) => tag !== ALL_TAG && !pinnedTagSet.has(tag)).map(([tag, count]) => (
-                <button key={tag} type="button" data-active={selectedTag === tag ? "true" : "false"} onClick={() => setSelectedTag(tag)} className="analysis-filter-toggle">
-                  {labelTag(tag, locale)} <span className="ml-0.5 font-mono opacity-70">{count}</span>
-                </button>
-              ))}
+            <div data-testid="highlight-tag-options" className="mt-1.5 flex flex-wrap gap-1.5">
+              {hiddenTags.map(tagButton)}
             </div>
           ) : null}
         </div>

@@ -59,6 +59,8 @@
   --cs2-compilation: var(--amber-9);
   --cs2-info: var(--cyan-9);
   --cs2-neutral-tone: #8d8d86;
+  /* How much of a game-defined colour (rating tiers…) to keep when it is used as text; the rest is black. */
+  --cs2-ink-mix: 100%;
 
   /* 表面层次 */
   --cs2-surface-0: var(--cs2-bg-page);
@@ -80,6 +82,15 @@
   --cs2-fuchsia-surface: var(--purple-3);
   --cs2-violet-surface: var(--violet-3);
   --cs2-red-surface: var(--red-3);
+
+  /* 状态色 border（与同色 surface 搭配的边框） */
+  --cs2-rose-border: var(--red-7);
+  --cs2-emerald-border: var(--green-7);
+  --cs2-amber-border: var(--amber-7);
+  --cs2-cyan-border: var(--cyan-7);
+  --cs2-fuchsia-border: var(--purple-7);
+  --cs2-violet-border: var(--violet-7);
+  --cs2-red-border: var(--red-7);
 
   /* 状态色 on-surface（badge/tag 文字） */
   --cs2-rose-on-surface: var(--red-11);

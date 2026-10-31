@@ -1,113 +1,32 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-
 import API from "../api/api";
 import { useLocaleStore } from "../i18n/localeStore.js";
 import CommonParamsModal from "./CommonParamsModal.jsx";
 import { useRecordingQueue } from "../stores/recordingQueueStore";
-
-vi.mock("../api/api", () => ({
-  default: {
-    get: vi.fn(),
-    post: vi.fn(),
-  },
-}));
-
-function setDesktopLayout(matches) {
-  Object.defineProperty(window, "matchMedia", {
-    configurable: true,
-    value: vi.fn().mockImplementation(() => ({
-      matches,
-      addEventListener: vi.fn(),
-      removeEventListener: vi.fn(),
-    })),
-  });
-}
-
-function renderPresetPage() {
-  return render(
-    <CommonParamsModal
-      variant="page"
-      open
-      onClose={() => {}}
-      batchRecording={false}
-      configReady
-    />,
-  );
-}
-
-function directSectionTitles(container) {
-  return Array.from(container.children).map((section) =>
-    within(section).getByRole("heading", { level: 3 }).textContent,
-  );
-}
-
-describe("CommonParamsModal recording preset layout", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    API.get.mockReturnValue(new Promise(() => {}));
-    useLocaleStore.getState().hydrate("zh");
-    useRecordingQueue.setState({ presetPacing: {} });
-  });
-
-  it("limits the pre-roll slider and numeric entry to ten seconds", () => {
-    setDesktopLayout(false);
-    renderPresetPage();
+vi.mock("../api/api", () => ({ default: { get: vi.fn(), post: vi.fn() } }));
+const renderPreset = () => render(<CommonParamsModal variant="page" open batchRecording={false} configReady />);
+describe("Free shared recording settings", () => {
+  beforeEach(() => { vi.clearAllMocks(); API.get.mockReturnValue(new Promise(() => {})); useLocaleStore.getState().hydrate("zh"); useRecordingQueue.setState({ presetPacing: {} }); });
+  it("retains the ten-second pre-roll cap after numeric editing", () => {
+    renderPreset();
     const name = "击杀段/死亡段前预留 (秒)";
-    const field = within(screen.getByText(name).closest("label"));
-    const slider = field.getByRole("slider");
-    const number = field.getByRole("spinbutton");
-    expect(slider.max).toBe("10");
-    expect(number.max).toBe("10");
-    expect(slider.value).toBe("2");
-    fireEvent.change(number, { target: { value: "20" } });
+    const slider = screen.getByRole("slider", { name });
+    const input = screen.getByRole("spinbutton", { name });
+    expect(slider.max).toBe("10"); expect(input.max).toBe("10");
+    fireEvent.change(input, { target: { value: "20" } }); fireEvent.blur(input);
     expect(useRecordingQueue.getState().presetPacing.pre_first_sec).toBe(10);
-    expect(number.value).toBe("10");
   });
-
-  it("keeps the two preset-only sections on top and matches warmup order below", () => {
-    setDesktopLayout(false);
-    renderPresetPage();
-
-    expect(directSectionTitles(screen.getByTestId("recording-preset-top-grid"))).toEqual([
-      "时间与多段节奏",
-      "回看视角预设",
-    ]);
-    expect(directSectionTitles(screen.getByTestId("recording-preset-grid"))).toEqual([
-      "OBS 转场",
-      "观战画面与调试",
-      "镜头与持枪",
-      "录制实验性功能",
-      "录制画布",
-      "启动参数与控制台",
-    ]);
-    expect(screen.queryByTestId("player-aliases-section")).toBeNull();
-    const cameraSection = screen.getByRole("heading", { name: "镜头与持枪" }).closest("section");
-    const experimentalSection = screen
-      .getByRole("heading", { name: "录制实验性功能" })
-      .closest("section");
-    expect(cameraSection).not.toBe(experimentalSection);
-    expect(experimentalSection.className).toContain("bg-cs2-amber-surface");
-    expect(experimentalSection.className).not.toContain("bg-cs2-bg-card");
-    expect(within(experimentalSection).getByText(/^POV 是实验性功能，仅用于本地 Demo 回放录制/))
-      .toBeTruthy();
-    expect(within(experimentalSection).queryByTestId("experimental-pov-disclaimer")).toBeNull();
-    expect(screen.queryByText(/恢复数值类节奏为后端内置默认/)).toBeNull();
+  it("allows clearing and entering a 150-second merge gap", () => {
+    renderPreset();
+    const input = screen.getByRole("spinbutton", { name: "合并间隔" });
+    for (const value of ["", "1", "15", "150"]) { fireEvent.change(input, { target: { value } }); expect(input.value).toBe(value); }
+    fireEvent.blur(input); expect(useRecordingQueue.getState().presetPacing.max_gap_sec).toBe(150);
   });
-
-  it("uses the same left and right groups as recording warmup on desktop", () => {
-    setDesktopLayout(true);
-    renderPresetPage();
-
-    expect(directSectionTitles(screen.getByTestId("recording-preset-column-left"))).toEqual([
-      "OBS 转场",
-      "观战画面与调试",
-      "镜头与持枪",
-      "启动参数与控制台",
-    ]);
-    expect(directSectionTitles(screen.getByTestId("recording-preset-column-right"))).toEqual([
-      "录制实验性功能",
-      "录制画布",
-    ]);
+  it("shares ordered setting groups without requesting paid runtime capabilities", () => {
+    const { container } = renderPreset();
+    expect([...container.querySelectorAll("section[id]")].map(x => x.id)).toEqual(["rp-pacing", "rp-replay", "rp-camera", "rp-experimental", "rp-hud", "rp-canvas", "rp-launch"]);
+    expect(screen.queryByText(/HLAE|ReShade|时光|夜间暴雨|下雪|POV 死亡效果|跟随玩家 TAB/)).toBeNull();
+    expect(API.get.mock.calls.some(([url]) => /capabilities|inspect3d|subtitle/.test(url))).toBe(false);
   });
 });

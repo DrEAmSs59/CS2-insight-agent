@@ -30,8 +30,8 @@ export default function AnnouncementBanner({ items = [] }) {
         data-announcement-level={warning ? "warning" : "info"}
         className={`rounded-xl border px-3 py-3 ${
           warning
-            ? "border-amber-500/40 bg-amber-500/10"
-            : "border-white/10 bg-cs2-bg-card"
+            ? "border-cs2-amber-border bg-cs2-amber-surface"
+            : "border-cs2-border-subtle bg-cs2-bg-card"
         }`}
       >
         <div className="mb-2 flex items-center gap-2">
@@ -44,7 +44,7 @@ export default function AnnouncementBanner({ items = [] }) {
             {t("guide.announcementLabel")}
           </span>
           {warning && (
-            <span className="text-[11px] font-semibold text-amber-300">
+            <span className="text-[11px] font-semibold text-cs2-amber-on-surface">
               {t("guide.announcementImportant")}
             </span>
           )}
@@ -55,11 +55,11 @@ export default function AnnouncementBanner({ items = [] }) {
                 aria-label={t("guide.announcementPrevious")}
                 disabled={currentIndex === 0}
                 onClick={() => setIndex(currentIndex - 1)}
-                className="rounded p-0.5 text-zinc-400 hover:bg-white/5 hover:text-dynamic-zinc-200 disabled:opacity-30"
+                className="rounded p-0.5 text-cs2-text-secondary hover:bg-cs2-bg-hover hover:text-cs2-text-primary disabled:opacity-30"
               >
                 <ChevronLeft className="h-4 w-4" />
               </button>
-              <span className="min-w-8 text-center font-mono text-[11px] text-zinc-400">
+              <span className="min-w-8 text-center font-mono text-[11px] text-cs2-text-secondary">
                 {t("guide.announcementPosition", { current: currentIndex + 1, total: items.length })}
               </span>
               <button
@@ -67,7 +67,7 @@ export default function AnnouncementBanner({ items = [] }) {
                 aria-label={t("guide.announcementNext")}
                 disabled={currentIndex === items.length - 1}
                 onClick={() => setIndex(currentIndex + 1)}
-                className="rounded p-0.5 text-zinc-400 hover:bg-white/5 hover:text-dynamic-zinc-200 disabled:opacity-30"
+                className="rounded p-0.5 text-cs2-text-secondary hover:bg-cs2-bg-hover hover:text-cs2-text-primary disabled:opacity-30"
               >
                 <ChevronRight className="h-4 w-4" />
               </button>
@@ -78,8 +78,8 @@ export default function AnnouncementBanner({ items = [] }) {
           data-announcement-body
           className={`rounded-lg border px-3 py-2.5 text-[12px] leading-relaxed ${
             warning
-              ? "border-amber-500/20 bg-black/25 text-amber-100"
-              : "border-white/8 bg-black/20 text-dynamic-zinc-200"
+              ? "border-cs2-amber-border bg-cs2-amber-surface text-cs2-amber-on-surface"
+              : "border-cs2-border-subtle bg-cs2-bg-input text-cs2-text-primary"
           }`}
         >
           <p className="whitespace-pre-line break-words">{body}</p>

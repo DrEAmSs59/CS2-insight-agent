@@ -1,9 +1,10 @@
-import { Shield } from "lucide-react";
+import { ArrowRight, Shield } from "lucide-react";
+import { AccentButton } from "../../AnalysisUi.jsx";
 import InsightCard from "./InsightCard";
 
 function teamTextClass(teamKey) {
-  if (teamKey === "a") return "text-sky-400";
-  if (teamKey === "b") return "text-amber-400";
+  if (teamKey === "a") return "text-cs2-team-blue";
+  if (teamKey === "b") return "text-cs2-team-amber";
   return "text-cs2-text-primary";
 }
 
@@ -46,8 +47,8 @@ export default function PlayerEventsCard({
   return (
     <InsightCard
       title="精彩个人事件"
-      icon={<Shield className="h-3.5 w-3.5 text-violet-400" />}
-      compact
+      icon={Shield}
+      tone="violet"
       className={className}
     >
       <div className="flex h-full flex-1 flex-col">
@@ -72,11 +73,11 @@ export default function PlayerEventsCard({
                       onOpenRound(event.roundNumber);
                     }
                   }}
-                  className={`grid min-h-[24px] grid-cols-[minmax(4.5rem,auto)_minmax(0,1fr)_auto] items-center gap-2 border-t border-cs2-border/40 py-0.5 text-[11px] first:border-t-0 ${
-                    rowClickable ? "cursor-pointer hover:text-cs2-accent" : ""
+                  className={`grid min-h-[26px] grid-cols-[minmax(4.5rem,auto)_minmax(0,1fr)_auto] items-center gap-2 rounded-md border-t border-cs2-border-subtle px-1 py-0.5 text-xs first:border-t-0 ${
+                    rowClickable ? "cursor-pointer hover:bg-cs2-bg-hover" : ""
                   }`}
                 >
-                  <span className="whitespace-nowrap font-mono text-[10px] text-cs2-text-muted">
+                  <span className="whitespace-nowrap font-mono text-[11px] text-cs2-text-muted">
                     {roundBadge(event)}
                   </span>
                   {canSelectPlayer && name ? (
@@ -100,13 +101,10 @@ export default function PlayerEventsCard({
           })}
         </ul>
         {canOpenHighlights ? (
-          <button
-            type="button"
-            className="mt-auto shrink-0 pt-1 text-left text-[10px] font-semibold text-cs2-accent hover:underline"
-            onClick={onOpenHighlights}
-          >
+          <AccentButton size="sm" className="mt-2 self-start" onClick={onOpenHighlights}>
             前往高光与录制
-          </button>
+            <ArrowRight className="h-3 w-3" aria-hidden />
+          </AccentButton>
         ) : null}
       </div>
     </InsightCard>

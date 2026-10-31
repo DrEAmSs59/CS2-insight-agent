@@ -30,6 +30,9 @@ const COMPILATION_ORDER = {
  *   roundMontagePickerDisabled?: boolean,
  *   suppressSummaryHeader?: boolean,
  *   onDequeue?: (clientClipUid: string) => void,
+ *   onEnqueue?: (clientClipUid: string) => void,
+ *   onTagClick?: (tag: string) => void,
+ *   activeTag?: string,
  * }} props
  */
 export default function ClipList({
@@ -49,6 +52,9 @@ export default function ClipList({
   roundMontagePickerDisabled = false,
   suppressSummaryHeader = false,
   onDequeue,
+  onEnqueue,
+  onTagClick,
+  activeTag = "",
 }) {
   const t = useT();
   const queued = queuedClientClipUids ?? NO_QUEUED;
@@ -139,6 +145,9 @@ export default function ClipList({
                   ? () => onDequeue(clip.client_clip_uid)
                   : undefined
               }
+              onEnqueue={onEnqueue}
+              onTagClick={onTagClick}
+              activeTag={activeTag}
               matchTotalRounds={matchTotalRounds}
               freezeToDeathDraft={freezeToDeathDraft}
               onFreezeToDeathDraftChange={onFreezeToDeathDraftChange}

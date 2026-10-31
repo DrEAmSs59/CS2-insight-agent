@@ -137,7 +137,7 @@ export default function MontageDraftPanel({ open, onClose, onOpenDraft, onDelete
 
           <div className="min-h-0 flex-1 overflow-y-auto p-4 sm:p-5">
             {error ? (
-              <div className="mb-3 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-300">
+              <div className="mb-3 rounded-lg border border-cs2-rose-border bg-cs2-rose-surface px-3 py-2 text-xs text-cs2-rose-on-surface">
                 {error}
               </div>
             ) : null}
@@ -175,7 +175,7 @@ export default function MontageDraftPanel({ open, onClose, onOpenDraft, onDelete
                             {formatDateTime(item.updated_at)}
                           </span>
                           {item.has_bgm ? (
-                            <span className="inline-flex items-center gap-1 text-violet-300">
+                            <span className="inline-flex items-center gap-1 text-cs2-violet-on-surface">
                               <Music className="h-3 w-3" aria-hidden />
                               {t("montage.draftsHasBgm")}
                             </span>
@@ -200,7 +200,7 @@ export default function MontageDraftPanel({ open, onClose, onOpenDraft, onDelete
                         onClick={() => void handleDelete(item)}
                         disabled={busy}
                         aria-label={t("montage.draftsDeleteBtn", { name: item.name || item.output_filename })}
-                        className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-cs2-border-subtle text-cs2-text-muted transition-colors hover:border-red-500/40 hover:bg-red-500/10 hover:text-red-300 disabled:opacity-40"
+                        className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-cs2-border-subtle text-cs2-text-muted transition-colors hover:border-cs2-rose-border hover:bg-cs2-rose-surface hover:text-cs2-rose-on-surface disabled:opacity-40"
                       >
                         {deletingId === item.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" aria-hidden />}
                       </button>
