@@ -21,7 +21,7 @@ import { AccentButton, EmptyState, FocusedPlayerHeader, TipStrip } from "../Anal
 import { craftNameParts, formatCraftPipeName, imageUrlForWear, listDefaultLoadout } from "./cosmeticsCatalog.js";
 import { isCustomizable, itemsForTeam, mergeLoadoutWithEvidence, slotKey, sortCosmeticsForRow, teamSlotKey } from "./cosmeticsLayout.js";
 import { originalCosmeticName, replacementCosmeticName } from "../../cosmetics-workshop/cosmeticNames.js";
-import PlayerLoadoutEditor, { loadoutCandidates } from "./PlayerLoadoutEditor.jsx";
+import PlayerLoadoutEditor, { isMusicSlot, loadoutCandidates, loadoutValue } from "./PlayerLoadoutEditor.jsx";
 import SkinReplacementPicker from "./SkinReplacementPicker.jsx";
 import { saveCustomSkinPlan, loadCustomSkinPlan } from "./saveCustomSkinPlan.js";
 import { readWorkshopSchemes, workshopSchemeSelectionCount, workshopSchemeSelectionForItem } from "../../cosmetics-workshop/workshopSchemeStorage.js";
@@ -550,7 +550,7 @@ function CosmeticCard({
   const replaced = Boolean(replacement && !replacement.restore);
   const rarityColor = String(item?.rarity || "").trim() || "#ded6cc";
   const rarityKey = RARITY_NAMES[rarityColor.toLowerCase()] || "unknown";
-  return <button type="button" onClick={() => onOpen?.(item, item)} onPointerEnter={event => onHoverStart?.(event, item)} onPointerLeave={onHoverEnd} onFocus={event => onHoverStart?.(event, item)} onBlur={onHoverEnd} data-cosmetic-card data-replaced={replaced ? "true" : undefined} {...buttonProps} className={`group grid w-full min-w-0 self-start grid-rows-[auto_auto] rounded-[10px] text-left outline-none${disabled ? " cursor-not-allowed opacity-50 grayscale" : ""}`} aria-label={accessibleName}>
+  return <button type="button" onClick={() => onOpen?.(item, item)} onPointerEnter={event => onHoverStart?.(event, item)} onPointerLeave={onHoverEnd} onFocus={event => onHoverStart?.(event, item)} onBlur={onHoverEnd} data-cosmetic-card data-replaced={replaced ? "true" : undefined} {...buttonProps} className={`group grid w-full min-w-0 self-start grid-rows-[auto_auto] rounded-[10px] text-left outline-none${disabled ? " cursor-not-allowed opacity-50 grayscale" : ""}`} aria-label={[accessibleName, replacementLabel].filter(Boolean).join(" · ")}>
       <span className={`cosmetic-preview-surface relative block aspect-[4/3] overflow-hidden rounded-[10px] border transition-colors group-focus-visible:border-cs2-accent ${replaced ? "border-cs2-accent" : "border-cs2-border-subtle group-hover:border-cs2-text-muted"}`}>
         {showClear ? <span role="button" tabIndex={0} data-testid="cosmetics-clear-replacement" aria-label={t("analysis.cosmetics.clearReplacement")} title={t("analysis.cosmetics.clearReplacement")} className="absolute right-1.5 top-1.5 z-[3] inline-flex h-6 w-6 items-center justify-center rounded-md border border-cs2-border bg-cs2-bg-card/95 text-cs2-text-muted shadow-[var(--cs2-shadow-sm)] transition-colors hover:bg-cs2-rose-surface hover:text-cs2-rose-on-surface" onClick={event => {
         event.preventDefault();
@@ -866,6 +866,7 @@ export default function CosmeticsView({
   const [savedReplacements, setSavedReplacements] = useState({});
   const [playerLoadout, setPlayerLoadout] = useState({});
   const [savedLoadout, setSavedLoadout] = useState({});
+  const [loadoutOriginals, setLoadoutOriginals] = useState({});
   const [originalBySlot, setOriginalBySlot] = useState({});
   const [savedOriginals, setSavedOriginals] = useState({});
   const [pickerItem, setPickerItem] = useState(null);
@@ -898,17 +899,17 @@ export default function CosmeticsView({
     const labels = {
       agent_t: zh ? "T 探员" : "T agent",
       agent_ct: zh ? "CT 探员" : "CT agent",
-      music_kit: zh ? "音乐盒" : "Music kit"
+      music_kit_t: zh ? "T 音乐盒" : "T music kit", music_kit_ct: zh ? "CT 音乐盒" : "CT music kit"
     };
-    const loadoutRows = Object.keys(labels).filter(key => playerLoadout[key] !== savedLoadout[key]).map(key => {
+    const loadoutRows = Object.keys(labels).filter(key => loadoutValue(playerLoadout, key) !== loadoutValue(savedLoadout, key)).map(key => {
       const describe = value => {
-        const item = loadoutCandidates(key, true).find(row => (key === "music_kit" ? row.index : row.def) === value);
+        const item = loadoutCandidates(key, true).find(row => (isMusicSlot(key) ? row.index : row.def) === value);
         return (zh ? item?.nameZh : item?.nameEn) || (zh ? "Demo 原设置" : "Original demo setting");
       };
       return {
         key: `loadout:${key}`,
-        from: `${labels[key]} · ${describe(savedLoadout[key])}`,
-        to: describe(playerLoadout[key])
+        from: `${labels[key]} · ${describe(loadoutValue(savedLoadout, key))}`,
+        to: describe(loadoutValue(playerLoadout, key))
       };
     });
     return [...rewriteOperationRows(localReplacements, originalBySlot, inventory, locale), ...loadoutRows];
@@ -931,6 +932,7 @@ export default function CosmeticsView({
     setSavedReplacements({});
     setPlayerLoadout({});
     setSavedLoadout({});
+    setLoadoutOriginals({});
     setOriginalBySlot({});
     setSavedOriginals({});
     setPickerItem(null);
@@ -962,6 +964,7 @@ export default function CosmeticsView({
         setSavedReplacements(seeded || {});
         setPlayerLoadout(data?.plan?.player_loadout || {});
         setSavedLoadout(data?.plan?.player_loadout || {});
+        setLoadoutOriginals(data?.plan?.player_loadout_originals || {});
         setLocalReplacements(seeded || {});
         setSavedOriginals(originals);
         setOriginalBySlot(originals);
@@ -1202,6 +1205,7 @@ export default function CosmeticsView({
         setSavedReplacements(seeded);
         setPlayerLoadout(result?.plan?.player_loadout || {});
         setSavedLoadout(result?.plan?.player_loadout || {});
+        setLoadoutOriginals(result?.plan?.player_loadout_originals || {});
         setSavedOriginals(originals);
         if (failed.length > 0) {
           // Keep succeeded overlays from the saved plan; only retain failed slots as
@@ -1365,8 +1369,9 @@ export default function CosmeticsView({
             onClearReplacement={browseMode ? null : clearReplacement}
             loadoutEditor={<PlayerLoadoutEditor key={`${planScope}:${team}`} team={team} value={playerLoadout} onChange={setPlayerLoadout}
               editable={!browseMode && !saving} locale={locale} onlineAssetsEnabled={onlineAssetsEnabled}
-              evidence={itemsForTeam(loadoutInventory, team)}
-              renderItem={({ item, field, key, onSelect }) => <CosmeticCard key={key} item={item} locale={locale}
+              evidence={itemsForTeam(loadoutInventory, team)} originals={loadoutOriginals}
+              renderItem={({ item, original, replacement, field, key, onSelect }) => <CosmeticCard key={key} item={item} labelItem={original} locale={locale}
+                replacement={replacement} replacementLabel={replacement ? t("analysis.cosmetics.replacementPreview", { name: displayName(replacement, locale) }) : null}
                 onlineAssetsEnabled={onlineAssetsEnabled} customMode={!browseMode} customizable={!saving}
                 buttonProps={{ "data-loadout-slot": field }}
                 onOpen={browseMode ? () => openItemDetail(item) : onSelect}

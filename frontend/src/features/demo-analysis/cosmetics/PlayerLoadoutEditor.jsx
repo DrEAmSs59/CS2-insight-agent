@@ -4,59 +4,74 @@ import Modal from "../../../components/ui/Modal.jsx";
 import { CS2_COSMETICS_ITEMS } from "../../../generated/cs2CosmeticsCatalog.js";
 import { IconTile } from "../AnalysisUi.jsx";
 
+export const isMusicSlot = field => field?.startsWith("music_kit");
+export const loadoutValue = (value, field) => value[field] ?? (isMusicSlot(field) ? value.music_kit : undefined);
+
 export function loadoutCandidates(field) {
-  const rows = CS2_COSMETICS_ITEMS.filter(item => field === "music_kit"
+  const rows = CS2_COSMETICS_ITEMS.filter(item => isMusicSlot(field)
     ? item.type === "musickit" && Number(item.index) > 0
     : item.type === "agent" && item.teams === (field === "agent_t" ? 0 : 1));
-  return [...new Map(rows.map(item => [field === "music_kit" ? item.index : item.def, item])).values()];
+  return [...new Map(rows.map(item => [isMusicSlot(field) ? item.index : item.def, item])).values()];
 }
 
 function imageSrc(image) {
   return image.startsWith("http") ? image : `https://cdn.cstrike.app${image}`;
 }
 
-export default function PlayerLoadoutEditor({ value, onChange, editable, locale, onlineAssetsEnabled, team, evidence = [], renderItem }) {
+export default function PlayerLoadoutEditor({ value, onChange, editable, locale, onlineAssetsEnabled, team, evidence = [], originals = {}, renderItem }) {
   const [field, setField] = useState(null);
   const [query, setQuery] = useState("");
   const zh = String(locale).startsWith("zh");
   const labels = { agent_t: zh ? "T 探员" : "T agent", agent_ct: zh ? "CT 探员" : "CT agent",
-    music_kit: zh ? "音乐盒" : "Music kit" };
-  const fields = team ? [team === "ct" ? "agent_ct" : "agent_t", "music_kit"] : Object.keys(labels);
+    music_kit_t: zh ? "T 音乐盒" : "T music kit", music_kit_ct: zh ? "CT 音乐盒" : "CT music kit" };
+  const fields = team ? [`agent_${team}`, `music_kit_${team}`] : Object.keys(labels);
   const original = zh ? "沿用 Demo 原设置" : "Use original demo setting";
   const name = item => (zh ? item?.nameZh : item?.nameEn) || item?.nameEn || original;
-  const id = (item, key) => key === "music_kit" ? item.index : item.def;
+  const id = (item, key) => isMusicSlot(key) ? item.index : item.def;
   const candidates = useMemo(() => field ? loadoutCandidates(field) : [], [field]);
   const shown = candidates.filter(item => `${item.nameZh} ${item.nameEn}`.toLowerCase().includes(query.trim().toLowerCase()));
   const select = item => {
     const next = { ...value };
+    // Migrate legacy shared music before editing either side, including restore.
+    if (isMusicSlot(field) && next.music_kit !== undefined) {
+      for (const side of ["t", "ct"]) next[`music_kit_${side}`] ??= next.music_kit;
+      delete next.music_kit;
+    }
     if (item) next[field] = id(item, field);
     else delete next[field];
     onChange(next);
     setField(null);
   };
-  const usingOriginal = field ? value[field] === undefined : false;
+  const usingOriginal = field ? loadoutValue(value, field) === undefined : false;
   const openSlot = key => { setQuery(""); setField(key); };
   return <section className={team ? "contents" : "mb-5"} data-testid={team ? `player-loadout-slots-${team}` : "player-loadout-editor"}>
     {!team && <div className="mb-2 flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
       <h3 className="text-[13px] font-semibold text-cs2-text-primary">{zh ? "探员与音乐盒" : "Agents & music kit"}</h3>
       <p className="text-xs text-cs2-text-muted">{zh
-        ? "探员按 T / CT 分别设置，仅支持同阵营替换。音乐盒在玩家获得 MVP 时自然播放，选择后保存方案。"
-        : "Choose an agent for each side; only same-team replacements are supported. Music plays on the player's MVP. Save the plan to apply."}</p>
+        ? "探员按 T / CT 分别设置，仅支持同阵营替换。音乐盒按 T / CT 分别设置，在玩家获得 MVP 时自然播放，选择后保存方案。"
+        : "Choose an agent for each side; only same-team replacements are supported. Music kits are also set per side and play on the player's MVP. Save the plan to apply."}</p>
     </div>}
-    <div className={team ? "contents" : "grid gap-2 sm:grid-cols-3"}>
+    <div className={team ? "contents" : "grid gap-2 sm:grid-cols-2"}>
       {fields.map(key => {
-        const item = loadoutCandidates(key).find(row => id(row, key) === value[key]);
+        const item = loadoutCandidates(key).find(row => id(row, key) === loadoutValue(value, key));
         if (team && renderItem) {
-          const originals = evidence.filter(row => row.type === (key === "music_kit" ? "musickit" : "agent"));
-          const rows = item ? [{
+          const sources = originals[key] ?? evidence.filter(row => row.type === (isMusicSlot(key) ? "musickit" : "agent"));
+          const replacement = item ? {
             catalog_id: item.id, def_index: item.def, paint_index: item.index || 0, type: item.type,
             name_zh: item.nameZh, name_en: item.nameEn, image_url: item.image ? imageSrc(item.image) : "",
             rarity: item.rarity, teams: item.teams, observed_teams: [team],
-          }] : originals;
-          if (rows.length) return rows.map((row, index) => renderItem({ item: row, field: key,
-            key: `${key}:${row.catalog_id || row.def_index}:${index}`, onSelect: () => openSlot(key) }));
+          } : null;
+          const rows = sources.length ? sources : replacement ? [{
+            type: replacement.type, name_zh: "Demo 原设置", name_en: "Original demo setting",
+          }] : [];
+          if (rows.length) return rows.map((source, index) => renderItem({
+            item: replacement ? { ...replacement, demo_original: source } : source,
+            original: source, replacement,
+            field: key, key: `${key}:${source.catalog_id || source.def_index}:${index}`, onSelect: () => openSlot(key),
+          }));
+
         }
-        const Icon = key === "music_kit" ? Music2 : UserRound;
+        const Icon = isMusicSlot(key) ? Music2 : UserRound;
         return <button key={key} type="button" disabled={!editable} aria-label={labels[key]}
           data-loadout-slot={key}
           onClick={() => openSlot(key)}
@@ -88,7 +103,7 @@ export default function PlayerLoadoutEditor({ value, onChange, editable, locale,
         </div>
         {shown.length ? <div className="grid min-h-0 flex-1 grid-cols-3 content-start gap-2 overflow-y-auto pr-1">
           {shown.map(item => {
-            const active = value[field] === id(item, field);
+            const active = loadoutValue(value, field) === id(item, field);
             return <button key={id(item, field)} type="button" aria-label={name(item)} onClick={() => select(item)} data-active={active ? "true" : "false"}
               className="analysis-card analysis-card--interactive relative p-3 text-left">
               {active ? <Check className="absolute right-2 top-2 h-4 w-4 text-cs2-accent" /> : null}

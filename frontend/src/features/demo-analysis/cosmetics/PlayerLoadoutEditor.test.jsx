@@ -21,3 +21,18 @@ test("selects and clears one slot without losing the other choices", () => {
   fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "沿用 Demo 原设置" }));
   expect(onChange).toHaveBeenLastCalledWith({ music_kit: 3 });
 });
+
+
+test("editing or restoring one music side migrates legacy shared music without changing the other side", () => {
+  const onChange = vi.fn();
+  const props = { onChange, editable: true, locale: "zh", onlineAssetsEnabled: false };
+  const { rerender } = render(<PlayerLoadoutEditor {...props} value={{ music_kit: 3 }} />);
+  fireEvent.click(screen.getByRole("button", { name: "CT 音乐盒" }));
+  const kit = loadoutCandidates("music_kit_ct").find(row => row.index === 4);
+  fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: kit.nameZh }));
+  expect(onChange).toHaveBeenLastCalledWith({ music_kit_ct: 4, music_kit_t: 3 });
+  rerender(<PlayerLoadoutEditor {...props} value={{ music_kit_ct: 4, music_kit_t: 3 }} />);
+  fireEvent.click(screen.getByRole("button", { name: "T 音乐盒" }));
+  fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "沿用 Demo 原设置" }));
+  expect(onChange).toHaveBeenLastCalledWith({ music_kit_ct: 4 });
+});

@@ -61,7 +61,7 @@ describe("CosmeticsView", () => {
     for (const team of ["ct", "t"]) {
       const row = screen.getByTestId(`cosmetics-row-${team}`);
       expect(within(row).getByRole("button", { name: team === "ct" ? "CT 探员" : "T 探员" }).disabled).toBe(true);
-      expect(within(row).getByRole("button", { name: "音乐盒" }).disabled).toBe(true);
+      expect(within(row).getByRole("button", { name: `${team.toUpperCase()} 音乐盒` }).disabled).toBe(true);
       expect(within(row).getAllByText("沿用 Demo 原设置")).toHaveLength(2);
     }
     fireEvent.click(screen.getByTestId("cosmetics-customize"));
@@ -83,7 +83,7 @@ describe("CosmeticsView", () => {
       for (const team of ["ct", "t"]) {
         const row = screen.getByTestId(`cosmetics-row-${team}`);
         const cards = [...row.querySelectorAll("[data-cosmetic-card], [data-loadout-slot]")];
-        expect(cards.slice(-2).map(card => card.getAttribute("data-loadout-slot"))).toEqual([`agent_${team}`, "music_kit"]);
+        expect(cards.slice(-2).map(card => card.getAttribute("data-loadout-slot"))).toEqual([`agent_${team}`, `music_kit_${team}`]);
         expect(within(cards.at(-2)).getByRole("img").getAttribute("src")).toContain((team === "ct" ? agentCt : agentT).image_url);
         expect(within(cards.at(-1)).getByRole("img").getAttribute("src")).toContain(music.image_url);
         expect(cards.at(-1).querySelector("[data-cosmetic-rarity-rail]")).toBeTruthy();
@@ -105,20 +105,49 @@ describe("CosmeticsView", () => {
     checkOrder();
   });
 
-  test("selecting a music kit in either team updates both rows and saves one shared setting", async () => {
+  test("agent and per-side music keep original-to-replacement labels after save and reopen", async () => {
+    const agent = loadoutCosmetic(loadoutCandidates("agent_ct")[0], ["ct"]);
+    const music = loadoutCosmetic(loadoutCandidates("music_kit").find(row => row.index === 3), ["t", "ct"]);
+    const ctAgent = loadoutCandidates("agent_ct")[1];
+    const ctKit = loadoutCandidates("music_kit").find(row => row.index === 4);
+    const tKit = loadoutCandidates("music_kit").find(row => row.index === 5);
+    const originals = { agent_ct: [agent], agent_t: [], music_kit_ct: [music], music_kit_t: [music] };
+    const loadout = { agent_ct: ctAgent.def, music_kit_ct: ctKit.index, music_kit_t: tKit.index };
+    const plan = { player_loadout: loadout, player_loadout_originals: originals, items: [] };
     vi.mocked(loadCustomSkinPlan).mockResolvedValueOnce({ ok: true, plan: null });
     vi.mocked(saveCustomSkinPlan).mockClear();
-    vi.mocked(saveCustomSkinPlan).mockResolvedValueOnce({ ok: true, plan: { player_loadout: { music_kit: 3 }, items: [] }, succeeded: [], failed: [] });
-    render(<CosmeticsView demoId={42} selectedPlayer={{ name: "JW", steamid: STEAM_ID }} locale="zh" workspace={{ cosmetics: { players: {} } }} />);
+    vi.mocked(saveCustomSkinPlan).mockResolvedValueOnce({ ok: true, plan, succeeded: [], failed: [] });
+    const props = { demoId: 42, selectedPlayer: { name: "JW", steamid: STEAM_ID }, locale: "zh" };
+    const workspace = { cosmetics: { players: { [STEAM_ID]: [agent, music] } } };
+    const first = render(<CosmeticsView {...props} workspace={workspace} />);
+    await waitFor(() => expect(loadCustomSkinPlan).toHaveBeenCalled());
     fireEvent.click(screen.getByTestId("cosmetics-customize"));
-    const ct = screen.getByTestId("cosmetics-row-ct"), t = screen.getByTestId("cosmetics-row-t");
-    fireEvent.click(within(ct).getByRole("button", { name: "音乐盒" }));
-    const chosen = loadoutCandidates("music_kit").find(item => item.index === 3);
-    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: chosen.nameZh }));
-    expect(ct.querySelector('[data-loadout-slot="music_kit"]').getAttribute("aria-label")).toContain(chosen.nameZh.split("|").at(-1).trim());
-    expect(t.querySelector('[data-loadout-slot="music_kit"]').getAttribute("aria-label")).toContain(chosen.nameZh.split("|").at(-1).trim());
+    const choose = (team, field, item) => {
+      fireEvent.click(screen.getByTestId(`cosmetics-row-${team}`).querySelector(`[data-loadout-slot="${field}"]`));
+      fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: item.nameZh }));
+    };
+    choose("ct", "music_kit_ct", ctKit);
+    choose("t", "music_kit_t", tKit);
+    choose("ct", "agent_ct", ctAgent);
+    const checkLabels = () => {
+      for (const [team, field, original, replacement] of [["ct", "agent_ct", agent, ctAgent],
+        ["ct", "music_kit_ct", music, ctKit], ["t", "music_kit_t", music, tKit]]) {
+        const card = screen.getByTestId(`cosmetics-row-${team}`).querySelector(`[data-loadout-slot="${field}"]`);
+        expect(card.textContent).toContain(original.name_zh.split("|").at(-1).trim());
+        expect(card.textContent).toContain(replacement.nameZh);
+      }
+    };
+    checkLabels();
     fireEvent.click(screen.getByTestId("cosmetics-save-plan"));
-    await waitFor(() => expect(saveCustomSkinPlan).toHaveBeenLastCalledWith(expect.objectContaining({ playerLoadout: { music_kit: 3 }, replacements: {} })));
+    await waitFor(() => expect(saveCustomSkinPlan).toHaveBeenLastCalledWith(expect.objectContaining({ playerLoadout: loadout, replacements: {} })));
+    await waitFor(() => expect(screen.getByTestId("cosmetics-customize")).toBeTruthy());
+    checkLabels();
+    first.unmount();
+    vi.mocked(loadCustomSkinPlan).mockResolvedValueOnce({ ok: true, plan });
+    render(<CosmeticsView {...props} workspace={{ cosmetics: { players: { [STEAM_ID]: [
+      loadoutCosmetic(ctAgent, ["ct"]), loadoutCosmetic(ctKit, ["ct"]), loadoutCosmetic(tKit, ["t"]),
+    ] } } }} />);
+    await waitFor(checkLabels);
   });
 
   test("shows only the selected player's evidence-owned inventory in CT/T team rows", () => {
