@@ -511,6 +511,13 @@ def build_batch_and_plan(
             repl.get("paint_wear"), replacement_definition_index, paint_kit
         )
 
+        if (item_type == "glove" and definition_index in {5028, 5029}
+                and replacement_definition_index == definition_index and paint_kit == 0):
+            # Every save starts from the library original. Restoring its default
+            # gloves removes the overlay; it must not materialize a paint-zero
+            # rule that skin-core rejects. Other players' plans still replay.
+            continue
+
         batch_item: dict[str, Any] = {
             "item_id64": item_id64,
             "definition_index": definition_index,
