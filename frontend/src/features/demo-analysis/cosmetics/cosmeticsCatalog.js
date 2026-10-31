@@ -115,6 +115,8 @@ export function imageUrlForWear(imageUrl, wear, item = null) {
   const url = String(imageUrl || "").trim();
   if (!url) return "";
   const base = url.replace(/_(light|medium|heavy)\.webp/i, ".webp");
+  // Glove cards use the original inventory icon, without an equipped hand.
+  if (item?.type === "glove") return base;
   // Vanilla/default art has no wear variants on the CDN.
   if (item && (item.is_placeholder || item.is_base || !(Number(item.paint_index) > 0))) {
     return base.includes(".webp") ? base : url;

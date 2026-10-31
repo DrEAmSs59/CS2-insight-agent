@@ -74,6 +74,15 @@ describe("cosmeticsCatalog", () => {
     expect(imageUrlForWear(base.replace(".webp", "_light.webp"), 0.1, { is_placeholder: true })).toBe(base);
   });
 
+  test("gloves always use their original inventory icon, including saved wear-image URLs", () => {
+    const base = "https://cdn.cstrike.app/images/sporty_gloves.webp";
+    const glove = { type: "glove", paint_index: 10038 };
+    for (const wear of [undefined, 0.01, 0.5, 0.9]) {
+      expect(imageUrlForWear(base, wear, glove)).toBe(base);
+      expect(imageUrlForWear(base.replace(".webp", "_heavy.webp"), wear, glove)).toBe(base);
+    }
+  });
+
   test("craftNameParts prefixes melee with star and splits finish", () => {
     const parts = craftNameParts(
       { type: "melee", name_en: "Butterfly Knife | Lore", name_zh: "蝴蝶刀 | 传说" },
