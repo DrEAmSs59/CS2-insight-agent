@@ -520,6 +520,7 @@ def _sample_player_context(
         "player_teams": {},
         "player_teams_at_tick": {},
         "music_kits": {},
+        "music_kit_teams": {},
         "item_stickers": {},
         "observed_items": {},
         "default_weapons": {},
@@ -571,6 +572,7 @@ def _sample_player_context(
     item_account_candidates: dict[int, set[str]] = {}
     player_teams: dict[str, set[str]] = {}
     music_kits: dict[str, set[int]] = {}
+    music_kit_teams: dict[tuple[str, int], set[str]] = {}
     item_stickers: dict[tuple[str, int], list[dict[str, Any]]] = {}
     observed_items: dict[tuple[str, int], dict[str, Any]] = {}
     default_weapons: dict[tuple[str, int], dict[str, Any]] = {}
@@ -883,6 +885,8 @@ def _sample_player_context(
         music_id = inventory_music if inventory_music is not None else playback_music
         if music_id is not None and music_id > 0:
             music_kits.setdefault(steamid, set()).add(music_id)
+            if team:
+                music_kit_teams.setdefault((steamid, music_id), set()).add(team)
 
     # A single asset observed under multiple participant accounts is ambiguous
     # demo state. Fail closed instead of assigning it to whichever row happened
@@ -935,6 +939,7 @@ def _sample_player_context(
         "player_teams": player_teams,
         "player_teams_at_tick": owner_teams_at_tick,
         "music_kits": music_kits,
+        "music_kit_teams": music_kit_teams,
         "item_stickers": item_stickers,
         "observed_items": observed_items,
         "default_weapons": default_weapons,
@@ -1160,8 +1165,8 @@ def build_player_cosmetic_inventory(
     When ``match_start_tick > 0``, gun cosmetics additionally require a live-phase
     ``item_purchase`` for that player+weapon def (warmup buys do not count).
     Glock-18/USP-S/P2000 instead qualify only from a fresh-spawn loadout snapshot,
-    before a player can pick up another player's pistol. Knives/gloves are unchanged;
-    agents, music kits, and C4 are deliberately omitted from the cosmetics page.
+    before a player can pick up another player's pistol. Knives/gloves are unchanged.
+    Agents and music kits use their owner controller and observed side; C4 is omitted.
     """
     parse_skins = getattr(parser, "parse_skins", None)
     rows: list[dict[str, Any]] = []
@@ -1416,7 +1421,28 @@ def build_player_cosmetic_inventory(
             continue
         owner_entries.setdefault(("item", item_id), glove_entry)
 
-    priority = {"melee": 0, "glove": 1, "weapon": 2, "utility": 3}
+    for (steamid, definition), agent_entry in context["agents"].items():
+        if agent_entry.get("observed_teams"):
+            grouped.setdefault(steamid, {})[("agent", definition)] = agent_entry
+
+    for (steamid, music_id), teams in context["music_kit_teams"].items():
+        music_entry = _skin_entry({
+            "def_index": 1314,
+            "paint_index": music_id,
+            "paint_seed": None,
+            "paint_wear": None,
+            "custom_name": None,
+        })
+        if music_entry and music_entry.get("catalog_exact") and music_entry.get("type") == "musickit":
+            music_entry.update({
+                "owner_steamid64": steamid,
+                "ownership_evidence": "demo_player_controller_music_kit",
+                "observed_teams": sorted(teams, key=("t", "ct").index),
+                "stickers": [],
+            })
+            grouped.setdefault(steamid, {})[("musickit", music_id)] = music_entry
+
+    priority = {"melee": 0, "glove": 1, "weapon": 2, "utility": 3, "agent": 4, "musickit": 5}
     return {
         steamid: sorted(
             (json_safe_item_id(entry) for entry in entries.values()),

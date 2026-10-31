@@ -55,6 +55,22 @@ function loadoutCosmetic(item, teams) {
 }
 
 describe("CosmeticsView", () => {
+  test("keeps original-setting slots visible when cached analysis has no loadout evidence", () => {
+    render(<CosmeticsView selectedPlayer={{ name: "JW", steamid: STEAM_ID }} locale="zh"
+      workspace={{ cosmetics: { players: {} } }} />);
+    for (const team of ["ct", "t"]) {
+      const row = screen.getByTestId(`cosmetics-row-${team}`);
+      expect(within(row).getByRole("button", { name: team === "ct" ? "CT 探员" : "T 探员" }).disabled).toBe(true);
+      expect(within(row).getByRole("button", { name: "音乐盒" }).disabled).toBe(true);
+      expect(within(row).getAllByText("沿用 Demo 原设置")).toHaveLength(2);
+    }
+    fireEvent.click(screen.getByTestId("cosmetics-customize"));
+    expect(screen.getByRole("button", { name: "T 探员" }).disabled).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: "T 探员" }));
+    expect(screen.queryByRole("button", { name: loadoutCandidates("agent_ct")[0].nameZh })).toBeNull();
+    expect(screen.queryByRole("checkbox")).toBeNull();
+  });
+
   test("each team keeps its agent and music kit at the end of the same item grid", () => {
     const agentT = loadoutCosmetic(loadoutCandidates("agent_t")[0], ["t"]);
     const agentCt = loadoutCosmetic(loadoutCandidates("agent_ct")[0], ["ct"]);
@@ -1838,7 +1854,7 @@ test("loadout-only customization saves, reloads and restores without weapon edit
   vi.mocked(loadCustomSkinPlan).mockResolvedValueOnce({ ok: true, plan: { player_loadout: loadout, items: [] } });
   vi.mocked(saveCustomSkinPlan).mockResolvedValueOnce({ ok: true, plan: { player_loadout: { music_kit: 3 }, items: [] }, succeeded: [], failed: [] });
   render(<CosmeticsView {...props} />);
-  await waitFor(() => expect(screen.getByTestId("cosmetics-row-t").querySelector('[data-loadout-slot="agent_t"]')).toBeTruthy());
+  await waitFor(() => expect(within(screen.getByTestId("cosmetics-row-t")).getByRole("button", { name: new RegExp(chosen.nameZh.split("|").at(-1).trim()) })).toBeTruthy());
   fireEvent.click(screen.getByTestId("cosmetics-customize"));
   fireEvent.click(screen.getByTestId("cosmetics-row-t").querySelector('[data-loadout-slot="agent_t"]'));
   fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "沿用 Demo 原设置" }));

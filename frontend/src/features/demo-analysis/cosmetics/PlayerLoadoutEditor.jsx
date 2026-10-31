@@ -55,9 +55,6 @@ export default function PlayerLoadoutEditor({ value, onChange, editable, locale,
           }] : originals;
           if (rows.length) return rows.map((row, index) => renderItem({ item: row, field: key,
             key: `${key}:${row.catalog_id || row.def_index}:${index}`, onSelect: () => openSlot(key) }));
-          return editable ? <button key={key} type="button" data-loadout-slot={key} aria-label={labels[key]}
-            className="self-start rounded-lg border border-dashed border-cs2-border px-3 py-2 text-xs text-cs2-text-secondary hover:border-cs2-accent hover:text-cs2-accent"
-            onClick={() => openSlot(key)}>{zh ? `选择${labels[key]}` : `Choose ${labels[key]}`}</button> : null;
         }
         const Icon = key === "music_kit" ? Music2 : UserRound;
         return <button key={key} type="button" disabled={!editable} aria-label={labels[key]}
