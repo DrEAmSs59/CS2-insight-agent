@@ -30,7 +30,7 @@ from typing import BinaryIO, Callable, Literal, Mapping, Optional
 
 
 PATCH_ID = "drop-legacy-remove-all-decals-138"
-PATCH_REVISION = 4
+PATCH_REVISION = 5
 WIN_PANEL_PATCH_ID = "drop-cs-win-panel-match-gameevent-207"
 PERSISTENT_PATCH_ID = f"{PATCH_ID}+{WIN_PANEL_PATCH_ID}"
 UNFINALIZED_PATCH_ID = "recover-unfinalized-terminal-metadata"
@@ -90,6 +90,10 @@ class PlaybackDemoReport:
     discarded_truncated_packet_bytes: int = 0
     rewritten_chroma_sky_references: int = 0
     remaining_chroma_sky_references: int = 0
+
+    terminal_phase_checked: bool = False
+    rewritten_terminal_phase_fields: int = 0
+    remaining_terminal_phase_fields: int = 0
 
     def to_dict(self) -> dict[str, object]:
         return asdict(self)

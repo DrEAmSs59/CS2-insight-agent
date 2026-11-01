@@ -9,7 +9,7 @@ import os
 import shutil
 import tempfile
 import threading
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -19,6 +19,7 @@ from .demo_playback_compat import (
     repair_demo_in_place,
 )
 from .env_utils import get_data_dir
+from .demo_terminal_phase import repair_terminal_phase_in_place
 
 logger = logging.getLogger(__name__)
 
@@ -236,7 +237,7 @@ def ensure_compatible_baseline(
         published = False
         try:
             shutil.copy2(source, temp_path)
-            report = repair_demo_in_place(
+            report = _repair_compatibility_in_place(
                 temp_path,
                 allow_truncated_packet_tail=allow_truncated_packet_tail,
             )
@@ -277,9 +278,44 @@ def _cached_result(
         return None
     try:
         report = PlaybackDemoReport(**record["report"])
+        if report.terminal_phase_checked is not True or report.remaining_terminal_phase_fields != 0:
+            return None
     except (KeyError, TypeError, ValueError):
         return None
     return DemoCompatibilityEnsureResult(report=report, cached=True)
+
+
+def _repair_compatibility_in_place(source: Path, **options: Any) -> PlaybackDemoReport:
+    """Publish event and entity fixes together; failed audits leave the input intact."""
+    before = _fingerprint(source)
+    with tempfile.TemporaryDirectory(prefix=".demo-compat-", dir=source.parent) as directory:
+        candidate = Path(directory) / "candidate.dem"
+        shutil.copy2(source, candidate)
+        report = repair_demo_in_place(candidate, **options)
+        phase = repair_terminal_phase_in_place(candidate)
+        report = replace(
+            report,
+            outcome="repaired" if phase.rewritten_fields else report.outcome,
+            patch_id=(report.patch_id + "+suppress-terminal-game-phase-5"
+                      if phase.rewritten_fields else report.patch_id),
+            terminal_phase_checked=True,
+            rewritten_terminal_phase_fields=phase.rewritten_fields,
+            remaining_terminal_phase_fields=0,
+            first_tick=min(tick for tick in (report.first_tick, phase.first_tick) if tick is not None)
+                if report.first_tick is not None or phase.first_tick is not None else None,
+            last_tick=max(tick for tick in (report.last_tick, phase.last_tick) if tick is not None)
+                if report.last_tick is not None or phase.last_tick is not None else None,
+        )
+        if _fingerprint(source) != before:
+            raise RuntimeError("demo source changed during compatibility repair")
+        if report.outcome == "repaired":
+            os.replace(candidate, source)
+        if phase.rewritten_fields:
+            logger.info(
+                "Suppressed demo terminal rules phase: path=%s fields=%d ticks=%s..%s",
+                source, phase.rewritten_fields, phase.first_tick, phase.last_tick,
+            )
+        return report
 
 
 def ensure_demo_compatible(
@@ -321,7 +357,7 @@ def ensure_demo_compatible(
             if allow_truncated_packet_tail
             else {}
         )
-        report = repair_demo_in_place(source, **repair_options)
+        report = _repair_compatibility_in_place(source, **repair_options)
         if report.recovered_unfinalized_demo:
             logger.warning(
                 "Recovered unfinalized demo terminal metadata after compatibility patches: "
