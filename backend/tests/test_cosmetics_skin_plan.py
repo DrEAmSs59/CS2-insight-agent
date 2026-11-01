@@ -980,3 +980,34 @@ def test_missing_zero_id_weapon_cannot_be_restored_from_client_snapshots(bad_pla
     with pytest.raises(CosmeticsSkinPlanError, match="slot not found"):
         build_batch_and_plan(STEAM_ID, [], {source_key: applied},
                              originals={source_key: original}, trusted_plan=persisted)
+
+
+@pytest.mark.parametrize("edit_alias", [False, True])
+def test_missing_zero_id_weapon_reuses_saved_source_after_reanalysis(edit_alias):
+    original = inventory_row(type="weapon", def_index=61, item_id=None,
+                             paint_index=0, paint_seed=0, paint_wear=0, observed_teams=["ct"])
+    key = "ct:def:61:0:0:0"
+    applied = replacement(type="weapon", def_index=61, paint_index=504, paint_wear=0.1)
+    first_batch, persisted = build_batch_and_plan(STEAM_ID, [original], {key: applied})
+    materialized = {**applied, "item_id": "14204636884736196609", "observed_teams": ["ct"]}
+    replacements = {key: applied}
+    if edit_alias:
+        replacements[f"ct:id:{materialized['item_id']}"] = {**applied, "paint_seed": 99}
+    batch, plan = build_batch_and_plan(STEAM_ID, [materialized], replacements, trusted_plan=persisted)
+    expected = [{**first_batch[0], "pattern_seed": 99}] if edit_alias else first_batch
+    assert batch == expected
+    assert plan["items"][0]["slot_key"] == key
+    assert plan["items"][0]["original"] == persisted["items"][0]["original"]
+    assert build_batch_from_plan_json(plan, [materialized]) == expected
+
+
+@pytest.mark.parametrize("trusted_key", [None, "t:def:61:0:0:0", "ct:def:9:0:0:0"])
+def test_missing_zero_id_weapon_cannot_be_supplied_by_client_or_other_slot(trusted_key):
+    original = inventory_row(type="weapon", def_index=61, item_id=None,
+                             paint_index=0, paint_seed=0, paint_wear=0, observed_teams=["ct"])
+    key = "ct:def:61:0:0:0"
+    applied = replacement(type="weapon", def_index=61, paint_index=504, paint_wear=0.1)
+    trusted = {"steamid": STEAM_ID, "items": [{"slot_key": trusted_key,
+               "original": original, "replacement": applied}]} if trusted_key else None
+    with pytest.raises(CosmeticsSkinPlanError, match="slot not found"):
+        build_batch_and_plan(STEAM_ID, [], {key: applied}, originals={key: original}, trusted_plan=trusted)
