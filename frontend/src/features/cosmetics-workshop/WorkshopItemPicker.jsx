@@ -7,6 +7,7 @@ import LucasIcon from "./LucasIcon.jsx";
 import WorkshopItemImage from "./WorkshopItemImage.jsx";
 import WorkshopModelSkins from "./WorkshopModelSkins.jsx";
 import { editorDraft } from "./itemAppearance.js";
+import { currentItemFirst } from "./workshopCurrentItem.js";
 import { CATEGORY_LABELS, FINISH_TYPES, TEAM_KEYS, localizedName, modelSkinCount, schemeModelChoices } from "./workshopCatalog.js";
 import { craftNameParts, filterCandidates } from "../demo-analysis/cosmetics/cosmeticsCatalog.js";
 
@@ -22,7 +23,11 @@ export default function WorkshopItemPicker({ category, team, slotItem, current =
   const [limit, setLimit] = useState(PAGE_SIZE);
   const modelListScroll = useRef(0);
   const listsModels = FINISH_TYPES.includes(category);
-  const rows = useMemo(() => query.trim() ? filterCandidates(choices, query, locale) : choices, [choices, query, locale]);
+  const rows = useMemo(() => {
+    // Keep model navigation alongside the exact saved knife/glove appearance.
+    const ordered = listsModels ? (current ? [current, ...choices] : choices) : currentItemFirst(choices, current || slotItem);
+    return query.trim() ? filterCandidates(ordered, query, locale) : ordered;
+  }, [choices, current, slotItem, listsModels, query, locale]);
   useEffect(() => setLimit(PAGE_SIZE), [query]);
   useLayoutEffect(() => {
     if (scrollContainer?.current) scrollContainer.current.scrollTop = model ? 0 : modelListScroll.current;
@@ -45,14 +50,17 @@ export default function WorkshopItemPicker({ category, team, slotItem, current =
     </div>
     <section className="lucas-grid" aria-label={title}>
       {rows.slice(0, limit).map((item) => {
-        const name = listsModels ? (!item.free && craftNameParts(item, locale).model) || localizedName(item, locale) : localizedName(item, locale);
+        const equipped = item === current;
+        const name = listsModels && !equipped ? (!item.free && craftNameParts(item, locale).model) || localizedName(item, locale) : localizedName(item, locale);
         const count = listsModels ? modelSkinCount(item) : 0;
-        return <LucasItemTile key={item.catalog_id} label={name} model={listsModels ? name : null}
-          finish={listsModels ? (en ? `${count} finishes` : `${count} 款皮肤`) : name} rarity={item.rarity}
-          selected={listsModels ? item.def_index === (current || slotItem).def_index : item.catalog_id === (current || slotItem).catalog_id}
-          image={<WorkshopItemImage catalogOnly item={item} className="h-full w-full" />}
+        return <LucasItemTile key={equipped ? "current" : item.catalog_id} label={[name, item.custom_name && `"${item.custom_name}"`].filter(Boolean).join(" | ")} model={listsModels ? name : null}
+          finish={equipped ? (listsModels ? item.custom_name && `"${item.custom_name}"` : name) : listsModels ? (en ? `${count} finishes` : `${count} 款皮肤`) : name} rarity={item.rarity}
+          selected={current ? equipped : item.catalog_id === slotItem.catalog_id}
+          badge={equipped ? <span>{en ? "In use" : "正在使用"}</span> : undefined}
+          image={<WorkshopItemImage catalogOnly={!equipped} item={item} className="h-full w-full" />}
           onClick={() => {
-            if (listsModels) { modelListScroll.current = scrollContainer?.current?.scrollTop || 0; setModel(item); }
+            if (equipped) onChoose({ ...current });
+            else if (listsModels) { modelListScroll.current = scrollContainer?.current?.scrollTop || 0; setModel(item); }
             else onChoose(editorDraft(item));
           }} />;
       })}

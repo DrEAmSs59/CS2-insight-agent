@@ -1038,3 +1038,63 @@ def test_loadout_requires_explicit_sidecar_confirmation(api_env, monkeypatch):
         json={"steamid": STEAM_ID, "player_loadout": {"music_kit": 3}})
     assert response.status_code == 502
     assert api_env["cached"].read_bytes() == before
+
+
+def test_single_awp_edit_preserves_materialized_usp_plan_after_reload(api_env, monkeypatch):
+    client, db = api_env["client"], api_env["db"]
+    original, cached = api_env["original"], api_env["cached"]
+    url = f"/api/demos/{api_env['demo_id']}/cosmetics/custom-plan"
+    usp = _inventory_row(def_index=61, model="usp_silencer", item_id=None,
+                         paint_index=0, paint_seed=0, paint_wear=0, observed_teams=["ct"])
+    awp = _inventory_row(def_index=9, model="awp", observed_teams=["ct"])
+    usp_replacement = _replacement(def_index=61, model="usp_silencer", paint_index=504, paint_wear=0.1)
+    awp_replacement = _replacement(def_index=9, model="awp", paint_index=344, paint_wear=0.1)
+    usp_key, awp_key = "ct:def:61:0:0:0", "ct:id:10"
+
+    def analyze(inventory):
+        asyncio.run(db.save_result(str(original), {
+            "analysis_workspace": {"cosmetics": {"players": {STEAM_ID: inventory}}},
+        }))
+
+    batches = []
+
+    def fake_rewrite(*, input_dem, output_dem, steam_id64, items, **kwargs):
+        assert Path(input_dem).read_bytes() == b"ORIGINAL-DEMO"
+        assert steam_id64 == STEAM_ID
+        batches.append(items)
+        Path(output_dem).write_bytes(f"REWRITTEN-{len(batches)}".encode())
+        return {"ok": True, "sha256": f"sha-{len(batches)}", "items_rewritten": len(items),
+                "succeeded": [{key: item[key] for key in ("item_id64", "definition_index", "team")}
+                              for item in items], "failed": []}
+
+    monkeypatch.setattr(cosmetics_skin, "run_rewrite_owned_batch", fake_rewrite)
+    analyze([usp, awp])
+    first = client.post(url, json={"steamid": STEAM_ID,
+        "replacements": {usp_key: usp_replacement, awp_key: awp_replacement}})
+    assert first.status_code == 200
+    assert first.json()["ok"] is True
+    saved_usp = next(entry for entry in first.json()["plan"]["items"] if entry["slot_key"] == usp_key)
+
+    # The new analysis has the synthetic USP entity; the old def slot is gone.
+    synthetic_id = "14204636884736196609"
+    analyze([{**usp_replacement, "item_id": synthetic_id, "observed_teams": ["ct"]}, awp])
+    for seed in (99, 100):
+        loaded = client.get(url, params={"steamid": STEAM_ID}).json()["plan"]
+        replacements = {entry["slot_key"]: entry["replacement"] for entry in loaded["items"]}
+        originals = {entry["slot_key"]: entry["original"] for entry in loaded["items"]}
+        replacements[awp_key] = {**awp_replacement, "paint_seed": seed}
+        # The UI also aliases the saved USP overlay onto the analyzed entity.
+        replacements[f"ct:id:{synthetic_id}"] = usp_replacement
+        response = client.post(url, json={"steamid": STEAM_ID,
+            "replacements": replacements, "originals": originals})
+        assert response.status_code == 200, response.text
+        assert response.json()["ok"] is True
+        batch = batches[-1]
+        assert len(batch) == 2
+        assert next(item for item in batch if item["definition_index"] == 61) == batches[0][0]
+        assert next(item for item in batch if item["definition_index"] == 9)["pattern_seed"] == seed
+        reloaded = client.get(url, params={"steamid": STEAM_ID}).json()["plan"]
+        assert next(entry for entry in reloaded["items"] if entry["slot_key"] == usp_key) == saved_usp
+        assert next(entry for entry in reloaded["items"] if entry["slot_key"] == awp_key)["replacement"]["paint_seed"] == seed
+        assert cached.read_bytes() == f"REWRITTEN-{len(batches)}".encode()
+        assert original.read_bytes() == b"ORIGINAL-DEMO"

@@ -6,6 +6,7 @@ import { LucasItemTile, LucasToolSelect } from "./LucasWorkshop.jsx";
 import LucasIcon from "./LucasIcon.jsx";
 import WorkshopItemImage from "./WorkshopItemImage.jsx";
 import { editorDraft } from "./itemAppearance.js";
+import { currentItemFirst } from "./workshopCurrentItem.js";
 import { CATALOG_SORTS, TEAM_KEYS, localizedName, modelFinishes, sortCatalogSkins } from "./workshopCatalog.js";
 import { craftNameParts, filterCandidates, isVanillaKnife } from "../demo-analysis/cosmetics/cosmeticsCatalog.js";
 
@@ -20,12 +21,12 @@ export default function WorkshopModelSkins({ item, current, locale, team, onBack
   const [sort, setSort] = useState("newest");
   const [rarity, setRarity] = useState("all");
   const finishes = useMemo(() => modelFinishes(item), [item]);
+  const equipped = current?.type === item.type && Number(current.def_index) === Number(item.def_index) ? current : null;
   const rows = useMemo(() => {
-    // Stock stays first so resetting a slot is always easy to find.
-    const sorted = [finishes[0], ...sortCatalogSkins(finishes.slice(1), sort, locale)]
+    const sorted = currentItemFirst([finishes[0], ...sortCatalogSkins(finishes.slice(1), sort, locale)], equipped, { keepStock: equipped?.is_base && !isVanillaKnife(equipped) && Boolean(equipped.attachment_edit_version) })
       .filter((row) => rarity === "all" || row.rarity === rarity);
     return query.trim() ? filterCandidates(sorted, query, locale) : sorted;
-  }, [finishes, sort, locale, rarity, query]);
+  }, [finishes, equipped, sort, locale, rarity, query]);
   const name = localizedName(item, locale);
 
   return <div className="lucas-model-skins">
@@ -46,12 +47,13 @@ export default function WorkshopModelSkins({ item, current, locale, team, onBack
       {rows.map((row) => {
         const parts = craftNameParts(row, locale);
         const stock = row.is_base && !isVanillaKnife(row);
-        const finish = stock ? "" : [parts.finish, parts.alt].filter(Boolean).join(" · ");
-        return <LucasItemTile key={row.catalog_id} label={stock ? localizedName(row, locale) : [parts.model, finish].filter(Boolean).join(" | ")}
+        const finish = [stock ? "" : [parts.finish, parts.alt].filter(Boolean).join(" · "), row.custom_name && `"${row.custom_name}"`].filter(Boolean).join(" · ");
+        return <LucasItemTile key={row === equipped ? "current" : row.catalog_id} label={stock && !finish ? localizedName(row, locale) : [stock ? localizedName(row, locale) : parts.model, finish].filter(Boolean).join(" | ")}
           model={stock ? localizedName(row, locale) : parts.model} finish={finish} rarity={row.rarity}
-          selected={current ? row.catalog_id === current.catalog_id : row.is_base}
-          image={<WorkshopItemImage catalogOnly item={row} className="h-full w-full" />}
-          onClick={() => onChoose(editorDraft(row))} />;
+          selected={current ? row === equipped : row.is_base}
+          badge={row === equipped ? <span>{en ? "In use" : "正在使用"}</span> : undefined}
+          image={<WorkshopItemImage catalogOnly={row !== equipped} item={row} className="h-full w-full" />}
+          onClick={() => onChoose(row === equipped ? { ...equipped } : editorDraft(row))} />;
       })}
     </section>
     {!rows.length ? <div className="lucas-empty"><p>{en ? "No items to display." : "没有可显示的饰品。"}</p></div> : null}

@@ -314,6 +314,13 @@ robocopy $Backend $DestBackend /E /NFL /NDL /NJH /NJS /nc /ns /np `
     | Out-Null
 if ($LASTEXITCODE -ge 8) { throw "robocopy backend failed (exit $LASTEXITCODE)" }
 
+# Shared offline Demo compatibility tool (also used by OBS and advanced playback).
+$DemoToolsDir = Join-Path $OutDir "tools"
+New-Item -ItemType Directory -Path $DemoToolsDir -Force | Out-Null
+& cargo build --release --locked --manifest-path (Join-Path $Root "tools/demo-cosmetic-rewriter/Cargo.toml") --bin demo-terminal-phase
+if ($LASTEXITCODE -ne 0) { throw "Failed to build DEM terminal-phase compatibility tool" }
+Copy-Item -LiteralPath (Join-Path $Root "tools/demo-cosmetic-rewriter/target/release/demo-terminal-phase.exe") -Destination $DemoToolsDir
+
 Copy-Item -LiteralPath $ProjectFile -Destination (Join-Path $OutDir "pyproject.toml") -Force
 Copy-Item -LiteralPath $LockFile -Destination (Join-Path $OutDir "uv.lock") -Force
 

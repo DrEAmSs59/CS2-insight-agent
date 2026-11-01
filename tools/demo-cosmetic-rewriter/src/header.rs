@@ -254,7 +254,7 @@ pub fn patch_and_validate_demo_layout(path: &Path) -> Result<DemoLayout> {
     Ok(scanned)
 }
 
-fn read_varint<R: Read>(reader: &mut R) -> Result<u32> {
+pub(crate) fn read_varint<R: Read>(reader: &mut R) -> Result<u32> {
     let mut value = 0_u32;
     for shift in (0..35).step_by(7) {
         let mut byte = [0_u8; 1];
