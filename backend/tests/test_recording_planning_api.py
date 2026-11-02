@@ -53,6 +53,31 @@ def test_removed_preview_endpoint_is_not_registered_or_advertised(client):
 
 
 @pytest.mark.parametrize("request_type", ["highlight", "kill_compilation"])
+def test_replay_order_keeps_the_configured_windows(client, tmp_path, request_type):
+    payload = _request(tmp_path, request_type, False)
+    payload["events"] = payload["events"][::2]  # Separate main shots in both modes.
+    payload["options"].update({
+        f"{request_type}_post_sec": 2.0,
+        "victim_pov_pre_sec": 1.5,
+        "victim_pov_post_sec": 0.75,
+    })
+    windows = []
+    for interleaved in (False, True):
+        payload["options"]["interleave_pov_pairs"] = interleaved
+        response = client.post("/api/recording/plan", json=payload)
+        assert response.status_code == 200
+        segments = response.json()["active_segments"]
+        windows.append(sorted((s["perspective"], s["start_tick"], s["end_tick"]) for s in segments))
+        for segment in segments:
+            tick = segment["anchor_ticks"][0]
+            if segment["perspective"] == "killer":
+                assert segment["end_tick"] == tick + 128
+            else:
+                assert (segment["start_tick"], segment["end_tick"]) == (tick - 96, tick + 48)
+    assert windows[0] == windows[1]
+
+
+@pytest.mark.parametrize("request_type", ["highlight", "kill_compilation"])
 @pytest.mark.parametrize("interleaved", [False, True])
 def test_legacy_ai_option_does_not_change_manual_preview_or_execution(client, tmp_path, request_type, interleaved):
     payload = _request(tmp_path, request_type, interleaved)

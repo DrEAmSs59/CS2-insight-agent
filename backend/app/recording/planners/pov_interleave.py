@@ -7,8 +7,7 @@ from ..normalizer import NormalizedRequest
 from ..platform_utils import platform_slot_offset, compute_voice_listen_mask, compute_voice_listen_mask_enemy
 
 PREPARE_PREROLL_SEC: float = 5.0
-# When V/K follows immediately, CS2 auto death-cam after the event — keep main POV tail minimal.
-INTERLEAVE_KILLER_TAIL_SEC: float = 0.35
+# Keep the death POV tail short when immediately replaying the killer's POV.
 INTERLEAVE_VICTIM_TAIL_SEC: float = 0.35
 
 
@@ -87,14 +86,9 @@ def plan_kill_then_victim_pairs(
     segments: list[RecordingSegment] = []
     seg_idx = 0
 
-    killer_tail_ticks = min(
-        killer_post_ticks,
-        max(1, int(INTERLEAVE_KILLER_TAIL_SEC * tick_rate)),
-    )
-
     for event in sorted_events:
         k_start = max(event.tick - killer_pre_ticks, first_tick)
-        k_end = min(event.tick + killer_tail_ticks, demo_end)
+        k_end = min(event.tick + killer_post_ticks, demo_end)
         k_start, k_end = clamp_fn(k_start, k_end, req)
 
         segments.append(

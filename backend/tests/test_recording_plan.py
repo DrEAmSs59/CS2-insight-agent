@@ -901,8 +901,8 @@ persp30 = [s.perspective for s in plan30.segments]
 check("30b: V,K,V,K", persp30 == [Perspective.victim, Perspective.killer] * 2, f"got {persp30}")
 
 
-# ── Test 31: Interleaved killer segment uses short post tail (not full highlight post) ─
-print("\nTest 31: Interleaved killer tail capped before victim POV")
+# ── Test 31: Interleaved kill and victim segments use their configured windows ─
+print("\nTest 31: Configured killer and victim windows in interleaved mode")
 tick31 = 10_000
 post31 = int(2.0 * TICK_RATE)
 req31 = dto(
@@ -912,6 +912,8 @@ req31 = dto(
         enable_victim_pov=True,
         interleave_pov_pairs=True,
         highlight_post_sec=2.0,
+        victim_pov_pre_sec=1.5,
+        victim_pov_post_sec=1.5,
     ),
     events=[make_kill_event(tick31)],
 )
@@ -921,11 +923,11 @@ if len(plan31.segments) >= 2:
     killer31 = plan31.segments[0]
     victim31 = plan31.segments[1]
     tail31 = killer31.end_tick - tick31
-    max_tail31 = int(0.35 * TICK_RATE) + 1
-    check("31b: killer end near kill tick", tail31 <= max_tail31, f"tail={tail31} max={max_tail31}")
-    check("31c: victim uses victim POV post window",
-          victim31.end_tick - tick31 >= int(1.5 * TICK_RATE) - 1,
-          f"victim tail={victim31.end_tick - tick31}")
+    check("31b: killer keeps configured tail", tail31 == post31, f"tail={tail31}")
+    vic_ticks31 = int(1.5 * TICK_RATE)
+    check("31c: victim keeps configured window",
+          (victim31.start_tick, victim31.end_tick) == (tick31 - vic_ticks31, tick31 + vic_ticks31),
+          f"victim window={victim31.start_tick}..{victim31.end_tick}")
 
 
 # ── Summary ────────────────────────────────────────────────────────────────
