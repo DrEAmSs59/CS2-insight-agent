@@ -19,6 +19,7 @@ from app.framemeld import (
     FRAMEMELD_FINAL_SHARPEN_FEATURE,
     FRAMEMELD_STATUS_PREFIX,
     FrameMeldCapability,
+    FrameMeldRifeDevicePlan,
     build_framemeld_command,
     framemeld_execution_policy,
     framemeld_failure_from_result,
@@ -330,6 +331,33 @@ class TestFrameMeld(unittest.TestCase):
         self.assertEqual(second.index, 1)
         self.assertEqual(second.selection, "success-cache")
         self.assertEqual(len(cache_payload["entries"]), 1)
+
+    def test_successful_rife_binding_with_mismatched_adapter_skips_cache(self):
+        plan = FrameMeldRifeDevicePlan(
+            index=0,
+            selection="inventory-candidate",
+            reason="unique_vendor_device_or_name_candidate",
+            confidence="medium",
+            preferred_adapter={"vendor": "nvidia", "name": "NVIDIA GeForce GTX 1050 Ti"},
+            inventory_device=None,
+            cache_key="test-mapping",
+        )
+        actual = {"index": 0, "vendor": "nvidia", "name": "NVIDIA GeForce RTX 3060 Laptop GPU"}
+        events = [{"event": "rife_binding", "index_binding_verified": True, "actual": actual}]
+        with patch("app.framemeld._write_device_cache") as write_cache, patch(
+            "app.framemeld.export_event"
+        ) as log_event:
+            self.assertFalse(record_framemeld_rife_result(plan, events, succeeded=True))
+
+        write_cache.assert_not_called()
+        log_event.assert_called_once()
+        self.assertEqual(log_event.call_args.args, ("rife_device_cache_rejected",))
+        self.assertEqual(log_event.call_args.kwargs["actual"], actual)
+        self.assertEqual(log_event.call_args.kwargs["reason"], plan.reason)
+        self.assertEqual(
+            log_event.call_args.kwargs["rejection_reason"],
+            "runtime_device_does_not_match_preferred_adapter",
+        )
 
     def test_amd_command_opts_into_structured_status_without_changing_nvenc(self):
         from app.framemeld import FrameMeldCapability

@@ -675,7 +675,7 @@ def record_framemeld_rife_result(
         export_event(
             "rife_device_cache_rejected",
             level=logging.WARNING,
-            reason="runtime_device_does_not_match_preferred_adapter",
+            rejection_reason="runtime_device_does_not_match_preferred_adapter",
             **plan.log_fields(),
             actual=actual_payload,
         )
