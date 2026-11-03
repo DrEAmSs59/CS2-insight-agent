@@ -49,7 +49,9 @@ describe("DemoPlayOptionsModal", () => {
     expect(screen.getByText("原生 DemoUI · 进度与播放控制")).toBeTruthy();
     expect(screen.getAllByTestId("advanced-preview-player-row")).toHaveLength(10);
     expect(screen.getByText("自定义玩家昵称")).toBeTruthy();
-    expect(screen.getByRole("checkbox", { name: "启用改名" }).checked).toBe(false);
+    expect(screen.getByRole("switch", { name: "启用改名" }).checked).toBe(false);
+    expect(screen.getByText("只修改本次播放 / 录制副本；原 Demo、Steam 身份和数据归属不变。")).toBeTruthy();
+    expect(screen.queryByText("仅对本次录制时生效")).toBeNull();
     expect(screen.getByText("键鼠")).toBeTruthy();
     expect(screen.getByText("底部中央")).toBeTruthy();
     expect(screen.getByText("小地图下")).toBeTruthy();

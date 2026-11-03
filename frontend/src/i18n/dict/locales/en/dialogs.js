@@ -57,6 +57,8 @@ export default {
   "playDemo.previewInputHudWeapon": "Weapon",
   "playDemo.inputAudioEnable": "Virtual key sounds",
   "playDemo.mapMaterialTitle": "Map material",
+  "playDemo.appearanceSection": "Appearance",
+  "playDemo.sessionOnly": "This playback session only",
   "playDemo.mapMaterialHint": "Choose the map material or rain effect for this advanced playback session. Recording presets are unchanged.",
   "playDemo.mapMaterialSelectLabel": "Advanced playback map material",
   "playDemo.weatherEffectTitle": "Weather effect",

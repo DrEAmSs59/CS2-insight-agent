@@ -11,7 +11,7 @@ import { playerAliasError } from "../utils/playerAliases.js";
 import { SETTINGS_INPUT_CLASS, Segmented, SelectInput, SettingsButton, SettingsNote, SettingsRow, SettingsSubhead, Switch } from "../pages/settings/SettingsControls.jsx";
 
 /** Only the per-demo name map leaves this component; identity is never editable. */
-export default function PlayerAliasesSection({ demos = [], value, onChange, onReadyChange, disabled = false, compact = false, layout = "card" }) {
+export default function PlayerAliasesSection({ demos = [], value, onChange, onReadyChange, disabled = false, compact = false, layout = "card", description }) {
   const t = useT();
   const [rosters, setRosters] = useState({});
   const [loadError, setLoadError] = useState("");
@@ -57,7 +57,7 @@ export default function PlayerAliasesSection({ demos = [], value, onChange, onRe
 
   if (layout === "rows") return (
     <div className="divide-y divide-cs2-border-subtle" data-testid="player-aliases-section">
-      <SettingsRow label={t("playerAliases.title")} description={t("playerAliases.recordingHint")}>
+      <SettingsRow label={t("playerAliases.title")} description={description ?? t("playerAliases.recordingHint")}>
         {enabled ? <SettingsButton variant="ghost" icon={RotateCcw} disabled={disabled} onClick={() => onChange({ ...value, drafts: {} })}>
           {t("playerAliases.reset")}
         </SettingsButton> : null}
