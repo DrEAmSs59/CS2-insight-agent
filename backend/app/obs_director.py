@@ -2006,6 +2006,36 @@ def _apply_recording_forcecamera_policy(lines) -> list[str]:
     return [*_without_forcecamera_console_lines(lines), _OBSERVE_ALL_FORCECAMERA_COMMAND]
 
 
+def _apply_recording_xray_overhead_policy(lines) -> list[str]:
+    """Mirror the final recording X-ray/HUD settings onto native player IDs.
+
+    Ordinary recording does not run the advanced-playback overhead loop.
+    Resolve after saved batches and user warmup so stale force=1 cannot leave
+    enemy markers visible with X-ray off. POV appends its own forced commands
+    afterward and retains its teammate-only presentation.
+    """
+    commands = list(lines)
+    settings = {"spec_show_xray": False, "cl_draw_only_deathnotices": False}
+    for line in commands:
+        try:
+            parts = shlex.split(str(line).strip().rstrip(";"))
+        except ValueError:
+            continue
+        if len(parts) != 2 or parts[0].lower() not in settings:
+            continue
+        value = parts[1].lower()
+        if value in {"true", "false"}:
+            enabled = value == "true"
+        else:
+            try:
+                enabled = float(value) != 0
+            except ValueError:
+                continue
+        settings[parts[0].lower()] = enabled
+    visible = settings["spec_show_xray"] and not settings["cl_draw_only_deathnotices"]
+    return [*commands, f"cl_drawhud_force_teamid_overhead {1 if visible else -1}"]
+
+
 def _apply_recording_voice_policy(
     lines,
     *,
@@ -3533,6 +3563,7 @@ class OBSDirector:
             lines = self._append_config_warmup_console_lines(
                 [*_RECORDING_KEYBIND_RESET_LINES, *cmds]
             )
+            lines = _apply_recording_xray_overhead_policy(lines)
             return _apply_recording_forcecamera_policy(
                 _apply_recording_voice_policy(
                     lines,
@@ -3593,6 +3624,7 @@ class OBSDirector:
             lines.append("cl_grenadepreview 0")
             lines.append("sv_grenade_trajectory_time_spectator 0")
         lines = self._append_config_warmup_console_lines(lines)
+        lines = _apply_recording_xray_overhead_policy(lines)
         return _apply_recording_forcecamera_policy(
             _apply_recording_voice_policy(
                 lines,
