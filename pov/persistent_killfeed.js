@@ -2,9 +2,15 @@
 // The journal belongs to this recording, not the engine's seek-rebuilt HUD pool.
 function createPersistentKillfeed(settings, api) {
     const events = settings.events || [], ranges = settings.segments || [], seen = new Set();
+    const roundStarts = settings.round_starts || [0];
     let journal = [], lastTick = null, container = null, stock = null, rendered = "", highlighted = "";
     let playbackTarget = "", previousPaused = true;
     function inRecording(tick) { return ranges.some(function (r) { return tick >= r[0] && tick <= r[1]; }); }
+    function roundStartAt(tick) {
+        let lo = 0, hi = roundStarts.length;
+        while (lo < hi) { const mid = (lo + hi) >> 1; if (roundStarts[mid] <= tick) lo = mid + 1; else hi = mid; }
+        return lo > 0 ? roundStarts[lo - 1] : 0;
+    }
     function firstAt(tick) {
         let lo = 0, hi = events.length;
         while (lo < hi) { const mid = (lo + hi) >> 1; if (events[mid].tick < tick) lo = mid + 1; else hi = mid; }
@@ -39,7 +45,12 @@ function createPersistentKillfeed(settings, api) {
         // A rewind changes the visible history, not event identity. Keep all
         // visited events so older rows can reappear without future kills leaking
         // into an earlier cut, even after the 15-row display limit was reached.
-        const visible = journal.filter(function (event) { return event.tick <= tick; }).slice(-15);
+        // Scope the display to the current DEM round, including paused seeks.
+        // Keep visited IDs across rounds so revisiting a cut still deduplicates.
+        const roundStart = roundStartAt(tick);
+        const visible = journal.filter(function (event) {
+            return event.tick >= roundStart && event.tick <= tick;
+        }).slice(-15);
         const signature = visible.map(function (event) { return event.id; }).join("|");
         if (signature !== rendered) {
             container.RemoveAndDeleteChildren();

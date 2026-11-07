@@ -17,11 +17,12 @@ const person = (xuid, name = xuid, team = 2) => ({xuid, name, team, clan:'tag'})
 const event = (tick, index, attacker = '76561198386265483') => ({id:tick+':'+index, tick,
     attacker:person(attacker), victim:person('76561198386265484', 'victim', 3), assister:person(''),
     weapon:'ak47', classes:['DeathNoticeHeadShot', 'through-smoke']});
-function harness(events, ranges = [[0, 10000]]) {
+function harness(events, ranges = [[0, 10000]], roundStarts = [0]) {
     let hud = new Panel(null, 'HudDeathNotice'); new Panel(hud, 'VisibleNotices');
     const factory = vm.runInNewContext(source + '\ncreatePersistentKillfeed');
     const api = {findHud:()=>hud, createPanel:(type, parent, id)=>new Panel(parent,id)};
-    const control = factory({events, segments:ranges, hide_clan_tags:true,target_xuid:'76561198386265483'},api);
+    const control = factory({events, segments:ranges, round_starts:roundStarts,
+        hide_clan_tags:true,target_xuid:'76561198386265483'},api);
     const rows = () => hud.FindChildTraverse('CS2InsightPersistentNotices')?.Children() || [];
     return { control, rows, update:(tick,xuid='76561198386265483',paused=false)=>control.update({nTick:tick,bIsPaused:paused},xuid),
         visible:()=>hud.FindChildTraverse('CS2InsightPersistentNotices')?.style.visibility === 'visible',
@@ -101,4 +102,31 @@ test('names are escaped, tags respect the setting, and team colors do not follow
     const name=h.rows()[0].FindChildTraverse('Attacker');assert.equal(name.text,'A&lt;&amp;&gt;');
     assert.ok(name.classes.has('DeathNoticeTColor'));h.update(10,e.victim.xuid);
     assert.ok(name.classes.has('DeathNoticeTColor'));
+});
+
+test('round 4 four-kill and round 8 five-kill cuts never share visible history in one demo', () => {
+    const ticks = [410,420,430,440,810,820,830,840,850];
+    const h=harness(ticks.map((tick,i)=>event(tick,i)),[[400,450],[800,860]],
+        [0,100,200,300,400,500,600,700,800,900]);
+    h.update(400);
+    for(let i=0;i<4;i++){h.update(ticks[i]);assert.equal(h.rows().length,i+1);}
+    // OBS pauses after seeking to the next cut without reopening the DEMO.
+    h.update(800,'76561198386265483',true);assert.equal(h.rows().length,0);
+    for(let i=4;i<9;i++){h.update(ticks[i]);assert.equal(h.rows().length,i-3);}
+    // Revisit either round, preserving deduplication and excluding its future kills.
+    h.update(409);assert.equal(h.rows().length,0);
+    h.update(420);assert.equal(h.rows().length,2);
+    h.update(440);assert.equal(h.rows().length,4);
+    h.update(819);assert.equal(h.rows().length,1);
+    h.update(850);assert.equal(h.rows().length,5);
+    h.rebuild();h.update(851);assert.equal(h.rows().length,5);
+});
+
+test('round boundaries clear paused or continuous playback even without a kill in the next round', () => {
+    const h=harness([event(10,0),event(100,1)],[[0,250]],[0,100,200]);
+    h.update(9);h.update(10);assert.equal(h.rows().length,1);
+    h.update(100);assert.equal(h.rows().length,1);
+    h.update(200,'76561198386265483',true);assert.equal(h.rows().length,0);
+    h.update(99);assert.equal(h.rows().length,1);
+    h.update(100);assert.equal(h.rows().length,1);
 });
