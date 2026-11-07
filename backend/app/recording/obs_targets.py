@@ -116,7 +116,26 @@ def prepare_obs_plan_targets(plans: list[RecordingPlan], demo_path: Path, *, res
     from ..demo_parse_isolation import resolve_obs_targets_isolated
 
     copies = [plan.model_copy(deep=True) for plan in plans]
+    # An explicitly selected posthumous victim POV is optional. Validate it on
+    # its own, so an unavailable victim does not cancel unrelated normal cuts.
+    for plan in copies:
+        for segment in plan.segments:
+            if segment.disabled or not segment.metadata.get("posthumous_kill"):
+                continue
+            single = plan.model_copy(deep=True)
+            single.segments = [segment.model_copy(deep=True)]
+            single.segments[0].metadata.pop("posthumous_kill", None)
+            try:
+                prepared = prepare_obs_plan_targets([single], demo_path, resolver=resolver)[0].segments[0]
+            except (ValueError, RuntimeError) as exc:
+                segment.disabled = True
+                segment.disabled_reason = "死后击杀受害者视角无法核验"
+                plan.warnings.append(f"tick {segment.anchor_ticks}: {segment.disabled_reason}: {exc}")
+            else:
+                segment.metadata.update(prepared.metadata)
+                segment.target_steamid64 = prepared.target_steamid64
     segments = [(plan, segment) for plan in copies for segment in plan.segments if not segment.disabled]
+    segments = [(plan, segment) for plan, segment in segments if not segment.metadata.get("posthumous_kill")]
     targets = [{"name": segment.target_player_name, "steamid64": segment.target_steamid64 or "",
                 "start_tick": segment.start_tick, "end_tick": segment.end_tick,
                 "seek_tick": obs_prepare_tick(segment, plan.tick_rate)}

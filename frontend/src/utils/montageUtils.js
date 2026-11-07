@@ -2,6 +2,7 @@
 
 import { isFreezeToDeathCompilation } from "./freezeToDeathRoundFilter";
 import { weaponUsedTokens } from "../i18n/weaponNames.js";
+import { posthumousOnly } from "./posthumousKills";
 
 /** 移除字符串中的 emoji 及变体选择符，避免在部分环境下渲染为方块。 */
 export function stripTagEmoji(str) {
@@ -270,6 +271,7 @@ export function humanizeCompilationKind(kind, t) {
  */
 export function friendlyClipTitleForQueue(clip, t) {
   if (!clip || typeof clip !== "object") return t("montage.clipTitleUnnamed");
+  if (posthumousOnly(clip)) return t("queue.posthumousTitle");
   const raw = getClipTitle(clip, t);
   if (typeof raw !== "string" || !/^片段\s+c_[a-f0-9]{6,}$/i.test(raw.trim())) {
     return raw;

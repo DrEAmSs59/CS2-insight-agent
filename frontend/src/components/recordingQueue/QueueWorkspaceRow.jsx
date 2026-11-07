@@ -15,6 +15,7 @@ import { friendlyClipTitleForQueue, isTimelineSourceClip } from "../../utils/mon
 import { isFreezeToDeathCompilation } from "../../utils/freezeToDeathRoundFilter";
 import { useRoundCompilationPlan } from "../../recording/useRoundCompilationPlans";
 import { queueItemHasPacingOverride, queueItemRoundLabel } from "./QueueInspectorPanel";
+import { posthumousOnly } from "../../utils/posthumousKills";
 
 const CAT_ICON = {
   highlight: Sparkles,
@@ -60,7 +61,7 @@ export default function QueueWorkspaceRow({
   const meta = [playerLabel, mapName, queueItemRoundLabel(item, clip, t)].filter(Boolean).join(" · ");
   const estimate = estimateItemRecordSeconds(item, globalPacing, roundPlan);
   const po = item.pacing_override || {};
-  const hasPov = Boolean(po.victim_pov || po.killer_pov);
+  const hasPov = !posthumousOnly(clip) && Boolean(po.victim_pov || po.killer_pov);
   const edited = queueItemHasPacingOverride(item);
   const inputMissing = item.demoHasPlayerKeyboardInput === false;
   const demoLabel = String(item.demoFilename || item.demoPath || "").trim();

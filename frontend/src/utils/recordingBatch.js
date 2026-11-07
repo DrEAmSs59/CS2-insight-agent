@@ -226,7 +226,10 @@ export function mergeTimelineRequestsForRecording(requests, { thresholdSec = 12,
       const ev = req?.events?.[0];
       const sameRound = prevEv && ev && Number(prevEv.round) === Number(ev.round);
       const gap = prevEv && ev ? Number(ev.tick) - Number(prevEv.tick) : Number.NaN;
-      if (sameRound && Number.isFinite(gap) && gap >= 0 && gap <= thresholdTicks) {
+      // Explicit posthumous victim shots are standalone. Merging would inherit
+      // the first normal kill's options and silently discard the victim choice.
+      const standaloneVictim = prev?.options?.posthumous_mode === "victim" || req?.options?.posthumous_mode === "victim";
+      if (!standaloneVictim && sameRound && Number.isFinite(gap) && gap >= 0 && gap <= thresholdTicks) {
         cur.push(req);
       } else {
         groups.push(cur);

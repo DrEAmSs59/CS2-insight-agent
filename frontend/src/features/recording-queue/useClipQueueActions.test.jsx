@@ -3,8 +3,49 @@ import { act, renderHook } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import { useClipQueueActions } from "./useClipQueueActions.js";
+import { usePosthumousChoices } from "../../utils/posthumousKills";
+import { useRecordingQueue } from "../../stores/recordingQueueStore";
+import { buildRecordingQueueRequestsFromQueue } from "../../utils/recordingBatch";
 
 describe("useClipQueueActions player fail batching", () => {
+  it.each(["skip","victim"])("preserves %s through all-kills enqueue and timeline batch with merging", (mode) => {
+    const events = [
+      {id:"ordinary",tick:79600,type:"kill",round:16,victim_name:"normal",victim_steamid:"111"},
+      {id:"special",posthumous_choice_key:"demo:sid:80077:222",tick:80077,type:"kill",round:16,
+        victim_name:"late",victim_steamid:"222",posthumous:true,attacker_death_tick:79743},
+    ].map((event)=>({...event,start_tick:event.tick-128,end_tick:event.tick+64}));
+    const clip = {clip_id:"all",client_clip_uid:"all",category:"compilation",compilation_kind:"all_kills",
+      kill_ticks:[79600,80077],victims:["normal","late"],victim_steamid64s:["111","222"],source_rounds:[16,16],
+      posthumous_kills:[{tick:80077,attacker_death_tick:79743,victim_name:"late",victim_steamid:"222"}]};
+    const meta = {target_player:"player",target_steam_id:"76561199134553751",demo_end_tick:115543};
+    const parsed = {demo_filename:"match.dem",players:{player:{clips:[clip],match_meta:meta}}};
+    const addToQueue = vi.fn();
+    usePosthumousChoices.setState({choices:{all:mode,"demo:sid:80077:222":mode}});
+    useRecordingQueue.setState({mergeTimelineClipsEnabled:true});
+    const {result} = renderHook(()=>useClipQueueActions({
+      t:(key)=>key,locale:"zh",setProgressText:vi.fn(),queue:[],addToQueue,removeByClientClipUid:vi.fn(),
+      uploadedDemos:[{filename:"match.dem",path:"I:/demo/match.dem"}],parsedMatches:[parsed],currentMatchIndex:0,
+      currentParsed:parsed,currentActivePlayer:"player",matchMeta:meta,activePlayerTabs:["player"],selectedPlayers:[["player"]],
+      clips:[clip],freezeToDeathDraft:{picked:[]},selectedClientClipUids:new Set(["all"]),
+      setSelectedClientClipUids:vi.fn(),currentDemoFilename:"match.dem",
+    }));
+    act(()=>result.current.handleAddSelectedToQueue());
+    const all = buildRecordingQueueRequestsFromQueue(addToQueue.mock.calls[0][0],{},[],[])[0];
+    expect(all.request_type).toBe("kill_compilation");
+    expect(all.options.posthumous_mode).toBe(mode);
+    expect(all.events.map((e)=>e.tick)).toEqual([79600,80077]);
+    act(()=>result.current.handleAddTimelineEventsBatchToQueue(events));
+    const batch = buildRecordingQueueRequestsFromQueue(addToQueue.mock.calls[1][0],{},[],[]);
+    expect(batch).toHaveLength(mode === "victim" ? 2 : 1);
+    expect(batch[0].events.map((e)=>e.tick)).toEqual([79600]);
+    if (mode === "victim") {
+      expect(batch[1].options.posthumous_mode).toBe("victim");
+      expect(batch[1].events[0].victim.steamid64).toBe("222");
+      expect(batch[1].options.enable_victim_pov).toBe(false);
+    }
+    usePosthumousChoices.setState({choices:{}});
+    useRecordingQueue.setState({mergeTimelineClipsEnabled:false});
+  });
   it("queues and removes whole rounds independently across players and same-named demos", () => {
     let queue = [];
     const addToQueue = (item) => { queue = [...queue, item]; };

@@ -55,6 +55,23 @@ function buildDtos(items) {
 }
 
 describe("mergeTimelineRequestsForRecording", () => {
+  it("keeps posthumous victims independent of nearby kills, deaths and other victims", () => {
+    const special = (tick, victim) => {
+      const item = timelineQueueItem({...makeKillEvent(tick,victim),posthumous:true,attacker_death_tick:1100});
+      item.clipData.posthumous_mode = "victim";
+      return item;
+    };
+    const out = mergeTimelineRequestsForRecording(buildDtos([
+      timelineQueueItem(makeKillEvent(1000,"normal")),
+      timelineQueueItem(makeDeathEvent(1100,"enemy")),
+      special(1200,"first"), special(1200,"second"), special(1300,"third"),
+    ]));
+    expect(out).toHaveLength(4);
+    expect(out[0].events.map((e)=>e.tick)).toEqual([1000,1100]);
+    expect(out.slice(1).map((r)=>r.options.posthumous_mode)).toEqual(["victim","victim","victim"]);
+    expect(out.slice(1).map((r)=>r.events[0].victim.name)).toEqual(["first","second","third"]);
+    expect(out.slice(1).every((r)=>r.events.length === 1 && !r.options.enable_victim_pov)).toBe(true);
+  });
   it("returns input when merge disabled/empty", () => {
     expect(mergeTimelineRequestsForRecording([], { thresholdSec: 12 })).toEqual([]);
     const dto = buildDtoFromQueueItem(

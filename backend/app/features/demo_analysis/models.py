@@ -125,6 +125,7 @@ class Clip:
     kill_headshots: list[bool] = field(default_factory=list)
     kill_tag_lists: list[list[str]] = field(default_factory=list)
     shots_to_kill: list[int] = field(default_factory=list)
+    posthumous_kills: list[dict[str, Any]] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         result = asdict(self)

@@ -415,6 +415,9 @@ async def execute_recording(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
+    if not any(not segment.disabled for segment in plan.segments):
+        return {"request_id": dto.request_id, "success": True, "skipped": True,
+                "warnings": plan.warnings, "segment_results": [], "output_path": None}
     config = load_config()
     obs_cfg = config.obs if hasattr(config, "obs") else OBSConfig()
     obs_client = OBSClient(obs_cfg)

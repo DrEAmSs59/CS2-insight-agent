@@ -54,6 +54,10 @@ export function buildPlanBlocks(item, globalPacing, roundPlan, t) {
   };
 
   switch (plan.variant) {
+    case "posthumous_victim_only":
+      return victims.slice(0, plan.eventCount).map((name) => ({
+        tone: "victim", label: replayLabel(name, false), sec: "", flex: 1,
+      }));
     case "fail_victim_only":
     case "fail_victim_killer_pair":
       blocks.push({ tone: "death", label: t("queue.stripMyDeath"), sec: "", flex: 2 }, tail);

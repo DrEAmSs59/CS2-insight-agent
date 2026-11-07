@@ -1,5 +1,9 @@
 // en / recording — keep keys scoped to this feature catalog.
 export default {
+  "queue.posthumousTitle": "Posthumous kill · Victim POV",
+  "queue.posthumousPerspective": "Recording perspective",
+  "queue.posthumousLocked": "This clip records only the victim's POV, with no extra replay or killer POV. The death tail is capped at 1.5 seconds.",
+  "queue.planSummary_posthumous_victim_only": "Victim POV only, one separate segment per victim",
   "record.warmupSessionHint": "Changes apply to this recording. Use Save settings to remember them as defaults.",
   "record.settingsNavLabel": "Recording settings sections",
   "record.transitionDuration": "Duration (ms)",

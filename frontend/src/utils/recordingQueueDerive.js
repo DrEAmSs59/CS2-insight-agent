@@ -2,6 +2,7 @@ import { BACKEND_DEFAULT_PACING } from "../stores/recordingQueueStore";
 import { DEMO_TICK_RATE } from "./montageUtils";
 import { isFreezeToDeathCompilation } from "./freezeToDeathRoundFilter";
 import { limitRecordingPacing } from "./recordingPacing.js";
+import { posthumousOnly } from "./posthumousKills";
 
 /** @param {Record<string, unknown>} gp */
 function gNum(gp, key) {
@@ -82,6 +83,11 @@ export function estimateItemRecordSeconds(item, globalPacing, roundPlan) {
   let pre = Math.max(0.5, pre_first_sec);
   let post = Math.max(0.5, post_last_sec);
   const thresholdTicks = max_gap_sec * DEMO_TICK_RATE;
+  if (posthumousOnly(clip)) {
+    if (clip.posthumous_mode !== "victim") return 0;
+    const tail = Math.max(0, Math.min(post_last_sec, 1.5));
+    return Math.max(3, Math.round(clip.kill_ticks.length * (pre + tail)));
+  }
 
   // 时间线击杀：后端用 timeline_kill_pre_sec(3.0) / timeline_kill_post_sec(2.0)，
   // 与 BACKEND_DEFAULT_PACING(2/1) 不同。若用户未显式配置 pacing，改用后端真实默认值。
@@ -184,6 +190,7 @@ export function countPovSegments(queue) {
   if (!queue?.length) return 0;
   let n = 0;
   for (const it of queue) {
+    if (posthumousOnly(it.clipData)) continue;
     const po = it.pacing_override || {};
     if (po.victim_pov) n += 1;
     if (po.killer_pov) n += 1;

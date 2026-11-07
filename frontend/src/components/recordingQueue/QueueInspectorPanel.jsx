@@ -246,9 +246,10 @@ export default function QueueInspectorPanel({
           </SettingsGroup>
         ) : wholeRound ? null : (
           <SettingsGroup title={t("queue.editorPacingTitle")} description={t("queue.editorPacingDesc")}>
-            {PACE_FIELDS.map((field) => {
+            {PACE_FIELDS.filter((field) => !pov.posthumous || field.key !== "max_gap_sec").map((baseField) => {
+              const field = pov.posthumous && baseField.key === "post_last_sec" ? { ...baseField, max: 1.5 } : baseField;
               const own = finite(po[field.key]);
-              const fallback = finite(gp[field.key]) ?? BACKEND_DEFAULT_PACING[field.key];
+              const fallback = Math.min(finite(gp[field.key]) ?? BACKEND_DEFAULT_PACING[field.key], field.max);
               const edited = own !== undefined;
               return (
                 <SettingsRow key={field.key} label={t(field.labelKey)} description={t(field.descKey)}>
@@ -268,7 +269,7 @@ export default function QueueInspectorPanel({
                     max={field.max}
                     step={field.step}
                     unit={t("settings.unitSeconds")}
-                    value={own ?? fallback}
+                    value={Math.min(own ?? fallback, field.max)}
                     defaultValue={fallback}
                     disabled={disabled}
                     onChange={(n) => {
@@ -281,10 +282,11 @@ export default function QueueInspectorPanel({
           </SettingsGroup>
         )}
 
-        <SettingsGroup title={t("queue.editorPovTitle")} description={t("queue.editorPovDesc")} testId="queue-editor-pov">
+        <SettingsGroup title={t(pov.posthumous ? "queue.posthumousPerspective" : "queue.editorPovTitle")} description={pov.posthumous ? undefined : t("queue.editorPovDesc")} testId="queue-editor-pov">
           {pov.locked ? (
             <SettingsNote icon={Info}>
-              {t(wholeRound ? "queue.povLockedWholeRound" : "queue.povLockedRounds")}
+              {t(pov.posthumous ? "queue.posthumousLocked" : wholeRound ? "queue.povLockedWholeRound" : "queue.povLockedRounds")}
+              {pov.posthumous ? <NameChips names={pov.victims} tone="victim" /> : null}
             </SettingsNote>
           ) : (
             <>

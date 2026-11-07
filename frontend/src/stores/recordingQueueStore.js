@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { limitRecordingPacing } from "../utils/recordingPacing.js";
+import { posthumousOnly } from "../utils/posthumousKills";
 
 /**
  * @typedef {Object} PacingOverride
@@ -53,6 +54,7 @@ function newId() {
 /** 与队列抽屉「受害者视角」资格判定一致：新入队时用于套用 default_victim_pov */
 export function clipVictimPovEnqueueEligible(clipData) {
   if (!clipData || typeof clipData !== "object") return false;
+  if (posthumousOnly(clipData)) return false;
   const victims = Array.isArray(clipData.victims) ? clipData.victims : [];
   const kind = clipData.compilation_kind;
   return (
@@ -336,6 +338,7 @@ export const useRecordingQueue = create((set, get) => ({
   toggleVictimPovForAllHighlightsInQueue() {
     set((s) => {
       const isEligible = (q) => {
+        if (posthumousOnly(q.clipData)) return false;
         const victims = Array.isArray(q.clipData?.victims) ? q.clipData.victims : [];
         const kind = q.clipData?.compilation_kind;
         return (

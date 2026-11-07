@@ -2050,6 +2050,10 @@ class DemoAnalyzer:
         tsid = _lookup_steam_id_for_name(shared_facts.name_to_sid, target_player)
         target_steam_id = str(tsid) if tsid is not None else None
 
+        from ...posthumous_kills import read_posthumous_kills, annotate_analysis_clips, annotate_timeline
+        posthumous_facts = read_posthumous_kills(self.dem_path)
+        clips = annotate_analysis_clips(clips, posthumous_facts, target_steam_id, map_name=map_name)
+
         all_players_roster = shared_facts.roster_snapshot()
         _server_name = shared_facts.server_name
 
@@ -2122,6 +2126,8 @@ class DemoAnalyzer:
             timeline = fb["timeline"]
             round_timeline = fb["round_timeline"]
 
+        annotate_timeline(timeline, posthumous_facts, str(self.dem_path))
+        annotate_timeline(round_timeline, posthumous_facts, str(self.dem_path))
         return ParseResult(
             match_meta=MatchMeta(
                 map_name=map_name, target_player=target_player, total_rounds=total_rounds,

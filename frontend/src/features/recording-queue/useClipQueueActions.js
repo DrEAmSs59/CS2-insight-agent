@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo } from "react";
+import { canQueuePosthumous, withPosthumousChoice, posthumousMode, usePosthumousChoices } from "../../utils/posthumousKills";
 
 import {
   isFreezeToDeathCompilation,
@@ -35,6 +36,7 @@ export function useClipQueueActions({
   setSelectedClientClipUids,
   currentDemoFilename,
 }) {
+  const posthumousChoices = usePosthumousChoices((s) => s.choices);
   const queuedClientClipUidsForCurrentDemo = useMemo(() => {
     if (!currentDemoFilename) return new Set();
     const uids = new Set();
@@ -58,23 +60,26 @@ export function useClipQueueActions({
       for (const uid of queuedClientClipUidsForCurrentDemo) {
         if (next.delete(uid)) changed = true;
       }
+      for (const clip of clips) {
+        if (!canQueuePosthumous(clip, posthumousChoices) && next.delete(clip.client_clip_uid)) changed = true;
+      }
       return changed ? next : previous;
     });
-  }, [queuedClientClipUidsForCurrentDemo, setSelectedClientClipUids]);
+  }, [clips, posthumousChoices, queuedClientClipUidsForCurrentDemo, setSelectedClientClipUids]);
 
   const roundMontageCanEnqueue = (freezeToDeathDraft?.picked ?? []).length > 0;
   const regularSelectableTotal = useMemo(
     () => clips.filter((clip) => {
-      if (clip.category === "meme_death" || !clip.client_clip_uid) return false;
+      if (clip.category === "meme_death" || !clip.client_clip_uid || !canQueuePosthumous(clip, posthumousChoices)) return false;
       if (queuedClientClipUidsForCurrentDemo.has(clip.client_clip_uid)) return false;
       if (isFreezeToDeathCompilation(clip) && !roundMontageCanEnqueue) return false;
       return true;
     }).length,
-    [clips, queuedClientClipUidsForCurrentDemo, roundMontageCanEnqueue],
+    [posthumousChoices, clips, queuedClientClipUidsForCurrentDemo, roundMontageCanEnqueue],
   );
   const selectedRegularCount = useMemo(
     () => clips.filter((clip) => {
-      if (clip.category === "meme_death" || !clip.client_clip_uid) return false;
+      if (clip.category === "meme_death" || !clip.client_clip_uid || !canQueuePosthumous(clip, posthumousChoices)) return false;
       if (!selectedClientClipUids.has(clip.client_clip_uid)) return false;
       if (queuedClientClipUidsForCurrentDemo.has(clip.client_clip_uid)) return false;
       if (isFreezeToDeathCompilation(clip) && !roundMontageCanEnqueue) return false;
@@ -82,6 +87,7 @@ export function useClipQueueActions({
     }).length,
     [
       clips,
+      posthumousChoices,
       queuedClientClipUidsForCurrentDemo,
       roundMontageCanEnqueue,
       selectedClientClipUids,
@@ -96,7 +102,7 @@ export function useClipQueueActions({
     ),
     [currentActivePlayer, currentParsed, queuedClientClipUidsForCurrentDemo],
   );
-  const canAddCurrentPlayerHighlights = currentPlayerClipScope.queueableHighlights.length > 0;
+  const canAddCurrentPlayerHighlights = currentPlayerClipScope.queueableHighlights.some((clip) => canQueuePosthumous(clip, posthumousChoices));
   const canAddCurrentPlayerFails = currentPlayerClipScope.queueableFails.length > 0;
 
   const queueItemMetaForPlayer = useCallback((index, playerName) => {
@@ -136,6 +142,7 @@ export function useClipQueueActions({
   const handleToggleClip = useCallback((clientClipUid) => {
     if (!clientClipUid || queuedClientClipUidsForCurrentDemo.has(clientClipUid)) return;
     const clip = clips.find((candidate) => candidate.client_clip_uid === clientClipUid);
+    if (clip && !canQueuePosthumous(clip, posthumousChoices)) return;
     if (clip && isFreezeToDeathCompilation(clip) && !roundMontageCanEnqueue) return;
     setSelectedClientClipUids((previous) => {
       const next = new Set(previous);
@@ -145,6 +152,7 @@ export function useClipQueueActions({
     });
   }, [
     clips,
+    posthumousChoices,
     queuedClientClipUidsForCurrentDemo,
     roundMontageCanEnqueue,
     setSelectedClientClipUids,
@@ -155,7 +163,7 @@ export function useClipQueueActions({
       const next = new Set(previous);
       clips
         .filter((clip) => {
-          if (clip.category === "meme_death" || !clip.client_clip_uid) return false;
+          if (clip.category === "meme_death" || !clip.client_clip_uid || !canQueuePosthumous(clip, posthumousChoices)) return false;
           if (queuedClientClipUidsForCurrentDemo.has(clip.client_clip_uid)) return false;
           if (isFreezeToDeathCompilation(clip) && !roundMontageCanEnqueue) return false;
           return true;
@@ -163,7 +171,7 @@ export function useClipQueueActions({
         .forEach((clip) => next.add(clip.client_clip_uid));
       return next;
     });
-  }, [clips, queuedClientClipUidsForCurrentDemo, roundMontageCanEnqueue, setSelectedClientClipUids]);
+  }, [posthumousChoices, clips, queuedClientClipUidsForCurrentDemo, roundMontageCanEnqueue, setSelectedClientClipUids]);
 
   const handleDeselectAll = useCallback(() => {
     setSelectedClientClipUids(new Set());
@@ -175,11 +183,12 @@ export function useClipQueueActions({
     const pickedRounds = [...(freezeToDeathDraft?.picked ?? [])].sort((a, b) => a - b);
     const queueItems = [];
     for (const clip of candidates) {
+      if (!canQueuePosthumous(clip, posthumousChoices)) continue;
       const baseItem = {
         ...meta,
         clipId: clip.clip_id,
         clientClipUid: clip.client_clip_uid,
-        clipData: { ...clip },
+        clipData: withPosthumousChoice(clip, posthumousChoices),
       };
       if (isFreezeToDeathCompilation(clip)) {
         const sliced = sliceFreezeToDeathClipForEnqueue(clip, pickedRounds);
@@ -196,7 +205,7 @@ export function useClipQueueActions({
       }
     }
     return { error: null, queueItems };
-  }, [currentMatchIndex, freezeToDeathDraft, queueItemMetaForIndex]);
+  }, [posthumousChoices, currentMatchIndex, freezeToDeathDraft, queueItemMetaForIndex]);
 
   const handleAddSelectedToQueue = useCallback(() => {
     if (!currentParsed || selectedClientClipUids.size === 0) return;
@@ -221,6 +230,7 @@ export function useClipQueueActions({
     addToQueue,
     buildClipQueueItems,
     clips,
+    posthumousChoices,
     currentParsed,
     selectedClientClipUids,
     setProgressText,
@@ -254,6 +264,7 @@ export function useClipQueueActions({
     addToQueue,
     buildClipQueueItems,
     clips,
+    posthumousChoices,
     currentParsed,
     queuedClientClipUidsForCurrentDemo,
     setProgressText,
@@ -264,11 +275,11 @@ export function useClipQueueActions({
   const handleAddCurrentPlayerHighlights = useCallback(() => {
     if (!currentParsed || !currentActivePlayer) return;
     const meta = queueItemMetaForPlayer(currentMatchIndex, currentActivePlayer);
-    const queueItems = currentPlayerClipScope.queueableHighlights.map((clip) => ({
+    const queueItems = currentPlayerClipScope.queueableHighlights.filter((clip) => canQueuePosthumous(clip, posthumousChoices)).map((clip) => ({
       ...meta,
       clipId: clip.clip_id,
       clientClipUid: clip.client_clip_uid,
-      clipData: clip,
+      clipData: withPosthumousChoice(clip, posthumousChoices),
     }));
     if (!queueItems.length) {
       setProgressText(t("app.enqueuePlayerHighlightsEmpty", { player: currentActivePlayer }));
@@ -285,6 +296,7 @@ export function useClipQueueActions({
     currentMatchIndex,
     currentParsed,
     currentPlayerClipScope,
+    posthumousChoices,
     queueItemMetaForPlayer,
     setProgressText,
     t,
@@ -297,7 +309,7 @@ export function useClipQueueActions({
       ...meta,
       clipId: clip.clip_id,
       clientClipUid: clip.client_clip_uid,
-      clipData: clip,
+      clipData: withPosthumousChoice(clip, posthumousChoices),
     }));
     if (!queueItems.length) {
       setProgressText(t("app.enqueuePlayerFailsEmpty", { player: currentActivePlayer }));
@@ -314,6 +326,7 @@ export function useClipQueueActions({
     currentMatchIndex,
     currentParsed,
     currentPlayerClipScope,
+    posthumousChoices,
     queueItemMetaForPlayer,
     setProgressText,
     t,
@@ -340,7 +353,7 @@ export function useClipQueueActions({
   const handleAddTimelineEventToQueue = useCallback((event, roundRow) => {
     const hasWindow = (event?.suggested_clip && typeof event.suggested_clip === "object")
       || (event?.start_tick != null && event?.end_tick != null);
-    if (!currentParsed || !hasWindow) return;
+    if (!currentParsed || !hasWindow || !canQueuePosthumous(event, posthumousChoices)) return;
     const meta = queueItemMetaForIndex(currentMatchIndex);
     const clipData = buildTimelineEventClipData({
       event,
@@ -354,6 +367,7 @@ export function useClipQueueActions({
       setProgressText(t("app.enqueueTimelineAlreadyIn"), { autoDismissMs: 2000 });
       return;
     }
+    clipData.posthumous_mode = posthumousMode(event, posthumousChoices);
     addQueueItem(clipData, meta);
     setProgressText(t("app.enqueueTimelineDone"), { autoDismissMs: 2000, queueLink: true });
   }, [
@@ -361,6 +375,7 @@ export function useClipQueueActions({
     currentMatchIndex,
     currentParsed,
     isAlreadyQueued,
+    posthumousChoices,
     locale,
     matchMeta,
     queueItemMetaForIndex,
@@ -391,6 +406,7 @@ export function useClipQueueActions({
     currentMatchIndex,
     currentParsed,
     isAlreadyQueued,
+    posthumousChoices,
     matchMeta,
     queueItemMetaForIndex,
     setProgressText,
@@ -402,6 +418,7 @@ export function useClipQueueActions({
     const meta = queueItemMetaForIndex(currentMatchIndex);
     const queueItems = [];
     for (const event of eventList) {
+      if (!canQueuePosthumous(event, posthumousChoices)) continue;
       if (!event?.suggested_clip && (event?.start_tick == null || event?.end_tick == null)) continue;
       const clipData = buildTimelineEventClipData({
         event,
@@ -411,6 +428,7 @@ export function useClipQueueActions({
         t,
         locale,
       });
+      clipData.posthumous_mode = posthumousMode(event, posthumousChoices);
       if (isAlreadyQueued(clipData, meta)) continue;
       queueItems.push({
         ...meta,
@@ -433,6 +451,7 @@ export function useClipQueueActions({
     currentMatchIndex,
     currentParsed,
     isAlreadyQueued,
+    posthumousChoices,
     locale,
     matchMeta,
     queueItemMetaForIndex,
@@ -454,6 +473,7 @@ export function useClipQueueActions({
     currentMatchIndex,
     currentParsed,
     isAlreadyQueued,
+    posthumousChoices,
     queueItemMetaForIndex,
     setProgressText,
     t,

@@ -4,6 +4,9 @@ import { beforeEach, describe, expect, test } from "vitest";
 import { useLocaleStore } from "../../i18n/localeStore.js";
 import { useRecordingQueue } from "../../stores/recordingQueueStore.js";
 import QueueInspectorPanel from "./QueueInspectorPanel.jsx";
+import { buildDtoFromQueueItem } from "../../recording/buildDtoFromQueueItem";
+import { countPovSegments, estimateItemRecordSeconds } from "../../utils/recordingQueueDerive";
+import { clipVictimPovEnqueueEligible } from "../../stores/recordingQueueStore";
 
 const highlight = {
   id: "q1",
@@ -38,6 +41,38 @@ describe("QueueInspectorPanel", () => {
   beforeEach(() => {
     useLocaleStore.setState({ locale: "zh", effectiveLocale: "zh", hydrated: true, persistenceError: null });
     useRecordingQueue.setState({ queue: [highlight, fail], globalPacing: { pre_first_sec: 2 } });
+  });
+
+  test("posthumous victim is a main shot, including a restored queue with replay enabled", () => {
+    const item = {
+      ...highlight,
+      pacing_override: { victim_pov: true, killer_pov: true, pov_interleaved: true },
+      clipData: { ...highlight.clipData, title: undefined, kill_ticks: [80077], victims: ["sh0rl"],
+        victim_steamid64s: ["76561199090191861"], posthumous_mode: "victim",
+        posthumous_kills: [{tick:80077, victim_name:"sh0rl"}] },
+    };
+    useRecordingQueue.setState({queue:[item]});
+    renderEditor("q1");
+    expect(screen.getByText("死后击杀 · 受害者视角")).toBeTruthy();
+    expect(screen.queryByRole("switch", { name:"受害者视角" })).toBeNull();
+    expect(screen.queryByRole("switch", { name:"击杀者视角" })).toBeNull();
+    expect(screen.queryByRole("spinbutton", { name:"合并间隔" })).toBeNull();
+    expect(screen.getByRole("spinbutton", { name:"片段后留白" }).max).toBe("1.5");
+    expect(within(screen.getByTestId("queue-plan-strip")).getByText("受害者视角 · sh0rl")).toBeTruthy();
+    expect(screen.getByText("只录制受害者视角，每名受害者单独一段")).toBeTruthy();
+    expect(countPovSegments([item])).toBe(0);
+    expect(estimateItemRecordSeconds(item,{pre_first_sec:2,post_last_sec:1})).toBe(3);
+    const dto = buildDtoFromQueueItem(item,null,{pre_first_sec:2,post_last_sec:5});
+    expect(dto.options.posthumous_mode).toBe("victim");
+    expect(dto.options.enable_victim_pov).toBe(false);
+    expect(dto.options.enable_fail_killer_pov).toBe(false);
+    expect(dto.options.interleave_pov_pairs).toBe(false);
+    expect(dto.options.victim_pov_post_sec).toBe(1.5);
+    expect(clipVictimPovEnqueueEligible(item.clipData)).toBe(false);
+    useRecordingQueue.setState({queue:[],globalPacing:{default_victim_pov:true}});
+    useRecordingQueue.getState().addToQueue({...item,pacing_override:{}});
+    useRecordingQueue.getState().toggleVictimPovForAllHighlightsInQueue();
+    expect(useRecordingQueue.getState().queue[0].pacing_override.victim_pov).not.toBe(true);
   });
 
   test("marks per-clip pacing overrides and resets them to the defaults", () => {

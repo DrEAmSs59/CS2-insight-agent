@@ -35,6 +35,9 @@ def _analyze_with_keyboard_probe(dem_path: str, analyze: Callable[[], _T]) -> tu
 
 def _run(payload: dict) -> object:
     action = str(payload.get("action") or "")
+    if action == "posthumous_kills":
+        from app.posthumous_kills import read_posthumous_kills
+        return read_posthumous_kills(str(payload["dem_path"]))
     if action == "obs_targets":
         from app.recording.obs_targets import resolve_obs_targets
 

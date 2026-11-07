@@ -3855,6 +3855,19 @@ class OBSDirector:
                     for plan in resolved_plans:
                         _plan_cache[plan.request_id] = plan
                     group_plans = [_plan_cache.get(dto.request_id) for dto in demo_requests]
+                    pending_requests = []
+                    for dto in demo_requests:
+                        prepared = _plan_cache.get(dto.request_id)
+                        if prepared is not None and not any(not s.disabled for s in prepared.segments):
+                            all_results.append({"request_id": dto.request_id, "success": True, "skipped": True,
+                                                "segment_results": [], "warnings": prepared.warnings,
+                                                "error": None})
+                        else:
+                            pending_requests.append(dto)
+                    demo_requests = pending_requests
+                    group_plans = [_plan_cache.get(dto.request_id) for dto in demo_requests]
+                    if not demo_requests:
+                        continue
                 except RecordingAborted:
                     raise
                 except Exception as exc:
