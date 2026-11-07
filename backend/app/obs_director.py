@@ -27,6 +27,7 @@ from obswebsocket.core import RecvThread, ReconnectThread
 
 from .demo_parse_isolation import IsolatedParseError, get_demo_match_summary_isolated
 from .chroma_demo_copy import ChromaDemoCopyReport, prepare_chroma_demo_copy
+from .demo_baseline_compat import repair_recording_baseline
 from .demo_parser import (
     BUFFER_SECONDS_AFTER,
     BUFFER_SECONDS_BEFORE,
@@ -79,14 +80,25 @@ def _prepare_recording_playback_demo_copy(
 ) -> ChromaDemoCopyReport | None:
     """Create only the disposable Demo that CS2 will play for recording."""
 
+    if source.resolve() == destination.resolve():
+        raise ValueError("recording Demo source and destination must differ")
+    if destination.exists():
+        raise FileExistsError(destination)
+    report = None
     if chroma_demo_map_name:
-        return prepare_chroma_demo_copy(
+        report = prepare_chroma_demo_copy(
             source,
             destination,
             map_name=chroma_demo_map_name,
         )
-    shutil.copy2(source, destination)
-    return None
+    else:
+        shutil.copy2(source, destination)
+    try:
+        repair_recording_baseline(destination)
+    except Exception:
+        destination.unlink(missing_ok=True)
+        raise
+    return report
 
 
 def _empty_voice_ban_payload(original: bytes) -> bytes:
