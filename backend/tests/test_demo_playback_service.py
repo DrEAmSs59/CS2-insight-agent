@@ -126,7 +126,85 @@ def _playback_fakes(monkeypatch):
         ),
     )
     monkeypatch.setattr(playback, "snapshot_user_configs", lambda _cs2_path: {})
+    monkeypatch.setattr(playback, "repair_recording_baseline", lambda _path: False)
     monkeypatch.setattr(playback.threading, "Thread", _DeferredThread)
+
+
+@pytest.mark.parametrize("enabled,aliases,chroma", [
+    (False, False, False), (True, False, False), (True, True, False),
+    (True, False, True), (True, True, True),
+])
+def test_playback_preloads_real_baseline_in_final_copy_only(
+    monkeypatch, tmp_path, enabled, aliases, chroma,
+):
+    from app import demo_baseline_compat as baseline
+    from test_demo_baseline_compat import fixture
+
+    cfg, demo, _ = _paths(tmp_path)
+    original = fixture(count=2)
+    demo.write_bytes(original)
+    staged = fixture(count=4 if chroma else 3 if aliases else 2)
+
+    def alias_copy(source, destination, _aliases):
+        assert source == demo
+        destination.write_bytes(fixture(count=3))
+
+    def chroma_copy(source, destination, **_kwargs):
+        assert source.read_bytes() == (fixture(count=3) if aliases else original)
+        destination.write_bytes(staged)
+        return SimpleNamespace(
+            manifest_report=SimpleNamespace(rewritten_chroma_sky_references=0),
+            handle_report=SimpleNamespace(fields_rewritten=0, input_sha256="in", output_sha256="out"),
+        )
+
+    monkeypatch.setattr(playback, "create_player_alias_copy", alias_copy)
+    monkeypatch.setattr(playback, "prepare_chroma_demo_copy", chroma_copy)
+    monkeypatch.setattr(playback, "_detect_chroma_demo_map_name", lambda _path: "de_cache")
+    monkeypatch.setattr(playback, "repair_recording_baseline", baseline.repair_recording_baseline)
+    service = playback.DemoPlaybackService()
+
+    def launch(*_args, **_kwargs):
+        copies = list((Path(cfg.cs2_path).parents[2] / "csgo").glob("*.dem"))
+        assert len(copies) == 1
+        assert copies[0].read_bytes() != staged
+        assert baseline.repair_recording_baseline(copies[0]) is False
+        assert demo.read_bytes() == original
+        return _FakeProcess()
+
+    monkeypatch.setattr(playback.subprocess, "Popen", launch)
+    result = service.launch(demo, cfg, playback.DemoPlaybackPovOptions(
+        enabled=enabled, player_aliases={"76561199032006224": "alias"} if aliases else {},
+        skybox_id=next(iter(playback.CHROMA_SKYBOX_IDS)) if chroma else "default",
+    ))
+    assert result["ok"]
+    assert demo.read_bytes() == original
+    session = service._active
+    session.started_at_monotonic = time.monotonic() - 4
+    service._monitor_session(session)
+    assert not session.copied_demo.exists()
+
+
+def test_playback_baseline_mismatch_blocks_launch_and_cleans_copy(monkeypatch, tmp_path):
+    from app import demo_baseline_compat as baseline
+    from test_demo_baseline_compat import fixture
+
+    cfg, demo, game_root = _paths(tmp_path)
+    original = fixture(snapshot_value=b"disagrees")
+    demo.write_bytes(original)
+    monkeypatch.setattr(playback, "repair_recording_baseline", baseline.repair_recording_baseline)
+    monkeypatch.setattr(playback.subprocess, "Popen", lambda *_a, **_k: pytest.fail("must not launch"))
+    service = playback.DemoPlaybackService()
+    snapshot = {tmp_path / "player.cfg": b"original config"}
+    restored = []
+    monkeypatch.setattr(service, "_start_player_config_protection", lambda _path: snapshot)
+    monkeypatch.setattr(service, "_restore_player_configs", lambda value: restored.append(value) or {"verified": True})
+    with pytest.raises(ValueError, match="disagrees with full snapshot"):
+        service.launch(demo, cfg, playback.DemoPlaybackPovOptions(enabled=True))
+    assert restored == [snapshot]
+    assert demo.read_bytes() == original
+    assert not list((game_root / "csgo").glob("_insight_*"))
+    assert _FakePovManager.instances[-1].installed == 0
+    assert service._active is None
 
 
 def test_launch_is_blocked_when_cs2_is_running(monkeypatch, tmp_path: Path):

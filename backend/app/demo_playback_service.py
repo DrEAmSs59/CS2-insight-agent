@@ -22,6 +22,7 @@ from .cs2_config_backup import (
 )
 from .chroma_demo_copy import prepare_chroma_demo_copy
 from .demo_compat_service import ensure_demo_compatible
+from .demo_baseline_compat import repair_recording_baseline
 from .map_material_vpk import DEFAULT_MAP_MATERIAL_ID
 from .weather_effects import visual_layer_console_commands
 from .pov_constants import POV_CORE_FORCED_COMMANDS, pov_tail_commands
@@ -394,6 +395,9 @@ class DemoPlaybackService:
                     )
                 elif not options.player_aliases:
                     shutil.copy2(dem_path, copied_demo)
+                # Apply the shared late-baseline fix to the final disposable
+                # playback copy, after alias/chroma rewrites and before launch.
+                repair_recording_baseline(copied_demo)
                 logger.info(
                     "Direct playback compatibility ready: cached=%s outcome=%s "
                     "removed_type138=%d removed_win_panel=%d "
