@@ -1187,6 +1187,14 @@ class PovHudManager:
             voice_build = build_recording_controller_vpk(voice_template,
                 recording_control=recording_control, session_console_commands=session_console_commands)
         package_bytes: Optional[bytes] = voice_build.vpk_bytes if voice_build is not None else None
+        if (package_bytes is not None and demo_path is not None
+                and (pov_visuals_enabled or advanced_playback_enabled)
+                and not recording_controller_only):
+            from .pov_radio_audio import bind_pov_radio_audio
+            try:
+                package_bytes = bind_pov_radio_audio(package_bytes, csgo_dir=self.get_csgo_dir())
+            except (ValueError, OSError, KeyError) as exc:
+                raise PovHudError(f"POV 角色喊话过滤资源准备失败：{exc}") from exc
         if persistent_killfeed:
             from .persistent_killfeed import bind_persistent_killfeed, killfeed_only_template
             try:
@@ -1201,6 +1209,15 @@ class PovHudManager:
                 )
             except (ValueError, OSError) as exc:
                 raise PovHudError(f"击杀常驻生成失败：{exc}") from exc
+        if (not persistent_killfeed and package_bytes is not None and demo_path is not None
+                and not recording_controller_only and (pov_visuals_enabled or advanced_playback_enabled)):
+            from .pov_assist_highlight import bind_pov_assist_highlight
+            try:
+                package_bytes = bind_pov_assist_highlight(package_bytes, demo_path)
+            except (ValueError, OSError) as exc:
+                # Optional visual correction: unsupported event data must retain
+                # the original stock notices, not prevent playback or recording.
+                logger.warning("POV assist highlight unavailable; retaining stock notices: %s", exc)
         explicit_map_name = normalize_skybox_map_name(map_name)
         detected_map_name = (
             normalize_skybox_map_name(voice_build.radar_map)

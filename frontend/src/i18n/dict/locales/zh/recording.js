@@ -1,5 +1,9 @@
 // zh / recording — keep keys scoped to this feature catalog.
 export default {
+  "queue.posthumousTitle": "死后击杀 · 受害者视角",
+  "queue.posthumousPerspective": "录制视角",
+  "queue.posthumousLocked": "此片段只录制受害者视角，不再追加回看或录制击杀者视角。死亡后最多保留 1.5 秒。",
+  "queue.planSummary_posthumous_victim_only": "只录制受害者视角，每名受害者单独一段",
   "record.warmupSessionHint": "此处修改仅作用于本次录制；点击“保存设置”可保存为下次默认值。",
   "record.settingsNavLabel": "录制设置分组",
   "record.transitionDuration": "时长（ms）",

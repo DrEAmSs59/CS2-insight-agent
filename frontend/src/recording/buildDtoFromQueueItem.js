@@ -11,6 +11,7 @@ import {
 } from "./recordingRequestFactory";
 import { stripGlobalPacingMetaKeys } from "../stores/recordingQueueStore";
 import { limitRecordingPacing } from "../utils/recordingPacing.js";
+import { posthumousOnly } from "../utils/posthumousKills";
 
 /**
  * Map pacing_override fields to RecordingOptions keys.
@@ -87,6 +88,14 @@ export function buildDtoFromQueueItem(item, matchMeta, globalPacing = {}) {
     ...(item.pacing_override || {}),
   });
   const options = pacingOverrideToOptions(mergedPacing);
+  // A posthumous victim is the main shot, not an additional replay. Ignore
+  // replay flags restored from older queues or inherited from global settings.
+  if (posthumousOnly(clipData)) {
+    options.enable_victim_pov = false;
+    options.enable_fail_killer_pov = false;
+    options.interleave_pov_pairs = false;
+    options.victim_pov_post_sec = Math.min(mergedPacing.post_last_sec ?? 1, 1.5);
+  }
 
   // Per-item obs_transition overrides (null = use AppConfig global default).
   if (item.obs_transition_enabled !== undefined)

@@ -1,5 +1,6 @@
 import { clipHasNoKillerPovTags } from "../stores/recordingQueueStore";
 import { isClipPacingAndPovLocked } from "./montageUtils";
+import { posthumousOnly } from "./posthumousKills";
 
 const KILL_COMPILATIONS = ["rival_kills", "all_kills", "weapon_kills"];
 const DEATH_COMPILATIONS = ["nemesis_deaths", "all_deaths"];
@@ -22,7 +23,8 @@ export function queueItemPovCapabilities(clip) {
   const victims = cleanNames(data.victims);
   const killers = cleanNames(data.killers);
   const killerName = String(data.killer_name ?? "").trim();
-  const locked = isClipPacingAndPovLocked(data);
+  const posthumous = posthumousOnly(data);
+  const locked = isClipPacingAndPovLocked(data) || posthumous;
   const isKillCompilation = category === "compilation" && KILL_COMPILATIONS.includes(kind);
   const isDeathCompilation = category === "compilation" && DEATH_COMPILATIONS.includes(kind);
   const noKillerSource = category === "fail" && clipHasNoKillerPovTags(data);
@@ -31,6 +33,7 @@ export function queueItemPovCapabilities(clip) {
     (category === "fail" && Boolean(killerName)) || (isDeathCompilation && killers.length > 0)
   );
   return {
+    posthumous,
     locked,
     isKillCompilation,
     isDeathCompilation,

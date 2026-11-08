@@ -102,6 +102,7 @@ export function buildTimelineEventClipData({ event, mapName = "", targetPlayer =
     map_name: mapName || "unknown",
     context_tags: [],
     queue_summary_line: queueSummaryLine,
+    posthumous_kills: isKill && event?.posthumous ? [{ tick, attacker_death_tick: event.attacker_death_tick, victim_name: vic, victim_steamid: vicSid }] : [],
     timeline_record_kind: isKill ? "kill" : isDeath ? "death" : "other",
     clip_min_tick: safeSt,
     clip_max_tick: safeEt,

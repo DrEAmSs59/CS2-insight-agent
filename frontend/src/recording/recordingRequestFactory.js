@@ -126,7 +126,7 @@ function newRequestId() {
 }
 
 export function buildHighlightRecordingRequest(clipData, queueItem, matchMeta, options = {}) {
-  const mergedOptions = { ...DEFAULT_RECORDING_OPTIONS, ...options };
+  const mergedOptions = { ...DEFAULT_RECORDING_OPTIONS, ...options, posthumous_mode: clipData.posthumous_mode === "victim" ? "victim" : "skip" };
   const demo = buildDemoContext(clipData, queueItem, matchMeta);
   const targetSpecSlot = clipData.target_spec_slot ?? null;
   const targetPlayer = buildTargetPlayer(queueItem.targetPlayer, queueItem.targetSteamId, targetSpecSlot);
@@ -160,7 +160,7 @@ export function buildHighlightRecordingRequest(clipData, queueItem, matchMeta, o
 }
 
 export function buildFailRecordingRequest(clipData, queueItem, matchMeta, options = {}) {
-  const mergedOptions = { ...DEFAULT_RECORDING_OPTIONS, ...options };
+  const mergedOptions = { ...DEFAULT_RECORDING_OPTIONS, ...options, posthumous_mode: clipData.posthumous_mode === "victim" ? "victim" : "skip" };
   const demo = buildDemoContext(clipData, queueItem, matchMeta);
   const targetSpecSlot = clipData.target_spec_slot ?? null;
   const targetPlayer = buildTargetPlayer(queueItem.targetPlayer, queueItem.targetSteamId, targetSpecSlot);
@@ -191,7 +191,7 @@ export function buildFailRecordingRequest(clipData, queueItem, matchMeta, option
 }
 
 export function buildTimelineKillRecordingRequest(clipData, queueItem, matchMeta, options = {}) {
-  const mergedOptions = { ...DEFAULT_RECORDING_OPTIONS, ...options };
+  const mergedOptions = { ...DEFAULT_RECORDING_OPTIONS, ...options, posthumous_mode: clipData.posthumous_mode === "victim" ? "victim" : "skip" };
   const demo = buildDemoContext(clipData, queueItem, matchMeta);
   // timeline event fields: attacker_name/attacker_steamid/attacker_spec_slot (killer)
   //                        victim_name/victim_steamid/victim_spec_slot
@@ -227,7 +227,7 @@ export function buildTimelineKillRecordingRequest(clipData, queueItem, matchMeta
 }
 
 export function buildTimelineDeathRecordingRequest(clipData, queueItem, matchMeta, options = {}) {
-  const mergedOptions = { ...DEFAULT_RECORDING_OPTIONS, ...options };
+  const mergedOptions = { ...DEFAULT_RECORDING_OPTIONS, ...options, posthumous_mode: clipData.posthumous_mode === "victim" ? "victim" : "skip" };
   const demo = buildDemoContext(clipData, queueItem, matchMeta);
   // timeline event fields: attacker_name/attacker_steamid/attacker_spec_slot (killer)
   //                        victim_spec_slot = target player's spec slot (target player died)
@@ -262,7 +262,7 @@ export function buildTimelineDeathRecordingRequest(clipData, queueItem, matchMet
 }
 
 export function buildKillCompilationRecordingRequest(clipData, queueItem, matchMeta, options = {}) {
-  const mergedOptions = { ...DEFAULT_RECORDING_OPTIONS, ...options };
+  const mergedOptions = { ...DEFAULT_RECORDING_OPTIONS, ...options, posthumous_mode: clipData.posthumous_mode === "victim" ? "victim" : "skip" };
   const demo = buildDemoContext(clipData, queueItem, matchMeta);
   const targetSpecSlot = clipData.target_spec_slot ?? null;
   const targetPlayer = buildTargetPlayer(queueItem.targetPlayer, queueItem.targetSteamId, targetSpecSlot);
@@ -305,7 +305,7 @@ export function buildKillCompilationRecordingRequest(clipData, queueItem, matchM
 }
 
 export function buildDeathCompilationRecordingRequest(clipData, queueItem, matchMeta, options = {}) {
-  const mergedOptions = { ...DEFAULT_RECORDING_OPTIONS, ...options };
+  const mergedOptions = { ...DEFAULT_RECORDING_OPTIONS, ...options, posthumous_mode: clipData.posthumous_mode === "victim" ? "victim" : "skip" };
   const demo = buildDemoContext(clipData, queueItem, matchMeta);
   const targetSpecSlot = clipData.target_spec_slot ?? null;
   const targetPlayer = buildTargetPlayer(queueItem.targetPlayer, queueItem.targetSteamId, targetSpecSlot);
@@ -378,7 +378,7 @@ export function buildRoundCompilationRecordingRequest(clipData, queueItem, match
 }
 
 export function buildTimelineRoundRecordingRequest(clipData, queueItem, matchMeta, options = {}) {
-  const mergedOptions = { ...DEFAULT_RECORDING_OPTIONS, ...options };
+  const mergedOptions = { ...DEFAULT_RECORDING_OPTIONS, ...options, posthumous_mode: clipData.posthumous_mode === "victim" ? "victim" : "skip" };
   const demo = buildDemoContext(clipData, queueItem, matchMeta);
   const targetSpecSlot = clipData.target_spec_slot ?? null;
   const targetPlayer = buildTargetPlayer(queueItem.targetPlayer, queueItem.targetSteamId, targetSpecSlot);

@@ -1,5 +1,6 @@
 import { mergedPacingForItem } from "./recordingQueueDerive";
 import { DEMO_TICK_RATE, isTimelineSourceClip } from "./montageUtils";
+import { posthumousOnly } from "./posthumousKills";
 
 /**
  * Group kill/death ticks by jump-cut threshold (mirrors backend planner merge).
@@ -46,6 +47,8 @@ export function planPreviewToTokens(plan) {
   const { variant, killerSegCount = 0, povSegCount = 0, eventCount = 0 } = plan;
 
   switch (variant) {
+    case "posthumous_victim_only":
+      return Array.from({ length: Math.min(eventCount, 8) }, () => "V");
     case "kill_only":
       return Array.from({ length: Math.min(killerSegCount, 8) }, () => "K");
     case "kill_victim_batch": {
@@ -117,6 +120,10 @@ export function getRecordingPlanPreview(item, globalPacing) {
   const thresholdTicks = max_gap_sec * DEMO_TICK_RATE;
   const eventTicks = extractEventTicks(clip);
   const eventCount = eventTicks.length;
+  if (posthumousOnly(clip)) {
+    const count = clip.posthumous_mode === "victim" ? eventCount : 0;
+    return { variant: "posthumous_victim_only", eventCount: count, killerSegCount: 0, povSegCount: 0, totalSegCount: count };
+  }
 
   const isKillCompilation = cat === "compilation" && ["rival_kills", "all_kills", "weapon_kills"].includes(compKind);
   const isDeathCompilation = cat === "compilation" && ["nemesis_deaths", "all_deaths"].includes(compKind);

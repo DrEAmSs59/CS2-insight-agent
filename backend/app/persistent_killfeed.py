@@ -45,6 +45,21 @@ def killfeed_only_template(vpk: bytes) -> bytes:
     return write_inline_vpk({VOICE_SCRIPT_PATH: rewrite_panorama_data(entries[VOICE_SCRIPT_PATH], edit)})
 
 
+def build_killfeed_round_starts(parser):
+    """Tick boundaries also distinguish restarts/overtime with repeated round numbers."""
+    try:
+        rows = parser.parse_event("round_start")
+    except Exception as exc:
+        raise ValueError("击杀常驻无法读取 Demo 回合边界") from exc
+    if hasattr(rows, "to_dict"):
+        rows = rows.to_dict(orient="list")
+    ticks = rows.get("tick") if isinstance(rows, dict) else None
+    if not isinstance(ticks, list) or any(type(tick) is not int or tick < 0 for tick in ticks):
+        raise ValueError("击杀常驻 Demo 回合边界无效")
+    # Tick zero covers a demo that begins before its first recorded round_start.
+    return sorted({0, *ticks})
+
+
 def build_killfeed_events(demo_path, *, parser=None):
     if parser is None:
         from demoparser2 import DemoParser
@@ -98,10 +113,14 @@ def bind_persistent_killfeed(vpk: bytes, *, enabled: bool,
         ranges = [[int(segment["start_tick"]), int(segment["end_tick"])] for segment in segments]
         if any(start < 0 or end <= start for start, end in ranges):
             raise ValueError("击杀常驻录制片段范围无效")
+        if parser is None:
+            from demoparser2 import DemoParser
+            parser = DemoParser(str(demo_path))
+        round_starts = build_killfeed_round_starts(parser)
         events = [event for event in build_killfeed_events(demo_path, parser=parser)
                   if event["attacker"]["xuid"] == target_xuid and event["victim"]["xuid"] != target_xuid]
         setting.update(events=events, segments=ranges, target_xuid=target_xuid,
-                       hide_clan_tags=bool(hide_clan_tags))
+                       hide_clan_tags=bool(hide_clan_tags), round_starts=round_starts)
     runtime = b""
     if enabled:
         if assets_dir is None:

@@ -57,6 +57,8 @@ export default {
   "playDemo.previewInputHudWeapon": "武器HUD上",
   "playDemo.inputAudioEnable": "虚拟按键音",
   "playDemo.mapMaterialTitle": "地图材质",
+  "playDemo.appearanceSection": "画面风格",
+  "playDemo.sessionOnly": "仅用于本次播放",
   "playDemo.mapMaterialHint": "选择本次高级播放使用的地图材质或下雨效果，位于预览与天空盒之间，不会修改录制预设。",
   "playDemo.mapMaterialSelectLabel": "高级播放地图材质",
   "playDemo.weatherEffectTitle": "天气效果",

@@ -5,7 +5,7 @@ from types import SimpleNamespace
 import pytest
 
 from app.demo_voice_hud import VOICE_SCRIPT_PATH, VOICE_DATA_BEGIN, VOICE_DATA_END, read_inline_vpk
-from app.persistent_killfeed import (build_killfeed_events, bind_persistent_killfeed,
+from app.persistent_killfeed import (build_killfeed_events, build_killfeed_round_starts, bind_persistent_killfeed,
     DATA_BEGIN, DATA_END, RUNTIME_BEGIN, RUNTIME_END, KILLFEED_TEMPLATE_MARKER)
 from app.panorama_resource import rewrite_panorama_data
 
@@ -20,7 +20,8 @@ def parser():
         'weapon': ['weapon_ak47', 'm4a1'], 'attacker_team_num': [2, 3], 'user_team_num': [3, 2],
         'attacker_clan_name': ['TAG', ''], 'headshot': [True, False], 'thrusmoke': [False, True],
     }
-    return SimpleNamespace(parse_event=lambda *args, **kwargs: table)
+    return SimpleNamespace(parse_event=lambda event, **kwargs:
+        {'tick': [0, 80, 1000]} if event == 'round_start' else table)
 
 
 def payload(vpk):
@@ -57,6 +58,7 @@ def test_shared_composition_replaces_stale_data_and_removes_code_when_disabled(n
     assert not setting(first)['hide_clan_tags']
     assert [event['id'] for event in setting(first)['events']] == ['100:0']
     assert setting(first)['target_xuid'] == '76561198386265483'
+    assert setting(first)['round_starts'] == [0, 80, 1000]
     rebound = bind_persistent_killfeed(first, enabled=True, demo_path='unused', parser=parser(),
         target_xuid='76561198386265483', segments=[{'start_tick':90,'end_tick':110}])
     assert payload(rebound) == a
@@ -124,6 +126,7 @@ def test_manager_composes_killfeed_and_restores_game_files(monkeypatch, tmp_path
         return {}
     monkeypatch.setattr(pov_hud_manager, 'load_input_report', input_report)
     events = build_killfeed_events('unused', parser=parser())
+    monkeypatch.setattr('demoparser2.DemoParser', lambda path: parser())
     monkeypatch.setattr(persistent_killfeed, 'build_killfeed_events', lambda *a, **k: events)
     manager.install(demo_path=tmp_path/'test.dem', require_demo_hud=True, pov_visuals_enabled=hud,
         persistent_killfeed=True, killfeed_only=not hud,
@@ -131,8 +134,40 @@ def test_manager_composes_killfeed_and_restores_game_files(monkeypatch, tmp_path
         persistent_killfeed_segments=[{'start_tick':90,'end_tick':110}])
     installed = (csgo/'pov.vpk').read_bytes()
     assert [event['id'] for event in setting(installed)['events']] == ['100:0']
+    assert setting(installed)['round_starts'] == [0, 80, 1000]
     if not hud:
         assert list(read_inline_vpk(installed)) == [VOICE_SCRIPT_PATH]
     assert manager.restore()['verified']
     assert (csgo/'gameinfo.gi').read_bytes() == original
     assert not (csgo/'pov.vpk').exists()
+
+
+def test_round_starts_use_ticks_not_repeated_round_numbers_and_accept_dataframe():
+    rows = {'tick': [800, 400, 400, 1], 'round': [1, 1, 1, 1]}
+    assert build_killfeed_round_starts(SimpleNamespace(parse_event=lambda event: rows)) == [0, 1, 400, 800]
+    frame = SimpleNamespace(to_dict=lambda *, orient: rows)
+    assert build_killfeed_round_starts(SimpleNamespace(parse_event=lambda event: frame)) == [0, 1, 400, 800]
+    assert build_killfeed_round_starts(SimpleNamespace(parse_event=lambda event: {'tick': []})) == [0]
+
+
+@pytest.mark.parametrize('rows', [{}, {'tick': [-1]}, {'tick': [1.5]}, {'tick': ['400']}, {'tick': [True]}])
+def test_invalid_round_boundaries_do_not_silently_retain_all_rounds(rows):
+    with pytest.raises(ValueError, match='回合边界'):
+        build_killfeed_round_starts(SimpleNamespace(parse_event=lambda event: rows))
+
+
+def test_cached_session_rebind_adds_round_boundaries_missing_from_old_payload():
+    from app.demo_voice_hud import write_inline_vpk
+    options = dict(enabled=True, demo_path='unused', parser=parser(),
+        target_xuid='76561198386265483', segments=[{'start_tick':90,'end_tick':110}])
+    first = bind_persistent_killfeed((ROOT/'pov/pov_voice_template.vpk').read_bytes(), **options)
+    entries = read_inline_vpk(first)
+    def stale(data):
+        start = data.index(DATA_BEGIN) + len(DATA_BEGIN)
+        end = data.index(DATA_END, start)
+        old = json.loads(data[start:end]); old.pop('round_starts')
+        return data[:start] + json.dumps(old).encode('ascii') + data[end:]
+    entries[VOICE_SCRIPT_PATH] = rewrite_panorama_data(entries[VOICE_SCRIPT_PATH], stale)
+    rebound = bind_persistent_killfeed(write_inline_vpk(entries), **options)
+    assert setting(rebound)['round_starts'] == [0, 80, 1000]
+    assert script(rebound).count(RUNTIME_BEGIN) == 1

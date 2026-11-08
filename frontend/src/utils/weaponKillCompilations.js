@@ -142,6 +142,10 @@ export function buildWeaponKillCompilationClipData({
     victim_steamid64s: kills.map((event) => String(event?.victim_steamid || "").trim()),
     victim_spec_slots: kills.map((event) => event?.victim_spec_slot ?? null),
     kill_ticks: kills.map((event) => Number(event.tick)),
+    posthumous_kills: kills.filter((event) => event.posthumous).map((event) => ({
+      tick: Number(event.tick), attacker_death_tick: event.attacker_death_tick,
+      victim_name: event.victim_name, victim_steamid: event.victim_steamid,
+    })),
     kill_weapons: kills.map(normalizedWeaponKey),
     kill_headshots: kills.map((event) => Boolean(event?.is_headshot ?? event?.headshot)),
     kill_tag_lists: kills.map(() => []),

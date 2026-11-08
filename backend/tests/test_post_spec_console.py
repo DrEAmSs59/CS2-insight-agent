@@ -8,6 +8,7 @@ from app.obs_director import (
     _filter_post_spec_console_lines,
 )
 from app.env_utils import OBSConfig
+from app.recording.executor.obs_client import OBSClient
 
 
 def test_filter_picks_cl_demo_predict():
@@ -96,6 +97,7 @@ def test_builtin_recording_options_also_flow_through_post_spec_allowlist():
     assert _filter_post_spec_console_lines(warmup_lines) == [
         "hud_showtargetid 0",
         "viewmodel_fov 68",
+        "cl_drawhud_force_teamid_overhead -1",
         "mp_forcecamera 0",
     ]
 
@@ -104,10 +106,10 @@ from app.recording.executor.recording_executor import RecordingExecutor
 
 
 def test_executor_stores_post_spec_lines():
-    ex = RecordingExecutor(None, post_spec_console_lines=["cl_demo_predict 1"])
+    ex = RecordingExecutor(OBSClient(OBSConfig()), post_spec_console_lines=["cl_demo_predict 1"])
     assert ex._post_spec_console_lines == ["cl_demo_predict 1"]
 
 
 def test_executor_defaults_post_spec_empty():
-    ex = RecordingExecutor(None)
+    ex = RecordingExecutor(OBSClient(OBSConfig()))
     assert ex._post_spec_console_lines == []

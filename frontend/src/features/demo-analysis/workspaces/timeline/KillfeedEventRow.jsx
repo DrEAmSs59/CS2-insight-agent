@@ -1,5 +1,7 @@
 import KillfeedIconStrip from "./killfeed/KillfeedIconStrip";
 import QueueAddButton from "../../../../components/QueueAddButton";
+import PosthumousKillChoice from "../../../../components/PosthumousKillChoice";
+import { canQueuePosthumous, usePosthumousChoices } from "../../../../utils/posthumousKills";
 import { useT } from "../../../../i18n/useT.js";
 import { useLocaleStore } from "../../../../i18n/localeStore.js";
 import { weaponDisplayName } from "../../../../i18n/weaponNames.js";
@@ -86,7 +88,8 @@ export default function KillfeedEventRow({
   const mods = getModifiers(event);
   const flashAssistLine = Boolean(mods.flash_assisted) && assistName;
   const normalAssistLine = assistName && !flashAssistLine;
-  const canRec = Boolean(event?.can_record) && !isAssistOnly;
+  const choices = usePosthumousChoices((s) => s.choices);
+  const canRec = Boolean(event?.can_record) && !isAssistOnly && canQueuePosthumous(event, choices);
   const clickable = canRec && typeof onRowClick === "function";
 
   const atkHighlight = focusedPlayer && atk === focusedPlayer;
@@ -185,6 +188,7 @@ export default function KillfeedEventRow({
         </span>
         {queueAction}
       </div>
+      {isKill && <PosthumousKillChoice clip={event} disabled={queued} />}
       {flashAssistLine ? (
         <p className="mt-1 pl-0.5 text-[12px] leading-snug text-cs2-text-secondary">
           <span className="text-cs2-text-muted">↳</span> {t("analysis.flashAssist")}

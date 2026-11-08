@@ -1,4 +1,4 @@
-import { AlertTriangle, ChevronLeft, ChevronRight, Cloud, Crosshair, Eye, Loader2, Package, Play, RefreshCw, ShieldAlert, Skull, Volume2, X } from "lucide-react";
+import { AlertTriangle, ChevronLeft, ChevronRight, Crosshair, Eye, Loader2, Package, Play, RefreshCw, ShieldAlert, Skull, Volume2, X } from "lucide-react";
 
 import { useT } from "../i18n/useT.js";
 import {
@@ -27,6 +27,7 @@ import {
   normalizeRecordingWeatherEffectId,
 } from "../utils/recordingWeatherEffect.js";
 import Modal from "./ui/Modal.jsx";
+import { SelectInput, SettingsButton, SettingsGroup, SettingsNote, SettingsRow } from "../pages/settings/SettingsControls.jsx";
 import PlayerAliasesSection from "./PlayerAliasesSection.jsx";
 import { hasInvalidPlayerAliases, PLAYER_ALIAS_ENTRY_VISIBLE } from "../utils/playerAliases.js";
 
@@ -108,6 +109,28 @@ export default function DemoPlayOptionsModal({
       className="!h-auto"
       contentClassName="overflow-y-auto"
       zIndex={150}
+      footer={!checking && !launching ? (
+        <div className="flex flex-wrap justify-end gap-2">
+          <SettingsButton onClick={onClose}>{t("common.cancel")}</SettingsButton>
+          {blockedReason ? (
+            blockedReason !== "path" ? (
+              <SettingsButton variant="primary" icon={RefreshCw} onClick={onRetry}>
+                {t("playDemo.retryCheck")}
+              </SettingsButton>
+            ) : null
+          ) : (
+            <SettingsButton
+              variant="primary"
+              icon={Play}
+              disabled={aliasesBlocked}
+              onClick={onPlayAdvanced}
+              data-testid="demo-play-advanced-option"
+            >
+              {t("playDemo.launchAdvanced")}
+            </SettingsButton>
+          )}
+        </div>
+      ) : null}
     >
       <div className="space-y-3 px-5 py-4">
         {checking ? (
@@ -128,36 +151,10 @@ export default function DemoPlayOptionsModal({
             </p>
           </div>
         ) : blockedReason ? (
-          <div className="space-y-4">
-            <div className="rounded-lg border border-amber-500/35 bg-cs2-amber-surface px-4 py-3">
-              <div className="flex items-start gap-3">
-                <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-cs2-amber-on-surface" />
-                <div>
-                  <p className="text-sm font-bold text-cs2-amber-on-surface">{t("playDemo.blockedTitle")}</p>
-                  <p className="mt-1 text-[12px] leading-relaxed text-cs2-text-secondary">{blockedMessage}</p>
-                </div>
-              </div>
-            </div>
-            <div className="flex justify-end gap-2">
-              <button
-                type="button"
-                onClick={onClose}
-                className="rounded-lg border border-cs2-border px-3 py-2 text-xs font-semibold text-cs2-text-secondary hover:bg-cs2-bg-hover"
-              >
-                {t("common.cancel")}
-              </button>
-              {blockedReason !== "path" ? (
-                <button
-                  type="button"
-                  onClick={onRetry}
-                  className="flex items-center gap-1.5 rounded-lg bg-cs2-accent px-3 py-2 text-xs font-bold text-cs2-text-on-accent hover:bg-cs2-accent-light"
-                >
-                  <RefreshCw className="h-3.5 w-3.5" />
-                  {t("playDemo.retryCheck")}
-                </button>
-              ) : null}
-            </div>
-          </div>
+          <SettingsNote tone="amber" icon={AlertTriangle}>
+            <p className="font-semibold">{t("playDemo.blockedTitle")}</p>
+            <p className="mt-1">{blockedMessage}</p>
+          </SettingsNote>
         ) : (
           <>
             <div data-testid="demo-play-preview">
@@ -272,147 +269,115 @@ export default function DemoPlayOptionsModal({
             </div>
 
             {PLAYER_ALIAS_ENTRY_VISIBLE ? (
-              <PlayerAliasesSection
-                demos={aliasDemos}
-                value={aliasEditor}
-                onChange={onAliasEditorChange}
-                onReadyChange={onAliasesReadyChange}
-                disabled={launching}
-                compact
-              />
+              <SettingsGroup>
+                <PlayerAliasesSection
+                  demos={aliasDemos}
+                  value={aliasEditor}
+                  onChange={onAliasEditorChange}
+                  onReadyChange={onAliasesReadyChange}
+                  disabled={launching}
+                  description={t("playerAliases.hint")}
+                  layout="rows"
+                />
+              </SettingsGroup>
             ) : null}
 
-            <div
-              data-testid="demo-play-map-material-option"
-              className="flex items-center gap-3 rounded-lg border border-cs2-border bg-cs2-bg-input/45 px-3 py-2.5"
+            <SettingsGroup
+              title={t("playDemo.appearanceSection")}
+              actions={<span className="text-xs text-cs2-text-muted">{t("playDemo.sessionOnly")}</span>}
             >
-              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-cs2-accent/10 text-cs2-accent">
-                <Package className="h-4 w-4" />
-              </div>
-              <div className="min-w-0 flex-1">
-                <p className="text-[12px] font-bold text-cs2-text-primary">{t("playDemo.mapMaterialTitle")}</p>
-                <p className="mt-0.5 text-[10px] leading-relaxed text-cs2-text-muted">{t("playDemo.mapMaterialHint")}</p>
-              </div>
-              <select
-                aria-label={t("playDemo.mapMaterialSelectLabel")}
-                value={selectedMapAppearance}
-                disabled={launching || !canChangeMapAppearance}
-                onChange={(event) => {
-                  applyRecordingMapAppearanceSelection(event.target.value, {
-                    onRecordingMapMaterialChange,
-                    onRecordingWeatherEffectChange,
-                    onRecordingSkyboxChange,
-                  });
-                }}
-                className="min-w-44 max-w-[48%] rounded-md border border-cs2-border bg-cs2-bg-input px-2.5 py-2 text-xs font-semibold text-cs2-text-primary outline-none focus:border-cs2-accent/60 disabled:opacity-50"
+              <SettingsRow
+                testId="demo-play-map-material-option"
+                label={t("playDemo.mapMaterialTitle")}
+                tooltip={t("playDemo.mapMaterialHint")}
               >
-                <option value={DEFAULT_RECORDING_MAP_APPEARANCE}>{t("record.mapMaterialDefault")}</option>
-                <option value={WAXED_RECORDING_MAP_APPEARANCE}>{t("record.mapMaterialWaxedReflection")}</option>
-                <option value={RAIN_RECORDING_MAP_APPEARANCE}>{t("record.weatherEffectRain")}</option>
-              </select>
-            </div>
+                <SelectInput
+                  ariaLabel={t("playDemo.mapMaterialSelectLabel")}
+                  value={selectedMapAppearance}
+                  disabled={launching || !canChangeMapAppearance}
+                  onChange={(value) => {
+                    applyRecordingMapAppearanceSelection(value, {
+                      onRecordingMapMaterialChange,
+                      onRecordingWeatherEffectChange,
+                      onRecordingSkyboxChange,
+                    });
+                  }}
+                >
+                  <option value={DEFAULT_RECORDING_MAP_APPEARANCE}>{t("record.mapMaterialDefault")}</option>
+                  <option value={WAXED_RECORDING_MAP_APPEARANCE}>{t("record.mapMaterialWaxedReflection")}</option>
+                  <option value={RAIN_RECORDING_MAP_APPEARANCE}>{t("record.weatherEffectRain")}</option>
+                </SelectInput>
+              </SettingsRow>
 
-            <div
-              data-testid="demo-play-skybox-option"
-              className="flex items-center gap-3 rounded-lg border border-cs2-border bg-cs2-bg-input/45 px-3 py-2.5"
-            >
-              {selectedSkyboxPreview ? (
-                <img
-                  data-testid="demo-play-skybox-preview"
-                  src={selectedSkyboxPreview}
-                  alt={t("settings.skyboxPreviewAlt", {
-                    name: recordingSkyboxDisplayName(
-                      effectiveSkybox,
-                      (Array.isArray(skyboxResources)
-                        ? skyboxResources.find((item) => item?.id === effectiveSkybox)?.display_name
-                        : ""),
-                      t,
-                    ),
-                  })}
-                  className="aspect-[2/1] w-24 shrink-0 rounded-md border border-cs2-border object-cover"
-                />
-              ) : (
-                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-cs2-accent/10 text-cs2-accent">
-                  <Cloud className="h-4 w-4" />
-                </div>
-              )}
-              <div className="min-w-0 flex-1">
-                <p className="text-[12px] font-bold text-cs2-text-primary">{t("playDemo.skyboxTitle")}</p>
-                <p className="mt-0.5 text-[10px] leading-relaxed text-cs2-text-muted">
-                  {t(rainSelected ? "playDemo.skyboxRainSelectable" : "playDemo.skyboxHint")}
-                </p>
-              </div>
-              <select
-                aria-label={t("playDemo.skyboxSelectLabel")}
-                value={effectiveSkybox}
-                disabled={launching || !onRecordingSkyboxChange}
-                onChange={(event) => onRecordingSkyboxChange?.(event.target.value)}
-                className="min-w-44 max-w-[48%] rounded-md border border-cs2-border bg-cs2-bg-input px-2.5 py-2 text-xs font-semibold text-cs2-text-primary outline-none focus:border-cs2-accent/60 disabled:opacity-50"
+              <SettingsRow
+                testId="demo-play-skybox-option"
+                label={t("playDemo.skyboxTitle")}
+                tooltip={t("playDemo.skyboxHint")}
+                description={rainSelected ? t("playDemo.skyboxRainSelectable") : undefined}
+                footer={selectedSkyboxPreview ? (
+                  <img
+                    data-testid="demo-play-skybox-preview"
+                    src={selectedSkyboxPreview}
+                    alt={t("settings.skyboxPreviewAlt", {
+                      name: recordingSkyboxDisplayName(
+                        effectiveSkybox,
+                        (Array.isArray(skyboxResources)
+                          ? skyboxResources.find((item) => item?.id === effectiveSkybox)?.display_name
+                          : ""),
+                        t,
+                      ),
+                    })}
+                    className="aspect-[2/1] w-full max-w-xs rounded-md border border-cs2-border-subtle object-cover"
+                  />
+                ) : null}
               >
-                <option value={DEFAULT_RECORDING_SKYBOX}>
-                  {t(rainSelected ? "record.skyboxRainDefault" : "record.skyboxDefault")}
-                </option>
-                <optgroup label={t("record.skyboxSolidColorOptions")}>
-                  {solidColorSkyboxes.map((item) => (
-                    <option key={item.id} value={item.id}>
-                      {recordingSkyboxDisplayName(item.id, item.display_name, t)}
-                    </option>
-                  ))}
-                </optgroup>
-                <optgroup label={t("record.skyboxBuiltinOptions")}>
-                  {standardBuiltinSkyboxes.map((item) => (
-                    <option key={item.id} value={item.id}>
-                      {recordingSkyboxDisplayName(item.id, item.display_name, t)}
-                    </option>
-                  ))}
-                </optgroup>
-                {customSkyboxes.length ? (
-                  <optgroup label={t("record.skyboxCustomOptions")}>
-                    {customSkyboxes.map((item) => (
-                      <option key={item.id} value={item.id}>{item.display_name}</option>
+                <SelectInput
+                  ariaLabel={t("playDemo.skyboxSelectLabel")}
+                  value={effectiveSkybox}
+                  disabled={launching || !onRecordingSkyboxChange}
+                  onChange={(value) => onRecordingSkyboxChange?.(value)}
+                >
+                  <option value={DEFAULT_RECORDING_SKYBOX}>
+                    {t(rainSelected ? "record.skyboxRainDefault" : "record.skyboxDefault")}
+                  </option>
+                  <optgroup label={t("record.skyboxSolidColorOptions")}>
+                    {solidColorSkyboxes.map((item) => (
+                      <option key={item.id} value={item.id}>
+                        {recordingSkyboxDisplayName(item.id, item.display_name, t)}
+                      </option>
                     ))}
                   </optgroup>
-                ) : null}
-                {isCustomRecordingSkyboxId(effectiveSkybox) && !selectedCustomAvailable ? (
-                  <option value={effectiveSkybox} disabled>{t("record.skyboxMissingCustom")}</option>
-                ) : null}
-              </select>
-            </div>
+                  <optgroup label={t("record.skyboxBuiltinOptions")}>
+                    {standardBuiltinSkyboxes.map((item) => (
+                      <option key={item.id} value={item.id}>
+                        {recordingSkyboxDisplayName(item.id, item.display_name, t)}
+                      </option>
+                    ))}
+                  </optgroup>
+                  {customSkyboxes.length ? (
+                    <optgroup label={t("record.skyboxCustomOptions")}>
+                      {customSkyboxes.map((item) => (
+                        <option key={item.id} value={item.id}>{item.display_name}</option>
+                      ))}
+                    </optgroup>
+                  ) : null}
+                  {isCustomRecordingSkyboxId(effectiveSkybox) && !selectedCustomAvailable ? (
+                    <option value={effectiveSkybox} disabled>{t("record.skyboxMissingCustom")}</option>
+                  ) : null}
+                </SelectInput>
+              </SettingsRow>
+            </SettingsGroup>
 
-            <div data-testid="demo-play-gameinfo-warning" className="flex items-start gap-2 rounded-lg border border-rose-500/25 bg-cs2-rose-surface px-3 py-2.5 text-[11px] leading-relaxed text-cs2-text-muted">
-              <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0 text-cs2-rose-on-surface" />
-              <div>
-                <p className="font-bold text-cs2-rose-on-surface">{t("playDemo.safetyTitle")}</p>
-                <p className="mt-0.5">{t("playDemo.safetyNote")}</p>
-              </div>
-            </div>
+            <SettingsNote testId="demo-play-gameinfo-warning" tone="rose" icon={ShieldAlert}>
+              <p className="font-semibold">{t("playDemo.safetyTitle")}</p>
+              <p className="mt-0.5">{t("playDemo.safetyNote")}</p>
+            </SettingsNote>
 
             {error ? (
-              <div className="rounded-lg border border-rose-500/35 bg-cs2-rose-surface px-3 py-2.5 text-[12px] text-cs2-rose-on-surface">
+              <SettingsNote tone="rose" role="alert">
                 {error}
-              </div>
+              </SettingsNote>
             ) : null}
-
-            <div className="flex justify-end gap-2">
-              <button
-                type="button"
-                disabled={launching}
-                onClick={onClose}
-                className="rounded-lg border border-cs2-border px-3 py-2 text-xs font-semibold text-cs2-text-secondary hover:bg-cs2-bg-hover disabled:opacity-50"
-              >
-                {t("common.cancel")}
-              </button>
-              <button
-                type="button"
-                disabled={launching || aliasesBlocked}
-                onClick={onPlayAdvanced}
-                data-testid="demo-play-advanced-option"
-                className="flex items-center gap-1.5 rounded-lg bg-cs2-accent px-3 py-2 text-xs font-bold text-cs2-text-on-accent hover:bg-cs2-accent-light disabled:opacity-50"
-              >
-                {launchingMode === "advanced" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Play className="h-3.5 w-3.5 fill-current" />}
-                {t("playDemo.launchAdvanced")}
-              </button>
-            </div>
           </>
         )}
       </div>

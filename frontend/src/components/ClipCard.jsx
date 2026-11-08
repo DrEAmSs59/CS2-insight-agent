@@ -1,6 +1,8 @@
 import { Flame, Skull, Check, Clapperboard, Film } from "lucide-react";
 import RoundMontageRoundPicker from "./RoundMontageRoundPicker";
 import QueueAddButton from "./QueueAddButton";
+import PosthumousKillChoice from "./PosthumousKillChoice";
+import { canQueuePosthumous, usePosthumousChoices } from "../utils/posthumousKills";
 import { describeTag, labelTag } from "../utils/tagDescriptions";
 import { isFreezeToDeathCompilation } from "../utils/freezeToDeathRoundFilter";
 import { isTimelineSourceClip } from "../utils/montageUtils";
@@ -109,6 +111,8 @@ export default function ClipCard({
 }) {
   const t = useT();
   const locale = useLocaleStore((s) => s.locale);
+  const posthumousChoices = usePosthumousChoices((s) => s.choices);
+  const posthumousBlocked = !canQueuePosthumous(clip, posthumousChoices);
 
   const isRoundMontage = isFreezeToDeathCompilation(clip);
   const ftdPicked = freezeToDeathDraft?.picked || [];
@@ -147,7 +151,7 @@ export default function ClipCard({
   const KILL_COUNT_TAGS = new Set(["双杀", "三杀", "四杀", "五杀 (ACE)"]);
   const killCountInTags = clip.context_tags?.some((tag) => KILL_COUNT_TAGS.has(tag)) ?? false;
 
-  const selectable = !inQueue && !ftdEnqueueBlocked && Boolean(clip.client_clip_uid);
+  const selectable = !inQueue && !ftdEnqueueBlocked && !posthumousBlocked && Boolean(clip.client_clip_uid);
 
   return (
     <article
@@ -284,6 +288,7 @@ export default function ClipCard({
             </div>
           ) : null}
 
+          <PosthumousKillChoice clip={clip} disabled={inQueue} />
           {isRoundMontage && typeof onFreezeToDeathDraftChange === "function" && (
             <div
               className="mt-2"
@@ -315,7 +320,7 @@ export default function ClipCard({
           {onEnqueue || inQueue ? (
             <QueueAddButton
               queued={inQueue}
-              disabled={ftdEnqueueBlocked || !clip.client_clip_uid}
+              disabled={ftdEnqueueBlocked || posthumousBlocked || !clip.client_clip_uid}
               onAdd={onEnqueue && clip.client_clip_uid ? () => onEnqueue(clip.client_clip_uid) : undefined}
               onRemove={onDequeue}
             />

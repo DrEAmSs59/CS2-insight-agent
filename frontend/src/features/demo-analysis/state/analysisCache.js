@@ -6,7 +6,7 @@ function normalizedName(value) {
 
 // Keep in sync with MATCH_WORKSPACE_ALGORITHM_VERSION in match_workspace.py.
 // Keep this cache check aligned with the Free backend workspace version.
-export const DEMO_ANALYSIS_WORKSPACE_ALGORITHM_VERSION = "match-workspace-2026.10.31-loadout-evidence-v3";
+export const DEMO_ANALYSIS_WORKSPACE_ALGORITHM_VERSION = "match-workspace-2026.11.07-posthumous-kills-v1";
 
 export function hasCurrentDemoAnalysisVersion(result) {
   const workspace = result?.analysis_workspace;

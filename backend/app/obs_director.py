@@ -27,6 +27,7 @@ from obswebsocket.core import RecvThread, ReconnectThread
 
 from .demo_parse_isolation import IsolatedParseError, get_demo_match_summary_isolated
 from .chroma_demo_copy import ChromaDemoCopyReport, prepare_chroma_demo_copy
+from .demo_baseline_compat import repair_recording_baseline
 from .demo_parser import (
     BUFFER_SECONDS_AFTER,
     BUFFER_SECONDS_BEFORE,
@@ -79,14 +80,25 @@ def _prepare_recording_playback_demo_copy(
 ) -> ChromaDemoCopyReport | None:
     """Create only the disposable Demo that CS2 will play for recording."""
 
+    if source.resolve() == destination.resolve():
+        raise ValueError("recording Demo source and destination must differ")
+    if destination.exists():
+        raise FileExistsError(destination)
+    report = None
     if chroma_demo_map_name:
-        return prepare_chroma_demo_copy(
+        report = prepare_chroma_demo_copy(
             source,
             destination,
             map_name=chroma_demo_map_name,
         )
-    shutil.copy2(source, destination)
-    return None
+    else:
+        shutil.copy2(source, destination)
+    try:
+        repair_recording_baseline(destination)
+    except Exception:
+        destination.unlink(missing_ok=True)
+        raise
+    return report
 
 
 def _empty_voice_ban_payload(original: bytes) -> bytes:
@@ -2006,6 +2018,36 @@ def _apply_recording_forcecamera_policy(lines) -> list[str]:
     return [*_without_forcecamera_console_lines(lines), _OBSERVE_ALL_FORCECAMERA_COMMAND]
 
 
+def _apply_recording_xray_overhead_policy(lines) -> list[str]:
+    """Mirror the final recording X-ray/HUD settings onto native player IDs.
+
+    Ordinary recording does not run the advanced-playback overhead loop.
+    Resolve after saved batches and user warmup so stale force=1 cannot leave
+    enemy markers visible with X-ray off. POV appends its own forced commands
+    afterward and retains its teammate-only presentation.
+    """
+    commands = list(lines)
+    settings = {"spec_show_xray": False, "cl_draw_only_deathnotices": False}
+    for line in commands:
+        try:
+            parts = shlex.split(str(line).strip().rstrip(";"))
+        except ValueError:
+            continue
+        if len(parts) != 2 or parts[0].lower() not in settings:
+            continue
+        value = parts[1].lower()
+        if value in {"true", "false"}:
+            enabled = value == "true"
+        else:
+            try:
+                enabled = float(value) != 0
+            except ValueError:
+                continue
+        settings[parts[0].lower()] = enabled
+    visible = settings["spec_show_xray"] and not settings["cl_draw_only_deathnotices"]
+    return [*commands, f"cl_drawhud_force_teamid_overhead {1 if visible else -1}"]
+
+
 def _apply_recording_voice_policy(
     lines,
     *,
@@ -3533,6 +3575,7 @@ class OBSDirector:
             lines = self._append_config_warmup_console_lines(
                 [*_RECORDING_KEYBIND_RESET_LINES, *cmds]
             )
+            lines = _apply_recording_xray_overhead_policy(lines)
             return _apply_recording_forcecamera_policy(
                 _apply_recording_voice_policy(
                     lines,
@@ -3593,6 +3636,7 @@ class OBSDirector:
             lines.append("cl_grenadepreview 0")
             lines.append("sv_grenade_trajectory_time_spectator 0")
         lines = self._append_config_warmup_console_lines(lines)
+        lines = _apply_recording_xray_overhead_policy(lines)
         return _apply_recording_forcecamera_policy(
             _apply_recording_voice_policy(
                 lines,
@@ -3811,6 +3855,19 @@ class OBSDirector:
                     for plan in resolved_plans:
                         _plan_cache[plan.request_id] = plan
                     group_plans = [_plan_cache.get(dto.request_id) for dto in demo_requests]
+                    pending_requests = []
+                    for dto in demo_requests:
+                        prepared = _plan_cache.get(dto.request_id)
+                        if prepared is not None and not any(not s.disabled for s in prepared.segments):
+                            all_results.append({"request_id": dto.request_id, "success": True, "skipped": True,
+                                                "segment_results": [], "warnings": prepared.warnings,
+                                                "error": None})
+                        else:
+                            pending_requests.append(dto)
+                    demo_requests = pending_requests
+                    group_plans = [_plan_cache.get(dto.request_id) for dto in demo_requests]
+                    if not demo_requests:
+                        continue
                 except RecordingAborted:
                     raise
                 except Exception as exc:

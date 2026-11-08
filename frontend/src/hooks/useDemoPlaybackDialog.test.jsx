@@ -49,7 +49,7 @@ describe("useDemoPlaybackDialog restoration monitor", () => {
     fireEvent.click(screen.getByRole("button", { name: "open" }));
     const launchButton = await screen.findByRole("button", { name: /启动高级播放 Demo/ });
     expect(screen.getByText("自定义玩家昵称")).toBeTruthy();
-    expect(screen.getByRole("checkbox", { name: "启用改名" }).checked).toBe(false);
+    expect(screen.getByRole("switch", { name: "启用改名" }).checked).toBe(false);
     fireEvent.click(launchButton);
     await waitFor(() => expect(playDemoInCs2).toHaveBeenCalledTimes(1));
     expect(playDemoInCs2.mock.calls[0][0].advancedPlayback).not.toHaveProperty("player_aliases");

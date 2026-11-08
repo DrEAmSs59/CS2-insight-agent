@@ -1,5 +1,5 @@
 from enum import Enum
-from typing import Any, Optional
+from typing import Any, Optional, Literal
 
 from pydantic import BaseModel, Field, field_validator
 from ..player_aliases import PlayerAliases
@@ -85,6 +85,7 @@ class RoundInfo(BaseModel):
 
 
 class RecordingOptions(BaseModel):
+    posthumous_mode: Literal["skip", "victim"] = "skip"
     highlight_pre_sec: float = Field(default=3.0, ge=0, le=MAX_EVENT_PREROLL_SECONDS, allow_inf_nan=False)
     highlight_post_sec: float = 2.0
     kill_jump_cut_threshold_sec: float = 12.0
