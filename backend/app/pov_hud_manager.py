@@ -1187,6 +1187,14 @@ class PovHudManager:
             voice_build = build_recording_controller_vpk(voice_template,
                 recording_control=recording_control, session_console_commands=session_console_commands)
         package_bytes: Optional[bytes] = voice_build.vpk_bytes if voice_build is not None else None
+        if (package_bytes is not None and demo_path is not None
+                and (pov_visuals_enabled or advanced_playback_enabled)
+                and not recording_controller_only):
+            from .pov_radio_audio import bind_pov_radio_audio
+            try:
+                package_bytes = bind_pov_radio_audio(package_bytes, csgo_dir=self.get_csgo_dir())
+            except (ValueError, OSError, KeyError) as exc:
+                raise PovHudError(f"POV 角色喊话过滤资源准备失败：{exc}") from exc
         if persistent_killfeed:
             from .persistent_killfeed import bind_persistent_killfeed, killfeed_only_template
             try:
