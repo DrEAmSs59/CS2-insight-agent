@@ -26,8 +26,9 @@ def _manager_fixture(
     running=None,
 ) -> tuple[PovHudManager, Path, Path, Path]:
     # Map staging fixtures do not contain installed sounds or a HUD script.
-    from app import pov_radio_audio
+    from app import pov_radio_audio, pov_assist_highlight
     monkeypatch.setattr(pov_radio_audio, "bind_pov_radio_audio", lambda package, **kwargs: package)
+    monkeypatch.setattr(pov_assist_highlight, "bind_pov_assist_highlight", lambda package, *args, **kwargs: package)
     monkeypatch.setattr(pov_hud_manager.sys, "platform", "win32")
     monkeypatch.setattr(
         pov_hud_manager,

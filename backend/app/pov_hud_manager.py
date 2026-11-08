@@ -1209,6 +1209,15 @@ class PovHudManager:
                 )
             except (ValueError, OSError) as exc:
                 raise PovHudError(f"击杀常驻生成失败：{exc}") from exc
+        if (not persistent_killfeed and package_bytes is not None and demo_path is not None
+                and not recording_controller_only and (pov_visuals_enabled or advanced_playback_enabled)):
+            from .pov_assist_highlight import bind_pov_assist_highlight
+            try:
+                package_bytes = bind_pov_assist_highlight(package_bytes, demo_path)
+            except (ValueError, OSError) as exc:
+                # Optional visual correction: unsupported event data must retain
+                # the original stock notices, not prevent playback or recording.
+                logger.warning("POV assist highlight unavailable; retaining stock notices: %s", exc)
         explicit_map_name = normalize_skybox_map_name(map_name)
         detected_map_name = (
             normalize_skybox_map_name(voice_build.radar_map)
