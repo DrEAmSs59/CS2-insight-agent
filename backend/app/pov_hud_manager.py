@@ -1206,6 +1206,7 @@ class PovHudManager:
                     package_bytes, enabled=True, demo_path=demo_path,
                     target_xuid=persistent_killfeed_target_xuid,
                     segments=persistent_killfeed_segments, hide_clan_tags=hide_killfeed_clan_tags,
+                    csgo_dir=self.get_csgo_dir(),
                 )
             except (ValueError, OSError) as exc:
                 raise PovHudError(f"击杀常驻生成失败：{exc}") from exc

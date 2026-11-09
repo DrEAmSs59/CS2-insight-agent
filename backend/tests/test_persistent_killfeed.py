@@ -10,6 +10,14 @@ from app.persistent_killfeed import (build_killfeed_events, build_killfeed_round
 from app.panorama_resource import rewrite_panorama_data
 
 ROOT = Path(__file__).resolve().parents[2]
+ICONS = frozenset({'world', 'ak47', 'm4a1'})
+
+
+@pytest.fixture(autouse=True)
+def stock_equipment(monkeypatch):
+    # Composition tests use synthetic events; the stock VPK reader and actual
+    # resource binding are covered separately in test_equipment_icons.py.
+    monkeypatch.setattr('app.persistent_killfeed.load_equipment_icons', lambda path: ICONS)
 
 
 def parser():
@@ -40,7 +48,7 @@ def setting(vpk):
 
 
 def test_distinct_same_tick_events_keep_exact_identities_and_effects():
-    events = build_killfeed_events('unused', parser=parser())
+    events = build_killfeed_events('unused', equipment_icons=ICONS, parser=parser())
     assert events[0]['id'] != events[1]['id']
     assert events[0]['attacker'] == {'xuid':'76561198386265483','name':'A<&>','clan':'TAG','team':2}
     assert events[0]['weapon'] == 'ak47'
@@ -78,7 +86,7 @@ def test_missing_or_inconsistent_events_and_invalid_ranges_fail_closed():
     for table in ({}, {'tick':[1],'attacker_name':[],'attacker_steamid':[],
                        'user_name':[],'user_steamid':[],'weapon':[]}):
         with pytest.raises(ValueError):
-            build_killfeed_events('unused',parser=SimpleNamespace(parse_event=lambda *a,**k:table))
+            build_killfeed_events('unused',equipment_icons=ICONS,parser=SimpleNamespace(parse_event=lambda *a,**k:table))
     template=(ROOT/'pov/pov_voice_template.vpk').read_bytes()
     with pytest.raises(ValueError,match='范围'):
         bind_persistent_killfeed(template,enabled=True,demo_path='unused',parser=parser(),target_xuid='76561198386265483',
@@ -125,7 +133,12 @@ def test_manager_composes_killfeed_and_restores_game_files(monkeypatch, tmp_path
         assert hud, 'killfeed-only must not parse input tracks'
         return {}
     monkeypatch.setattr(pov_hud_manager, 'load_input_report', input_report)
-    events = build_killfeed_events('unused', parser=parser())
+    monkeypatch.setattr('app.pov_radio_audio.bind_pov_radio_audio', lambda vpk, **k: vpk)
+    def stock_icons(path):
+        assert path == csgo
+        return ICONS
+    monkeypatch.setattr(persistent_killfeed, 'load_equipment_icons', stock_icons)
+    events = build_killfeed_events('unused', equipment_icons=ICONS, parser=parser())
     monkeypatch.setattr('demoparser2.DemoParser', lambda path: parser())
     monkeypatch.setattr(persistent_killfeed, 'build_killfeed_events', lambda *a, **k: events)
     manager.install(demo_path=tmp_path/'test.dem', require_demo_hud=True, pov_visuals_enabled=hud,
