@@ -55,6 +55,7 @@ def test_persistent_killfeed_groups_protagonists_and_preserves_requested_cuts(mo
         {'start_tick':0, 'end_tick':50}, {'start_tick':200, 'end_tick':250}]
     assert installed[1]['persistent_killfeed_segments'] == [{'start_tick':100, 'end_tick':150}]
     for package in installed:
+        assert package['recording_round_banner_reset'] is True
         assert package['persistent_killfeed'] is True
         assert package['killfeed_only'] is not hud
         assert package['pov_visuals_enabled'] is hud
@@ -204,6 +205,8 @@ def test_manager_replaces_demo_package_and_rejects_static_fallback(
     monkeypatch.setattr(pov_hud_manager.sys, "platform", "win32")
     monkeypatch.setattr(pov_hud_manager, "is_cs2_running", lambda: False)
     monkeypatch.setattr(pov_hud_manager, "load_input_report", lambda _path: {})
+    # The lifecycle fixture has synthetic VPK bytes, not a game radio archive.
+    monkeypatch.setattr("app.pov_radio_audio.bind_pov_radio_audio", lambda vpk, **kwargs: vpk)
     cs2 = tmp_path / "game/bin/win64/cs2.exe"
     cs2.parent.mkdir(parents=True)
     cs2.write_bytes(b"exe")
