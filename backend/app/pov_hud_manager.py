@@ -978,6 +978,7 @@ class PovHudManager:
         killfeed_only: bool = False,
         recording_control: Optional[Mapping[str, Any]] = None,
         recording_controller_only: bool = False,
+        recording_round_banner_reset: bool = False,
         session_console_commands: Optional[list[str]] = None,
         persistent_killfeed_target_xuid: str = "",
         persistent_killfeed_segments: Optional[list[dict]] = None,
@@ -1007,6 +1008,7 @@ class PovHudManager:
                 killfeed_only=killfeed_only,
                 recording_control=recording_control,
                 recording_controller_only=recording_controller_only,
+                recording_round_banner_reset=recording_round_banner_reset,
                 session_console_commands=session_console_commands,
                 persistent_killfeed_target_xuid=persistent_killfeed_target_xuid,
                 persistent_killfeed_segments=persistent_killfeed_segments,
@@ -1039,6 +1041,7 @@ class PovHudManager:
         killfeed_only: bool = False,
         recording_control: Optional[Mapping[str, Any]] = None,
         recording_controller_only: bool = False,
+        recording_round_banner_reset: bool = False,
         session_console_commands: Optional[list[str]] = None,
         persistent_killfeed_target_xuid: str = "",
         persistent_killfeed_segments: Optional[list[dict]] = None,
@@ -1206,9 +1209,16 @@ class PovHudManager:
                     package_bytes, enabled=True, demo_path=demo_path,
                     target_xuid=persistent_killfeed_target_xuid,
                     segments=persistent_killfeed_segments, hide_clan_tags=hide_killfeed_clan_tags,
+                    csgo_dir=self.get_csgo_dir(),
                 )
             except (ValueError, OSError) as exc:
                 raise PovHudError(f"击杀常驻生成失败：{exc}") from exc
+        # Compose after killfeed_only_template, which replaces the shared HUD context.
+        if recording_round_banner_reset:
+            if package_bytes is None or demo_path is None:
+                raise PovHudError("录制横幅清理缺少 Demo 或 Panorama 模板")
+            from .round_banner import bind_round_banner_reset
+            package_bytes = bind_round_banner_reset(package_bytes, demo_path)
         if (not persistent_killfeed and package_bytes is not None and demo_path is not None
                 and not recording_controller_only and (pov_visuals_enabled or advanced_playback_enabled)):
             from .pov_assist_highlight import bind_pov_assist_highlight

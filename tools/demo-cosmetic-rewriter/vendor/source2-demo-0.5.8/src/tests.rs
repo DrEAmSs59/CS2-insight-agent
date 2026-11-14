@@ -171,6 +171,36 @@ fn ubit_var_round_trips_bucket_boundaries() {
 }
 
 #[test]
+fn fixed8_fields_keep_value_types_and_field_boundaries() {
+    use crate::entity::field::{Decode, Encode, FieldDecoder, FieldEncoder, FieldProperties, FieldType, Skip};
+
+    let properties = FieldProperties {
+        encoder: FieldEncoder::from_str("fixed8"),
+        encoder_flags: 0,
+        bit_count: 0,
+        low_value: 0.0,
+        high_value: 0.0,
+    };
+    for (field_type, expected) in [
+        ("int8", FieldValue::Signed8(-123)),
+        ("uint8[4]", FieldValue::Unsigned8(133)),
+        ("MoveType_t", FieldValue::Unsigned32(133)),
+    ] {
+        let decoder = FieldDecoder::from_field(&FieldType::new(field_type), properties);
+        let mut reader = SliceReader::new(&[0x85, 0x85, 0x2a]);
+        assert_eq!(decoder.decode(&mut reader), expected);
+        decoder.skip(&mut reader);
+        assert_eq!(reader.read_var_u32(), 0x2a);
+        let mut out = Vec::new();
+        let mut writer = BitstreamWriter::new(&mut out);
+        decoder.encode(&mut writer, &expected).unwrap();
+        writer.flush().unwrap();
+        drop(writer);
+        assert_eq!(out, [0x85]);
+    }
+}
+
+#[test]
 fn var_u32_round_trips_boundaries() {
     for value in [0, 1, 127, 128, 16_384, u32::MAX] {
         let mut out = Vec::new();

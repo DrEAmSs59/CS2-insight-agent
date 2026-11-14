@@ -3982,6 +3982,7 @@ class OBSDirector:
                                 require_demo_hud=True,
                                 voice_mode=pov_voice_mode_v3,
                                 pov_visuals_enabled=pov_on_v3,
+                                recording_round_banner_reset=True,
                                 persistent_killfeed=persistent_killfeed_v3,
                                 killfeed_only=not recording_hud_on_v3,
                                 **({"recording_control": recording_control_payload,

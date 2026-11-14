@@ -4,6 +4,7 @@ from pathlib import Path
 import re
 from .demo_voice_hud import VOICE_SCRIPT_PATH, VOICE_DATA_BEGIN, VOICE_DATA_END, read_inline_vpk, write_inline_vpk
 from .panorama_resource import rewrite_panorama_data
+from .equipment_icons import EquipmentIconResolver, load_equipment_icons
 
 KILLFEED_TEMPLATE_MARKER = b"/* INSIGHT_PANORAMA_KILLFEED_V1 */"
 RUNTIME_BEGIN = b"/*__CS2_INSIGHT_SHARED_KILLFEED_BEGIN__*/"
@@ -60,7 +61,8 @@ def build_killfeed_round_starts(parser):
     return sorted({0, *ticks})
 
 
-def build_killfeed_events(demo_path, *, parser=None):
+def build_killfeed_events(demo_path, *, equipment_icons, parser=None):
+    icons = EquipmentIconResolver(equipment_icons)
     if parser is None:
         from demoparser2 import DemoParser
         parser = DemoParser(str(demo_path))
@@ -81,9 +83,7 @@ def build_killfeed_events(demo_path, *, parser=None):
         row = {key: values[index] for key, values in table.items()}
         tick = int(row["tick"])
         victim, attacker, assister = [person(row, prefix) for prefix in ("user", "attacker", "assister")]
-        weapon = str(row["weapon"] or "world").removeprefix("weapon_")
-        if not re.fullmatch(r"[a-z0-9_]+", weapon):
-            raise ValueError("击杀常驻武器标识无效")
+        weapon = icons.resolve(row["weapon"])
         classes = [name for field, name in (
             ("headshot", "DeathNoticeHeadShot"), ("penetrated", "DeathNoticePenetrate"),
             ("revenge", "DeathNoticeRevenge"), ("dominated", "DeathNoticeDomination"),
@@ -101,7 +101,8 @@ def build_killfeed_events(demo_path, *, parser=None):
 
 def bind_persistent_killfeed(vpk: bytes, *, enabled: bool,
                             demo_path=None, segments=None, target_xuid: str = "",
-                            hide_clan_tags: bool = True, parser=None, assets_dir=None) -> bytes:
+                            hide_clan_tags: bool = True, parser=None, assets_dir=None,
+                            csgo_dir=None) -> bytes:
     """Compose the app-owned overlay into a temporary recording VPK."""
     setting = {"version": 1, "enabled": bool(enabled)}
     if enabled:
@@ -117,7 +118,8 @@ def bind_persistent_killfeed(vpk: bytes, *, enabled: bool,
             from demoparser2 import DemoParser
             parser = DemoParser(str(demo_path))
         round_starts = build_killfeed_round_starts(parser)
-        events = [event for event in build_killfeed_events(demo_path, parser=parser)
+        events = [event for event in build_killfeed_events(demo_path, parser=parser,
+                  equipment_icons=load_equipment_icons(csgo_dir))
                   if event["attacker"]["xuid"] == target_xuid and event["victim"]["xuid"] != target_xuid]
         setting.update(events=events, segments=ranges, target_xuid=target_xuid,
                        hide_clan_tags=bool(hide_clan_tags), round_starts=round_starts)

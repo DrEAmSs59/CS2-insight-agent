@@ -150,3 +150,27 @@ CI 预算：嵌入 resources 不超过 `120 MiB`，NSIS 安装包不超过 `45 M
 `skin-core.exe` **不在本仓库构建**；由闭源 `CS2-demo-anyskin` 产出后在打包时显式注入。只有设置 `CS2_SKIN_CORE_EXE` 时，`desktop:stage-resources` 才会复制它到 `frontend/src-tauri/bundle-resources/tools/skin-core.exe`；普通构建不会再从同级私有仓库静默拾取旧产物，缺失时 OSS CI 仍可正常构建。正式发布前请把本版主程序（及建议包含的 bundled `python.exe`）PE SHA-256 写入 skin-core 的父进程 allowlist，并用 anyskin `release-skin-core.ps1 -ParentPe ... -Pack` 产出 **release-ship + UPX** 的 `dist/skin-core.exe` 再注入（免费加固/加壳；非商业壳替代品）。
 
 Tauri 正式发布复用 `package_portable.ps1` 的 Python staging 能力。
+
+## Free 2.8.3 打包记录 · 2026-11-14
+
+- 应用基线：Free `develop` 的 `47c01f1a682149e539d9caedc0b2f126607dc43a`，加 insight11/fixed8 移植；包含 Python 运行时门禁、锁定依赖、可重建补丁及独立 DEM 工具的字段解码/编码修复。
+- AnySkin：远端 `main` 的 `9e38d2ed45b1d1854e39a6e7f27cf7ce1703ddd5`，直接使用上游发布脚本，生成本次最终宿主白名单。
+- 解析器：`demoparser2-0.41.4+cs2insight11-cp312-cp312-win_amd64.whl`，CPU revision `demotracer-21f6a9b-insight-cpu1-fixed8`。
+- wheel SHA256：`a4b8b584201d9710fe8c2bbeff4144748539bef595c66d75f61cbd8d897ccada`，与 Pro 已发布字节一致。
+- 已按所有者指令发布到 [Free 解析器 Release](https://github.com/DrEAmSs59/CS2-insight-agent/releases/tag/demoparser-runtime-v0.41.4-cs2insight11-r1)，保留 prerelease / 非 latest；wheel 与 `demoparser2-SHA256SUMS.txt` 已匿名下载复验。
+- 技术维护说明见 [insight11 与配套 DEM 工具](../../docs/dev-setup.zh-CN.md#insight11-与配套-dem-工具)。安装包结果和未测范围另在本节补全；解析器发布不代表安装包已发布。- 最终本地安装包：CS2 Insight Agent_2.8.3_x64-setup.exe，109320715 bytes（104.26 MiB）；SHA256：6a3f32310519525b7fc4745cc3d048ce15eba5c9364837fdcdaa77ed899acbf0。
+- 最终 Agent SHA256：dc886f650575c0d49d2fd83308f5e7278f00b137a3623482f3c923270cb381a4；bundled Python SHA256：651e2230e6f02b233b46c0f829f08df95864d8155e41802c4609fc4aab45c843。对应白名单已重新编译进最终 Skin Core，随后仅重打包 NSIS。
+- updater 公钥验签通过；安装包和 Agent 的 ProductVersion/FileVersion 均为 2.8.3。未配置 Authenticode 证书签名。
+- 最终安装包解包后逐文件核对 3613 个资源；隔离后端健康接口返回 status=ok/version=2.8.3，解包后的 Skin Core schemas 1/2/3 加密 IPC 通过。无 3D 检视器或 HLAE native-runtime。
+- 源码验证：51 项后端解析器/饰品/IPC 测试、1 项 fixed8 字段边界测试、8 项 Python staging 测试和 12 项前端边界/打包测试通过。新版 AnySkin 空 loadout 错误文案增加 badge，Free 校验器已与 Pro 对齐，未放宽精确匹配或父进程门禁。
+- 体积：resources=196.32 MiB，安装包=104.26 MiB，预计安装文件至少 252.96 MiB，超过本文旧预算 150/70/180 MiB；预算未通过。保留完整既有功能资源，未为缩小体积删减。
+- 范围：仅生成本地安装包；未上传安装包或更新客户端 feed，未执行实际安装/升级、GUI、真实 Demo 改写和 OBS 实录验收。解析器 Release 发布与上述本地包验收范围分开记录。
+### Free 2.8.3 发布 · 2026-11-15
+
+所有者明确授权发布上述既有安装包，采用 normal 更新模式及四条修复说明，并在上传完成后将 Free develop 合并进 main。本次未重建安装包，原安装/升级、GUI 和游戏实测未执行的范围保持不变。
+
+- R2：仅使用 Free 的 `cs2-insight-agent-updates` 桶；先备份旧 `latest.json` / `latest.yml`，安装包采用不覆盖已有对象的条件上传，公开下载 SHA256 验证后才通过 ETag 条件写入两个更新清单。上传和公开下载均设置两小时超时。
+- [Free 普通更新清单](https://pub-7920152f7eff45c19b5a1750e55acd42.r2.dev/latest.json)：version=2.8.3、update_mode=normal，四条修复说明与所有者提供的文本一致；`latest.yml` 的版本、安装包大小和 SHA512 与同一文件匹配。
+- [GitHub V2.8.3](https://github.com/DrEAmSs59/CS2-insight-agent/releases/tag/V2.8.3)：正式 latest Release，上传安装包、updater `.sig` 和 `SHA256SUMS`。标签指向实际构建源码提交 `de636e713f5dd7742a8a6e0a8da2320144e91665`，后续发布记录不改变构建来源。
+- R2 与 GitHub 的匿名公开下载均为 109320715 bytes，SHA256 均为 `6a3f32310519525b7fc4745cc3d048ce15eba5c9364837fdcdaa77ed899acbf0`，与已验本地最终包一致。
+- 发布记录只保留公开包身份、校验结果及清单备份；上传凭据未写入仓库或可分发产物。主程序发布不修改 Pro 或 HLAE 通道。

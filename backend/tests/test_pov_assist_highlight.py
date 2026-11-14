@@ -100,7 +100,10 @@ def test_manager_mounts_assist_for_pov_and_advanced_only_and_restores(monkeypatc
     monkeypatch.setattr(pov_radio_audio, 'bind_pov_radio_audio', lambda package, **kwargs: package)
     events = assist.build_assist_events('demo', parser=Parser())
     monkeypatch.setattr(assist, 'build_assist_events', lambda *a, **k: events)
-    monkeypatch.setattr(persistent_killfeed, 'bind_persistent_killfeed', lambda vpk, **k: vpk)
+    def persistent_bind(vpk, **kwargs):
+        assert kwargs['csgo_dir'] == csgo
+        return vpk
+    monkeypatch.setattr(persistent_killfeed, 'bind_persistent_killfeed', persistent_bind)
     manager.install(demo_path=tmp_path / 'test.dem', require_demo_hud=True,
                     pov_visuals_enabled=pov, advanced_playback_enabled=advanced,
                     persistent_killfeed=persistent)
