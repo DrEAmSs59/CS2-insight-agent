@@ -9,7 +9,7 @@ dependencies = [
     "cramjam==2.14.0",
     "lz4==4.4.5",
     "cryptography==50.0.2",
-    "demoparser2==0.41.4+cs2insight10; sys_platform == 'win32' and platform_machine == 'AMD64'",
+    "demoparser2==0.41.4+cs2insight11; sys_platform == 'win32' and platform_machine == 'AMD64'",
     "fastapi==0.157.0",
     "httpx==0.28.1",
     "obs-websocket-py==1.0",
@@ -37,4 +37,4 @@ package = false
 required-version = ">=0.13.5,<0.14"
 
 [tool.uv.sources]
-demoparser2 = { url = "https://github.com/DrEAmSs59/CS2-insight-agent/releases/download/demoparser-runtime-v0.41.4-cs2insight10-r1/demoparser2-0.41.4%2Bcs2insight10-cp312-cp312-win_amd64.whl", marker = "sys_platform == 'win32' and platform_machine == 'AMD64'" }
+demoparser2 = { url = "https://github.com/DrEAmSs59/CS2-insight-agent/releases/download/demoparser-runtime-v0.41.4-cs2insight11-r1/demoparser2-0.41.4%2Bcs2insight11-cp312-cp312-win_amd64.whl", marker = "sys_platform == 'win32' and platform_machine == 'AMD64'" }

@@ -206,7 +206,7 @@ requires-dist = [
     { name = "certifi", specifier = "==2026.10.19" },
     { name = "cramjam", specifier = "==2.14.0" },
     { name = "cryptography", specifier = "==50.0.2" },
-    { name = "demoparser2", marker = "platform_machine == 'AMD64' and sys_platform == 'win32'", url = "https://github.com/DrEAmSs59/CS2-insight-agent/releases/download/demoparser-runtime-v0.41.4-cs2insight10-r1/demoparser2-0.41.4%2Bcs2insight10-cp312-cp312-win_amd64.whl" },
+    { name = "demoparser2", marker = "platform_machine == 'AMD64' and sys_platform == 'win32'", url = "https://github.com/DrEAmSs59/CS2-insight-agent/releases/download/demoparser-runtime-v0.41.4-cs2insight11-r1/demoparser2-0.41.4%2Bcs2insight11-cp312-cp312-win_amd64.whl" },
     { name = "fastapi", specifier = "==0.157.0" },
     { name = "httpx", specifier = "==0.28.1" },
     { name = "lz4", specifier = "==4.4.5" },
@@ -228,10 +228,10 @@ parser-build = [{ name = "maturin", specifier = "==1.15.0" }]
 
 [[package]]
 name = "demoparser2"
-version = "0.41.4+cs2insight10"
-source = { url = "https://github.com/DrEAmSs59/CS2-insight-agent/releases/download/demoparser-runtime-v0.41.4-cs2insight10-r1/demoparser2-0.41.4%2Bcs2insight10-cp312-cp312-win_amd64.whl" }
+version = "0.41.4+cs2insight11"
+source = { url = "https://github.com/DrEAmSs59/CS2-insight-agent/releases/download/demoparser-runtime-v0.41.4-cs2insight11-r1/demoparser2-0.41.4%2Bcs2insight11-cp312-cp312-win_amd64.whl" }
 wheels = [
-    { url = "https://github.com/DrEAmSs59/CS2-insight-agent/releases/download/demoparser-runtime-v0.41.4-cs2insight10-r1/demoparser2-0.41.4%2Bcs2insight10-cp312-cp312-win_amd64.whl", hash = "sha256:650edc1708d88a451c2ae51d97cdc7b60cfc50fbc0101b83d6da7e78823487e3" },
+    { url = "https://github.com/DrEAmSs59/CS2-insight-agent/releases/download/demoparser-runtime-v0.41.4-cs2insight11-r1/demoparser2-0.41.4%2Bcs2insight11-cp312-cp312-win_amd64.whl", hash = "sha256:a4b8b584201d9710fe8c2bbeff4144748539bef595c66d75f61cbd8d897ccada" },
 ]
 
 [[package]]

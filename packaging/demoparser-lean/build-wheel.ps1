@@ -119,6 +119,15 @@ try {
     & git -C $sourceRoot apply $cpuPatch
     if ($LASTEXITCODE -ne 0) { throw 'Applying CPU overlay failed' }
 
+    if (-not $BenchmarkBaseline) {
+        $fixed8Patch = Join-Path $PSScriptRoot "fixed8.patch"
+        if ((Get-FileHash -LiteralPath $fixed8Patch -Algorithm SHA256).Hash.ToLowerInvariant() -ne $metadata.fixed8_patch_sha256) {
+            throw 'fixed8 overlay SHA256 mismatch'
+        }
+        & git -C $sourceRoot apply $fixed8Patch
+        if ($LASTEXITCODE -ne 0) { throw 'Applying fixed8 overlay failed' }
+    }
+
     $manifest = Join-Path $sourceRoot "src\python\Cargo.toml"
     $lockPath = Join-Path $sourceRoot "src\python\Cargo.lock"
     $versionQuoted = '"' + [string]$metadata.distribution_version + '"'

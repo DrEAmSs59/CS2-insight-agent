@@ -182,3 +182,19 @@ uv run --frozen python -m pytest backend/tests -q
 pnpm --dir frontend test
 cargo test --manifest-path frontend/src-tauri/Cargo.toml --locked
 ```
+
+## insight11 与配套 DEM 工具
+
+Free 使用 `demoparser2 0.41.4+cs2insight11`，原生版本标记为
+`demotracer-21f6a9b-insight-cpu1-fixed8`。默认依赖从 Free 仓库的
+[解析器预发布](https://github.com/DrEAmSs59/CS2-insight-agent/releases/tag/demoparser-runtime-v0.41.4-cs2insight11-r1)
+下载，`uv.lock` 锁定 wheel 的 SHA256；它与 Pro 使用同一份 wheel。
+
+fixed8 修复同时涉及 Python 解析器和独立 DEM 工具。配置 Python 后，
+还需重建工具，避免新 wheel 配旧 EXE 导致 Demo 入库失败：
+
+```powershell
+cargo build --release --locked --bins --manifest-path tools/demo-cosmetic-rewriter/Cargo.toml
+```
+
+正式桌面打包脚本会从源码重建所需工具。

@@ -6,7 +6,7 @@
 
 ## 实际调用链
 
-Tauri 开发启动优先使用 `.venv/Scripts/python.exe`，桌面包使用 `python/python.exe`。二者通过 `demoparser2` 的 CPython 原生扩展调用 Rust。`setup-backend-dev.ps1` 更新这两个已有环境；启动校验同时检查 wheel 版本 `0.41.4+cs2insight10` 和原生方法返回的 `demotracer-21f6a9b-insight-cpu1`。
+Tauri 开发启动优先使用 `.venv/Scripts/python.exe`，桌面包使用 `python/python.exe`。二者通过 `demoparser2` 的 CPython 原生扩展调用 Rust。`setup-backend-dev.ps1` 更新这两个已有环境；启动校验同时检查 wheel 版本 `0.41.4+cs2insight11` 和原生方法返回的 `demotracer-21f6a9b-insight-cpu1-fixed8`。
 
 Insight 特有的烟雾/inferno 采集、烟雾体素解码和 Parquet 读写保留。SharedString 和不可变共享列表在 Python、事件和 Parquet 出口转换为原有类型。购买事件支持 DemoTracer 的完整武器皮肤对象。标量使用原有 f32 精度，输出至 Python 时精确提升为 f64；新增嵌套皮肤结构保留属性原始位。
 
@@ -37,10 +37,10 @@ Insight 特有的烟雾/inferno 采集、烟雾体素解码和 Parquet 读写保
 也可使用已构建 wheel：
 
 ```powershell
-./packaging/demoparser-lean/setup-backend-dev.ps1 -WheelPath ./dist/wheels/demoparser2-0.41.4+cs2insight10-cp312-cp312-win_amd64.whl
+./packaging/demoparser-lean/setup-backend-dev.ps1 -WheelPath ./dist/wheels/demoparser2-0.41.4+cs2insight11-cp312-cp312-win_amd64.whl
 ```
 
-构建不依赖 DemoTracer 仓库仍在本机。公开仓库的 `pyproject.toml`/`uv.lock` 指向 GitHub pre-release 上的 `0.41.4+cs2insight10` wheel。新 checkout 用 `uv sync --frozen` 即可；本地重编后可用 `-WheelPath` 覆盖安装。发布 CI 在 `develop` 上构建并上传同一 pre-release tag。
+构建不依赖 DemoTracer 仓库仍在本机。`pyproject.toml` 和 `uv.lock` 固定远程安装使用的地址与哈希。新 wheel 发布前，使用上面的 `-BuildFromSource` 或 `-WheelPath` 安装。远程安装要求发布资产与 `uv.lock` 中的 SHA256 一致。
 
 ## 可复现基准
 
@@ -51,7 +51,7 @@ Insight 特有的烟雾/inferno 采集、烟雾体素解码和 Parquet 读写保
 ./packaging/demoparser-lean/build-wheel.ps1 -PythonExe ./.venv/Scripts/python.exe -OutputDir dist/wheels
 ./packaging/demoparser-lean/benchmark-cpu.ps1 `
   -BeforeWheel ./tmp/cpu-before/demoparser2-0.41.4+cs2insight9-cp312-cp312-win_amd64.whl `
-  -AfterWheel ./dist/wheels/demoparser2-0.41.4+cs2insight10-cp312-cp312-win_amd64.whl `
+  -AfterWheel ./dist/wheels/demoparser2-0.41.4+cs2insight11-cp312-cp312-win_amd64.whl `
   -Demos @('path/to/faceit.dem.zst', 'path/to/cache.dem', 'path/to/anubis.dem')
 ```
 

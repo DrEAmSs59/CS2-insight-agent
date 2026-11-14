@@ -28,7 +28,7 @@ def verify(executable: Path) -> None:
             expected = "items must not be empty"
             if schema == 3:
                 request["player_loadout"] = {}
-                expected = "player_loadout must select an agent or music kit"
+                expected = "player_loadout must select an agent, music kit, or badge"
             key = os.urandom(32)
             request_path, response_path = root / f"request-{schema}.bin", root / f"response-{schema}.bin"
             request_path.write_bytes(crypto["encrypt_request"](key, source, output, json.dumps(request).encode()))

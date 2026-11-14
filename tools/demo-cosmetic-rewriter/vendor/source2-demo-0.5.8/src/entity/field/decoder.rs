@@ -20,6 +20,9 @@ pub(crate) enum FieldDecoder {
     Boolean,
     String,
     BinaryBlock,
+    FixedI8,
+    FixedU8,
+    FixedU8AsU32,
     Signed8,
     Signed16,
     Signed32,
@@ -68,6 +71,7 @@ impl FieldDecoder {
             }
             "float32" | "GameTime_t" => FieldDecoder::Float32(Float32Decoder { properties }),
 
+            "int8" if properties.encoder == Some(FieldEncoder::Fixed8) => FieldDecoder::FixedI8,
             "int8" => FieldDecoder::Signed8,
             "int16" => FieldDecoder::Signed16,
             "int32" => FieldDecoder::Signed32,
@@ -75,12 +79,17 @@ impl FieldDecoder {
             #[cfg(feature = "dota")]
             "HeroID_t" => FieldDecoder::Signed32,
 
+            "uint8" | "BloodType" if properties.encoder == Some(FieldEncoder::Fixed8) => {
+                FieldDecoder::FixedU8
+            }
             "uint8" | "BloodType" => FieldDecoder::Unsigned8,
             "uint16" => FieldDecoder::Unsigned16,
             "uint64" | "CStrongHandle" | "HeroFacetKey_t" | "ResourceId_t" => {
                 FieldDecoder::Unsigned64(Unsigned64Decoder { properties })
             }
 
+            // Byte-sized enums are exposed as u32 by this parser.
+            _ if properties.encoder == Some(FieldEncoder::Fixed8) => FieldDecoder::FixedU8AsU32,
             _ => FieldDecoder::Unsigned32,
         }
     }
@@ -101,6 +110,9 @@ impl Decode for FieldDecoder {
                 String::from_utf8_lossy(&bytes).into_owned()
             }),
 
+            FieldDecoder::FixedI8 => FieldValue::Signed8(reader.read_bits(8) as i8),
+            FieldDecoder::FixedU8 => FieldValue::Unsigned8(reader.read_bits(8) as u8),
+            FieldDecoder::FixedU8AsU32 => FieldValue::Unsigned32(reader.read_bits(8)),
             FieldDecoder::Signed8 => FieldValue::Signed8(reader.read_var_i32() as i8),
             FieldDecoder::Signed16 => FieldValue::Signed16(reader.read_var_i32() as i16),
             FieldDecoder::Signed32 => FieldValue::Signed32(reader.read_var_i32()),
@@ -139,6 +151,9 @@ impl Skip for FieldDecoder {
                 reader.skip_bytes(n);
             }
 
+            FieldDecoder::FixedI8 | FieldDecoder::FixedU8 | FieldDecoder::FixedU8AsU32 => {
+                reader.skip_bits(8);
+            }
             FieldDecoder::Signed8 | FieldDecoder::Signed16 | FieldDecoder::Signed32 => {
                 reader.read_var_i32();
             }
@@ -172,6 +187,9 @@ impl Encode for FieldDecoder {
                 writer.write_var_u32(bytes.len() as u32)?;
                 writer.write_bytes(bytes.as_bytes())
             }
+            FieldDecoder::FixedI8 => writer.write_bits(8, value.i8() as u8 as u64),
+            FieldDecoder::FixedU8 => writer.write_bits(8, value.u8().into()),
+            FieldDecoder::FixedU8AsU32 => writer.write_bits(8, value.u32().into()),
             FieldDecoder::Signed8 => writer.write_var_i32(value.i8() as i32),
             FieldDecoder::Signed16 => writer.write_var_i32(value.i16() as i32),
             FieldDecoder::Signed32 => writer.write_var_i32(value.i32()),

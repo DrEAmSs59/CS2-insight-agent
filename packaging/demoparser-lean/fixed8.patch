@@ -1,0 +1,81 @@
+diff --git a/src/parser/src/first_pass/sendtables.rs b/src/parser/src/first_pass/sendtables.rs
+index d5b70ac..97a5491 100644
+--- a/src/parser/src/first_pass/sendtables.rs
++++ b/src/parser/src/first_pass/sendtables.rs
+@@ -234,6 +234,16 @@ impl<'a> FirstPassParser<'a> {
+         if field.encoder == "qangle_precise" {
+             field.decoder = QanglePresDecoder;
+         }
++        // CS2 14197 (2026-11-11) sends 8-bit fields (uint8, int8, 8-bit enums, also inside
++        // arrays and vectors) with the "fixed8" encoder: one raw byte instead of a varint.
++        // Only the element decoder changes; vector lengths stay varints (VectorField always uses UnsignedDecoder).
++        if field.encoder == "fixed8" {
++            field.decoder = match field.decoder {
++                SignedDecoder => Fixed8SignedDecoder,
++                Unsigned64Decoder => Fixed8Unsigned64Decoder,
++                _ => Fixed8Decoder,
++            };
++        }
+         field.field_type = ft;
+         Ok(field)
+     }
+diff --git a/src/parser/src/second_pass/decoder.rs b/src/parser/src/second_pass/decoder.rs
+index 99d5c3e..1182413 100644
+--- a/src/parser/src/second_pass/decoder.rs
++++ b/src/parser/src/second_pass/decoder.rs
+@@ -21,6 +21,9 @@ pub enum Decoder {
+     FloatCoordDecoder,
+     FloatSimulationTimeDecoder,
+     Fixed64Decoder,
++    Fixed8Decoder,
++    Fixed8SignedDecoder,
++    Fixed8Unsigned64Decoder,
+     QanglePitchYawDecoder,
+     Qangle3Decoder(u8),
+     QangleVarDecoder,
+@@ -72,6 +75,11 @@ impl<'a> Bitreader<'a> {
+             VectorNormalDecoder => Ok(Variant::VecXYZ(self.decode_normal_vec()?)),
+             Unsigned64Decoder => Ok(Variant::U64(self.read_varint_u_64()?)),
+             Fixed64Decoder => Ok(Variant::U64(self.decode_uint64()?)),
++            // "fixed8" encoder: one raw byte instead of a varint. Each variant keeps the
++            // Variant type the field had before it got the encoder.
++            Fixed8Decoder => Ok(Variant::U32(self.read_nbits(8)?)),
++            Fixed8SignedDecoder => Ok(Variant::I32(self.read_nbits(8)? as u8 as i8 as i32)),
++            Fixed8Unsigned64Decoder => Ok(Variant::U64(self.read_nbits(8)? as u64)),
+             VectorFloatCoordDecoder => Ok(Variant::VecXYZ(self.decode_vector_float_coord()?)),
+             AmmoDecoder => Ok(Variant::U32(self.decode_ammo()?)),
+             QanglePresDecoder => Ok(Variant::VecXYZ(self.decode_qangle_variant_pres()?)),
+@@ -496,6 +504,21 @@ mod tests {
+         }
+     }
+ 
++    #[test]
++    fn fixed8_reads_one_raw_byte() {
++        let qf_map = QfMapper {
++            idx: 0,
++            map: AHashMap::default(),
++        };
++        // 0x85 as a varint would also consume the next byte. fixed8 must not.
++        let bytes = [0x85, 0x01, 0xff, 0x7f];
++        let mut bitreader = Bitreader::new(&bytes);
++        assert_eq!(bitreader.decode(&Fixed8Decoder, &qf_map), Ok(Variant::U32(0x85)));
++        assert_eq!(bitreader.decode(&Fixed8Unsigned64Decoder, &qf_map), Ok(Variant::U64(1)));
++        assert_eq!(bitreader.decode(&Fixed8SignedDecoder, &qf_map), Ok(Variant::I32(-1)));
++        assert_eq!(bitreader.decode(&Fixed8SignedDecoder, &qf_map), Ok(Variant::I32(127)));
++    }
++
+     #[test]
+     fn test_qfloat_new() {
+         let qf = QuantalizedFloat::new(15, Some(1), None, Some(1024.000000));
+diff --git a/src/python/src/lib.rs b/src/python/src/lib.rs
+--- a/src/python/src/lib.rs
++++ b/src/python/src/lib.rs
+@@ -1047,7 +1047,7 @@
+ #[pymethods]
+ impl DemoParser {
+     #[staticmethod]
+-    pub fn cpu_runtime_revision() -> &'static str { "demotracer-21f6a9b-insight-cpu1" }
++    pub fn cpu_runtime_revision() -> &'static str { "demotracer-21f6a9b-insight-cpu1-fixed8" }
+ 
+     /// Most recent native parse duration, excluding Python materialization/export.
+     pub fn last_parse_seconds(&self) -> f64 {
