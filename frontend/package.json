@@ -32,8 +32,8 @@
   "devDependencies": {
     "@aws-sdk/client-s3": "3.1154.0",
     "@aws-sdk/lib-storage": "3.1154.0",
-    "@ianlucas/cs2-lib": "9.8.0",
-    "@ianlucas/cs2-lib-inspect": "9.5.0",
+    "@ianlucas/cs2-lib": "9.11.0",
+    "@ianlucas/cs2-lib-inspect": "9.6.0",
     "@tailwindcss/vite": "^4.3.3",
     "@tauri-apps/cli": "^2.12.4",
     "@testing-library/jest-dom": "^7.0.1",
