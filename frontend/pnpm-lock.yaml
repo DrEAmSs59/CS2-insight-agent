@@ -195,11 +195,11 @@ importers:
         specifier: 3.1154.0
         version: 3.1154.0(@aws-sdk/client-s3@3.1154.0)
       '@ianlucas/cs2-lib':
-        specifier: 9.8.0
-        version: 9.8.0
+        specifier: 9.11.0
+        version: 9.11.0
       '@ianlucas/cs2-lib-inspect':
-        specifier: 9.5.0
-        version: 9.5.0(@ianlucas/cs2-lib@9.8.0)
+        specifier: 9.6.0
+        version: 9.6.0(@ianlucas/cs2-lib@9.11.0)
       '@tailwindcss/vite':
         specifier: ^4.3.3
         version: 4.3.3(vite@8.3.5(esbuild@0.28.2)(jiti@2.7.0))
@@ -557,14 +557,14 @@ packages:
       '@noble/hashes':
         optional: true
 
-  '@ianlucas/cs2-lib-inspect@9.5.0':
-    resolution: {integrity: sha512-xwxa5Fkfdl/s/2yxOv8ezyAHKBn4AQPY9k2pn7rVmXcgGqdH5WLJ6scADqaCeRez0GCK6iv9DzjzJ9RfkQbipg==}
+  '@ianlucas/cs2-lib-inspect@9.6.0':
+    resolution: {integrity: sha512-LDC6NS+KcRrHyYRzCUPIIJnYoOGfOS+tvcJ5nv9P/BPxN9gH2mHlm+20u4sN8Q8SYJpsaJwGcC0P94VKMWlNzg==}
     engines: {node: '>=20'}
     peerDependencies:
-      '@ianlucas/cs2-lib': ^9.5.0
+      '@ianlucas/cs2-lib': ^9.10.0
 
-  '@ianlucas/cs2-lib@9.8.0':
-    resolution: {integrity: sha512-WQd1yE1E8DMUnLQ/l2NwmMqpRYoJFcX7TsbDxplg+lyY4IiyousC2DKNcd7Sqsn9FNYwCd/7aLLfbzxs/1GLrQ==}
+  '@ianlucas/cs2-lib@9.11.0':
+    resolution: {integrity: sha512-UzHJxO4lAHkTVhJF5YlA6YTi+gt2pBIUSw13barrcED3JEhQdxeZryXFATGLJIsO4RANQclEN1dVsKTyS6Qk5g==}
     engines: {node: '>=20'}
 
   '@jridgewell/gen-mapping@0.3.13':
@@ -2011,14 +2011,14 @@ snapshots:
 
   '@exodus/bytes@1.16.0': {}
 
-  '@ianlucas/cs2-lib-inspect@9.5.0(@ianlucas/cs2-lib@9.8.0)':
+  '@ianlucas/cs2-lib-inspect@9.6.0(@ianlucas/cs2-lib@9.11.0)':
     dependencies:
-      '@ianlucas/cs2-lib': 9.8.0
+      '@ianlucas/cs2-lib': 9.11.0
       '@protobuf-ts/runtime': 2.11.1
       buffer: 6.0.3
       crc-32: 1.2.2
 
-  '@ianlucas/cs2-lib@9.8.0': {}
+  '@ianlucas/cs2-lib@9.11.0': {}
 
   '@jridgewell/gen-mapping@0.3.13':
     dependencies:
