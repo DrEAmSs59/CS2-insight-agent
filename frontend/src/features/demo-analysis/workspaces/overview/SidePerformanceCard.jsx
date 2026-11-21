@@ -1,3 +1,4 @@
+import { useT } from "../../../../i18n/useT.js";
 import { ShieldCheck } from "lucide-react";
 import InsightCard from "./InsightCard";
 
@@ -46,15 +47,16 @@ export default function SidePerformanceCard({
   teamBName = "Team B",
   className = "",
 }) {
+  const t = useT();
   const summary = model?.summary || "";
   const showOt = Boolean(model?.hasOvertime);
 
   return (
     <InsightCard
-      title="阵营表现"
+      title={t("analysis.overview.sidePerformance")}
       icon={ShieldCheck}
       tone="green"
-      summary="各半场 T / CT 方赢下的回合"
+      summary={t("analysis.overview.sideTableHint")}
       className={className}
     >
       <div className="flex min-h-0 flex-1 flex-col">
@@ -62,11 +64,11 @@ export default function SidePerformanceCard({
           <table className="w-full min-w-[240px] text-xs">
             <thead>
               <tr className="text-[11px] text-cs2-text-muted">
-                <th className="pb-1.5 text-left font-medium">队伍</th>
-                <th className="pb-1.5 font-medium">上半场 T/CT</th>
-                <th className="pb-1.5 font-medium">下半场 T/CT</th>
-                {showOt ? <th className="pb-1.5 font-medium">加时 T/CT</th> : null}
-                <th className="pb-1.5 font-medium">总计</th>
+                <th className="pb-1.5 text-left font-medium">{t("analysis.overview.team")}</th>
+                <th className="pb-1.5 font-medium">{t("analysis.overview.firstHalfSides")}</th>
+                <th className="pb-1.5 font-medium">{t("analysis.overview.secondHalfSides")}</th>
+                {showOt ? <th className="pb-1.5 font-medium">{t("analysis.overview.overtimeSides")}</th> : null}
+                <th className="pb-1.5 font-medium">{t("analysis.overview.total")}</th>
               </tr>
             </thead>
             <tbody>

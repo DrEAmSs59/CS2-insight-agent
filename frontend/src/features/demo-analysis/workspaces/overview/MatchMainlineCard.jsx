@@ -1,3 +1,4 @@
+import { useT } from "../../../../i18n/useT.js";
 import { Crosshair } from "lucide-react";
 import { IconTile } from "../../AnalysisUi.jsx";
 
@@ -23,7 +24,8 @@ const TAG_SHAPE = "inline-flex h-6 items-center rounded-full px-2.5 text-[11px] 
  * }} props
  */
 export default function MatchMainlineCard({ mainline }) {
-  const title = mainline?.title || "比赛主线";
+  const t = useT();
+  const title = mainline?.title || t("analysis.overview.mainline");
   const text = mainline?.text || "";
   const tags = Array.isArray(mainline?.tags) ? mainline.tags.slice(0, 3) : [];
   const maxLead = Number(mainline?.maxLead || 0);
@@ -52,12 +54,12 @@ export default function MatchMainlineCard({ mainline }) {
         ))}
         {maxLead > 0 ? (
           <span data-overview-neutral-tag className={`${TAG_SHAPE} bg-cs2-bg-input text-cs2-text-secondary`}>
-            最大领先 {maxLead}
+            {t("analysis.overview.maxLead", { n: maxLead })}
           </span>
         ) : null}
         {longestStreak > 0 ? (
           <span data-overview-neutral-tag className={`${TAG_SHAPE} bg-cs2-bg-input text-cs2-text-secondary`}>
-            最长连胜 {longestStreak}
+            {t("analysis.overview.longestStreak", { n: longestStreak })}
           </span>
         ) : null}
       </div>

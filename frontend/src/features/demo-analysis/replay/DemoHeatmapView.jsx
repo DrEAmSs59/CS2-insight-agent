@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import { getDemoRadarMapUrl } from "../../../api/api";
 import useSessionState from "../../../hooks/useSessionState";
+import { useLocaleStore } from "../../../i18n/localeStore.js";
 import { useT } from "../../../i18n/useT.js";
 import {
   createReplayCacheKey,
@@ -22,6 +23,7 @@ import {
   buildReplayHeatmapSet,
   replayHeatmapPlayerKey,
 } from "./replayHeatmap";
+import { replayErrorMessage } from "./replayErrorMessage.js";
 import { resolveReplayTransform } from "./replayRadarTransform";
 import { playerDisplayName, playerIdentityKey } from "../../../utils/playerIdentity.js";
 import ReplayCameraControls from "./ReplayCameraControls";
@@ -132,6 +134,7 @@ export default function DemoHeatmapView({
   selectedPlayer = "",
 }) {
   const t = useT();
+  const locale = useLocaleStore((state) => state.effectiveLocale);
   const rounds = workspace?.rounds || [];
   const mapName = mapKey(workspace?.map_name);
   const tickRate = Math.max(1, Number(workspace?.tick_rate) || 64);
@@ -175,7 +178,7 @@ export default function DemoHeatmapView({
     total: 0,
     data: null,
     transform: null,
-    error: "",
+    error: null,
   });
 
   const jobs = useMemo(() => rounds
@@ -199,11 +202,11 @@ export default function DemoHeatmapView({
   useEffect(() => {
     let cancelled = false;
     if (!demoPath) {
-      setLoadState((current) => ({ ...current, status: "error", error: t("analysis.heatmap.missingPath") }));
+      setLoadState((current) => ({ ...current, status: "error", error: { key: "analysis.heatmap.missingPath" } }));
       return undefined;
     }
     if (!jobs.length) {
-      setLoadState((current) => ({ ...current, status: "error", error: t("analysis.heatmap.noRounds") }));
+      setLoadState((current) => ({ ...current, status: "error", error: { key: "analysis.heatmap.noRounds" } }));
       return undefined;
     }
 
@@ -221,7 +224,7 @@ export default function DemoHeatmapView({
       total: jobs.length,
       data: null,
       transform: null,
-      error: "",
+      error: null,
     });
 
     const run = async () => {
@@ -261,7 +264,17 @@ export default function DemoHeatmapView({
         responseTransform: liveTransform,
         workspaceTransform: workspace?.map_transform,
       });
-      if (!transform) throw new Error(t("analysis.heatmap.missingTransform"));
+      if (!transform) {
+        setLoadState({
+          status: "error",
+          completed: 0,
+          total: jobs.length,
+          data: null,
+          transform: null,
+          error: { key: "analysis.heatmap.missingTransform" },
+        });
+        return;
+      }
       const hasMapLayers = Number.isFinite(Number(transform.lower_level_max_units))
         && ["de_nuke", "de_vertigo"].includes(mapName);
       const data = buildReplayHeatmapSet({
@@ -277,7 +290,7 @@ export default function DemoHeatmapView({
         total: jobs.length,
         data,
         transform,
-        error: "",
+        error: null,
       };
       rememberHeatmap(heatmapCacheKey, readyState);
       setLoadState(readyState);
@@ -291,13 +304,13 @@ export default function DemoHeatmapView({
         total: jobs.length,
         data: null,
         transform: null,
-        error: reason?.response?.data?.detail || reason?.message || t("analysis.heatmap.loadFailed"),
+        error: { reason, key: "analysis.heatmap.loadFailed" },
       });
     });
     return () => {
       cancelled = true;
     };
-  }, [demoPath, heatmapCacheKey, jobs, mapName, playerTeamKeys, reloadEpoch, t, workspace?.map_transform]);
+  }, [demoPath, heatmapCacheKey, jobs, mapName, playerTeamKeys, reloadEpoch, workspace?.map_transform]);
 
   const hasMapLayers = Boolean(loadState.data?.lower);
   useEffect(() => {
@@ -524,7 +537,7 @@ export default function DemoHeatmapView({
             <div className="absolute inset-0 z-20 flex items-center justify-center bg-black/70 p-8 text-center">
               <div>
                 <Flame className="mx-auto h-7 w-7 text-rose-400" />
-                <p className="mt-3 max-w-md text-xs leading-relaxed text-white/75">{loadState.error}</p>
+                <p className="mt-3 max-w-md text-xs leading-relaxed text-white/75">{replayErrorMessage(loadState.error, locale, t)}</p>
                 <AccentButton className="mt-4" onClick={() => setReloadEpoch((value) => value + 1)}>
                   <RefreshCw className="h-3.5 w-3.5" aria-hidden />
                   {t("analysis.heatmap.retry")}

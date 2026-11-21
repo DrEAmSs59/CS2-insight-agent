@@ -1,3 +1,4 @@
+import { useT } from "../../../../i18n/useT.js";
 import { Play } from "lucide-react";
 import { AccentButton, SectionHeader } from "../../AnalysisUi.jsx";
 
@@ -20,19 +21,19 @@ const TONE_STYLES = {
   },
 };
 
-function typeBadgeLabel(types) {
+function typeBadgeLabel(types, t) {
   const set = new Set(types || []);
-  if (set.has("final")) return "终局";
-  if (set.has("clutch")) return "残局";
+  if (set.has("final")) return t("analysis.overview.badgeFinal");
+  if (set.has("clutch")) return t("analysis.overview.clutch");
   if (set.has("ace")) return "ACE";
-  if (set.has("multikill")) return "四杀";
-  if (set.has("force_upset")) return "强起";
-  if (set.has("economy_upset")) return "经济";
-  if (set.has("pistol")) return "手枪局";
-  if (set.has("lead_change")) return "转折";
-  if (set.has("streak_start")) return "连胜";
-  if (set.has("match_point")) return "赛点";
-  return "关键";
+  if (set.has("multikill")) return t("analysis.overview.quadKill");
+  if (set.has("force_upset")) return t("analysis.overview.badgeForce");
+  if (set.has("economy_upset")) return t("analysis.overview.badgeEconomy");
+  if (set.has("pistol")) return t("analysis.overview.pistolRound");
+  if (set.has("lead_change")) return t("analysis.overview.badgeLeadChange");
+  if (set.has("streak_start")) return t("analysis.overview.badgeStreak");
+  if (set.has("match_point")) return t("analysis.overview.badgeMatchPoint");
+  return t("analysis.overview.badgeKey");
 }
 
 function resolveTone(round) {
@@ -45,9 +46,9 @@ function resolveTone(round) {
   return "blue";
 }
 
-function roundHeading(round) {
+function roundHeading(round, t) {
   const n = round.roundNumber;
-  if (n == null) return "回合";
+  if (n == null) return t("analysis.overview.round");
   if (round.scoreA != null && round.scoreB != null) {
     return `R${n} ${round.scoreA}:${round.scoreB}`;
   }
@@ -62,6 +63,7 @@ function roundHeading(round) {
  * }} props
  */
 export default function KeyRoundsTimeline({ rounds, onOpenRound, onOpenReplayRound }) {
+  const t = useT();
   const list = Array.isArray(rounds) ? rounds : [];
   const canOpen = typeof onOpenRound === "function";
   const canReplay = typeof onOpenReplayRound === "function";
@@ -72,8 +74,8 @@ export default function KeyRoundsTimeline({ rounds, onOpenRound, onOpenReplayRou
     <section>
       <SectionHeader
         level={2}
-        title="关键回合"
-        description={canReplay ? "点击卡片查看回合详情，或直接打开 2D 回放" : "点击卡片查看回合详情"}
+        title={t("analysis.overview.keyRounds")}
+        description={canReplay ? t("analysis.overview.keyRoundsReplayHint") : t("analysis.overview.keyRoundsHint")}
         className="mb-2"
       />
 
@@ -107,18 +109,18 @@ export default function KeyRoundsTimeline({ rounds, onOpenRound, onOpenReplayRou
                 >
                   <div className="flex items-center gap-1.5">
                     <span className="whitespace-nowrap font-mono text-[13px] font-bold text-cs2-text-primary">
-                      {roundHeading(round)}
+                      {roundHeading(round, t)}
                     </span>
                     <span
                       data-overview-tone-tag
                       className={`inline-flex h-5 items-center rounded-full px-2 text-[11px] font-semibold ${styles.badge}`}
                     >
-                      {typeBadgeLabel(round.types)}
+                      {typeBadgeLabel(round.types, t)}
                     </span>
                   </div>
                   <p className="mt-1.5 truncate text-[13px] font-semibold text-cs2-text-primary">
                     {round.playerName ? `${round.playerName} · ` : ""}
-                    {round.title || "关键回合"}
+                    {round.title || t("analysis.overview.keyRounds")}
                   </p>
                   <p className="mt-0.5 line-clamp-2 text-[11.5px] leading-snug text-cs2-text-muted">
                     {round.description || ""}
@@ -127,14 +129,14 @@ export default function KeyRoundsTimeline({ rounds, onOpenRound, onOpenReplayRou
                     <div className="mt-auto pt-2">
                       <AccentButton
                         size="sm"
-                        aria-label={`打开 R${roundNumber} 的 2D 回放`}
+                        aria-label={t("analysis.overview.keyRoundReplay", { n: roundNumber })}
                         onClick={(e) => {
                           e.stopPropagation();
                           onOpenReplayRound(roundNumber);
                         }}
                       >
                         <Play className="h-3 w-3" fill="currentColor" aria-hidden />
-                        2D 回放
+                        {t("analysis.workspace.tabReplay")}
                       </AccentButton>
                     </div>
                   ) : null}

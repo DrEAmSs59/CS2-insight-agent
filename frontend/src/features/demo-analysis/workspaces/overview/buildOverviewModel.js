@@ -1,3 +1,4 @@
+import { translate } from "../../../../i18n/translate.js";
 import {
   num,
   ratio,
@@ -267,22 +268,22 @@ function computeRoundStats(rounds, phaseMeta, match) {
   };
 }
 
-function buildTags(match, stats, phaseMeta, sidePerformance) {
+function buildTags(match, stats, phaseMeta, sidePerformance, t) {
   const candidates = [];
   const { scoreDiff } = match;
   const hasReverse = match.winnerKey && stats.winnerMaxDeficit >= 3;
   const hasBlowout = match.state === "completed" && scoreDiff >= 7;
 
   if (phaseMeta.overtimeRounds.length > 0) {
-    candidates.push({ key: "overtime", label: "加时鏖战", tone: "accent" });
+    candidates.push({ key: "overtime", label: t("analysis.overview.tag.overtime"), tone: "accent" });
   }
   if (hasReverse) {
-    candidates.push({ key: "reverse", label: "逆转局", tone: "amber" });
+    candidates.push({ key: "reverse", label: t("analysis.overview.tag.reverse"), tone: "amber" });
   } else if (hasBlowout) {
-    candidates.push({ key: "blowout", label: "碾压局", tone: "amber" });
+    candidates.push({ key: "blowout", label: t("analysis.overview.tag.blowout"), tone: "amber" });
   }
   if (stats.leadChanges >= 3) {
-    candidates.push({ key: "back-and-forth", label: "拉锯局", tone: "blue" });
+    candidates.push({ key: "back-and-forth", label: t("analysis.overview.tag.backAndForth"), tone: "blue" });
   }
 
   const ctWins = (sidePerformance.teamA?.total?.ct || 0) + (sidePerformance.teamB?.total?.ct || 0);
@@ -290,14 +291,14 @@ function buildTags(match, stats, phaseMeta, sidePerformance) {
   const totalSideRounds = ctWins + tWins;
   if (totalSideRounds > 0) {
     if (ctWins - tWins >= 4 && ratio(ctWins, totalSideRounds) >= 0.6) {
-      candidates.push({ key: "ct-dominant", label: "CT 方主导", tone: "blue" });
+      candidates.push({ key: "ct-dominant", label: t("analysis.overview.tag.ctDominant"), tone: "blue" });
     } else if (tWins - ctWins >= 4 && ratio(tWins, totalSideRounds) >= 0.6) {
-      candidates.push({ key: "t-dominant", label: "T 方主导", tone: "amber" });
+      candidates.push({ key: "t-dominant", label: t("analysis.overview.tag.tDominant"), tone: "amber" });
     }
   }
 
   if (stats.longestStreak.length >= 5) {
-    candidates.push({ key: "streak", label: "连胜拉开", tone: "accent" });
+    candidates.push({ key: "streak", label: t("analysis.overview.tag.streak"), tone: "accent" });
   }
 
   const tags = [];
@@ -314,8 +315,8 @@ function buildTags(match, stats, phaseMeta, sidePerformance) {
   return tags;
 }
 
-function buildMainline(data, match, phaseMeta, stats, sidePerformance) {
-  const title = "比赛主线";
+function buildMainline(data, match, phaseMeta, stats, sidePerformance, t) {
+  const title = t("analysis.overview.mainline");
   const { scoreA, scoreB } = match;
 
   const maxLead = Math.max(stats.maxLeadA || 0, stats.maxLeadB || 0) || undefined;
@@ -326,7 +327,7 @@ function buildMainline(data, match, phaseMeta, stats, sidePerformance) {
   if (match.state === "empty") {
     return {
       title,
-      text: "当前解析结果没有可用于生成概览的正式回合。",
+      text: t("analysis.overview.noMainline"),
       tags: [],
       ...metrics,
     };
@@ -335,8 +336,8 @@ function buildMainline(data, match, phaseMeta, stats, sidePerformance) {
   if (match.state === "tied") {
     return {
       title,
-      text: `双方当前比分为 ${scoreA}:${scoreB}，比赛结束时战平。`,
-      tags: buildTags(match, stats, phaseMeta, sidePerformance),
+      text: t("analysis.overview.matchDraw", { a: scoreA, b: scoreB }),
+      tags: buildTags(match, stats, phaseMeta, sidePerformance, t),
       ...metrics,
     };
   }
@@ -344,8 +345,8 @@ function buildMainline(data, match, phaseMeta, stats, sidePerformance) {
   if (match.state === "incomplete") {
     return {
       title,
-      text: `Demo 在 ${scoreA}:${scoreB} 时结束，比赛尚未分出胜负。`,
-      tags: buildTags(match, stats, phaseMeta, sidePerformance),
+      text: t("analysis.overview.matchIncomplete", { a: scoreA, b: scoreB }),
+      tags: buildTags(match, stats, phaseMeta, sidePerformance, t),
       ...metrics,
     };
   }
@@ -362,37 +363,37 @@ function buildMainline(data, match, phaseMeta, stats, sidePerformance) {
     stats.winnerMaxDeficit >= 3 &&
     stats.winnerOtRounds > 0
   ) {
-    text = `${winnerName} 常规阶段一度落后 ${stats.winnerMaxDeficit} 分，加时完成反超并以 ${winnerScore}:${loserScore} 获胜。`;
+    text = t("analysis.overview.overtimeComeback", { winner: winnerName, a: winnerScore, b: loserScore, deficit: stats.winnerMaxDeficit });
   } else if (match.hasOvertime) {
-    text = `双方常规阶段战至 ${stats.regulationScore}，${winnerName} 加时拿下 ${stats.winnerOtRounds} 回合，以 ${winnerScore}:${loserScore} 获胜。`;
+    text = t("analysis.overview.overtimeWin", { winner: winnerName, a: winnerScore, b: loserScore, regulation: stats.regulationScore, n: stats.winnerOtRounds });
   } else if (stats.winnerMaxDeficit >= 3) {
-    text = `${winnerName} 曾落后 ${stats.winnerMaxDeficit} 分，从 R${stats.turningRound || "?"} 扭转走势，以 ${winnerScore}:${loserScore} 完成逆转。`;
+    text = t("analysis.overview.comebackWin", { winner: winnerName, a: winnerScore, b: loserScore, deficit: stats.winnerMaxDeficit, round: stats.turningRound || "?" });
   } else if (match.scoreDiff >= 7) {
-    text = `${winnerName} 从 R${stats.leadRound} 开始建立优势，并以 ${winnerScore}:${loserScore} 轻松获胜。`;
+    text = t("analysis.overview.dominantWin", { winner: winnerName, a: winnerScore, b: loserScore, round: stats.leadRound });
   } else if (stats.secondHalfGain >= 4) {
-    text = `${loserName} 下半场追回 ${stats.secondHalfGain} 分，但 ${winnerName} 守住优势，以 ${winnerScore}:${loserScore} 获胜。`;
+    text = t("analysis.overview.heldLead", { winner: winnerName, a: winnerScore, b: loserScore, loser: loserName, gain: stats.secondHalfGain });
   } else if (match.scoreDiff <= 2) {
-    text = `${winnerName} 以 ${winnerScore}:${loserScore} 险胜，双方分差较小，节奏胶着。`;
+    text = t("analysis.overview.closeWin", { winner: winnerName, a: winnerScore, b: loserScore });
   } else {
-    text = `${winnerName} 以 ${winnerScore}:${loserScore} 获胜。`;
+    text = t("analysis.overview.matchWin", { winner: winnerName, a: winnerScore, b: loserScore });
   }
 
   return {
     title,
     text,
-    tags: buildTags(match, stats, phaseMeta, sidePerformance),
+    tags: buildTags(match, stats, phaseMeta, sidePerformance, t),
     ...metrics,
   };
 }
 
-function buildTrend(rounds, phaseMeta, stats, match) {
+function buildTrend(rounds, phaseMeta, stats, match, t) {
   const { stageScores, longestStreak } = stats;
   // Compact layout: half / OT / lead / streak live in the chart footer — no prose summary.
   let summary = "";
   if (!rounds.length) {
-    summary = "暂无可用回合数据。";
+    summary = t("analysis.overview.noTrend");
   } else if (match.state === "tied" || match.state === "incomplete") {
-    summary = `当前比分 ${match.scoreA}:${match.scoreB}。`;
+    summary = t("analysis.overview.currentScore", { a: match.scoreA, b: match.scoreB });
   }
 
   return {
@@ -412,7 +413,7 @@ function incrementSideBucket(bucket, side) {
   bucket.total += 1;
 }
 
-function buildSidePerformance(rounds, phaseMeta, data) {
+function buildSidePerformance(rounds, phaseMeta, data, t) {
   const teamA = emptySideBucket();
   const teamB = emptySideBucket();
 
@@ -459,27 +460,27 @@ function buildSidePerformance(rounds, phaseMeta, data) {
   const nameA = teamName(data, "a");
   const nameB = teamName(data, "b");
 
-  let summary = "双方在 T/CT 两侧的得分差异不明显。";
+  let summary = t("analysis.overview.balancedSides");
   if (teamACtGap >= 4 && teamACtGap > teamBCtGap) {
-    summary = `${nameA} 在 CT 方拿下 ${teamA.total.ct} 回合，CT 表现更胜一筹`;
+    summary = t("analysis.overview.sideLead", { name: nameA, side: "CT", n: teamA.total.ct });
     dominantSide = "CT";
   } else if (teamBCtGap >= 4 && teamBCtGap > teamACtGap) {
-    summary = `${nameB} 在 CT 方拿下 ${teamB.total.ct} 回合，CT 表现更胜一筹`;
+    summary = t("analysis.overview.sideLead", { name: nameB, side: "CT", n: teamB.total.ct });
     dominantSide = "CT";
   } else if (teamATGap >= 4 && teamATGap > teamBTGap) {
-    summary = `${nameA} 在 T 方拿下 ${teamA.total.t} 回合，T 表现更胜一筹`;
+    summary = t("analysis.overview.sideLead", { name: nameA, side: "T", n: teamA.total.t });
     dominantSide = "T";
   } else if (teamBTGap >= 4 && teamBTGap > teamATGap) {
-    summary = `${nameB} 在 T 方拿下 ${teamB.total.t} 回合，T 表现更胜一筹`;
+    summary = t("analysis.overview.sideLead", { name: nameB, side: "T", n: teamB.total.t });
     dominantSide = "T";
   } else if (dominantSide === "CT") {
     const leader = teamA.total.ct >= teamB.total.ct ? nameA : nameB;
     const wins = Math.max(teamA.total.ct, teamB.total.ct);
-    summary = `${leader} 在 CT 方拿下 ${wins} 回合，CT 表现更胜一筹`;
+    summary = t("analysis.overview.sideLead", { name: leader, side: "CT", n: wins });
   } else if (dominantSide === "T") {
     const leader = teamA.total.t >= teamB.total.t ? nameA : nameB;
     const wins = Math.max(teamA.total.t, teamB.total.t);
-    summary = `${leader} 在 T 方拿下 ${wins} 回合，T 表现更胜一筹`;
+    summary = t("analysis.overview.sideLead", { name: leader, side: "T", n: wins });
   }
 
   return {
@@ -564,7 +565,7 @@ function collectRoundClutch1vNAttempts(round, playerTeamMap) {
   return [...byPlayer.values()].filter((attempt) => attempt.opponents >= 2);
 }
 
-function buildOpening(rounds, data) {
+function buildOpening(rounds, data, t) {
   const playerTeamMap = buildPlayerTeamMap(data.players);
   const teamA = emptyTeamOpening();
   const teamB = emptyTeamOpening();
@@ -607,7 +608,7 @@ function buildOpening(rounds, data) {
 
   let summary = "";
   if (!hasData) {
-    summary = "当前 Demo 未提供可用于统计的首杀事件。";
+    summary = t("analysis.overview.noOpening");
   } else if (
     teamA.fiveVFour.total >= 3 &&
     teamB.fiveVFour.total >= 3 &&
@@ -615,7 +616,7 @@ function buildOpening(rounds, data) {
     teamB.fiveVFour.rate != null
   ) {
     const leader = teamA.fiveVFour.rate >= teamB.fiveVFour.rate ? "a" : "b";
-    summary = `${teamName(data, leader)} 的 5v4 转化率更高。`;
+    summary = t("analysis.overview.openingLeader", { name: teamName(data, leader) });
   }
 
   return { teamA, teamB, summary, hasData };
@@ -652,7 +653,7 @@ function detectRoundEconomyUpset(round) {
   };
 }
 
-function buildEconomy(rounds, data, _phaseMeta, stats) {
+function buildEconomy(rounds, data, _phaseMeta, stats, t) {
   const pistol = {
     teamA: {
       wins: 0,
@@ -754,7 +755,7 @@ function buildEconomy(rounds, data, _phaseMeta, stats) {
     pistol.teamA.wins === 0 &&
     pistol.teamB.wins === 0
   ) {
-    summary = "本场未产生明显经济翻盘回合";
+    summary = t("analysis.overview.noEconomyUpsets");
   }
 
   return {
@@ -774,7 +775,7 @@ function buildEconomy(rounds, data, _phaseMeta, stats) {
   };
 }
 
-function buildObjective(rounds, data) {
+function buildObjective(rounds, data, t) {
   const playerTeamMap = buildPlayerTeamMap(data.players);
   const teamA = {
     plants: 0,
@@ -830,16 +831,16 @@ function buildObjective(rounds, data) {
   let dominantSite = null;
   const totalSites = siteA + siteB;
   if (!hasData) {
-    summary = "本场没有可识别的下包事件。";
+    summary = t("analysis.overview.noPlants");
   } else if (totalSites >= 3) {
     const shareA = siteA / totalSites;
     const shareB = siteB / totalSites;
     if (shareA >= 0.65) {
       dominantSite = "A";
-      summary = "主要下包点：A 点";
+      summary = t("analysis.overview.dominantSite", { site: dominantSite });
     } else if (shareB >= 0.65) {
       dominantSite = "B";
-      summary = "主要下包点：B 点";
+      summary = t("analysis.overview.dominantSite", { site: dominantSite });
     }
   }
 
@@ -859,7 +860,7 @@ const PLAYER_EVENT_PRIORITY = {
   clutch_aggregate: 10,
 };
 
-function buildPlayerEvents(rounds, data) {
+function buildPlayerEvents(rounds, data, t) {
   const playerTeamMap = buildPlayerTeamMap(data.players);
   const candidates = [];
 
@@ -887,13 +888,7 @@ function buildPlayerEvents(rounds, data) {
           scoreA: num(round.team_a_score_after),
           scoreB: num(round.team_b_score_after),
           label:
-            opponents >= 5
-              ? `1v${opponents} 残局`
-              : opponents === 4
-                ? "1v4 残局"
-                : opponents === 3
-                  ? "1v3 残局"
-                  : "1v2 残局",
+            t("analysis.overview.clutchSize", { n: opponents }),
         });
       }
       if (event.type === "multikill" && event.player) {
@@ -912,7 +907,7 @@ function buildPlayerEvents(rounds, data) {
           roundNumber: round.round_number,
           scoreA: num(round.team_a_score_after),
           scoreB: num(round.team_b_score_after),
-          label: kills >= 5 ? "ACE" : "四杀",
+          label: kills >= 5 ? "ACE" : t("analysis.overview.quadKill"),
         });
       }
     }
@@ -936,7 +931,7 @@ function buildPlayerEvents(rounds, data) {
           roundNumber: round.round_number,
           scoreA: num(round.team_a_score_after),
           scoreB: num(round.team_b_score_after),
-          label: kills >= 5 ? "ACE" : "四杀",
+          label: kills >= 5 ? "ACE" : t("analysis.overview.quadKill"),
         });
       }
     }
@@ -961,7 +956,7 @@ function buildPlayerEvents(rounds, data) {
         playerName: byFk[0].name,
         teamKey,
         roundNumber: null,
-        label: `${num(byFk[0].first_kills)} 次首杀`,
+        label: t("analysis.overview.openingKillsCount", { n: num(byFk[0].first_kills) }),
       });
     }
 
@@ -978,7 +973,7 @@ function buildPlayerEvents(rounds, data) {
         playerName: byUtil[0].name,
         teamKey,
         roundNumber: null,
-        label: `造成 ${topUtil} 点道具伤害`,
+        label: t("analysis.overview.utilityDamageCount", { n: topUtil }),
       });
     }
 
@@ -996,7 +991,7 @@ function buildPlayerEvents(rounds, data) {
         playerName: byTrade[0].name,
         teamKey,
         roundNumber: null,
-        label: `完成 ${num(byTrade[0].trade_kills)} 次补枪`,
+        label: t("analysis.overview.tradeCount", { n: num(byTrade[0].trade_kills) }),
       });
     }
 
@@ -1011,7 +1006,7 @@ function buildPlayerEvents(rounds, data) {
         playerName: byClutch[0].name,
         teamKey,
         roundNumber: null,
-        label: `赢下 ${num(byClutch[0].clutch_wins)} 次残局`,
+        label: t("analysis.overview.clutchCount", { n: num(byClutch[0].clutch_wins) }),
       });
     }
   }
@@ -1068,6 +1063,7 @@ function getStreakStartingAt(rounds, roundNumber) {
 }
 
 function buildKeyRoundCandidates(
+  t,
   rounds,
   data,
   match,
@@ -1112,7 +1108,7 @@ function buildKeyRoundCandidates(
         roundNumber === phaseMeta.halftimeRound;
       types.push("pistol");
       score = Math.max(score, isSidePistol ? 52 : 42);
-      title = isSidePistol ? "换边手枪局" : "手枪局";
+      title = isSidePistol ? t("analysis.overview.switchPistol") : t("analysis.overview.pistolRound");
     }
 
     const upset = economy.upsetRounds.find(
@@ -1122,7 +1118,7 @@ function buildKeyRoundCandidates(
       const type = upset.isForceUpset ? "force_upset" : "economy_upset";
       types.push(type);
       score = Math.max(score, 80);
-      title = upset.isForceUpset ? "强起翻盘" : "经济翻盘";
+      title = upset.isForceUpset ? t("analysis.overview.forceUpset") : t("analysis.overview.economyUpset");
       tone = "amber";
       if (upset.equipRatio <= 0.5) score += 8;
     }
@@ -1138,7 +1134,7 @@ function buildKeyRoundCandidates(
       } else if (event.type === "multikill") {
         types.push("multikill");
         score = Math.max(score, 70);
-        title = "四杀";
+        title = t("analysis.overview.quadKill");
         playerName = event.playerName;
         tone = "accent";
       } else if (event.type === "clutch") {
@@ -1153,7 +1149,7 @@ function buildKeyRoundCandidates(
         const clutchScore =
           opp >= 5 ? 95 : opp === 4 ? 90 : opp === 3 ? 85 : 78;
         score = Math.max(score, clutchScore);
-        title = event.label || "残局";
+        title = event.label || t("analysis.overview.clutch");
         playerName = event.playerName;
         tone = "violet";
       }
@@ -1168,13 +1164,7 @@ function buildKeyRoundCandidates(
           opp >= 5 ? 95 : opp === 4 ? 90 : opp === 3 ? 85 : 78;
         score = Math.max(score, clutchScore);
         title =
-          opp >= 5
-            ? `1v${opp} 残局`
-            : opp === 4
-              ? "1v4 残局"
-              : opp === 3
-                ? "1v3 残局"
-                : "1v2 残局";
+          t("analysis.overview.clutchSize", { n: Math.max(2, opp) });
         playerName = event.player;
         tone = "violet";
       }
@@ -1187,7 +1177,7 @@ function buildKeyRoundCandidates(
         } else if (kills >= 4) {
           types.push("multikill");
           score = Math.max(score, 70);
-          title = "四杀";
+          title = t("analysis.overview.quadKill");
         }
         playerName = event.player;
         tone = "accent";
@@ -1198,12 +1188,12 @@ function buildKeyRoundCandidates(
       if (beforeLeader && leader && beforeLeader !== leader) {
         types.push("lead_change");
         score = Math.max(score, 78);
-        if (!title) title = "关键反超";
+        if (!title) title = t("analysis.overview.leadChange");
         score += 12;
       } else if (beforeA !== beforeB && scoreA === scoreB) {
         types.push("tie");
         score = Math.max(score, 72);
-        if (!title) title = "关键追平";
+        if (!title) title = t("analysis.overview.keyTie");
         score += 8;
       }
     }
@@ -1212,11 +1202,11 @@ function buildKeyRoundCandidates(
     if (streakFromHere.length >= 5) {
       types.push("streak_start");
       score = Math.max(score, 74);
-      if (!title) title = "连胜起点";
+      if (!title) title = t("analysis.overview.streakStart");
     } else if (streakFromHere.length >= 4) {
       types.push("streak_start");
       score = Math.max(score, 66);
-      if (!title) title = "连胜起点";
+      if (!title) title = t("analysis.overview.streakStart");
     }
 
     if (winner === "a" || winner === "b") {
@@ -1227,7 +1217,7 @@ function buildKeyRoundCandidates(
       ) {
         types.push("streak_end");
         score = Math.max(score, 64);
-        if (!title) title = "终结连胜";
+        if (!title) title = t("analysis.overview.streakEnd");
       }
       if (winStreak.teamKey === winner) {
         winStreak = { teamKey: winner, length: winStreak.length + 1 };
@@ -1244,13 +1234,13 @@ function buildKeyRoundCandidates(
     ) {
       types.push("match_point");
       score = Math.max(score, 50);
-      if (!title) title = "赛点回合";
+      if (!title) title = t("analysis.overview.matchPoint");
     }
 
     if (roundNumber === stats.turningRound && stats.winnerMaxDeficit >= 3) {
       types.push("lead_change");
       score = Math.max(score, 82);
-      if (!title) title = "走势转折";
+      if (!title) title = t("analysis.overview.turningPoint");
       tone = "amber";
     }
 
@@ -1262,18 +1252,18 @@ function buildKeyRoundCandidates(
         if (playerName && title) {
           const playerTeam = playerTeamMap.get(String(playerName).trim().toLowerCase());
           if (playerTeam && winner && playerTeam !== winner) {
-            description = `${playerName} 完成${title}，未能赢下回合，${winnerName} 获胜`;
+            description = t("analysis.overview.keyPlayerLost", { player: playerName, title, winner: winnerName });
           } else {
-            description = `${playerName} 完成${title}，帮助 ${winnerName} 拿下本回合`;
+            description = t("analysis.overview.keyPlayerWon", { player: playerName, title, winner: winnerName });
           }
         } else if (types.includes("force_upset")) {
-          description = `${winnerName} 强起翻盘`;
+          description = t("analysis.overview.keyForceUpset", { winner: winnerName });
         } else if (types.includes("economy_upset")) {
-          description = `${winnerName} 经济翻盘`;
+          description = t("analysis.overview.keyEconomyUpset", { winner: winnerName });
         } else if (types.includes("streak_start") && streakFromHere.length >= 4) {
-          description = `${winnerName} 开启后续连胜`;
+          description = t("analysis.overview.keyStreakStart", { winner: winnerName });
         } else {
-          description = `${winnerName} 拿下本回合`;
+          description = t("analysis.overview.keyRoundWinner", { winner: winnerName });
         }
       }
       candidates.push({
@@ -1301,10 +1291,10 @@ function buildKeyRoundCandidates(
     scoreB: num(lastRound.team_b_score_after, match.scoreB),
     primaryType: "final",
     types: ["final"],
-    title: isFinalMatch ? "终结比赛" : "当前最后回合",
+    title: isFinalMatch ? t("analysis.overview.endMatch") : t("analysis.overview.lastRound"),
     description: isFinalMatch
-      ? `比赛在 R${lastRound.round_number} 结束，最终比分 ${match.scoreA}:${match.scoreB}。`
-      : `Demo 在 R${lastRound.round_number} 结束，当前比分 ${match.scoreA}:${match.scoreB}。`,
+      ? t("analysis.overview.finalScore", { n: lastRound.round_number, a: match.scoreA, b: match.scoreB })
+      : t("analysis.overview.unfinishedScore", { n: lastRound.round_number, a: match.scoreA, b: match.scoreB }),
     tone: isFinalMatch ? "accent" : "blue",
     timestamp: formatRoundTimestamp(lastRound, data, firstFreezeTick),
     playerName: null,
@@ -1379,6 +1369,7 @@ function selectKeyRounds(candidates) {
 }
 
 function buildKeyRounds(
+  t,
   rounds,
   data,
   match,
@@ -1389,6 +1380,7 @@ function buildKeyRounds(
 ) {
   if (!rounds.length) return [];
   const candidates = buildKeyRoundCandidates(
+    t,
     rounds,
     data,
     match,
@@ -1400,7 +1392,7 @@ function buildKeyRounds(
   return selectKeyRounds(candidates);
 }
 
-function emptyEconomy() {
+function emptyEconomy(t) {
   return {
     pistol: {
       teamA: {
@@ -1440,21 +1432,21 @@ function emptyEconomy() {
     },
     upsetRounds: [],
     keyRound: null,
-    summary: "本场未产生明显经济翻盘回合",
+    summary: t("analysis.overview.noEconomyUpsets"),
     hasData: false,
   };
 }
 
-function emptyOpening() {
+function emptyOpening(t) {
   return {
     teamA: emptyTeamOpening(),
     teamB: emptyTeamOpening(),
-    summary: "当前 Demo 未提供可用于统计的首杀事件。",
+    summary: t("analysis.overview.noOpening"),
     hasData: false,
   };
 }
 
-function emptyObjective() {
+function emptyObjective(t) {
   return {
     teamA: {
       plants: 0,
@@ -1472,28 +1464,29 @@ function emptyObjective() {
     },
     siteA: 0,
     siteB: 0,
-    summary: "本场没有可识别的下包事件。",
+    summary: t("analysis.overview.noPlants"),
     dominantSite: null,
     hasData: false,
   };
 }
 
-export function buildOverviewModel(data) {
+export function buildOverviewModel(data, t = (key, params) => translate("zh", key, params)) {
   const rounds = normalizeRounds(data);
   const phaseMeta = detectPhaseMeta(data, rounds);
   const match = buildMatchState(data, rounds, phaseMeta);
   const stats = computeRoundStats(rounds, phaseMeta, match);
-  const sidePerformance = buildSidePerformance(rounds, phaseMeta, data);
+  const sidePerformance = buildSidePerformance(rounds, phaseMeta, data, t);
 
   const economy = rounds.length
-    ? buildEconomy(rounds, data, phaseMeta, stats)
-    : emptyEconomy();
-  const opening = rounds.length ? buildOpening(rounds, data) : emptyOpening();
+    ? buildEconomy(rounds, data, phaseMeta, stats, t)
+    : emptyEconomy(t);
+  const opening = rounds.length ? buildOpening(rounds, data, t) : emptyOpening(t);
   const objective = rounds.length
-    ? buildObjective(rounds, data)
-    : emptyObjective();
-  const playerEvents = rounds.length ? buildPlayerEvents(rounds, data) : [];
+    ? buildObjective(rounds, data, t)
+    : emptyObjective(t);
+  const playerEvents = rounds.length ? buildPlayerEvents(rounds, data, t) : [];
   const keyRounds = buildKeyRounds(
+    t,
     rounds,
     data,
     match,
@@ -1506,8 +1499,8 @@ export function buildOverviewModel(data) {
   return {
     match,
     phaseMeta,
-    mainline: buildMainline(data, match, phaseMeta, stats, sidePerformance),
-    trend: buildTrend(rounds, phaseMeta, stats, match),
+    mainline: buildMainline(data, match, phaseMeta, stats, sidePerformance, t),
+    trend: buildTrend(rounds, phaseMeta, stats, match, t),
     sidePerformance,
     economy,
     opening,

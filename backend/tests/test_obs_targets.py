@@ -27,7 +27,9 @@ def columns(rows):
 
 def parser(rows, bot_rows=()):
     return SimpleNamespace(parse_ticks=Mock(side_effect=lambda fields, ticks, **kwargs:
-        columns(bot_rows if "prop_states" in kwargs else [r for r in rows if r["tick"] in ticks])))
+        columns([r for r in (list(rows) + list(bot_rows)
+                            if fields == ["CCSPlayerController.m_bControllingBot"] else rows)
+                 if r["tick"] in ticks])))
 
 
 def target(**updates):
@@ -169,6 +171,39 @@ def test_cut_can_start_on_bot_body_when_normal_player_pawn_is_dead():
 def test_other_players_bot_takeover_does_not_block_target():
     bot = row(1150, sid=OTHER, **{"CCSPlayerController.m_bControllingBot": True})
     assert obs_targets.resolve_obs_targets("demo.dem", [target()], parser=parser([row(680), row(1000)], [bot]))[0]["slot"] == 11
+
+
+@pytest.mark.parametrize("ordinary_first", [True, False])
+def test_dead_start_detects_later_takeover_despite_tick_wide_native_filter(ordinary_first):
+    # Regression: a nonmatching player makes prop_states stop collecting the
+    # whole tick. The target's dead original pawn stays dead after BOT takeover.
+    flag = "CCSPlayerController.m_bControllingBot"
+    snapshots = []
+    for tick in (680, 1000, 1150, 1200):
+        ordinary = row(tick, slot=4, pawn=100, sid=OTHER)
+        controlled = row(tick, alive=False, **{flag: tick >= 1150})
+        snapshots.extend([ordinary, controlled] if ordinary_first else [controlled, ordinary])
+
+    def parse_ticks(fields, ticks, **kwargs):
+        selected = []
+        for tick in sorted(ticks):
+            for sample in snapshots:
+                if sample["tick"] != tick:
+                    continue
+                if kwargs.get("prop_states") and not sample[flag]:
+                    break
+                selected.append(sample)
+        return columns(selected)
+
+    reader = Mock(return_value={"rows": [body(680, alive=False),
+        body(1150, pawn=1625, takeover=True),
+        body(1200, pawn=1625, takeover=True, alive=False)]})
+    resolved = obs_targets.resolve_obs_targets("demo.dem", [target()],
+        parser=SimpleNamespace(parse_ticks=parse_ticks), takeover_reader=reader)[0]
+    assert resolved["start_tick"] == resolved["seek_tick"] == 1150
+    assert resolved["pawn"] == 1625
+    assert [(r["tick"], r["pawn"]) for r in resolved["timeline"]] == [(1150, 1625), (1200, 0)]
+    reader.assert_called_once()
 
 
 def test_preparation_tick_honors_planner_or_default_five_seconds():

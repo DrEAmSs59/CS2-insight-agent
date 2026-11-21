@@ -1,3 +1,4 @@
+import { useT } from "../../../../i18n/useT.js";
 import { Activity } from "lucide-react";
 import InsightCard from "./InsightCard";
 
@@ -22,7 +23,7 @@ function leadColor(lead) {
   return "var(--cs2-text-muted)";
 }
 
-function buildAnnotations(points, phaseMeta) {
+function buildAnnotations(points, phaseMeta, t) {
   if (!points.length) return [];
   const first = points[0];
   const last = points[points.length - 1];
@@ -31,7 +32,7 @@ function buildAnnotations(points, phaseMeta) {
 
   // Prefer explicit kickoff (0:0); otherwise first point.
   const kickoff = points.find((p) => p.isKickoff) || first;
-  annotations.push({ roundNumber: kickoff.roundNumber, label: "开局", point: kickoff });
+  annotations.push({ roundNumber: kickoff.roundNumber, label: t("analysis.overview.chartStart"), point: kickoff });
 
   const half = phaseMeta?.halftimeRound;
   if (
@@ -40,7 +41,7 @@ function buildAnnotations(points, phaseMeta) {
     half !== kickoff.roundNumber &&
     half !== last.roundNumber
   ) {
-    annotations.push({ roundNumber: half, label: "换边", point: byRound.get(half) });
+    annotations.push({ roundNumber: half, label: t("analysis.overview.chartSwitch"), point: byRound.get(half) });
   }
 
   const otStart =
@@ -54,11 +55,11 @@ function buildAnnotations(points, phaseMeta) {
     otStart !== last.roundNumber &&
     otStart !== half
   ) {
-    annotations.push({ roundNumber: otStart, label: "加时", point: byRound.get(otStart) });
+    annotations.push({ roundNumber: otStart, label: t("analysis.overview.chartOvertime"), point: byRound.get(otStart) });
   }
 
   if (last.roundNumber !== kickoff.roundNumber) {
-    annotations.push({ roundNumber: last.roundNumber, label: "终局", point: last });
+    annotations.push({ roundNumber: last.roundNumber, label: t("analysis.overview.chartEnd"), point: last });
   }
 
   return annotations;
@@ -72,10 +73,11 @@ function yAxisTicks(maxAbs) {
 }
 
 function LeadChart({ points, phaseMeta, teamAName, teamBName }) {
+  const t = useT();
   if (points.length < 2) {
     return (
       <p className={`flex ${CHART_HEIGHT_CLASS} items-center justify-center text-xs text-cs2-text-muted`}>
-        当前解析结果不足以生成比赛走势。
+        {t("analysis.overview.noTrendChart")}
       </p>
     );
   }
@@ -90,7 +92,7 @@ function LeadChart({ points, phaseMeta, teamAName, teamBName }) {
     const amp = (H - PAD_Y * 2) / 2;
     return mid - (lead / maxAbs) * amp;
   };
-  const annotations = buildAnnotations(points, phaseMeta);
+  const annotations = buildAnnotations(points, phaseMeta, t);
   const annRounds = new Set(annotations.map((a) => a.roundNumber));
   const ticks = yAxisTicks(maxAbs);
 
@@ -118,7 +120,7 @@ function LeadChart({ points, phaseMeta, teamAName, teamBName }) {
           preserveAspectRatio="xMidYMid meet"
           className="shrink-0"
           role="img"
-          aria-label="比赛走势折线"
+          aria-label={t("analysis.overview.trendChart")}
         >
         {/* Y axis flush to SVG left → team names sit 3px away */}
         <line
@@ -229,6 +231,7 @@ export default function MatchTrendCard({
   teamBName = "Team B",
   className = "",
 }) {
+  const t = useT();
   const points = Array.isArray(model?.points) ? model.points : [];
   const stage = model?.stageScores || {};
   const streak = model?.longestStreak || {};
@@ -245,24 +248,24 @@ export default function MatchTrendCard({
       : "—";
 
   const summaryParts = [
-    `上半场 ${stage.firstHalf?.a ?? 0}:${stage.firstHalf?.b ?? 0}`,
-    `下半场 ${stage.secondHalf?.a ?? 0}:${stage.secondHalf?.b ?? 0}`,
+    t("analysis.overview.scoreFirstHalf", { a: stage.firstHalf?.a ?? 0, b: stage.firstHalf?.b ?? 0 }),
+    t("analysis.overview.scoreSecondHalf", { a: stage.secondHalf?.a ?? 0, b: stage.secondHalf?.b ?? 0 }),
   ];
   if (hasOt) {
-    summaryParts.push(`加时 ${stage.overtime?.a ?? 0}:${stage.overtime?.b ?? 0}`);
+    summaryParts.push(t("analysis.overview.scoreOvertime", { a: stage.overtime?.a ?? 0, b: stage.overtime?.b ?? 0 }));
   }
   if (deficit > 0) {
     const loserLead = maxLeadA >= maxLeadB ? maxLeadB : maxLeadA;
     if (loserLead === 0 && maxLead > 0) {
-      summaryParts.push(`最大领先 ${maxLead}`);
+      summaryParts.push(t("analysis.overview.maxLead", { n: maxLead }));
     } else if (maxLeadA !== maxLeadB) {
-      summaryParts.push(`${maxLeadTeam} 最大领先 ${maxLead}`);
+      summaryParts.push(t("analysis.overview.teamMaxLead", { team: maxLeadTeam, n: maxLead }));
     } else {
-      summaryParts.push(`最大领先 ${maxLead}`);
+      summaryParts.push(t("analysis.overview.maxLead", { n: maxLead }));
     }
   }
   if (streak.length > 0) {
-    summaryParts.push(`最长连胜 ${streakText}`);
+    summaryParts.push(t("analysis.overview.longestStreak", { n: streakText }));
   }
 
   const underTitle =
@@ -270,7 +273,7 @@ export default function MatchTrendCard({
 
   return (
     <InsightCard
-      title="比赛走势"
+      title={t("analysis.overview.matchTrend")}
       icon={Activity}
       tone="blue"
       summary={underTitle}
@@ -285,11 +288,11 @@ export default function MatchTrendCard({
       <div className="mt-1.5 flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-cs2-text-muted">
         <span className="inline-flex items-center gap-1">
           <span className="h-2 w-2 rounded-full bg-cs2-team-blue" />
-          蓝线 / 上方 = {teamAName} 领先
+          {t("analysis.overview.chartBlueLead", { team: teamAName })}
         </span>
         <span className="inline-flex items-center gap-1">
           <span className="h-2 w-2 rounded-full bg-cs2-team-amber" />
-          黄线 / 下方 = {teamBName} 领先
+          {t("analysis.overview.chartAmberLead", { team: teamBName })}
         </span>
       </div>
     </InsightCard>

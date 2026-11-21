@@ -117,6 +117,36 @@ export function rewriteStoredRoundHeadline(rawHeadline, options = {}) {
   return `${winnerLabel} 赢下第 ${options.roundNumber} 回合`;
 }
 
+export function localizeRoundHeadline(round, winner, locale, t) {
+  const headline = round.headline || "";
+  if (locale !== "en" && headline) return headline;
+  const lost = headline.match(/^(.*) ([双三四五\d]+)杀未能赢下回合，.+ 获胜$/);
+  const won = headline.match(/^(.*) ([双三四五\d]+)杀帮助 .+ 拿下回合$/);
+  const multikill = lost || won;
+  if (multikill) {
+    const [, player, numeral] = multikill;
+    const n = NUMERAL_KILLS[numeral] || Number(numeral);
+    return lost
+      ? t("analysis.rounds.headlineLostMultikill", { player, n, winner })
+      : t("analysis.rounds.headlineWonMultikill", { player, n, winner });
+  }
+  const defense = headline.match(/^(.*) ([双三四五\d]+)杀守住 ([AB]) 区$/);
+  if (defense) {
+    const [, player, numeral, site] = defense;
+    const n = NUMERAL_KILLS[numeral] || Number(numeral);
+    return t("analysis.rounds.headlineHold", { player, n, site });
+  }
+  if (headline.endsWith(" 强起翻盘")) {
+    return t("analysis.overview.keyForceUpset", { winner });
+  }
+  if (headline.endsWith(" 经济翻盘")) {
+    return t("analysis.overview.keyEconomyUpset", { winner });
+  }
+  if (headline && !/\p{Script=Han}/u.test(headline)) return headline;
+  if (round.site) return t("analysis.rounds.headlinePlant", { winner, site: round.site });
+  return t("analysis.rounds.headlineWin", { winner, n: round.round_number });
+}
+
 export function detectPhaseMeta(data, rounds) {
   const sortedRounds = [...rounds]
     .filter((round) => Number(round?.round_number) > 0)

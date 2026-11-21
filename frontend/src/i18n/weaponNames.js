@@ -41,6 +41,7 @@ export const WEAPON_NAME_ZH_TO_EN = {
 
   // 投掷物 & 装备
   "手雷":                "HE Grenade",
+  "HE 手雷":             "HE Grenade",
   "闪光弹":              "Flashbang",
   "烟雾弹":              "Smoke Grenade",
   "燃烧弹":              "Incendiary",
