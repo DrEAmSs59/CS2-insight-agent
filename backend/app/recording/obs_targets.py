@@ -33,7 +33,7 @@ def _columns(value):
 
 def resolve_obs_targets(demo_path: str, targets: list[dict], *, parser=None, takeover_reader=None) -> list[dict]:
     """Worker entry point: batch both prepare/start snapshots for one Demo."""
-    from demoparser2 import DemoParser, WantedPropState
+    from demoparser2 import DemoParser
 
     if not targets:
         return []
@@ -53,11 +53,12 @@ def resolve_obs_targets(demo_path: str, targets: list[dict], *, parser=None, tak
     flag = "CCSPlayerController.m_bControllingBot"
     scan_ticks = sorted({tick for target in targets
                          for tick in range(target["seek_tick"], target["end_tick"] + 1)})
-    bot_columns = _columns(parser.parse_ticks(
-        [flag], ticks=scan_ticks, prop_states=[WantedPropState(flag, True)],
-    ))
+    # Native prop_states can stop collecting a whole tick at the first
+    # nonmatching player. Read the flag without that filter so an ordinary
+    # player cannot hide another player's BOT takeover later in the tick.
+    bot_columns = _columns(parser.parse_ticks([flag], ticks=scan_ticks))
     bot_rows = [{key: values[i] for key, values in bot_columns.items()}
-                for i in range(len(bot_columns.get("tick", [])))]
+                for i, controlling in enumerate(bot_columns.get(flag, [])) if controlling]
 
     def checked_body(rows, target):
         row = _identity(rows, target["name"], target["steamid64"])
