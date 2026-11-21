@@ -1,3 +1,5 @@
+import { useT } from "../../../i18n/useT.js";
+
 const HUD_ICON_BASE = "/hud-death-notice";
 
 function HudEquipmentIcon({ stem, className = "" }) {
@@ -11,13 +13,13 @@ function HudEquipmentIcon({ stem, className = "" }) {
   );
 }
 
-function bombTitle(status, site) {
+function bombTitle(status, site, t) {
   if (status === "planted") {
-    return `C4 已放置${site ? ` · ${site} 区` : ""}`;
+    return site ? t("analysis.replay.bombPlantedAt", { site }) : t("analysis.replay.bombPlanted");
   }
-  if (status === "dropped") return "C4 已掉落";
-  if (status === "defused") return "C4 已拆除";
-  if (status === "exploded") return "C4 已引爆";
+  if (status === "dropped") return t("analysis.replay.bombDropped");
+  if (status === "defused") return t("analysis.replay.bombDefused");
+  if (status === "exploded") return t("analysis.replay.bombExploded");
   return "C4";
 }
 
@@ -26,6 +28,7 @@ function bombTitle(status, site) {
  * Positioning (`left`/`top` %) is passed via `style` from the scene canvas.
  */
 export default function ReplayBombMarker({ status, site = "", style, className = "" }) {
+  const t = useT();
   const muted = status === "defused" || status === "exploded";
   const planted = status === "planted";
   const dropped = status === "dropped";
@@ -42,7 +45,7 @@ export default function ReplayBombMarker({ status, site = "", style, className =
     <div
       className={`demo-c4-marker pointer-events-none absolute z-[4] -translate-x-1/2 -translate-y-1/2 ${muted ? "opacity-45" : ""} ${className}`}
       style={style}
-      title={bombTitle(status, site)}
+      title={bombTitle(status, site, t)}
       data-bomb-status={status}
     >
       <style>{`

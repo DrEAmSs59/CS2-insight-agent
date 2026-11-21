@@ -1,3 +1,4 @@
+import { useT } from "../../../../i18n/useT.js";
 import { Swords } from "lucide-react";
 import InsightCard from "./InsightCard";
 
@@ -41,6 +42,7 @@ export default function OpeningAdvantageCard({
   teamBName = "Team B",
   className = "",
 }) {
+  const t = useT();
   const teamA = model?.teamA || {};
   const teamB = model?.teamB || {};
   const hasData = model?.hasData !== false;
@@ -49,7 +51,7 @@ export default function OpeningAdvantageCard({
 
   return (
     <InsightCard
-      title="首杀与人数优势"
+      title={t("analysis.overview.openingAdvantage")}
       icon={Swords}
       tone="amber"
       className={className}
@@ -60,23 +62,23 @@ export default function OpeningAdvantageCard({
           <span className="truncate text-right text-cs2-team-blue">{teamAName}</span>
           <span className="truncate text-right text-cs2-team-amber">{teamBName}</span>
         </div>
-        <MetricRow label="首杀次数" valueA={teamA.firstKills ?? 0} valueB={teamB.firstKills ?? 0} />
+        <MetricRow label={t("analysis.overview.openingKillCount")} valueA={teamA.firstKills ?? 0} valueB={teamB.firstKills ?? 0} />
         <MetricRow
-          label="5v4 转化率"
+          label={t("analysis.overview.openingConversion")}
           valueA={formatRate(teamA.fiveVFour)}
           valueB={formatRate(teamB.fiveVFour)}
           sampleA={formatSample(teamA.fiveVFour)}
           sampleB={formatSample(teamB.fiveVFour)}
         />
         <MetricRow
-          label="4v5 翻盘率"
+          label={t("analysis.overview.openingRecovery")}
           valueA={formatRate(teamA.fourVFive)}
           valueB={formatRate(teamB.fourVFive)}
           sampleA={formatSample(teamA.fourVFive)}
           sampleB={formatSample(teamB.fourVFive)}
         />
         <MetricRow
-          label="1vN 残局胜率"
+          label={t("analysis.overview.clutchWinRate")}
           valueA={formatRate(teamA.clutch1vN)}
           valueB={formatRate(teamB.clutch1vN)}
           sampleA={formatSample(teamA.clutch1vN)}

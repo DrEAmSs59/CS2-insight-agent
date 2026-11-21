@@ -1,3 +1,4 @@
+import { useT } from "../../../i18n/useT.js";
 import { memo, useEffect, useRef } from "react";
 
 const RENDER_SIZE = 256;
@@ -9,11 +10,11 @@ const COLOR_STOPS = [
   [0.72, 249, 115, 22, 195],
   [1, 225, 29, 72, 225],
 ];
-const MODE_LABELS = {
-  movement: "整场走位热力图",
-  combat: "整场交战热力图",
-  kills: "整场击杀热力图",
-  deaths: "整场死亡热力图",
+const MODE_LABEL_KEYS = {
+  movement: "analysis.heatmap.canvasMovement",
+  combat: "analysis.heatmap.canvasCombat",
+  kills: "analysis.heatmap.canvasKills",
+  deaths: "analysis.heatmap.canvasDeaths",
 };
 
 function interpolateColor(value) {
@@ -55,6 +56,7 @@ function bilinearValue(heatmap, x, y) {
 }
 
 export default memo(function ReplayHeatmapCanvas({ heatmap, mode = "off" }) {
+  const t = useT();
   const canvasRef = useRef(null);
 
   useEffect(() => {
@@ -87,7 +89,7 @@ export default memo(function ReplayHeatmapCanvas({ heatmap, mode = "off" }) {
       width={RENDER_SIZE}
       height={RENDER_SIZE}
       data-heatmap-mode={mode}
-      aria-label={MODE_LABELS[mode] || "整场热力图"}
+      aria-label={t(MODE_LABEL_KEYS[mode] || "analysis.heatmap.title")}
       className="pointer-events-none absolute inset-0 h-full w-full opacity-90"
       style={{ mixBlendMode: "screen" }}
     />

@@ -219,6 +219,61 @@ describe("DemoAnalysisPage Insight Agent flow", () => {
     vi.clearAllMocks();
   });
 
+  test("localizes the six analysis views and cached demo events in English", async () => {
+    const shell = buildShell();
+    shell.analysisWorkspace.demo_fingerprint = "analysis-english-locale-test";
+    const { container } = renderPage(shell);
+    const openView = (name) => fireEvent.click(screen.getByRole("button", { name, exact: true }));
+    const expectEnglish = () => {
+      const labels = Array.from(container.querySelectorAll("[title], [aria-label], [alt]"))
+        .flatMap((node) => ["title", "aria-label", "alt"].map((attr) => node.getAttribute(attr)))
+        .filter(Boolean);
+      expect(container.textContent).not.toMatch(/\p{Script=Han}/u);
+      expect(labels.join("\n")).not.toMatch(/\p{Script=Han}/u);
+    };
+
+    openView("概览");
+    expect(screen.getByRole("heading", { name: "比赛主线" })).toBeTruthy();
+    act(() => useLocaleStore.getState().hydrate("en"));
+    expect(screen.getByRole("heading", { name: "Match Story" })).toBeTruthy();
+    expectEnglish();
+
+    openView("Rounds");
+    expect(screen.getByRole("heading", { name: "Round List" })).toBeTruthy();
+    expect(screen.getByText("ZywOo held Site B with 2 kills")).toBeTruthy();
+    expect(screen.getByText("Threw HE Grenade")).toBeTruthy();
+    expectEnglish();
+
+    openView("Economy");
+    expect(screen.getByRole("heading", { name: "Economy Trend" })).toBeTruthy();
+    expect(screen.getAllByText("Force buy").length).toBeGreaterThan(0);
+    expectEnglish();
+
+    openView("Players");
+    expect(screen.getByRole("heading", { name: "Detailed Stats" })).toBeTruthy();
+    expectEnglish();
+
+    openView("2D Replay");
+    await waitFor(() => expect(screen.getByLabelText("ZywOo carrying a defuse kit")).toBeTruthy());
+    expect(screen.getByRole("button", { name: "Jump to event: ZywOo threw HE Grenade" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Jump to event: ZywOo killed b1t with AK-47 (headshot)" }));
+    expect(await screen.findByTitle("C4 planted at Site B")).toBeTruthy();
+    expectEnglish();
+
+    const position = screen.getByRole("slider", { name: "Replay timeline" }).value;
+    const requestCount = API.post.mock.calls.length;
+    act(() => useLocaleStore.getState().hydrate("zh"));
+    expect(screen.getByRole("slider", { name: "回放时间轴" }).value).toBe(position);
+    expect(API.post).toHaveBeenCalledTimes(requestCount);
+    act(() => useLocaleStore.getState().hydrate("en"));
+
+    openView("Heatmap");
+    await waitFor(() => expect(container.querySelector('[data-heatmap-mode="movement"]')?.getAttribute("aria-label"))
+      .toBe("Full-match movement heatmap"));
+    expect(screen.getByRole("button", { name: "Fit" })).toBeTruthy();
+    expectEnglish();
+  });
+
   test("defaults highlights to the first roster player without firing an AI request", () => {
     const shell = buildShell({
       currentParsed: {

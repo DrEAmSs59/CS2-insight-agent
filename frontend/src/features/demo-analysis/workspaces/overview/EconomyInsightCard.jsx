@@ -1,16 +1,17 @@
+import { useT } from "../../../../i18n/useT.js";
 import { Coins } from "lucide-react";
 import InsightCard from "./InsightCard";
 
 /** 赢下几个手枪局，以及每个手枪局之后分别连胜多少 */
-function formatPistolStreak(bucket) {
-  if (!bucket || !(bucket.wins > 0)) return "未赢下手枪局";
+function formatPistolStreak(bucket, t) {
+  if (!bucket || !(bucket.wins > 0)) return t("analysis.overview.noPistolWins");
   const streaks = Array.isArray(bucket.postWinStreaks) ? bucket.postWinStreaks : [];
   const wins = bucket.wins;
-  if (streaks.length === 0) return `赢下 ${wins} 个手枪局`;
+  if (streaks.length === 0) return t("analysis.overview.pistolWins", { wins });
   const detail = streaks
-    .map((n, i) => `第 ${i + 1} 个后连胜 ${n} 局`)
+    .map((n, i) => t("analysis.overview.pistolStreak", { i: i + 1, n }))
     .join(" · ");
-  return `赢下 ${wins} 个手枪局 · ${detail}`;
+  return `${t("analysis.overview.pistolWins", { wins })} · ${detail}`;
 }
 
 function teamLabel(key, teamAName, teamBName) {
@@ -42,6 +43,7 @@ export default function EconomyInsightCard({
   teamBName = "Team B",
   className = "",
 }) {
+  const t = useT();
   const pistol = model?.pistol || {};
   const teamA = pistol.teamA || {};
   const teamB = pistol.teamB || {};
@@ -53,30 +55,30 @@ export default function EconomyInsightCard({
 
   return (
     <InsightCard
-      title="经济表现"
+      title={t("analysis.overview.economyPerformance")}
       icon={Coins}
       tone="accent"
       className={className}
     >
       {!hasData ? (
         <p className="text-xs text-cs2-text-muted">
-          {model?.summary || "本场未产生明显经济翻盘回合"}
+          {model?.summary || t("analysis.overview.noEconomyUpsets")}
         </p>
       ) : (
         <div className="flex flex-1 flex-col justify-center text-xs">
-          <CompactRow label="手枪局转化率">
+          <CompactRow label={t("analysis.overview.pistolConversion")}>
             <div className="flex flex-col gap-0.5 leading-snug">
               <span>
                 <span className="text-cs2-team-blue">{teamAName}</span>{" "}
-                <span className="font-semibold text-cs2-text-primary">{formatPistolStreak(teamA)}</span>
+                <span className="font-semibold text-cs2-text-primary">{formatPistolStreak(teamA, t)}</span>
               </span>
               <span>
                 <span className="text-cs2-team-amber">{teamBName}</span>{" "}
-                <span className="font-semibold text-cs2-text-primary">{formatPistolStreak(teamB)}</span>
+                <span className="font-semibold text-cs2-text-primary">{formatPistolStreak(teamB, t)}</span>
               </span>
             </div>
           </CompactRow>
-          <CompactRow label="强起翻盘回合">
+          <CompactRow label={t("analysis.overview.forceUpsets")}>
             <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5">
               <span>
                 <span className="text-cs2-team-blue">{teamAName}</span>{" "}
@@ -88,7 +90,7 @@ export default function EconomyInsightCard({
               </span>
             </div>
           </CompactRow>
-          <CompactRow label="关键经济回合">
+          <CompactRow label={t("analysis.overview.keyEconomy")}>
             {keyRound ? (
               <span className="min-w-0 truncate text-cs2-text-secondary">
                 R{keyRound.roundNumber}
@@ -97,10 +99,10 @@ export default function EconomyInsightCard({
                   : ""}
                 {" · "}
                 {teamLabel(keyRound.winnerTeamKey, teamAName, teamBName)}
-                {keyRound.isForceUpset ? " 强起翻盘" : " 经济翻盘"}
+                {" "}{keyRound.isForceUpset ? t("analysis.overview.forceUpset") : t("analysis.overview.economyUpset")}
               </span>
             ) : (
-              <span className="text-cs2-text-muted">本场无明显经济翻盘回合</span>
+              <span className="text-cs2-text-muted">{t("analysis.overview.noKeyEconomy")}</span>
             )}
           </CompactRow>
         </div>
