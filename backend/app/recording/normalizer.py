@@ -210,11 +210,11 @@ def normalize(dto: RecordingRequestDTO) -> NormalizedRequest:
 
     if dto.options.group_victim_replays and (
         dto.request_type != RequestType.kill_compilation
-        or dto.source_ref.group_id != "all_kills"
+        or dto.source_ref.group_id not in {"all_kills", "weapon_kills"}
         or not dto.options.enable_victim_pov
         or dto.options.interleave_pov_pairs
     ):
-        raise NormalizationError("Grouped victim replays require all_kills with victim POV and no per-kill interleave")
+        raise NormalizationError("Grouped victim replays require all_kills or weapon_kills with victim POV and no per-kill interleave")
 
     if dto.options.group_killer_replays and (
         dto.request_type != RequestType.death_compilation

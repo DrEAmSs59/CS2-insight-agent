@@ -2,7 +2,7 @@ import { posthumousOnly } from "./posthumousKills";
 
 export function groupedReplayOption(clip) {
   if (clip?.category !== "compilation") return null;
-  if (clip.compilation_kind === "all_kills") return "group_victim_replays";
+  if (["all_kills", "weapon_kills"].includes(clip.compilation_kind)) return "group_victim_replays";
   if (clip.compilation_kind === "all_deaths") return "group_killer_replays";
   return null;
 }

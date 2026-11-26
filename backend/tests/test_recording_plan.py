@@ -290,6 +290,10 @@ assert group_plan.segments[0].end_tick < group_plan.segments[1].start_tick
 assert [s.target_player_name for s in group_plan.segments if s.perspective == Perspective.victim] == [
     "victim0", "victim1", "victim2", "victim3"
 ]
+# A weapon-filtered request uses the same windows, targets and replay order.
+weapon_request = group_request.model_copy(update={"source_ref": SourceRef(group_id="weapon_kills")})
+assert build_plan(weapon_request).segments == group_plan.segments
+
 # A shorter threshold makes each kill its own group.
 group_request.options.kill_compilation_jump_cut_threshold_sec = 14
 assert [s.perspective for s in build_plan(group_request).segments] == [Perspective.killer, Perspective.victim] * 4

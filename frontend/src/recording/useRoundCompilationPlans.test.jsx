@@ -17,6 +17,7 @@ beforeEach(() => vi.clearAllMocks());
 
 test.each([
   ["all_kills", { victim_pov: true, group_victim_replays: true }],
+  ["weapon_kills", { victim_pov: true, group_victim_replays: true }],
   ["all_deaths", { killer_pov: true, group_killer_replays: true }],
 ])("grouped %s previews use the same scoped DTO as recording", async (kind, pacingOverride) => {
   const grouped = { ...item, clipData: { category: "compilation", compilation_kind: kind,
