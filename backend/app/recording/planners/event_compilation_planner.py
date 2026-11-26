@@ -13,16 +13,36 @@ def plan_event_compilation(req: NormalizedRequest) -> list[RecordingSegment]:
 
 
 def order_grouped_replays(
-    segments: list[RecordingSegment], threshold_ticks: int, replay_perspective: Perspective
+    segments: list[RecordingSegment], req: NormalizedRequest
 ) -> list[RecordingSegment]:
-    # Capture windows already stop at round boundaries. Only replay order spans rounds.
-    ticks = sorted({tick for segment in segments for tick in segment.anchor_ticks})
+    opts = req.options
+    rate = req.demo.tick_rate
+    if req.request_type == RequestType.death_compilation:
+        pre, post = opts.death_compilation_pre_sec, opts.death_compilation_post_sec
+        gap = opts.kill_jump_cut_threshold_sec
+        replay_perspective = Perspective.killer
+    elif req.request_type == RequestType.highlight:
+        pre, post = opts.highlight_pre_sec, opts.highlight_post_sec
+        gap = opts.kill_jump_cut_threshold_sec
+        replay_perspective = Perspective.victim
+    else:
+        pre, post = opts.kill_compilation_pre_sec, opts.kill_compilation_post_sec
+        gap = opts.kill_compilation_jump_cut_threshold_sec
+        replay_perspective = Perspective.victim
+
+    threshold_ticks = int(gap * rate)
+    # Across a cut, only the main shots' tail and lead count, each rounded as in capture.
+    cross_round_ticks = int(post * rate) + int(pre * rate)
+    round_by_tick = {tick: segment.round for segment in segments for tick in segment.anchor_ticks}
     group_by_tick = {}
     previous = None
     group = 0
-    for tick in ticks:
-        if previous is not None and tick - previous > threshold_ticks:
-            group += 1
+    for tick in sorted(round_by_tick):
+        if previous is not None:
+            same_round = round_by_tick[previous] == round_by_tick[tick]
+            interval = tick - previous if same_round else cross_round_ticks
+            if interval > threshold_ticks:
+                group += 1
         group_by_tick[tick] = group
         previous = tick
 

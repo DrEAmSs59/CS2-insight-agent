@@ -266,9 +266,9 @@ check("6a-iii: end_tick", plan.segments[0].end_tick == exp_end,
       f"got {plan.segments[0].end_tick}")
 
 
-# Replay groups use adjacent kill ticks, including across rounds. Main windows
-# still cut at round boundaries, and the next group starts one tick past the gap.
-group_ticks = [10000, 10960, 11920, 12881]
+# Within a round, gaps of 960 and 961 ticks straddle the 15-second limit.
+# Across rounds the 90-second demo gap cuts to 6s of tail + 9s of lead.
+group_ticks = [10000, 10960, 16720, 17681]
 group_rounds = [4, 4, 5, 5]
 group_events = [
     make_kill_event(tick, round_num=rnd, victim=TargetPlayer(name=f"victim{i}", steamid64=str(100+i)))
@@ -278,13 +278,14 @@ group_request = dto(
     request_type=RequestType.kill_compilation, source_type=SourceType.kill,
     source_ref=SourceRef(group_id="all_kills"), events=list(reversed(group_events)),
     options=RecordingOptions(enable_victim_pov=True, group_victim_replays=True,
-                             kill_compilation_jump_cut_threshold_sec=15),
+                             kill_compilation_jump_cut_threshold_sec=15,
+                             kill_compilation_pre_sec=9, kill_compilation_post_sec=6),
 )
 group_plan = build_plan(group_request)
 assert [(s.perspective, s.anchor_ticks) for s in group_plan.segments] == [
-    (Perspective.killer, group_ticks[:2]), (Perspective.killer, [11920]),
-    (Perspective.victim, [10000]), (Perspective.victim, [10960]), (Perspective.victim, [11920]),
-    (Perspective.killer, [12881]), (Perspective.victim, [12881]),
+    (Perspective.killer, group_ticks[:2]), (Perspective.killer, [16720]),
+    (Perspective.victim, [10000]), (Perspective.victim, [10960]), (Perspective.victim, [16720]),
+    (Perspective.killer, [17681]), (Perspective.victim, [17681]),
 ]
 assert group_plan.segments[0].end_tick < group_plan.segments[1].start_tick
 assert [s.target_player_name for s in group_plan.segments if s.perspective == Perspective.victim] == [
@@ -302,17 +303,27 @@ assert build_plan(rival_request).segments == group_plan.segments
 highlight_group = group_request.model_copy(deep=True)
 highlight_group.request_type = RequestType.highlight
 highlight_group.source_ref = SourceRef()
+highlight_group.options.highlight_pre_sec = 2
+highlight_group.options.highlight_post_sec = 1
 highlight_group.options.kill_jump_cut_threshold_sec = 15
 highlight_group.options.kill_compilation_jump_cut_threshold_sec = 2
 assert [(s.perspective, s.anchor_ticks) for s in build_plan(highlight_group).segments] == [
     (s.perspective, s.anchor_ticks) for s in group_plan.segments
 ]
+# Highlights use their own padding: 3 seconds on the cut vs 15 for compilations.
+highlight_group.options.kill_jump_cut_threshold_sec = 3
+expected_middle_pair = [Perspective.killer, Perspective.victim, Perspective.killer,
+                        Perspective.killer, Perspective.victim, Perspective.victim,
+                        Perspective.killer, Perspective.victim]
+assert [s.perspective for s in build_plan(highlight_group).segments] == expected_middle_pair
+highlight_group.options.highlight_post_sec += 1 / TICK_RATE
+assert [s.perspective for s in build_plan(highlight_group).segments] == [Perspective.killer, Perspective.victim] * 4
+
 # A shorter threshold makes each kill its own group.
 group_request.options.kill_compilation_jump_cut_threshold_sec = 14
 assert [s.perspective for s in build_plan(group_request).segments] == [Perspective.killer, Perspective.victim] * 4
 
-# All Deaths groups anchors even across rounds, but never captures the round change.
-# Large padding overlaps the next group's shot: it must not influence membership.
+# Death compilations also use main POV padding across the cut.
 death_events = [
     make_death_event(tick, round_num=rnd, killer=TargetPlayer(name=f"killer{i}", steamid64=str(200+i)))
     for i, (tick, rnd) in enumerate(zip(group_ticks, group_rounds))
@@ -322,19 +333,19 @@ death_request = dto(
     source_ref=SourceRef(group_id="all_deaths"), events=list(reversed(death_events)),
     options=RecordingOptions(enable_fail_killer_pov=True, group_killer_replays=True,
                              kill_jump_cut_threshold_sec=15, death_compilation_pre_sec=9,
-                             death_compilation_post_sec=8),
+                             death_compilation_post_sec=6),
 )
 death_plan = build_plan(death_request)
 assert [(s.perspective, s.anchor_ticks) for s in death_plan.segments] == [
-    (Perspective.victim, group_ticks[:2]), (Perspective.victim, [11920]),
-    (Perspective.killer, [10000]), (Perspective.killer, [10960]), (Perspective.killer, [11920]),
-    (Perspective.victim, [12881]), (Perspective.killer, [12881]),
+    (Perspective.victim, group_ticks[:2]), (Perspective.victim, [16720]),
+    (Perspective.killer, [10000]), (Perspective.killer, [10960]), (Perspective.killer, [16720]),
+    (Perspective.victim, [17681]), (Perspective.killer, [17681]),
 ]
 assert [s.round for s in death_plan.segments[:2]] == [4, 5]
 assert [s.target_player_name for s in death_plan.segments if s.perspective == Perspective.killer] == [
     "killer0", "killer1", "killer2", "killer3"
 ]
-death_request.options.kill_jump_cut_threshold_sec = 14
+death_request.options.kill_jump_cut_threshold_sec = 15 - 1 / TICK_RATE
 assert [s.perspective for s in build_plan(death_request).segments] == [Perspective.victim, Perspective.killer] * 4
 
 # ── Test 6b: Kill compilation beyond threshold → split ────────────────────
