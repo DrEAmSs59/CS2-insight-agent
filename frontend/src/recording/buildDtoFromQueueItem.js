@@ -1,4 +1,4 @@
-import { usesGroupedKillReplays } from "../utils/groupedKillReplays";
+import { groupedReplayOption, usesGroupedReplays } from "../utils/groupedCompilationReplays";
 import {
   DEFAULT_RECORDING_OPTIONS,
   buildHighlightRecordingRequest,
@@ -89,8 +89,8 @@ export function buildDtoFromQueueItem(item, matchMeta, globalPacing = {}) {
     ...(item.pacing_override || {}),
   });
   const options = pacingOverrideToOptions(mergedPacing);
-  if (usesGroupedKillReplays(item)) {
-    options.group_victim_replays = true;
+  if (usesGroupedReplays(item)) {
+    options[groupedReplayOption(clipData)] = true;
     options.interleave_pov_pairs = false;
   }
   // A posthumous victim is the main shot, not an additional replay. Ignore

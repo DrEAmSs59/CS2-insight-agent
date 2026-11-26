@@ -127,6 +127,29 @@ describe("QueueInspectorPanel", () => {
     expect(useRecordingQueue.getState().queue[1].pacing_override).toBeUndefined();
   });
 
+  test("All Deaths groups killer replays by the item gap and keeps nemesis deaths separate", () => {
+    const deaths = { ...highlight,
+      clipData: { ...highlight.clipData, category: "compilation", compilation_kind: "all_deaths",
+        killers: ["one", "two"], kill_ticks: [1000, 1960], source_rounds: [5, 6] },
+      pacing_override: { killer_pov: true, pov_interleaved: true, max_gap_sec: 15 } };
+    useRecordingQueue.setState({ queue: [deaths] });
+    const view = renderEditor("q1");
+    const dto = () => buildDtoFromQueueItem(useRecordingQueue.getState().queue[0], null, { max_gap_sec: 12 });
+    fireEvent.click(screen.getByRole("radio", { name: "每组死亡后" }));
+    view.rerenderLatest();
+    expect(screen.getByRole("radio", { name: "每组死亡后" }).checked).toBe(true);
+    expect(dto().options).toMatchObject({ group_killer_replays: true, enable_fail_killer_pov: true,
+      interleave_pov_pairs: false, kill_jump_cut_threshold_sec: 15 });
+    expect(dto().source_ref.group_id).toBe("all_deaths");
+    fireEvent.click(screen.getByRole("radio", { name: "全部死亡后" }));
+    expect(dto().options.group_killer_replays).toBeFalsy();
+    const nemesis = { ...deaths, clipData: { ...deaths.clipData, compilation_kind: "nemesis_deaths" },
+      pacing_override: { killer_pov: true, group_killer_replays: true } };
+    view.rerender(<QueueInspectorPanel selectedItem={nemesis} />);
+    expect(screen.queryByRole("radio", { name: "每组死亡后" })).toBeNull();
+    expect(buildDtoFromQueueItem(nemesis, null).options.group_killer_replays).toBeFalsy();
+  });
+
   test("only All Kills offers grouped replays and sends the selected merge gap", () => {
     const allKills = {
       ...highlight, clipData: { ...highlight.clipData, category: "compilation", compilation_kind: "all_kills" },

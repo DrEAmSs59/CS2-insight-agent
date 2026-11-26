@@ -730,6 +730,8 @@ export default {
   "queue.victimPovRowUnavailable": "当前片段没有可用的受害者视角",
   "queue.povVictimsLabel": "受害者",
   "queue.povKillersLabel": "击杀者",
+  "queue.povTimingDeathGroup": "每组死亡后",
+  "queue.povTimingDeathGroupDesc": "按合并间隔分组。每组先播本人死亡，再依次回看击杀者视角。跨回合直接切镜头。",
   "queue.povTimingGroup": "每组击杀后",
   "queue.povTimingGroupDesc": "按合并间隔分组。每组先播本人击杀，再依次回看受害者视角。跨回合直接切镜头。",
   "queue.povTimingLabel": "什么时候回看",

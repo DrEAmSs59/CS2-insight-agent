@@ -12,7 +12,9 @@ def plan_event_compilation(req: NormalizedRequest) -> list[RecordingSegment]:
         raise ValueError(f"Unsupported request_type: {req.request_type}")
 
 
-def order_grouped_kill_replays(segments: list[RecordingSegment], threshold_ticks: int) -> list[RecordingSegment]:
+def order_grouped_replays(
+    segments: list[RecordingSegment], threshold_ticks: int, replay_perspective: Perspective
+) -> list[RecordingSegment]:
     # Capture windows already stop at round boundaries. Only replay order spans rounds.
     ticks = sorted({tick for segment in segments for tick in segment.anchor_ticks})
     group_by_tick = {}
@@ -27,7 +29,7 @@ def order_grouped_kill_replays(segments: list[RecordingSegment], threshold_ticks
     def playback_order(segment):
         first = segment.anchor_ticks[0]
         # A posthumous victim-only shot occupies its original main-shot position.
-        replay = segment.perspective == Perspective.victim and not segment.metadata.get("posthumous_kill")
+        replay = segment.perspective == replay_perspective and not segment.metadata.get("posthumous_kill")
         return group_by_tick[first], bool(replay), first
 
     return sorted(segments, key=playback_order)
@@ -172,7 +174,9 @@ def _plan_death_compilation(req: NormalizedRequest) -> list[RecordingSegment]:
 
     pre_ticks = int(opts.death_compilation_pre_sec * tick_rate)
     post_ticks = int(opts.death_compilation_post_sec * tick_rate)
-    merge_gap_ticks = int(opts.death_compilation_merge_gap_sec * tick_rate)
+    # Grouped replays use the queue's event-to-event threshold, also used by timeline deaths.
+    gap_sec = opts.kill_jump_cut_threshold_sec if opts.group_killer_replays else opts.death_compilation_merge_gap_sec
+    merge_gap_ticks = int(gap_sec * tick_rate)
 
     first_tick = req.demo.first_tick
     demo_end_tick = req.demo.demo_end_tick
@@ -215,8 +219,7 @@ def _plan_death_compilation(req: NormalizedRequest) -> list[RecordingSegment]:
         prev_event, _, prev_win_end = current_group[-1]
 
         same_round = event.round == prev_event.round
-        # Merge if same round and (windows overlap OR gap <= merge_gap_ticks)
-        gap = win_start - prev_win_end
+        gap = event.tick - prev_event.tick if opts.group_killer_replays else win_start - prev_win_end
 
         if same_round and gap <= merge_gap_ticks:
             current_group.append(item)

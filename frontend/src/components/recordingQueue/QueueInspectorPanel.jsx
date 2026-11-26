@@ -1,4 +1,4 @@
-import { isAllKillsCompilation, usesGroupedKillReplays } from "../../utils/groupedKillReplays";
+import { groupedReplayOption, usesGroupedReplays } from "../../utils/groupedCompilationReplays";
 import { AlertTriangle, ChevronDown, ChevronUp, Info, Monitor, Trash2 } from "lucide-react";
 import { BACKEND_DEFAULT_PACING, useRecordingQueue } from "../../stores/recordingQueueStore";
 import { useT } from "../../i18n/useT.js";
@@ -163,14 +163,16 @@ export default function QueueInspectorPanel({
       ? t("queue.noKillerPovReason")
       : t("queue.killerPovRowUnavailable");
 
-  const groupedReplay = usesGroupedKillReplays(item);
+  const groupOption = groupedReplayOption(clip);
+  const groupedReplay = usesGroupedReplays(item);
+  const groupDescription = pov.isDeathCompilation ? "queue.povTimingDeathGroupDesc" : "queue.povTimingGroupDesc";
   const setReplayTiming = (value) => {
     const timing = { pov_interleaved: value === true };
-    if (isAllKillsCompilation(clip)) timing.group_victim_replays = value === "group";
+    if (groupOption) timing[groupOption] = value === "group";
     commit(timing);
   };
   const timingRow = (deaths) => (
-    <SettingsRow indent label={t("queue.povTimingLabel")} description={t(groupedReplay ? "queue.povTimingGroupDesc" : po.pov_interleaved ? "queue.povTimingEachDesc" : "queue.povTimingBatchDesc")}>
+    <SettingsRow indent label={t("queue.povTimingLabel")} description={t(groupedReplay ? groupDescription : po.pov_interleaved ? "queue.povTimingEachDesc" : "queue.povTimingBatchDesc")}>
       <Segmented
         ariaLabel={t("queue.povTimingLabel")}
         value={groupedReplay ? "group" : Boolean(po.pov_interleaved)}
@@ -178,7 +180,7 @@ export default function QueueInspectorPanel({
         onChange={setReplayTiming}
         options={[
           { value: true, label: t(deaths ? "queue.povTimingEachDeath" : "queue.povTimingEachKill") },
-          ...(isAllKillsCompilation(clip) ? [{ value: "group", label: t("queue.povTimingGroup") }] : []),
+          ...(groupOption ? [{ value: "group", label: t(deaths ? "queue.povTimingDeathGroup" : "queue.povTimingGroup") }] : []),
           { value: false, label: t(deaths ? "queue.povTimingAfterDeaths" : "queue.povTimingAfterKills") },
         ]}
       />

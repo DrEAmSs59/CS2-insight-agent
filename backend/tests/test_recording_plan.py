@@ -294,6 +294,32 @@ assert [s.target_player_name for s in group_plan.segments if s.perspective == Pe
 group_request.options.kill_compilation_jump_cut_threshold_sec = 14
 assert [s.perspective for s in build_plan(group_request).segments] == [Perspective.killer, Perspective.victim] * 4
 
+# All Deaths groups anchors even across rounds, but never captures the round change.
+# Large padding overlaps the next group's shot: it must not influence membership.
+death_events = [
+    make_death_event(tick, round_num=rnd, killer=TargetPlayer(name=f"killer{i}", steamid64=str(200+i)))
+    for i, (tick, rnd) in enumerate(zip(group_ticks, group_rounds))
+]
+death_request = dto(
+    request_type=RequestType.death_compilation, source_type=SourceType.death,
+    source_ref=SourceRef(group_id="all_deaths"), events=list(reversed(death_events)),
+    options=RecordingOptions(enable_fail_killer_pov=True, group_killer_replays=True,
+                             kill_jump_cut_threshold_sec=15, death_compilation_pre_sec=9,
+                             death_compilation_post_sec=8),
+)
+death_plan = build_plan(death_request)
+assert [(s.perspective, s.anchor_ticks) for s in death_plan.segments] == [
+    (Perspective.victim, group_ticks[:2]), (Perspective.victim, [11920]),
+    (Perspective.killer, [10000]), (Perspective.killer, [10960]), (Perspective.killer, [11920]),
+    (Perspective.victim, [12881]), (Perspective.killer, [12881]),
+]
+assert [s.round for s in death_plan.segments[:2]] == [4, 5]
+assert [s.target_player_name for s in death_plan.segments if s.perspective == Perspective.killer] == [
+    "killer0", "killer1", "killer2", "killer3"
+]
+death_request.options.kill_jump_cut_threshold_sec = 14
+assert [s.perspective for s in build_plan(death_request).segments] == [Perspective.victim, Perspective.killer] * 4
+
 # ── Test 6b: Kill compilation beyond threshold → split ────────────────────
 print("\nTest 6b: Kill compilation beyond threshold → 2 segments")
 gap = int(RecordingOptions().kill_compilation_jump_cut_threshold_sec * TICK_RATE) + 500

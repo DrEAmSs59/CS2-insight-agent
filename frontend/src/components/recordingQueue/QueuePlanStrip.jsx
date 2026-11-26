@@ -1,4 +1,4 @@
-import { usesGroupedKillReplays } from "../../utils/groupedKillReplays";
+import { usesGroupedReplays } from "../../utils/groupedCompilationReplays";
 import { useT } from "../../i18n/useT.js";
 import { getRecordingPlanPreview } from "../../utils/recordingPlanPreview";
 import { mergedPacingForItem } from "../../utils/recordingQueueDerive";
@@ -23,15 +23,19 @@ function seconds(value) {
 /** Turn a recording plan into ordered blocks for the visual strip. */
 export function buildPlanBlocks(item, globalPacing, roundPlan, t) {
   const clip = item?.clipData || {};
-  if (usesGroupedKillReplays(item)) {
+  if (usesGroupedReplays(item)) {
     if (roundPlan?.status !== "ready") return [];
     const { active_segments, tick_rate } = roundPlan.plan;
+    const deaths = clip.compilation_kind === "all_deaths";
+    const replayPov = deaths ? "killer" : "victim";
     const blocks = active_segments.slice(0, MAX_BLOCKS).map((segment) => {
-      const victim = segment.perspective === "victim";
+      const replay = segment.perspective === replayPov;
       const duration = (segment.end_tick - segment.start_tick) / tick_rate;
       return {
-        tone: victim ? "victim" : "kill",
-        label: victim ? segment.target_player_name || t("queue.victimPovLabel") : t("queue.stripRound", { n: segment.round }),
+        tone: replay ? replayPov : deaths ? "death" : "kill",
+        label: replay
+          ? segment.target_player_name || t(deaths ? "queue.killerPovLabel" : "queue.victimPovLabel")
+          : t("queue.stripRound", { n: segment.round }),
         sec: seconds(duration),
         flex: Math.max(duration, 1),
       };
@@ -123,7 +127,7 @@ export function buildPlanBlocks(item, globalPacing, roundPlan, t) {
 
 export function planSummaryKey(item, globalPacing) {
   const clip = item?.clipData || {};
-  if (usesGroupedKillReplays(item)) return "queue.povTimingGroup";
+  if (usesGroupedReplays(item)) return clip.compilation_kind === "all_deaths" ? "queue.povTimingDeathGroup" : "queue.povTimingGroup";
   if (isFreezeToDeathCompilation(clip)) return "queue.planSummary_rounds";
   if (isRoundTimelineRoundClip(clip)) return "queue.planSummary_whole_round";
   const plan = getRecordingPlanPreview(item, globalPacing);
@@ -140,7 +144,7 @@ export default function QueuePlanStrip({ item, globalPacing, roundPlan, estimate
   const victims = Array.isArray(clip.victims) ? clip.victims.filter(Boolean).length : 0;
   return (
     <div className="space-y-2.5 px-4 py-3.5" data-testid="queue-plan-strip">
-      {usesGroupedKillReplays(item) && roundPlan?.status !== "ready" && (
+      {usesGroupedReplays(item) && roundPlan?.status !== "ready" && (
         roundPlan?.status === "error" ? (
           <p role="alert" className="text-xs text-cs2-text-error">
             {t("ftd.planFailed")} <button className="underline" onClick={roundPlan.retry}>{t("ftd.planRetry")}</button>

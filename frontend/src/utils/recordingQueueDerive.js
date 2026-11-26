@@ -1,4 +1,4 @@
-import { usesGroupedKillReplays } from "./groupedKillReplays";
+import { usesGroupedReplays } from "./groupedCompilationReplays";
 import { BACKEND_DEFAULT_PACING } from "../stores/recordingQueueStore";
 import { DEMO_TICK_RATE } from "./montageUtils";
 import { isFreezeToDeathCompilation } from "./freezeToDeathRoundFilter";
@@ -75,7 +75,7 @@ const _KILLER_POV_POST_DEFAULT = 1.5;
  */
 export function estimateItemRecordSeconds(item, globalPacing, roundPlan) {
   const clip = item.clipData || {};
-  if (isFreezeToDeathCompilation(clip) || usesGroupedKillReplays(item)) {
+  if (isFreezeToDeathCompilation(clip) || usesGroupedReplays(item)) {
     return roundPlan?.status === "ready" ? roundPlan.plan.estimated_duration_sec : null;
   }
   const po = item.pacing_override && typeof item.pacing_override === "object" ? item.pacing_override : {};

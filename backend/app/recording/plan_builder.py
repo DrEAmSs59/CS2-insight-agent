@@ -3,11 +3,11 @@ from dataclasses import replace
 from pathlib import Path
 
 from .models import (
-    RecordingRequestDTO, RecordingPlan, RequestType
+    Perspective, RecordingRequestDTO, RecordingPlan, RequestType
 )
 from .normalizer import normalize
 from .planners.event_clip_planner import plan_event_clip
-from .planners.event_compilation_planner import order_grouped_kill_replays, plan_event_compilation
+from .planners.event_compilation_planner import order_grouped_replays, plan_event_compilation
 from .planners.round_pov_planner import plan_round_pov
 from .postprocess.segment_postprocessor import postprocess_segments
 
@@ -76,7 +76,10 @@ def build_plan(dto: RecordingRequestDTO) -> RecordingPlan:
                 raw_segments.append(segment)
     if req.options.group_victim_replays:
         threshold_ticks = int(req.options.kill_compilation_jump_cut_threshold_sec * req.demo.tick_rate)
-        raw_segments = order_grouped_kill_replays(raw_segments, threshold_ticks)
+        raw_segments = order_grouped_replays(raw_segments, threshold_ticks, Perspective.victim)
+    elif req.options.group_killer_replays:
+        threshold_ticks = int(req.options.kill_jump_cut_threshold_sec * req.demo.tick_rate)
+        raw_segments = order_grouped_replays(raw_segments, threshold_ticks, Perspective.killer)
     elif special:
         raw_segments.sort(key=lambda s:(s.start_tick, s.segment_index))
     active, disabled, all_warnings = postprocess_segments(raw_segments, req, extra_warnings)

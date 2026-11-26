@@ -216,6 +216,14 @@ def normalize(dto: RecordingRequestDTO) -> NormalizedRequest:
     ):
         raise NormalizationError("Grouped victim replays require all_kills with victim POV and no per-kill interleave")
 
+    if dto.options.group_killer_replays and (
+        dto.request_type != RequestType.death_compilation
+        or dto.source_ref.group_id != "all_deaths"
+        or not dto.options.enable_fail_killer_pov
+        or dto.options.interleave_pov_pairs
+    ):
+        raise NormalizationError("Grouped killer replays require all_deaths with killer POV and no per-death interleave")
+
     events = list(dto.events)
     events, roster_notes = enrich_events_victims_from_roster(events, demo.all_players or [])
     warnings.extend(roster_notes)
