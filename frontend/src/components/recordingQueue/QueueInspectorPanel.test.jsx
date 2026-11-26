@@ -127,6 +127,30 @@ describe("QueueInspectorPanel", () => {
     expect(useRecordingQueue.getState().queue[1].pacing_override).toBeUndefined();
   });
 
+  test("only All Kills offers grouped replays and sends the selected merge gap", () => {
+    const allKills = {
+      ...highlight, clipData: { ...highlight.clipData, category: "compilation", compilation_kind: "all_kills" },
+      pacing_override: { victim_pov: true, pov_interleaved: true, max_gap_sec: 15 },
+    };
+    useRecordingQueue.setState({ queue: [allKills] });
+    const view = renderEditor("q1");
+    const dto = () => buildDtoFromQueueItem(useRecordingQueue.getState().queue[0], null, { max_gap_sec: 12 });
+    fireEvent.click(screen.getByRole("radio", { name: "每组击杀后" }));
+    view.rerenderLatest();
+    expect(screen.getByRole("radio", { name: "每组击杀后" }).checked).toBe(true);
+    expect(dto().options).toMatchObject({ group_victim_replays: true, enable_victim_pov: true,
+      interleave_pov_pairs: false, kill_compilation_jump_cut_threshold_sec: 15 });
+    expect(dto().source_ref.group_id).toBe("all_kills");
+    fireEvent.click(screen.getByRole("radio", { name: "每次击杀后" }));
+    expect(dto().options.interleave_pov_pairs).toBe(true);
+    expect(dto().options.group_victim_replays).toBeFalsy();
+    const weapon = { ...allKills, clipData: { ...allKills.clipData, compilation_kind: "weapon_kills" },
+      pacing_override: { victim_pov: true, group_victim_replays: true } };
+    view.rerender(<QueueInspectorPanel selectedItem={weapon} />);
+    expect(screen.queryByRole("radio", { name: "每组击杀后" })).toBeNull();
+    expect(buildDtoFromQueueItem(weapon, null).options.group_victim_replays).toBeFalsy();
+  });
+
   test("turns on victim replays and shows them in the preview", () => {
     const view = renderEditor("q1");
     const pov = screen.getByTestId("queue-editor-pov");

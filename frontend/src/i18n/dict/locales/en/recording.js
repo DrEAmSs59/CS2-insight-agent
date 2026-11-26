@@ -730,6 +730,8 @@ export default {
   "queue.victimPovRowUnavailable": "This clip has no players you killed",
   "queue.povVictimsLabel": "Victims",
   "queue.povKillersLabel": "Killers",
+  "queue.povTimingGroup": "After each kill group",
+  "queue.povTimingGroupDesc": "Group nearby kills by the merge gap. Play your kills first, cutting between rounds, then replay each victim’s POV in order.",
   "queue.povTimingLabel": "When to replay",
   "queue.povTimingEachDesc": "Your view and the replays alternate",
   "queue.povTimingBatchDesc": "Play everything first, then all replays",

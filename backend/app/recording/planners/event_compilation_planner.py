@@ -12,6 +12,27 @@ def plan_event_compilation(req: NormalizedRequest) -> list[RecordingSegment]:
         raise ValueError(f"Unsupported request_type: {req.request_type}")
 
 
+def order_grouped_kill_replays(segments: list[RecordingSegment], threshold_ticks: int) -> list[RecordingSegment]:
+    # Capture windows already stop at round boundaries. Only replay order spans rounds.
+    ticks = sorted({tick for segment in segments for tick in segment.anchor_ticks})
+    group_by_tick = {}
+    previous = None
+    group = 0
+    for tick in ticks:
+        if previous is not None and tick - previous > threshold_ticks:
+            group += 1
+        group_by_tick[tick] = group
+        previous = tick
+
+    def playback_order(segment):
+        first = segment.anchor_ticks[0]
+        # A posthumous victim-only shot occupies its original main-shot position.
+        replay = segment.perspective == Perspective.victim and not segment.metadata.get("posthumous_kill")
+        return group_by_tick[first], bool(replay), first
+
+    return sorted(segments, key=playback_order)
+
+
 def _plan_kill_compilation(req: NormalizedRequest) -> list[RecordingSegment]:
     tick_rate = req.demo.tick_rate
     opts = req.options

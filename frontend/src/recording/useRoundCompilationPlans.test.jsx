@@ -15,6 +15,20 @@ const item = {
 const plan = { active_segments: [{ round: 1, start_tick: 6208, end_tick: 12928 }], estimated_duration_sec: 105 };
 beforeEach(() => vi.clearAllMocks());
 
+test("grouped All Kills previews use the same scoped DTO as recording", async () => {
+  const grouped = { ...item, clipData: { category: "compilation", compilation_kind: "all_kills",
+    kill_ticks: [1000, 1960], source_rounds: [3, 4], victims: ["one", "two"] },
+    pacing_override: { victim_pov: true, group_victim_replays: true } };
+  API.post.mockResolvedValue({ data: plan });
+  const pacing = { max_gap_sec: 15 };
+  const { result } = renderHook(() => useRoundCompilationPlans([grouped], pacing, [], [], []));
+  await waitFor(() => expect(result.current[grouped.id].status).toBe("ready"));
+  const [request] = buildRecordingQueueRequestsFromQueue([grouped], pacing, [], [], []);
+  expect(API.post.mock.calls[0][1]).toEqual({ ...request, request_id: "round-preview" });
+  expect(request.events.map(event => event.round)).toEqual([3, 4]);
+  expect(request.options.kill_compilation_jump_cut_threshold_sec).toBe(15);
+});
+
 test("preview uses the execution DTO and caches only for the same request", async () => {
   API.post.mockResolvedValue({ data: plan });
   const { result, rerender } = renderHook(({ queue }) => useRoundCompilationPlans(queue, {}, [], [], []), { initialProps: { queue: [item] } });

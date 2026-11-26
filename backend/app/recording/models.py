@@ -107,6 +107,7 @@ class RecordingOptions(BaseModel):
     victim_pov_post_sec: float = 1.5
     # When True with enable_victim_pov: K→V per kill. When False: all killer segments then all victim (legacy).
     interleave_pov_pairs: bool = False
+    group_victim_replays: bool = False
     enable_fail_killer_pov: bool = False
     fail_killer_pre_sec: float = 3.0
     fail_killer_post_sec: float = 2.0

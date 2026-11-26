@@ -266,6 +266,34 @@ check("6a-iii: end_tick", plan.segments[0].end_tick == exp_end,
       f"got {plan.segments[0].end_tick}")
 
 
+# Replay groups use adjacent kill ticks, including across rounds. Main windows
+# still cut at round boundaries, and the next group starts one tick past the gap.
+group_ticks = [10000, 10960, 11920, 12881]
+group_rounds = [4, 4, 5, 5]
+group_events = [
+    make_kill_event(tick, round_num=rnd, victim=TargetPlayer(name=f"victim{i}", steamid64=str(100+i)))
+    for i, (tick, rnd) in enumerate(zip(group_ticks, group_rounds))
+]
+group_request = dto(
+    request_type=RequestType.kill_compilation, source_type=SourceType.kill,
+    source_ref=SourceRef(group_id="all_kills"), events=list(reversed(group_events)),
+    options=RecordingOptions(enable_victim_pov=True, group_victim_replays=True,
+                             kill_compilation_jump_cut_threshold_sec=15),
+)
+group_plan = build_plan(group_request)
+assert [(s.perspective, s.anchor_ticks) for s in group_plan.segments] == [
+    (Perspective.killer, group_ticks[:2]), (Perspective.killer, [11920]),
+    (Perspective.victim, [10000]), (Perspective.victim, [10960]), (Perspective.victim, [11920]),
+    (Perspective.killer, [12881]), (Perspective.victim, [12881]),
+]
+assert group_plan.segments[0].end_tick < group_plan.segments[1].start_tick
+assert [s.target_player_name for s in group_plan.segments if s.perspective == Perspective.victim] == [
+    "victim0", "victim1", "victim2", "victim3"
+]
+# A shorter threshold makes each kill its own group.
+group_request.options.kill_compilation_jump_cut_threshold_sec = 14
+assert [s.perspective for s in build_plan(group_request).segments] == [Perspective.killer, Perspective.victim] * 4
+
 # ── Test 6b: Kill compilation beyond threshold → split ────────────────────
 print("\nTest 6b: Kill compilation beyond threshold → 2 segments")
 gap = int(RecordingOptions().kill_compilation_jump_cut_threshold_sec * TICK_RATE) + 500

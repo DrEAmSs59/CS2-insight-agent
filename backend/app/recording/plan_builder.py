@@ -7,7 +7,7 @@ from .models import (
 )
 from .normalizer import normalize
 from .planners.event_clip_planner import plan_event_clip
-from .planners.event_compilation_planner import plan_event_compilation
+from .planners.event_compilation_planner import order_grouped_kill_replays, plan_event_compilation
 from .planners.round_pov_planner import plan_round_pov
 from .postprocess.segment_postprocessor import postprocess_segments
 
@@ -74,7 +74,10 @@ def build_plan(dto: RecordingRequestDTO) -> RecordingPlan:
             for segment in plan_event_clip(victim_req):
                 segment.metadata["posthumous_kill"] = True
                 raw_segments.append(segment)
-    if special:
+    if req.options.group_victim_replays:
+        threshold_ticks = int(req.options.kill_compilation_jump_cut_threshold_sec * req.demo.tick_rate)
+        raw_segments = order_grouped_kill_replays(raw_segments, threshold_ticks)
+    elif special:
         raw_segments.sort(key=lambda s:(s.start_tick, s.segment_index))
     active, disabled, all_warnings = postprocess_segments(raw_segments, req, extra_warnings)
 

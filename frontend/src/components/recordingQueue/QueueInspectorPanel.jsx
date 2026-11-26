@@ -1,3 +1,4 @@
+import { isAllKillsCompilation, usesGroupedKillReplays } from "../../utils/groupedKillReplays";
 import { AlertTriangle, ChevronDown, ChevronUp, Info, Monitor, Trash2 } from "lucide-react";
 import { BACKEND_DEFAULT_PACING, useRecordingQueue } from "../../stores/recordingQueueStore";
 import { useT } from "../../i18n/useT.js";
@@ -162,15 +163,22 @@ export default function QueueInspectorPanel({
       ? t("queue.noKillerPovReason")
       : t("queue.killerPovRowUnavailable");
 
+  const groupedReplay = usesGroupedKillReplays(item);
+  const setReplayTiming = (value) => {
+    const timing = { pov_interleaved: value === true };
+    if (isAllKillsCompilation(clip)) timing.group_victim_replays = value === "group";
+    commit(timing);
+  };
   const timingRow = (deaths) => (
-    <SettingsRow indent label={t("queue.povTimingLabel")} description={t(po.pov_interleaved ? "queue.povTimingEachDesc" : "queue.povTimingBatchDesc")}>
+    <SettingsRow indent label={t("queue.povTimingLabel")} description={t(groupedReplay ? "queue.povTimingGroupDesc" : po.pov_interleaved ? "queue.povTimingEachDesc" : "queue.povTimingBatchDesc")}>
       <Segmented
         ariaLabel={t("queue.povTimingLabel")}
-        value={Boolean(po.pov_interleaved)}
+        value={groupedReplay ? "group" : Boolean(po.pov_interleaved)}
         disabled={disabled}
-        onChange={(value) => commit({ pov_interleaved: value })}
+        onChange={setReplayTiming}
         options={[
           { value: true, label: t(deaths ? "queue.povTimingEachDeath" : "queue.povTimingEachKill") },
+          ...(isAllKillsCompilation(clip) ? [{ value: "group", label: t("queue.povTimingGroup") }] : []),
           { value: false, label: t(deaths ? "queue.povTimingAfterDeaths" : "queue.povTimingAfterKills") },
         ]}
       />

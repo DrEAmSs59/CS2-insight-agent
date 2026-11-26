@@ -116,7 +116,7 @@ function buildSourceRef(clipData, queueItem) {
     timeline_event_id: clipData.timeline_event_id || null,
     queue_item_id: queueItem.id || null,
     // Preserve the new subtype through the generic kill_compilation DTO.
-    group_id: clipData.compilation_kind === "weapon_kills" ? "weapon_kills" : null,
+    group_id: ["weapon_kills", "all_kills"].includes(clipData.compilation_kind) ? clipData.compilation_kind : null,
     context_tags: Array.isArray(clipData.context_tags) ? clipData.context_tags : [],
   };
 }

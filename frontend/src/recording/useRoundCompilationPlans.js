@@ -1,3 +1,4 @@
+import { usesGroupedKillReplays } from "../utils/groupedKillReplays";
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 import API from "../api/api";
 import { buildRecordingQueueRequestsFromQueue } from "../utils/recordingBatch";
@@ -12,7 +13,7 @@ export function useRoundCompilationPlans(queue, globalPacing, uploadedDemos, par
   const [results, setResults] = useState({});
   const [revision, setRevision] = useState(0);
   const cache = useRef(new Map());
-  const specs = useMemo(() => queue.filter((item) => isFreezeToDeathCompilation(item.clipData)).map((item) => {
+  const specs = useMemo(() => queue.filter((item) => isFreezeToDeathCompilation(item.clipData) || usesGroupedKillReplays(item)).map((item) => {
     try {
       const [dto] = buildRecordingQueueRequestsFromQueue([item], globalPacing, uploadedDemos, parsedMatches, demoLibraryItems);
       dto.request_id = "round-preview";
