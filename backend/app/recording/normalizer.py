@@ -208,13 +208,13 @@ def normalize(dto: RecordingRequestDTO) -> NormalizedRequest:
             "enable_victim_pov only applies to highlight, kill_compilation, and timeline_kill"
         )
 
-    if dto.options.group_victim_replays and (
-        dto.request_type != RequestType.kill_compilation
-        or dto.source_ref.group_id not in {"all_kills", "weapon_kills"}
-        or not dto.options.enable_victim_pov
-        or dto.options.interleave_pov_pairs
-    ):
-        raise NormalizationError("Grouped victim replays require all_kills or weapon_kills with victim POV and no per-kill interleave")
+    if dto.options.group_victim_replays:
+        supported = dto.request_type == RequestType.highlight or (
+            dto.request_type == RequestType.kill_compilation
+            and dto.source_ref.group_id in {"all_kills", "weapon_kills", "rival_kills"}
+        )
+        if not supported or not dto.options.enable_victim_pov or dto.options.interleave_pov_pairs:
+            raise NormalizationError("Grouped victim replays require a highlight or kill compilation with non-interleaved victim POV")
 
     if dto.options.group_killer_replays and (
         dto.request_type != RequestType.death_compilation

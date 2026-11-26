@@ -95,7 +95,8 @@ def _plan_highlight(req: NormalizedRequest) -> list[RecordingSegment]:
             current_group.append(event)
         else:
             gap = event.tick - current_group[-1].tick
-            if gap <= threshold_ticks:
+            same_shot = not opts.group_victim_replays or event.round == current_group[-1].round
+            if same_shot and gap <= threshold_ticks:
                 current_group.append(event)
             else:
                 groups.append(current_group)

@@ -150,7 +150,7 @@ describe("QueueInspectorPanel", () => {
     expect(buildDtoFromQueueItem(nemesis, null).options.group_killer_replays).toBeFalsy();
   });
 
-  test.each(["all_kills", "weapon_kills"])("%s offers grouped replays and sends the selected merge gap", (kind) => {
+  test.each(["all_kills", "weapon_kills", "rival_kills"])("%s offers grouped replays and sends the selected merge gap", (kind) => {
     const compilation = {
       ...highlight, clipData: { ...highlight.clipData, category: "compilation", compilation_kind: kind },
       pacing_override: { victim_pov: true, pov_interleaved: true, max_gap_sec: 15 },
@@ -169,12 +169,17 @@ describe("QueueInspectorPanel", () => {
     expect(dto().options.group_victim_replays).toBeFalsy();
   });
 
-  test("rival kills keep their existing replay modes", () => {
-    const rival = { ...highlight, clipData: { ...highlight.clipData, category: "compilation", compilation_kind: "rival_kills" },
-      pacing_override: { victim_pov: true, group_victim_replays: true } };
-    render(<QueueInspectorPanel selectedItem={rival} />);
+  test("multi-kill highlights offer per-group timing while single kills do not", () => {
+    useRecordingQueue.setState({ queue: [{ ...highlight, pacing_override: { victim_pov: true } }] });
+    const view = renderEditor("q1");
+    fireEvent.click(screen.getByRole("radio", { name: "每组击杀后" }));
+    const item = useRecordingQueue.getState().queue[0];
+    const request = buildDtoFromQueueItem(item, null, { max_gap_sec: 15 });
+    expect(request.options).toMatchObject({ group_victim_replays: true, kill_jump_cut_threshold_sec: 15 });
+    const single = { ...item, clipData: { ...item.clipData, kill_ticks: [1000] } };
+    view.rerender(<QueueInspectorPanel selectedItem={single} />);
     expect(screen.queryByRole("radio", { name: "每组击杀后" })).toBeNull();
-    expect(buildDtoFromQueueItem(rival, null).options.group_victim_replays).toBeFalsy();
+    expect(buildDtoFromQueueItem(single, null).options.group_victim_replays).toBeFalsy();
   });
 
   test("turns on victim replays and shows them in the preview", () => {

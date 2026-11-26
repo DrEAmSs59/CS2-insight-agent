@@ -294,6 +294,19 @@ assert [s.target_player_name for s in group_plan.segments if s.perspective == Pe
 weapon_request = group_request.model_copy(update={"source_ref": SourceRef(group_id="weapon_kills")})
 assert build_plan(weapon_request).segments == group_plan.segments
 
+rival_request = group_request.model_copy(update={"source_ref": SourceRef(group_id="rival_kills")})
+assert build_plan(rival_request).segments == group_plan.segments
+
+# Highlights use their own gap setting. Repeated exact-threshold gaps form one
+# replay group, with a separate main shot at the round change.
+highlight_group = group_request.model_copy(deep=True)
+highlight_group.request_type = RequestType.highlight
+highlight_group.source_ref = SourceRef()
+highlight_group.options.kill_jump_cut_threshold_sec = 15
+highlight_group.options.kill_compilation_jump_cut_threshold_sec = 2
+assert [(s.perspective, s.anchor_ticks) for s in build_plan(highlight_group).segments] == [
+    (s.perspective, s.anchor_ticks) for s in group_plan.segments
+]
 # A shorter threshold makes each kill its own group.
 group_request.options.kill_compilation_jump_cut_threshold_sec = 14
 assert [s.perspective for s in build_plan(group_request).segments] == [Perspective.killer, Perspective.victim] * 4

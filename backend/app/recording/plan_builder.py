@@ -75,7 +75,9 @@ def build_plan(dto: RecordingRequestDTO) -> RecordingPlan:
                 segment.metadata["posthumous_kill"] = True
                 raw_segments.append(segment)
     if req.options.group_victim_replays:
-        threshold_ticks = int(req.options.kill_compilation_jump_cut_threshold_sec * req.demo.tick_rate)
+        gap = (req.options.kill_jump_cut_threshold_sec if req.request_type == RequestType.highlight
+               else req.options.kill_compilation_jump_cut_threshold_sec)
+        threshold_ticks = int(gap * req.demo.tick_rate)
         raw_segments = order_grouped_replays(raw_segments, threshold_ticks, Perspective.victim)
     elif req.options.group_killer_replays:
         threshold_ticks = int(req.options.kill_jump_cut_threshold_sec * req.demo.tick_rate)
