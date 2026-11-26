@@ -247,7 +247,7 @@ export default function QueueInspectorPanel({
         ) : null}
 
         <SettingsGroup title={t("queue.editorPreviewTitle")} description={t("queue.editorPreviewDesc")} padded={false} bodyClassName="overflow-hidden rounded-[10px] border border-cs2-border-subtle bg-cs2-bg-card">
-          <QueuePlanStrip item={item} globalPacing={gp} roundPlan={roundPlan} estimateSec={estSec} />
+          <QueuePlanStrip key={item.id} item={item} globalPacing={gp} roundPlan={roundPlan} estimateSec={estSec} />
         </SettingsGroup>
 
         {roundCompilation ? (

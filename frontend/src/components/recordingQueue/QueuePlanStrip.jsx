@@ -1,3 +1,4 @@
+import { useId, useState } from "react";
 import { usesGroupedReplays } from "../../utils/groupedCompilationReplays";
 import { useT } from "../../i18n/useT.js";
 import { getRecordingPlanPreview } from "../../utils/recordingPlanPreview";
@@ -5,7 +6,7 @@ import { mergedPacingForItem } from "../../utils/recordingQueueDerive";
 import { isRoundTimelineRoundClip } from "../../utils/montageUtils";
 import { isFreezeToDeathCompilation } from "../../utils/freezeToDeathRoundFilter";
 
-const MAX_BLOCKS = 6;
+const COLLAPSED_BLOCKS = 6;
 
 const TONES = {
   pad: "bg-cs2-bg-input text-cs2-text-muted",
@@ -28,27 +29,36 @@ export function buildPlanBlocks(item, globalPacing, roundPlan, t) {
     const { active_segments, tick_rate } = roundPlan.plan;
     const deaths = clip.compilation_kind === "all_deaths";
     const replayPov = deaths ? "killer" : "victim";
-    const blocks = active_segments.slice(0, MAX_BLOCKS).map((segment) => {
-      const replay = segment.perspective === replayPov;
+    let eventNumber = 0;
+    return active_segments.map((segment) => {
+      const pov = segment.perspective === replayPov;
+      const posthumous = Boolean(segment.posthumous_kill);
       const duration = (segment.end_tick - segment.start_tick) / tick_rate;
+      let label;
+      if (pov) {
+        const perspective = posthumous ? t("queue.posthumousTitle")
+          : t(deaths ? "queue.killerPovLabel" : "queue.victimPovLabel");
+        const name = segment.target_player_name;
+        label = name ? t("queue.stripReplay", { perspective, name }) : perspective;
+        if (posthumous) eventNumber += segment.anchor_ticks.length;
+      } else {
+        const first = eventNumber + 1;
+        eventNumber += segment.anchor_ticks.length;
+        const n = first === eventNumber ? first : `${first}–${eventNumber}`;
+        label = t(deaths ? "queue.stripDeath" : "queue.stripKill", { n });
+      }
       return {
-        tone: replay ? replayPov : deaths ? "death" : "kill",
-        label: replay
-          ? segment.target_player_name || t(deaths ? "queue.killerPovLabel" : "queue.victimPovLabel")
-          : t("queue.stripRound", { n: segment.round }),
+        tone: pov ? replayPov : deaths ? "death" : "kill",
+        label,
         sec: seconds(duration),
         flex: Math.max(duration, 1),
       };
     });
-    if (active_segments.length > MAX_BLOCKS) blocks.push({
-      tone: "pad", label: t("queue.stripMore", { n: active_segments.length - MAX_BLOCKS }), sec: "", flex: 1,
-    });
-    return blocks;
   }
   if (isFreezeToDeathCompilation(clip)) {
     if (roundPlan?.status !== "ready") return [];
     const { plan } = roundPlan;
-    return plan.active_segments.slice(0, MAX_BLOCKS * 2).map((segment) => {
+    return plan.active_segments.map((segment) => {
       const sec = (segment.end_tick - segment.start_tick) / plan.tick_rate;
       return { tone: "death", label: t("queue.stripRound", { n: segment.round }), sec: seconds(sec), flex: Math.max(sec, 1) };
     });
@@ -71,11 +81,6 @@ export function buildPlanBlocks(item, globalPacing, roundPlan, t) {
   });
   const blocks = [{ tone: "pad", label: t("settings.presetPreShort"), sec: seconds(pre), flex: Math.max(pre, 0.6) }];
   const tail = { tone: "pad", label: t("settings.presetPostShort"), sec: seconds(post), flex: Math.max(post, 0.6) };
-  const pushCapped = (list, total, more) => {
-    blocks.push(...list.slice(0, MAX_BLOCKS));
-    if (total > MAX_BLOCKS) blocks.push({ tone: more, label: t("queue.stripMore", { n: total - MAX_BLOCKS }), sec: "", flex: 1.5 });
-  };
-
   switch (plan.variant) {
     case "posthumous_victim_only":
       return victims.slice(0, plan.eventCount).map((name) => ({
@@ -92,12 +97,10 @@ export function buildPlanBlocks(item, globalPacing, roundPlan, t) {
     case "death_killer_interleaved": {
       const death = plan.variant === "death_killer_interleaved";
       const others = death ? killers : victims;
-      const pairs = [];
       for (let i = 0; i < plan.eventCount; i += 1) {
-        pairs.push({ tone: death ? "death" : "kill", label: t(death ? "queue.stripDeath" : "queue.stripKill", { n: i + 1 }), sec: "", flex: 2.5 });
-        pairs.push({ tone: death ? "killer" : "victim", label: replayLabel(others[i] || "—", death), sec: "", flex: povSec });
+        blocks.push({ tone: death ? "death" : "kill", label: t(death ? "queue.stripDeath" : "queue.stripKill", { n: i + 1 }), sec: "", flex: 2.5 });
+        blocks.push({ tone: death ? "killer" : "victim", label: replayLabel(others[i] || "—", death), sec: "", flex: povSec });
       }
-      pushCapped(pairs, pairs.length, death ? "death" : "kill");
       blocks.push(tail);
       return blocks;
     }
@@ -109,7 +112,7 @@ export function buildPlanBlocks(item, globalPacing, roundPlan, t) {
         sec: "",
         flex: 2.5,
       }));
-      pushCapped(main, main.length, death ? "death" : "kill");
+      blocks.push(...main);
       blocks.push(tail);
       if (plan.variant === "kill_victim_batch" || plan.variant === "death_killer_batch") {
         const others = (death ? killers : victims).map((name) => ({
@@ -118,7 +121,7 @@ export function buildPlanBlocks(item, globalPacing, roundPlan, t) {
           sec: "",
           flex: povSec,
         }));
-        pushCapped(others, others.length, death ? "killer" : "victim");
+        blocks.push(...others);
       }
       return blocks;
     }
@@ -139,8 +142,13 @@ export function planSummaryKey(item, globalPacing) {
  */
 export default function QueuePlanStrip({ item, globalPacing, roundPlan, estimateSec }) {
   const t = useT();
+  const [expanded, setExpanded] = useState(false);
+  const listId = useId();
   const blocks = buildPlanBlocks(item, globalPacing, roundPlan, t);
   const clip = item?.clipData || {};
+  const hiddenCount = Math.max(0, blocks.length - COLLAPSED_BLOCKS);
+  const showAll = expanded && hiddenCount > 0;
+  const visibleBlocks = showAll ? blocks : blocks.slice(0, COLLAPSED_BLOCKS);
   const victims = Array.isArray(clip.victims) ? clip.victims.filter(Boolean).length : 0;
   return (
     <div className="space-y-2.5 px-4 py-3.5" data-testid="queue-plan-strip">
@@ -152,17 +160,33 @@ export default function QueuePlanStrip({ item, globalPacing, roundPlan, estimate
         ) : <p role="status" className="text-xs text-cs2-text-muted">{t("ftd.planLoading")}</p>
       )}
       {blocks.length ? (
-        <div className="flex h-11 w-full gap-[3px]" aria-hidden>
-          {blocks.map((block, index) => (
-            <div
-              key={`${block.label}-${index}`}
-              style={{ flex: block.flex }}
-              className={`flex min-w-[46px] flex-col justify-center overflow-hidden whitespace-nowrap rounded-[5px] px-2 ${TONES[block.tone]}`}
+        <div className={showAll ? "space-y-2" : "flex w-full gap-1"}>
+          <ol id={listId} className={showAll
+            ? "grid grid-cols-[repeat(auto-fill,minmax(min(100%,10rem),1fr))] gap-1"
+            : "flex min-w-0 flex-1 gap-[3px]"}>
+            {visibleBlocks.map((block, index) => (
+              <li
+                key={index}
+                title={block.label}
+                style={showAll ? undefined : { flex: block.flex }}
+                className={`flex min-h-11 min-w-0 flex-col justify-center rounded-[5px] px-2 py-1 ${TONES[block.tone]}`}
+              >
+                <span className={`text-[11.5px] font-semibold ${showAll ? "[overflow-wrap:anywhere]" : "truncate"}`}>{block.label}</span>
+                {block.sec ? <span className="truncate font-mono text-[10.5px] opacity-80">{block.sec}</span> : null}
+              </li>
+            ))}
+          </ol>
+          {hiddenCount > 0 && (
+            <button
+              type="button"
+              aria-controls={listId}
+              aria-expanded={showAll}
+              onClick={() => setExpanded(!showAll)}
+              className="ml-auto block shrink-0 rounded-[5px] bg-cs2-bg-input px-2 py-1 text-xs text-cs2-accent hover:underline"
             >
-              <span className="truncate text-[11.5px] font-semibold">{block.label}</span>
-              {block.sec ? <span className="font-mono text-[10.5px] opacity-80">{block.sec}</span> : null}
-            </div>
-          ))}
+              {showAll ? t("queue.stripCollapse") : t("queue.stripExpand", { n: hiddenCount })}
+            </button>
+          )}
         </div>
       ) : null}
       <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 text-xs text-cs2-text-secondary">
